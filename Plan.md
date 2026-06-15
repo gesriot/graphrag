@@ -37,6 +37,8 @@ The winning pattern is **hybrid**:
 
 Important implementation correction: do **not** rely on generic GraphRAG entity extraction to infer precise code structure from raw source. Use deterministic source tooling for hard facts, then feed the resulting graph into GraphRAG. The official GraphRAG docs support a "bring your own graph" path using `entities.parquet`, `relationships.parquet`, and optional `text_units.parquet`, followed by community creation/report workflows. That should be the primary route for the MVP.
 
+**Current execution strategy (decided 2026-06-15): no external API by default.** The first working system should not require OpenAI/Azure/Anthropic/xAI keys. Build the deterministic pipeline first: extractor → BYOG parquet → schema tests → local graph queries/context packs → manual or local-agent-assisted work in Codex / Claude Code / Grok Build. Official GraphRAG LLM workflows (`create_community_reports`, Global/Local/DRIFT search, embeddings) remain an optional later backend for evaluation or higher-quality summaries, not a blocker for Phase 1-3 progress.
+
 ## 2. High-Level Architecture (Replicable Version)
 
 ```
@@ -53,21 +55,29 @@ Structured extraction → "Documents" or direct entities:
   - entities.parquet: symbols/modules/files with descriptions + linked text units.
   - relationships.parquet: structural edges with descriptions, weights, provenance.
   - text_units.parquet: source snippets, docs, tests, build metadata, and extracted facts.
-(Experimental) Also run LLM extraction over enriched symbol documents to add semantic overlays, but validate every hard relation against the deterministic graph.
+(Primary, no external API) Local deterministic graph layer:
+  - schema validation: no dangling endpoints/text units, provenance on every fact.
+  - DuckDB/SQLite/NetworkX traversals: callers/callees, modules, impact, dependency order.
+  - context-pack generation: symbol neighborhood + source snippets + tests/golden traces + behavior contract notes.
+  - optional deterministic/community heuristics until LLM summaries are introduced.
+(Optional later) Run official GraphRAG LLM workflows or another LLM summarizer over the BYOG graph to add community reports, Global/Local/DRIFT search, embeddings, and semantic overlays. Validate every hard relation against deterministic facts.
         ↓
-Hierarchical communities (Leiden, plus optional module-aware constraints) + bottom-up LLM summaries.
+Communities/summaries:
+  - local first: module-aware groups, graph metrics, deterministic summaries/context packs.
+  - optional later: Leiden + bottom-up LLM community summaries.
         ↓
 Storage: GraphRAG artifacts (parquet/index) as canonical outputs + DuckDB/SQLite for local queries + optional graph DB (Memgraph/Neo4j/FalkorDB) for visualization and Cypher-style traversals + embeddings for hybrid search.
         ↓
-Query layer (adapted GraphRAG global/local + graph-native traversals for "callers of X", "impact of changing Y", "subsystem overview"):
-  - Global sensemaking: "What are the core architectural layers and data flows?"
+Query layer (local graph-native traversals first; adapted GraphRAG global/local optional later):
+  - Local sensemaking: "What are the core modules, dependencies, and data flows?"
   - Symbol-centric + neighborhood.
-  - Community summaries as "memory" of large parts of the system.
+  - Context packs as portable memory for local agents and manual review.
+  - Community summaries as optional large-system memory once an LLM endpoint is configured.
         ↓
 Porting/Translation Agent System (multi-step, iterative):
   - Decomposition planner (respect dep graph; bottom-up or community-by-community).
-  - Context assembler: pull relevant subgraph + summaries + original snippets + porting rules (Rust idioms, ownership patterns, error handling, unsafe boundaries for C).
-  - Translator LLM (strong model): produce idiomatic or structure-preserving Rust.
+  - Context assembler: pull relevant subgraph + deterministic context packs + original snippets + tests/golden traces + porting rules (Rust idioms, ownership patterns, error handling, unsafe boundaries for C).
+  - Translator path: manual/local-agent-assisted first (Codex / Claude Code / Grok Build); optional LLM API/local endpoint later.
   - Verifier: cargo check/build, run tests (migrate or harness original tests), fuzz/differential if applicable, static analysis (clippy, miri for unsafe).
   - Refiner loop: feed errors + more context back; human review gates for critical components.
         ↓
@@ -75,7 +85,7 @@ Output: Rust crate(s) mirroring (or improving) original structure + updated grap
 ```
 
 **Key success enablers for "zero errors" (as claimed in the anecdote):**
-- Extremely rich, low-hallucination context (hybrid AST + LLM extraction).
+- Extremely rich, low-hallucination context (deterministic AST/static graph first; optional LLM semantic overlay later).
 - Incremental + verifiable process (never port everything in one shot).
 - Strong verification harness (original tests are gold; add property-based/differential testing).
 - Human oversight on architecture and safety-critical pieces.
@@ -84,10 +94,10 @@ Output: Rust crate(s) mirroring (or improving) original structure + updated grap
 **MVP target (first concrete milestone):**
 - Input: one small multi-file Python project with tests and deterministic behavior (CLI/game logic preferred over graphics-only behavior).
 - Output graph: BYOG-compatible `entities.parquet`, `relationships.parquet`, `text_units.parquet`.
-- GraphRAG run: `create_communities`, `create_community_reports`, and embeddings when using Local/DRIFT search.
-- Query layer: answer at least 10 fixed architecture/behavior questions with cited symbols/snippets.
-- Porting loop: translate one dependency-ordered unit at a time to Rust, run `cargo check`, run ported/golden tests, and record every manual intervention.
-- Baseline: compare against plain full-context LLM translation and vector-RAG-over-code translation.
+- Self-contained validation: schema tests generate fresh BYOG in temp dirs; no required pre-generated outputs and no external API.
+- Query/context layer: answer at least 10 fixed architecture/behavior questions using local graph traversals and `context-pack` outputs with cited symbols/snippets.
+- Porting loop: translate one dependency-ordered unit at a time using local tools/agents + context packs, run `cargo check`, run ported/golden tests, and record every manual intervention.
+- Baseline: compare against plain full-context local-agent/manual prompting and vector-RAG-over-code when available. Cloud LLM baselines are optional, not required for MVP.
 
 ## 3. Phased Implementation Plan (Actionable, Verifiable)
 
@@ -96,14 +106,14 @@ Output: Rust crate(s) mirroring (or improving) original structure + updated grap
 ### Phase 0: Foundations & Reproduction Experiments (1-2 weeks)
 - Clone and run microsoft/graphrag on sample narrative data + a small multi-file Python codebase. Measure baseline global Q&A quality.
 - Watch the key talks in full; transcribe/clip the exact demo segments and quotes. Note any visible UI or output style from the game demo.
-- Set up the workspace: Python + Rust toolchains, GraphRAG, pyarrow/pandas, tree-sitter (Python bindings or CLI + tree-sitter-language-pack / tree-sitter-cli), DuckDB/SQLite, NetworkX, and optional graph DB (Neo4j/Memgraph via Docker only when visualization or Cypher is needed). Keep LLM access provider-pluggable from day one.
+- Set up the workspace: Python + Rust toolchains, GraphRAG package/CLI for BYOG compatibility, pyarrow/pandas, tree-sitter (Python bindings or CLI + tree-sitter-language-pack / tree-sitter-cli), DuckDB/SQLite, NetworkX, and optional graph DB (Neo4j/Memgraph via Docker only when visualization or Cypher is needed). Keep LLM access provider-pluggable, but do not require any external API for the first pipeline.
 - Pick 2-3 small target projects for experiments:
   1. A tiny public Python game or CLI app similar in spirit to the demo (~few hundred LOC, multiple modules/files, clear structure).
   2. A small well-tested C library or component (e.g. a data structure or parser with tests).
   3. Something from the graphrag repo itself or a simple Rust crate (for round-tripping later).
-- Baseline: Use plain LLM (or basic vector RAG over code chunks) to port the small Python example. Document failures.
+- Baseline: Use manual/local-agent prompting over raw code and, where available, basic vector RAG over code chunks. External cloud LLM baseline is optional.
 - Decide the initial graph schema and provenance model before writing agents. Every node/edge should retain `source_file`, byte/range span, extractor name, confidence, and whether it is deterministic or LLM-inferred.
-- **Verification:** Working GraphRAG quickstart; one tiny code corpus converted to GraphRAG BYOG tables; documented baseline failure modes.
+- **Verification:** One tiny code corpus converted to GraphRAG-compatible BYOG tables; self-contained schema tests; deterministic golden traces; GraphRAG config/key boundary documented if official LLM workflows are not run.
 
 ### Phase 1: Robust Multi-Language Code Parser & Structural Knowledge Graph (Core)
 - Integrate tree-sitter (primary: Python, C, C++, Rust grammars are mature; add others as needed). Handle error-tolerant parsing (critical for real codebases).
@@ -123,8 +133,13 @@ Output: Rust crate(s) mirroring (or improving) original structure + updated grap
 - **Optional but high value:** Simple call-graph resolution heuristics and import resolution.
 - **Verification:** For a medium repo (e.g. 10k-50k LOC), produce accurate "list all public functions calling X transitively", "module dependency graph", "most complex functions". Compare precision/recall manually or against known structure. Track false edges separately from unknown edges; do not let uncertain dynamic calls masquerade as ground truth.
 
-### Phase 2: Adapt GraphRAG Pipeline for Code (Semantic + Hierarchical Layer)
-- Prefer a thin wrapper over microsoft/graphrag before forking. Use the official BYOG path for deterministic graph ingestion:
+### Phase 2: Local Query/Context Layer + Optional GraphRAG Workflows
+- Primary track: build local, no-external-API graph operations on the BYOG outputs:
+  - schema validation and provenance audits.
+  - graph traversals: callers/callees, direct/transitive dependencies, modules, import graph, affected symbols.
+  - deterministic context packs for porting/review: entity + neighbors + source snippets + test/golden contract + confidence/provenance.
+  - simple local community/grouping heuristics (module/package grouping, connected components, centrality) before any LLM summarization.
+- Optional track: prefer a thin wrapper over microsoft/graphrag before forking. Use the official BYOG path for deterministic graph ingestion when an API key or local OpenAI-compatible endpoint is available:
   - `entities.parquet` for files/modules/symbols.
   - `relationships.parquet` for structural edges.
   - optional `text_units.parquet` for source snippets, docs, tests, and build context.
@@ -133,15 +148,15 @@ Output: Rust crate(s) mirroring (or improving) original structure + updated grap
   - Entity types tailored: `function`, `struct`, `enum`, `trait`, `module`, `file`, `constant`, `type_alias`, etc.
   - Relationship types or rich descriptions: `calls`, `is_called_by`, `defines`, `uses_type`, `imports`, `implements`, `overrides`, `contains`, semantic "related_to" or "depends_on_semantically".
   - Claims/covariates: "assumes non-null", "thread-safe", "performance critical path", "error handling strategy: returns Result", "porting note: uses raw pointers here".
-- Run the index pipeline on the Phase 1 BYOG tables plus enriched symbol "documents". Keep deterministic and LLM-inferred facts in separate columns/tables so provenance is visible.
-- Leverage existing community detection (Leiden) and bottom-up summarization. Tune or add code-aware summarization prompts: "Describe the responsibilities, invariants, data flows, and architectural role of this community/subsystem. Note any cross-cutting concerns or porting considerations."
-- Generate "global" views: top-level architecture summary, key interfaces, error models, etc.
-- Add code-specific query modes if needed (e.g. "impact analysis" subgraph).
-- **Hybrid boost (strongly recommended):** Keep the precise AST-derived edges as ground truth. Use LLM extraction primarily for semantics, summaries, and soft relations. This addresses known weaknesses of pure LLM-extracted graphs on code (hallucinated calls, missed edges).
-- **Verification:** On the small demo project, global queries like "explain the overall architecture and main data flow" or "what are the invariants around the game state?" produce coherent, accurate, non-contradictory answers that reference specific symbols. Community summaries are useful for high-level understanding. Compare token efficiency and quality vs. dumping all source into context. Add a small adjudication rubric: factuality, completeness, cited provenance, token/cost, latency.
+- If running official GraphRAG workflows, run the index pipeline on the Phase 1 BYOG tables plus enriched symbol "documents". Keep deterministic and LLM-inferred facts in separate columns/tables so provenance is visible.
+- If running official GraphRAG workflows, leverage existing community detection (Leiden) and bottom-up summarization. Tune or add code-aware summarization prompts: "Describe the responsibilities, invariants, data flows, and architectural role of this community/subsystem. Note any cross-cutting concerns or porting considerations."
+- Generate local first "global" views: top-level architecture outline, key interfaces, dependency order, error models, and behavior-contract inventory. Upgrade these with GraphRAG community reports only when an LLM endpoint is configured.
+- Add code-specific query modes (e.g. "impact analysis" subgraph).
+- **Hybrid boost (optional later):** Keep the precise AST-derived edges as ground truth. If LLM extraction is added, use it only for semantics, summaries, and soft relations. This addresses known weaknesses of pure LLM-extracted graphs on code (hallucinated calls, missed edges).
+- **Verification:** On the small demo project, local context-pack queries like "explain the overall architecture and main data flow" or "what are the invariants around the game state?" produce coherent, accurate, non-contradictory packs that reference specific symbols and tests. If GraphRAG reports are later enabled, compare them against local packs using a small adjudication rubric: factuality, completeness, cited provenance, token/cost, latency.
 
 ### Phase 3: Query, Exploration & Visualization Layer
-- Expose GraphRAG global/local/DRIFT + graph-native queries (via chosen DB or custom traversals).
+- Expose graph-native queries first (via DuckDB/SQLite/NetworkX or custom traversals). Expose GraphRAG global/local/DRIFT only as an optional backend.
 - Build a small query API before a UI. Core commands should return structured JSON as well as human-readable text:
   - `index <repo>`
   - `query-global <question>`
@@ -154,15 +169,15 @@ Output: Rust crate(s) mirroring (or improving) original structure + updated grap
   - "Show me the subgraph for module X and its direct dependencies".
   - Visualize communities/hierarchy (export to Graphviz, or integrate Memgraph Lab / Neo4j Browser style).
 - Support "explain this function in context of the broader system".
-- **Verification:** Developer can explore a medium codebase faster and more accurately than with grep + LLM file reads. Quantitative: fewer tokens / tool calls needed for architecture questions (inspired by Codebase-Memory evaluations). Context packs are stable/reproducible and include enough provenance for review.
+- **Verification:** Developer can explore a medium codebase faster and more accurately than with grep + ad hoc file reads. Quantitative: fewer tool calls needed for architecture questions (inspired by Codebase-Memory evaluations). Context packs are stable/reproducible and include enough provenance for review.
 
 ### Phase 4: Translation / Porting Agent(s)
 - Implement a controller/agent loop (LangGraph, CrewAI, or custom state machine; or even simple scripts at first).
 - Steps per component or community:
   1. Select target (planner uses dep graph + complexity to order work; prefer leaves / well-contained units).
   2. Write or retrieve a behavior contract for the target: public API, inputs/outputs, state transitions, errors, invariants, side effects, performance-sensitive paths, and known original bugs to preserve or intentionally fix.
-  3. Assemble context package: relevant community summary + local subgraph (entities + relations) + original source snippets + docs/tests + extracted claims/porting notes + target language rules (Rust idioms, ownership patterns, `Result`/`Option`, no silent panics in production paths, explicit unsafe boundaries, etc.).
-  4. Generate candidate Rust (structure-preserving initially: same modules/files where sensible; or more idiomatic only after tests pass).
+  3. Assemble context package: deterministic context pack + local subgraph (entities + relations) + original source snippets + docs/tests/golden traces + extracted claims/porting notes + target language rules (Rust idioms, ownership patterns, `Result`/`Option`, no silent panics in production paths, explicit unsafe boundaries, etc.). Community summaries are optional additions if available.
+  4. Generate candidate Rust using manual/local-agent-assisted workflow first (Codex / Claude Code / Grok Build); structure-preserving initially: same modules/files where sensible, more idiomatic only after tests pass.
   5. Verify: parse/compile (rustc/cargo), link if needed, run relevant tests. Capture errors, warnings, and behavioral deltas.
   6. If failures: feed compiler/test output + more targeted graph context (e.g. "the types used here") back to refiner. Limited iterations; escalate to human on persistent issues.
 - For Python→Rust: Focus on semantics, performance (avoid unnecessary clones), async if original used it, etc.
@@ -181,8 +196,8 @@ Output: Rust crate(s) mirroring (or improving) original structure + updated grap
 - **Verification:** Apply the full pipeline to a larger component (target 5k-20k LOC well-tested original). Measure engineer-time vs. quality. Document any remaining manual interventions.
 
 ### Phase 6: Scale, Cost, C/C++ Specifics, Production Readiness
-- Handle million-line codebases: streaming/chunked indexing, parallel extraction, summarization caching, sharded or sampled community work, cheaper models (or quantized) for extraction pass, strong models only for synthesis/porting.
-- Cost tracking and optimization (GraphRAG indexing is known to be token-heavy; monitor and tune prompts).
+- Handle million-line codebases: streaming/chunked indexing, parallel extraction, deterministic summary/context-pack caching, sharded or sampled community work. If optional LLM stages are enabled, use cheaper/local models for summarization and stronger models only for synthesis/refinement.
+- Cost tracking and optimization for optional LLM-backed stages (GraphRAG indexing can be token-heavy); deterministic stages should report CPU/time/storage instead.
 - C/C++ specifics:
   - Require build-system capture (`compile_commands.json`, include paths, defines, generated files) before claiming reliable C/C++ facts.
   - Pre-process with clang tooling or additional static analyzers for aliasing, ownership hints (where possible).
@@ -198,7 +213,7 @@ Output: Rust crate(s) mirroring (or improving) original structure + updated grap
 ### Phase 7: Polish, Documentation, Benchmarking & Community
 - Comprehensive docs: how the graph is built, prompt tuning guide for code domain (modeled after GraphRAG's), examples of successful ports.
 - Reproduce the spirit of the original demo as a canonical example.
-- Benchmarks vs. baselines (plain LLM, vector RAG over code, other code-graph tools).
+- Benchmarks vs. baselines (raw-code local-agent/manual prompting, vector RAG over code if available, other code-graph tools, optional cloud LLM baselines).
 - Ablation: value of hierarchical summaries vs. flat graph vs. AST-only.
 - Open issues: legal/attribution for ports, exact behavioral equivalence (incl. original bugs vs. fixes), handling of build systems / platform specifics.
 - Contribution model: treat this as a research/engineering project; welcome tree-sitter grammar extensions, new query types, better verifiers.
@@ -206,10 +221,10 @@ Output: Rust crate(s) mirroring (or improving) original structure + updated grap
 ## 4. Technology Stack Recommendations (Pragmatic, Low Lock-in)
 
 - **Parsing:** tree-sitter (Python `tree-sitter` + `tree-sitter-language-pack` or equivalent; or tree-sitter CLI + custom walker) for syntax, plus language-specific semantic tooling where available (`ast`/Jedi/Pyright/mypy for Python, clang tooling for C/C++, rust-analyzer/`cargo metadata`/`syn` for Rust).
-- **GraphRAG core:** Start with the official microsoft/graphrag Python package and its BYOG workflow. Customize via config + prompt overrides + custom input preparation. Consider LightRAG or other variants only after the baseline is measured.
+- **GraphRAG core / compatibility:** Keep the official microsoft/graphrag BYOG schema as the interchange target. The package/CLI can remain installed for compatibility tests and optional future community reports, but the first working pipeline should not require an external LLM API.
 - **Graph storage/query:** Keep parquet as the canonical interchange. Use DuckDB/SQLite + NetworkX for prototyping and reproducible local queries. Add Memgraph/Neo4j/FalkorDB when Cypher, visualization, or larger interactive traversal becomes necessary.
-- **LLMs:** Provider-pluggable interface. Use cheaper/local models for extraction experiments only after structured-output reliability is measured; use the strongest available reasoning/code model for synthesis and hard refinement. Track cost, latency, retries, and invalid structured outputs per stage.
-- **Agents/Orchestration:** Start with explicit state machines + retry logic and durable run logs. LangGraph is a good fit once the workflow stabilizes. Later: expose via MCP so other agents/editors can query the code graph.
+- **LLMs / agents:** No external API by default. Use deterministic context packs with local interactive agents (Codex / Claude Code / Grok Build) and manual review first. Keep a provider-pluggable interface for optional later backends: local OpenAI-compatible servers (Ollama/vLLM/LM Studio/llama.cpp) or cloud APIs. Track cost/latency only for optional LLM-backed stages.
+- **Agents/Orchestration:** Start with explicit state machines + retry logic and durable run logs. Later: expose via MCP so local agents/editors can query the code graph as a tool.
 - **Verification:** cargo, pytest equivalents, proptest, miri, etc. Git for diff/review.
 - **UI/Exploration:** CLI first (Typer), then Gradio/Streamlit or integrate existing graph viewers. Export DOT/Mermaid for architecture diagrams.
 - **Language support priority:** Python (easiest for initial ports), C (high impact), C++ (harder), Rust (for completeness/roundtrip).
@@ -221,7 +236,7 @@ Alternatives to evaluate: pure graph DB + LLM-to-Cypher (as in Graph-Code demos)
 - **Extraction hallucinations:** Pure LLM graphs on code are unreliable for precise calls/edges. **Mitigation:** Hybrid (AST ground truth + LLM semantics). Validate extracted relations against static facts.
 - **False confidence from partial static analysis:** Tree-sitter can parse syntax without resolving every reference/type. **Mitigation:** Store confidence/provenance on every edge; distinguish deterministic, heuristic, LLM-inferred, and unknown facts.
 - **C/C++ semantic gap:** Perfect automatic translation is extremely difficult (UB, implementation-defined behavior, performance micro-optimizations, platform specifics). **Mitigation:** Scope to "high-fidelity port of semantics + tests" rather than bit-exact + zero-unsafe. Use for acceleration, not replacement of expert review on critical paths. Leverage formal methods where available.
-- **Cost & scale:** GraphRAG indexing on large corpora is expensive. **Mitigation:** Incremental, caching, sampling for summaries, tiered models, focus on "hot" subsystems first.
+- **Cost & scale:** Official LLM-backed GraphRAG indexing on large corpora can be expensive. **Mitigation:** make the deterministic BYOG/context-pack path useful without LLM calls; add incremental caching, sampling for optional summaries, tiered/local models, and focus on "hot" subsystems first.
 - **Verification completeness:** Passing tests ≠ semantic equivalence for all inputs. **Mitigation:** Multi-layered (unit, integration, fuzz, differential, manual for high-risk).
 - **IP/Legal:** Porting third-party code may have license implications. **Mitigation:** Start with permissively licensed or your own code; document provenance.
 - **"1M LOC / month" is aspirational/internal:** Public version will require significant human guidance and iteration initially. Treat as a powerful assistant, not autonomous magic.
@@ -235,9 +250,11 @@ Alternatives to evaluate: pure graph DB + LLM-to-Cypher (as in Graph-Code demos)
 3. Set up the empty workspace: `uv init` or `python -m venv`, install GraphRAG + pyarrow/pandas + tree-sitter deps, add a small `examples/` dir.
 4. Run Microsoft GraphRAG quickstart on a toy text corpus, then run a BYOG smoke test with hand-written `entities.parquet` and `relationships.parquet`.
 5. Prototype a minimal Python extractor that outputs files/modules/classes/functions, containment edges, imports, and conservative call-ish edges with provenance.
-6. Convert the extracted graph into GraphRAG BYOG tables; run `create_communities` + `create_community_reports`; compare query quality on "global architecture" questions.
-7. Create the first `context-pack` command for a function/module and attempt a manual+LLM Rust port using generated summaries + subgraph dumps vs. baseline. Measure compile/test success and manual fixes.
-8. Create the first GitHub issues or sections in this repo for graph schema, BYOG export, prompt templates, parser, query API, and agent loop.
+6. Convert the extracted graph into GraphRAG-compatible BYOG tables and make schema tests self-contained (fresh temp outputs, no dependency on ignored generated parquets).
+7. Create the first `context-pack` command for a function/module and answer architecture/behavior questions using local graph data only.
+8. Attempt the first structure-preserving Rust port using deterministic context packs + golden traces + local interactive agents/manual review. Measure compile/test success and manual fixes.
+9. Optional later: if a local or cloud LLM endpoint is configured, run `create_communities` + `create_community_reports` and compare quality/cost against local context packs.
+10. Create the first GitHub issues or sections in this repo for graph schema, BYOG export, context-pack, parser, query API, and agent loop.
 
 ## 7. References & Further Reading (Key Sources)
 
@@ -251,3 +268,5 @@ Alternatives to evaluate: pure graph DB + LLM-to-Cypher (as in Graph-Code demos)
 This plan is designed to be executed iteratively with strong verification at each phase. It balances fidelity to the demonstrated technique (hierarchical semantic graph via GraphRAG on structured code input) with practical, available open-source components.
 
 Start small, measure everything (quality, cost, human effort), and expand. The combination of precise static structure + GraphRAG-style global memory is a powerful and replicable pattern.
+
+*Plan created: 2026-06-14. Reviewed/updated: 2026-06-15. Current implementation strategy: no external API by default; deterministic BYOG + local context-pack pipeline first.*
