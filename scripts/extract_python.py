@@ -22,6 +22,7 @@ Usage example:
 
 from __future__ import annotations
 
+import ast
 import json
 import sys
 from pathlib import Path
@@ -219,7 +220,7 @@ def extract_from_file(path: Path) -> Dict[str, List[Dict[str, Any]]]:
     callable_names = set(defined_names) | imported_call_names
 
     # Conservative calls: local definitions and explicitly imported names only.
-    # This is syntax only — real version will need name resolution.
+    # This is syntax only - real version will need name resolution.
     def walk_calls(node: Node):
         if node.type == "call":
             func = node.child_by_field_name("function")
@@ -302,12 +303,88 @@ def extract_from_file(path: Path) -> Dict[str, List[Dict[str, Any]]]:
         "is_deterministic": True,
     })
 
+    _enhance_with_ast(source, path, entities, relationships, defined_names)
+
     return {
         "entities": entities,
         "relationships": relationships,
         "imports": imports,
         "module_title": module_title,
     }
+
+
+def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relationships: List[Dict], defined_names: List[str]) -> None:
+    """Use stdlib ast to add deterministic import hints to tree-sitter call edges.
+
+    This is still intentionally conservative: AST direct imports can strengthen
+    a relationship with a resolved_target_hint, while future Jedi/Pyright passes
+    can add richer reference/type information behind an optional try/fallback.
+    """
+    try:
+        tree = ast.parse(source)
+    except Exception:
+        return
+
+    import_map: Dict[str, str] = {}  # local_name -> module (e.g. "update_player" -> "physics")
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            mod = node.module or ""
+            if node.level:  # relative
+                # For mini_game package we can treat ".physics" as "physics"
+                mod = mod.lstrip(".")
+            for alias in node.names:
+                local = alias.asname or alias.name
+                import_map[local] = mod
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                local = alias.asname or alias.name
+                import_map[local] = alias.name
+
+    # Improve existing tree-sitter calls with direct import hints. This keeps row
+    # counts stable while giving the bridge better targets for cross-file calls.
+    for rel in relationships:
+        if rel.get("type") != "calls":
+            continue
+        raw_target = str(rel.get("target", ""))
+        bare = raw_target.split(":")[-1].split(".")[-1]
+        module = import_map.get(bare)
+        if module:
+            module_stem = module.split(".")[-1]
+            rel["resolved_target_hint"] = f"{module_stem}:{bare}"
+            rel["description"] = f"{rel.get('description', '')} (ast import hint: {module}.{bare})"
+            rel["confidence"] = max(float(rel.get("confidence", 0.0) or 0.0), 0.85)
+            rel["weight"] = max(float(rel.get("weight", 0.0) or 0.0), 0.85)
+            rel["extractor"] = "tree-sitter-python+ast"
+            rel["is_deterministic"] = True
+
+    # Foundation for the next increment: this pass sees Attribute calls too
+    # (e.g. physics.update_player), even though we only annotate existing edges
+    # for now to avoid duplicate relationships.
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            func = node.func
+            callee = None
+            if isinstance(func, ast.Name):
+                callee = func.id
+            elif isinstance(func, ast.Attribute):
+                # e.g. physics.update_player or self.foo
+                if isinstance(func.value, ast.Name):
+                    mod = func.value.id
+                    callee = f"{mod}.{func.attr}"
+                else:
+                    callee = func.attr
+
+            if callee:
+                # resolve bare name via imports
+                if "." not in callee and callee in import_map:
+                    mod = import_map[callee]
+                    if mod:
+                        callee = f"{mod}.{callee}"
+
+                # Next step: emit resolved Attribute calls that tree-sitter's
+                # identifier-only pass does not see.
+                pass  # placeholder for richer logic if we collect more in future iterations
+
 
 
 def main(argv: list[str]) -> int:

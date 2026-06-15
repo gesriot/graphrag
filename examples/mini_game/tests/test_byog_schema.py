@@ -184,3 +184,30 @@ def test_behavior_contract_matches_golden_inputs():
     trace_names = set(contract["golden_traces"])
     expected_trace_names = {f"golden_{name}.json" for name in GOLDEN_INPUTS}
     assert trace_names == expected_trace_names
+
+
+# --- graph_query tests (self-contained via fixture) ---
+
+def test_graph_query_callers_callees(mini_game_byog_root: Path):
+    from scripts.graph_query import callers, callees, load_graph
+    ents, rels = load_graph(mini_game_byog_root)
+
+    # run_simulation should call into physics (cross-file, thanks to two-pass + better resolution)
+    c = callees(ents, rels, "sim:run_simulation")
+    assert any("physics:update_player" in x for x in c), f"Expected cross-file callee, got {c}"
+
+    # physics symbol should have callers from sim
+    callers_list = callers(ents, rels, "physics:update_player")
+    assert any("sim:" in x for x in callers_list), f"Expected caller from sim, got {callers_list}"
+
+
+def test_graph_query_impact_symbol(mini_game_byog_root: Path):
+    from scripts.graph_query import impact, symbol_lookup, load_graph
+    ents, rels = load_graph(mini_game_byog_root)
+
+    impacted = impact(ents, rels, "core:Config")
+    assert isinstance(impacted, list)
+
+    s = symbol_lookup(ents, "sim:run_simulation")
+    assert s is not None and s.get("title") == "sim:run_simulation"
+    assert "snippet_preview" in s or "source_file" in s

@@ -23,16 +23,14 @@ from pathlib import Path
 from typing import List, Dict, Any
 
 import pandas as pd
+import sys
 import typer
 
+# Support both `python -m scripts.xxx` and direct `python scripts/xxx.py`
+sys.path.insert(0, str(Path(__file__).parent))
+from byog_graph import ByogGraph, load_graph  # re-export for backward compat
+
 app = typer.Typer(help="Local BYOG graph queries (callers, callees, impact, etc.)")
-
-
-def load_graph(graph_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
-    out = graph_dir / "output"
-    ents = pd.read_parquet(out / "entities.parquet")
-    rels = pd.read_parquet(out / "relationships.parquet")
-    return ents, rels
 
 
 def _resolve_symbol(ents: pd.DataFrame, query: str) -> str | None:
@@ -164,41 +162,41 @@ def symbol_lookup(ents: pd.DataFrame, query: str) -> Dict[str, Any] | None:
 
 @app.command("callers")
 def cli_callers(symbol: str, graph: Path = typer.Option(Path("byog_mini_game"), "--graph")):
-    ents, rels = load_graph(graph)
-    print("\n".join(callers(ents, rels, symbol)))
+    g = ByogGraph(graph)
+    print("\n".join(g.callers(symbol)))
 
 
 @app.command("callees")
 def cli_callees(symbol: str, graph: Path = typer.Option(Path("byog_mini_game"), "--graph")):
-    ents, rels = load_graph(graph)
-    print("\n".join(callees(ents, rels, symbol)))
+    g = ByogGraph(graph)
+    print("\n".join(g.callees(symbol)))
 
 
 @app.command("neighbors")
 def cli_neighbors(symbol: str, graph: Path = typer.Option(Path("byog_mini_game"), "--graph")):
-    ents, rels = load_graph(graph)
-    n = neighbors(ents, rels, symbol)
+    g = ByogGraph(graph)
+    n = g.neighbors(symbol)
     print("incoming:", n["incoming"])
     print("outgoing:", n["outgoing"])
 
 
 @app.command("dependency-order")
 def cli_dep_order(graph: Path = typer.Option(Path("byog_mini_game"), "--graph")):
-    ents, rels = load_graph(graph)
-    for t in dependency_order(ents, rels):
+    g = ByogGraph(graph)
+    for t in g.dependency_order():
         print(t)
 
 
 @app.command("impact")
 def cli_impact(symbol: str, graph: Path = typer.Option(Path("byog_mini_game"), "--graph")):
-    ents, rels = load_graph(graph)
-    print("\n".join(impact(ents, rels, symbol)))
+    g = ByogGraph(graph)
+    print("\n".join(g.impact(symbol)))
 
 
 @app.command("symbol")
 def cli_symbol(query: str, graph: Path = typer.Option(Path("byog_mini_game"), "--graph")):
-    ents, _ = load_graph(graph)
-    res = symbol_lookup(ents, query)
+    g = ByogGraph(graph)
+    res = g.symbol(query)
     if res:
         print(json.dumps(res, indent=2, ensure_ascii=False))
     else:

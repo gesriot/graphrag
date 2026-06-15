@@ -135,7 +135,7 @@ def build_byog_for_package() -> Dict[str, List[Dict[str, Any]]]:
                 r["covariate_ids"] = []
 
             src_title = r.get("source", "")
-            tgt_title = r.get("target", "")
+            tgt_title = r.get("resolved_target_hint") or r.get("target", "")
 
             def resolve_to_title(raw: str) -> str:
                 if not raw:

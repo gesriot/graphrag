@@ -24,18 +24,14 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import pandas as pd
+import sys
 import typer
 
+# Support both `python -m scripts.xxx` and direct `python scripts/xxx.py`
+sys.path.insert(0, str(Path(__file__).parent))
+from byog_graph import load_byog  # common loader
+
 app = typer.Typer(help="Assemble a context pack for a code symbol from a BYOG graph (entities/rels/tus parquets).")
-
-
-def load_byog(graph_dir: Path) -> Dict[str, pd.DataFrame]:
-    out = graph_dir / "output"
-    return {
-        "entities": pd.read_parquet(out / "entities.parquet"),
-        "relationships": pd.read_parquet(out / "relationships.parquet"),
-        "text_units": pd.read_parquet(out / "text_units.parquet") if (out / "text_units.parquet").exists() else pd.DataFrame(),
-    }
 
 
 def find_entity(ents: pd.DataFrame, symbol: str) -> pd.Series | None:
