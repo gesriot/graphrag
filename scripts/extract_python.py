@@ -72,22 +72,29 @@ def extract_from_file(path: Path) -> Dict[str, List[Dict[str, Any]]]:
         }
     )
 
-    # Collect top-level defs
+    # Collect top-level defs (including @dataclass etc. which are decorated_definition)
     defined_names: List[str] = []
     defined_kinds: Dict[str, str] = {}
 
     for child in root.children:
-        if child.type in ("function_definition", "class_definition"):
-            name_node = child.child_by_field_name("name")
+        node = child
+        if child.type == "decorated_definition":
+            defn = child.child_by_field_name("definition")
+            if defn is not None and defn.type in ("function_definition", "class_definition"):
+                node = defn
+            else:
+                continue
+        if node.type in ("function_definition", "class_definition"):
+            name_node = node.child_by_field_name("name")
             if name_node is None:
                 continue
             name = get_text(source, name_node)
-            kind = "fn" if child.type == "function_definition" else "class"
+            kind = "fn" if node.type == "function_definition" else "class"
             ent_id = make_id(kind, name, source_file)
 
             doc = ""
             # crude docstring extraction
-            body = child.child_by_field_name("body")
+            body = node.child_by_field_name("body")
             if body and body.named_child_count > 0:
                 first = body.named_children[0]
                 if first.type == "expression_statement":
@@ -95,16 +102,21 @@ def extract_from_file(path: Path) -> Dict[str, List[Dict[str, Any]]]:
                     if expr and expr.type == "string":
                         doc = get_text(source, expr).strip('\'" \n')
 
+            # Use outer decorated node for full span/snippet (includes the @dataclass decorator)
+            span_node = child if child.type == "decorated_definition" else node
+            snippet = get_text(source, span_node)
+
             entities.append(
                 {
                     "id": ent_id,
                     "title": name,
                     "type": kind,
                     "description": doc or f"{kind} {name} defined in {path.name}",
+                    "snippet": snippet,
                     "text_unit_ids": [f"tu:file:{path.name}"],
                     "human_readable_id": len(entities) + 1,
                     "source_file": source_file,
-                    "span": f"{child.start_point[0]+1}:{child.start_point[1]}-{child.end_point[0]+1}:{child.end_point[1]}",
+                    "span": f"{span_node.start_point[0]+1}:{span_node.start_point[1]}-{span_node.end_point[0]+1}:{span_node.end_point[1]}",
                     "extractor": "tree-sitter-python",
                     "confidence": 1.0,
                     "is_deterministic": True,
@@ -113,7 +125,7 @@ def extract_from_file(path: Path) -> Dict[str, List[Dict[str, Any]]]:
             defined_names.append(name)
             defined_kinds[name] = kind
 
-            # contains edge
+            # contains edge (point to the symbol)
             relationships.append(
                 {
                     "id": f"rel:contains:{path.name}:{name}",

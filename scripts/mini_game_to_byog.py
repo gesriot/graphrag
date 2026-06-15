@@ -40,6 +40,13 @@ OUT_DIR = OUT_ROOT / "output"
 
 
 def build_byog_for_package() -> Dict[str, List[Dict[str, Any]]]:
+    """Two-pass bridge (P1 fix).
+
+    Pass 1: collect *all* entities and titles across every file first.
+    Pass 2: resolve and emit relationships using the complete title map.
+    This prevents dropping cross-file calls (e.g. main.py -> sim.run_simulation)
+    that were previously filtered before later files contributed their titles.
+    """
     all_entities: List[Dict[str, Any]] = []
     all_relationships: List[Dict[str, Any]] = []
     all_text_units: List[Dict[str, Any]] = []
@@ -53,19 +60,23 @@ def build_byog_for_package() -> Dict[str, List[Dict[str, Any]]]:
     tu_id = 0
     rel_id = 0
 
-    title_to_id: Dict[str, str] = {}  # title -> entity id (for possible future)
+    title_to_id: Dict[str, str] = {}
     title_to_text_unit: Dict[str, str] = {}
+
+    # Raw data collected in pass 1
+    per_file_raw: List[Dict[str, Any]] = []  # one entry per py_file
 
     def slug(value: str) -> str:
         return re.sub(r"[^A-Za-z0-9_.:-]+", "_", value).strip("_")
 
+    # ===================== PASS 1: collect entities + titles =====================
     for py_file in py_files:
         rel = extract_from_file(py_file)
         stem = py_file.stem
 
+        file_entities = []
         for e in rel["entities"]:
             human_id += 1
-            # Make title stable and FQN-ish for cross-file uniqueness and matching
             original_title = e["title"]
             fqn_title = f"{stem}:{original_title}" if stem != "mini_game" else original_title
             symbol_tu_id = f"tu:{stem}:{slug(original_title)}"
@@ -77,18 +88,20 @@ def build_byog_for_package() -> Dict[str, List[Dict[str, Any]]]:
                 e["document_ids"] = [f"doc:{stem}"]
             if "covariate_ids" not in e:
                 e["covariate_ids"] = []
-            # Keep provenance
             title_to_id[fqn_title] = e["id"]
             title_to_text_unit[fqn_title] = symbol_tu_id
             all_entities.append(e)
+            file_entities.append(e)
 
-            # text unit per entity for simplicity (or per file)
             tu_id += 1
+            snippet = e.get("snippet", "") or ""
+            desc = e.get("description", "") or ""
+            text = snippet if snippet else (desc or f"symbol {fqn_title} from {py_file}")
             all_text_units.append({
                 "id": symbol_tu_id,
                 "human_readable_id": tu_id,
-                "text": e.get("description", "") or f"symbol {fqn_title} from {py_file}",
-                "n_tokens": max(1, len((e.get("description", "") or "").split())),
+                "text": text,
+                "n_tokens": max(1, len(text.split())),
                 "document_id": f"doc:{stem}",
                 "document_ids": e.get("document_ids", []),
                 "entity_ids": [e["id"]],
@@ -101,7 +114,18 @@ def build_byog_for_package() -> Dict[str, List[Dict[str, Any]]]:
                 "is_deterministic": e.get("is_deterministic"),
             })
 
-        for r in rel["relationships"]:
+        per_file_raw.append({
+            "stem": stem,
+            "py_file": py_file,
+            "relationships": rel.get("relationships", []),
+            "imports": rel.get("imports", []),
+        })
+
+    # ===================== PASS 2: resolve relationships with complete map =====================
+    for raw in per_file_raw:
+        stem = raw["stem"]
+        py_file = raw["py_file"]
+        for r in raw["relationships"]:
             rel_id += 1
             r["id"] = f"rel:{stem}:{rel_id}"
             r["human_readable_id"] = rel_id
@@ -110,18 +134,9 @@ def build_byog_for_package() -> Dict[str, List[Dict[str, Any]]]:
             if "covariate_ids" not in r:
                 r["covariate_ids"] = []
 
-            # CRITICAL FIX: source/target must be titles that exist in entities.title
-            # (not the internal ent: ids). Use the (now FQN) titles.
-            # The extractor used simple names or ent:; we override here to titles.
-            # For contains we can map, for calls too.
-            # Since we just set titles above, we can re-resolve using original intent.
-            # For this bridge we reconstruct from the extracted data using titles.
             src_title = r.get("source", "")
             tgt_title = r.get("target", "")
 
-            # CRITICAL FIX for GraphRAG 3.1 create_communities:
-            # source/target MUST match values in entities["title"] (we use FQN titles).
-            # Drop crude/unknown ones (e.g. import text turned into bad targets) to avoid dangling.
             def resolve_to_title(raw: str) -> str:
                 if not raw:
                     return ""
@@ -146,9 +161,31 @@ def build_byog_for_package() -> Dict[str, List[Dict[str, Any]]]:
                         text_unit_ids.append(tu_ref)
                 r["text_unit_ids"] = text_unit_ids
                 all_relationships.append(r)
-            # else dropped (imports etc can be improved in Phase 1 with real module entities)
+            # else: dropped (bad imports etc.)
 
-    # Dedup text_units rough
+    # Cross-file call resolution (now safe because title_to_id is complete)
+    bare_to_fqns: Dict[str, List[str]] = {}
+    for t in title_to_id:
+        bare = t.split(":")[-1]
+        bare_to_fqns.setdefault(bare, []).append(t)
+
+    upgraded_calls = []
+    for r in all_relationships:
+        if r.get("type") != "calls":
+            upgraded_calls.append(r)
+            continue
+        tgt = str(r.get("target", ""))
+        if ":" not in tgt:
+            candidates = bare_to_fqns.get(tgt, [])
+            if len(candidates) == 1:
+                r["target"] = candidates[0]
+                r["description"] = r.get("description", "") + " (cross-file resolved)"
+                r["confidence"] = 0.75
+                r["is_deterministic"] = False
+        upgraded_calls.append(r)
+    all_relationships = upgraded_calls
+
+    # Dedup text_units
     seen_tu = {}
     for tu in all_text_units:
         seen_tu[tu["id"]] = tu
@@ -160,31 +197,6 @@ def build_byog_for_package() -> Dict[str, List[Dict[str, Any]]]:
             relationship_ids_by_tu.setdefault(tuid, []).append(r["id"])
     for tu in all_text_units:
         tu["relationship_ids"] = relationship_ids_by_tu.get(tu["id"], [])
-
-    # Cross-file call resolution (enhancement for point 2)
-    # Build bare name -> possible FQN titles from what we have
-    bare_to_fqns: Dict[str, List[str]] = {}
-    for t in title_to_id:
-        bare = t.split(":")[-1]
-        bare_to_fqns.setdefault(bare, []).append(t)
-
-    # Simple post-pass: if a call rel target is a bare name that is defined in another module via import, upgrade target
-    upgraded_calls = []
-    for r in all_relationships:
-        if r.get("type") != "calls":
-            upgraded_calls.append(r)
-            continue
-        tgt = str(r.get("target", ""))
-        src = str(r.get("source", ""))
-        if ":" not in tgt:  # bare or partially qualified
-            candidates = bare_to_fqns.get(tgt, [])
-            if len(candidates) == 1:
-                r["target"] = candidates[0]
-                r["description"] = r.get("description", "") + " (cross-file resolved)"
-                r["confidence"] = 0.75
-                r["is_deterministic"] = False
-        upgraded_calls.append(r)
-    all_relationships = upgraded_calls
 
     return {
         "entities": all_entities,

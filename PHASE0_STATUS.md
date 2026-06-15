@@ -12,11 +12,11 @@
   - 5/5 behavior-contract tests passing (`pytest`).
   - This gives us **golden traces + explicit behavior contract** before any porting (per updated plan).
 
-- Official GraphRAG BYOG path exercised:
-  - `scripts/make_byog_smoke.py` produces `entities.parquet`, `relationships.parquet`, `text_units.parquet` with our required provenance columns (`source_file`, `span`, `extractor`, `confidence`, `is_deterministic`).
-  - `byog_smoke/settings.yaml` with the minimal `workflows: [create_communities, create_community_reports]`.
-  - BYOG parquet files (entities/relationships/text_units) are generated and locally schema-valid (with provenance extensions). `graphrag index --root byog_smoke` fails early at config parsing on `${OPENAI_API_KEY}` (before any workflow or community detection). Full end-to-end GraphRAG ingestion (communities + reports) on custom BYOG not yet exercised without an LLM key / dry-run path. This is documented as a caveat.
-  - Parquet column validation passed.
+- Official GraphRAG BYOG path exercised (deterministic part only, per "no external API by default" strategy in Plan.md):
+  - `scripts/make_byog_smoke.py` and `scripts/mini_game_to_byog.py` produce `entities.parquet`, `relationships.parquet`, `text_units.parquet` with full provenance.
+  - Self-contained schema tests (in `examples/mini_game/tests/test_byog_schema.py`) generate fresh BYOG in tmp dirs and validate no dangling endpoints / text units.
+  - `graphrag index --root byog_smoke` is intentionally not required for the core pipeline (it only reaches config parse without a key). LLM-dependent steps (`create_community_reports`, embeddings, Global/Local search) are optional later only.
+  - Local `context-pack` (pandas on the parquets) + DuckDB traversals are the active query layer.
 
 - First parser prototype: `scripts/extract_python.py`
   - tree-sitter based.
@@ -35,22 +35,22 @@
 - GraphRAG BYOG workflow ingestion path works up to the LLM requirement.
 - Extractor runs and produces usable entity/rel records with spans and confidence.
 
-## Notes / Blockers / Next (post user review fixes)
-- Caveat 1 clarified: BYOG files locally valid + schema-checked; full `graphrag index` still fails at config parse on ${OPENAI_API_KEY} (no workflow run yet).
-- Caveat 2 fixed in smoke + bridge: relationships.source/target now use entity titles (FQN style in bridge).
-- Caveat 3 fixed: added golden_collision_first + explicit test (collided=True at tick 9).
-- New: full-package bridge (scripts/mini_game_to_byog.py), schema tests (test_byog_schema.py), physics Optional fix, python req lowered to >=3.12.
-- Next real LLM/GraphRAG community run only after these rails (per user recs). No commits made.
-- The tree-sitter extractor is syntax-only and deliberately naive on calls (no resolution). Phase 1 will add better intra-file + cross-file resolution + Python stdlib `ast` / Jedi signals.
-- No heavy LLM calls were made yet (baseline port in Phase 0 was deprioritized until we have `context-pack` + summaries from real BYOG run).
-- The mini-game is an excellent MVP target: deterministic, has tests/golden traces, multiple modules, clear "physics" vs "sim" separation — ideal for first Python→Rust port experiment.
+## Notes / Blockers / Next (aligned to local-first strategy in Plan.md)
+- Primary path is **deterministic + no external API**: extractor → BYOG parquets → schema tests (fresh in tmp) → local context-pack / DuckDB traversals → manual or agent work (Grok Build / Claude Code / Codex).
+- Official GraphRAG LLM features (`create_community_reports`, Global/Local/DRIFT, embeddings) are explicitly optional later (only if/when a local or cloud endpoint is added). They are not part of the MVP critical path.
+- Caveats 1-3 from previous review remain addressed (dangling fixed, collision golden added, self-contained tests).
+- New in this session: decorated_definition support (core dataclasses now extracted), source snippets in text_units, improved context-pack lookup, first structure-preserving Rust port experiment that passes the collision golden scenario.
+- No external LLM calls were used for any core artifact. All verification is local.
+- The mini-game + context-pack + local Rust port is the current working example of the strategy.
 
-## Commands that prove Phase 0
+## Commands that prove Phase 0 (local deterministic pipeline)
 ```bash
-uv run python -m pytest examples/mini_game/tests/test_sim.py -q
+uv run python -m pytest examples/mini_game/tests -q
 uv run python scripts/make_byog_smoke.py
-uv run graphrag index --root byog_smoke   # reaches expected LLM error
-uv run python scripts/extract_python.py examples/mini_game/sim.py output/extracted_sim.json
+uv run python scripts/mini_game_to_byog.py
+uv run python scripts/context_pack.py sim:run_simulation --graph byog_mini_game --purpose port-to-rust
+uv run python -m compileall examples scripts
+cd examples/mini_game_rust && cargo check && cargo run --quiet
 ```
 
 Phase 0 success criteria (from Plan.md) met:

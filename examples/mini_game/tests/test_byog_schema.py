@@ -126,3 +126,43 @@ def test_byog_smoke_specific_alignment(smoke_byog_root: Path):
         assert r["source"] in titles
         assert r["target"] in titles
         assert r["source"] in {"update", "helper"} or "update" in str(r["source"])
+
+
+def test_core_dataclasses_extracted(mini_game_byog_root: Path):
+    """P1 + P2: @dataclass classes in core.py must be extracted and their text_units must contain real source snippets."""
+    ents, _, tus = _load_parquets(mini_game_byog_root)
+    titles = set(ents["title"].astype(str))
+    required = {"core:Config", "core:PlayerState", "core:Event", "core:TraceRecord"}
+    missing = required - titles
+    assert not missing, f"Missing decorated dataclasses from core.py: {missing}"
+
+    tu_by_id = {str(row["id"]): str(row.get("text", "")) for _, row in tus.iterrows()}
+
+    for t in required:
+        ent_row = ents[ents["title"].astype(str) == t].iloc[0]
+        tu_ids = ent_row.get("text_unit_ids", []) or []
+        snippet_found = False
+        for tuid in tu_ids:
+            text = tu_by_id.get(str(tuid), "")
+            if "@dataclass" in text or "class " + t.split(":")[-1] in text or "def " in text:
+                snippet_found = True
+                break
+        assert snippet_found, f"No real source snippet found for {t} via its text_unit_ids"
+
+
+def test_main_cross_file_calls_to_sim(mini_game_byog_root: Path):
+    """Regression: main.py should produce calls/edges into sim module (run_simulation, events_from_list)."""
+    _, rels, _ = _load_parquets(mini_game_byog_root)
+    pairs = {
+        (str(row["source"]), str(row["target"]), str(row["type"]))
+        for _, row in rels.iterrows()
+    }
+
+    expected = {
+        ("main:run", "sim:events_from_list", "calls"),
+        ("main:run", "sim:run_simulation", "calls"),
+        ("main:dump_golden", "sim:events_from_list", "calls"),
+        ("main:dump_golden", "sim:run_simulation", "calls"),
+    }
+    missing = expected - pairs
+    assert not missing, f"Missing cross-file call edges from main.py into sim: {missing}"

@@ -24,7 +24,8 @@ build/
 
 # Rust
 target/
-Cargo.lock
+# Cargo.lock should be committed for runnable Rust examples with dev-deps
+# (e.g. serde_json for golden diff tests).
 
 # IDE
 .idea/

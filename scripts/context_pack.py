@@ -39,13 +39,27 @@ def load_byog(graph_dir: Path) -> Dict[str, pd.DataFrame]:
 
 
 def find_entity(ents: pd.DataFrame, symbol: str) -> pd.Series | None:
-    # exact title match first, then contains
-    m = ents[ents["title"].astype(str) == symbol]
-    if len(m) == 0:
-        m = ents[ents["title"].astype(str).str.contains(symbol, case=False, na=False)]
-    if len(m) == 0:
+    """Exact match preferred. On ambiguous partial matches, error with candidates list."""
+    exact = ents[ents["title"].astype(str) == symbol]
+    if len(exact) == 1:
+        return exact.iloc[0]
+    if len(exact) > 1:
+        cands = list(exact["title"].astype(str))
+        typer.secho(f"Multiple exact matches for '{symbol}': {cands}", fg=typer.colors.RED)
         return None
-    return m.iloc[0]
+
+    partial = ents[ents["title"].astype(str).str.contains(symbol, case=False, na=False)]
+    if len(partial) == 0:
+        return None
+    if len(partial) > 1:
+        cands = list(partial["title"].astype(str))
+        typer.secho(
+            f"Ambiguous symbol '{symbol}'. Candidates: {cands}. "
+            "Use a more precise title (e.g. 'sim:run_simulation' or 'core:Config').",
+            fg=typer.colors.YELLOW,
+        )
+        return None
+    return partial.iloc[0]
 
 
 def get_neighbors(rels: pd.DataFrame, entity_id: str, entity_title: str) -> List[Dict[str, Any]]:
@@ -82,11 +96,16 @@ def pack(
     graph: Path = typer.Option(Path("byog_mini_game"), "--graph", "-g", help="Directory containing the BYOG (with output/ subdir)"),
     purpose: str = typer.Option("port-to-rust", "--purpose", "-p"),
     output: Path | None = typer.Option(None, "--output", "-o", help="Write JSON to this path instead of stdout"),
+    max_text_chars: int = typer.Option(300, "--max-text-chars", help="Truncate text units to this many chars (0 or negative = no limit)"),
+    full_text: bool = typer.Option(False, "--full-text", help="Equivalent to --max-text-chars 0 (no truncation)"),
 ):
     """Assemble and print (or save) a context pack for the given symbol."""
     if not (graph / "output" / "entities.parquet").exists():
         typer.secho(f"BYOG not found under {graph}. Run the bridge or smoke generator first.", fg=typer.colors.RED)
         raise typer.Exit(1)
+
+    if full_text:
+        max_text_chars = 0
 
     data = load_byog(graph)
     ents, rels, tus = data["entities"], data["relationships"], data["text_units"]
@@ -111,6 +130,21 @@ def pack(
             "See test_collision_first and test_golden_trace_matches."
         )
 
+    def truncate_text(txt: str, limit: int) -> tuple[str, bool]:
+        if limit <= 0 or len(txt) <= limit:
+            return txt, False
+        return txt[:limit], True
+
+    packed_texts = []
+    for t in texts[:10]:
+        raw = str(t.get("text", ""))
+        truncated_text, was_truncated = truncate_text(raw, max_text_chars)
+        packed_texts.append({
+            "id": t.get("id"),
+            "text": truncated_text,
+            "truncated": was_truncated,
+        })
+
     pack: Dict[str, Any] = {
         "symbol": ent_dict.get("title"),
         "purpose": purpose,
@@ -129,10 +163,7 @@ def pack(
             }
             for nr in neighbors[:30]  # cap for prompt size
         ],
-        "text_units": [
-            {"id": t.get("id"), "text": str(t.get("text", ""))[:300]}
-            for t in texts[:10]
-        ],
+        "text_units": packed_texts,
         "provenance": {
             "source_file": ent_dict.get("source_file"),
             "span": ent_dict.get("span"),
@@ -142,6 +173,10 @@ def pack(
         },
         "golden_contract_note": golden_note if golden_note else None,
         "usage_hint": "Use this pack + the original source of the listed files when prompting an LLM to port the symbol to Rust while preserving exact observable behavior on the golden inputs.",
+        "truncation": {
+            "max_text_chars": max_text_chars if max_text_chars > 0 else None,
+            "full_text": full_text or max_text_chars <= 0,
+        },
     }
 
     result = json.dumps(pack, indent=2, ensure_ascii=False)

@@ -1,0 +1,13 @@
+[package]
+name = "mini_game_rust"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Core simulation remains pure std for the deterministic port experiment.
+
+[dev-dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# Adding dev-deps for golden JSON verification. This will produce Cargo.lock.
+# Per project decision: commit Cargo.lock for reproducible `cargo test` of the golden contract.
