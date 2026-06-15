@@ -1,0 +1,157 @@
+#!/usr/bin/env python
+"""
+BYOG smoke test generator.
+
+Creates the three canonical GraphRAG Bring-Your-Own-Graph parquet tables
+for a tiny "code" example (two functions in one module with a call edge).
+
+This is the primary contract for Phase 0/1 MVP: deterministic parser output
+must be serializable to these tables, then GraphRAG community/report workflows
+can be run on top.
+
+Run:
+    uv run python scripts/make_byog_smoke.py
+Then (when LLM configured):
+    uv run graphrag index --root byog_smoke
+    uv run graphrag query --root byog_smoke --method global "What are the main components?"
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+
+OUT_DIR = Path("byog_smoke/output")
+OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# --- text_units (source "chunks" the graph was "extracted" from) ---
+# For code we will treat logical symbols + doc snippets as units.
+text_units = pd.DataFrame([
+    {
+        "id": "tu:mod1",
+        "text": "module: mini_example.py\n\nContains update() and helper().",
+        "n_tokens": 12,
+        "document_ids": ["doc:mini_example"],
+        "entity_ids": ["ent:file:mini_example", "ent:fn:update", "ent:fn:helper"],
+        "relationship_ids": ["rel:update_calls_helper"],
+    },
+    {
+        "id": "tu:fn_update",
+        "text": "def update(state):\n    ... calls helper()",
+        "n_tokens": 8,
+        "document_ids": ["doc:mini_example"],
+        "entity_ids": ["ent:fn:update"],
+        "relationship_ids": ["rel:update_calls_helper"],
+    },
+])
+
+# --- entities (nodes) ---
+entities = pd.DataFrame([
+    {
+        "id": "ent:file:mini_example",
+        "title": "mini_example.py",
+        "type": "file",  # code-specific
+        "description": "Top-level module containing simulation helpers.",
+        "text_unit_ids": ["tu:mod1"],
+        "human_readable_id": 1,
+        "source_file": "examples/mini_game/sim.py",  # provenance
+        "span": "1:0-50:0",
+        "extractor": "manual-smoke",
+        "confidence": 1.0,
+        "is_deterministic": True,
+    },
+    {
+        "id": "ent:fn:update",
+        "title": "update",
+        "type": "function",
+        "description": "Main simulation step. Mutates state and may call helper.",
+        "text_unit_ids": ["tu:fn_update"],
+        "human_readable_id": 2,
+        "source_file": "examples/mini_game/sim.py",
+        "span": "def update",
+        "extractor": "manual-smoke",
+        "confidence": 1.0,
+        "is_deterministic": True,
+    },
+    {
+        "id": "ent:fn:helper",
+        "title": "helper",
+        "type": "function",
+        "description": "Low-level physics helper called by update.",
+        "text_unit_ids": ["tu:mod1"],
+        "human_readable_id": 3,
+        "source_file": "examples/mini_game/physics.py",
+        "span": "def helper",
+        "extractor": "manual-smoke",
+        "confidence": 0.9,
+        "is_deterministic": False,  # pretend LLM added some semantic color
+    },
+])
+
+# --- relationships (edges) ---
+relationships = pd.DataFrame([
+    {
+        "id": "rel:update_calls_helper",
+        "source": "ent:fn:update",
+        "target": "ent:fn:helper",
+        "type": "calls",  # or description only
+        "description": "update() invokes helper() on every physics step for collision checks.",
+        "weight": 1.0,  # important for Leiden community detection
+        "text_unit_ids": ["tu:fn_update", "tu:mod1"],
+        "human_readable_id": 1,
+        "source_file": "examples/mini_game/sim.py",
+        "span": "update: calls helper",
+        "extractor": "manual-smoke",
+        "confidence": 1.0,
+        "is_deterministic": True,
+    },
+])
+
+# Write as parquet (the exact format GraphRAG BYOG expects)
+pq.write_table(pa.Table.from_pandas(text_units), OUT_DIR / "text_units.parquet")
+pq.write_table(pa.Table.from_pandas(entities), OUT_DIR / "entities.parquet")
+pq.write_table(pa.Table.from_pandas(relationships), OUT_DIR / "relationships.parquet")
+
+print("Wrote BYOG tables to", OUT_DIR)
+print("entities:", len(entities), "relationships:", len(relationships))
+
+# Also write a minimal settings.yaml for the smoke root
+SETTINGS = """\
+# Minimal BYOG settings for code graph experiments.
+# See https://microsoft.github.io/graphrag/index/byog/
+input:
+  type: file
+  file_type: text
+  base_dir: "input"
+output:
+  base_dir: "output"
+llm:
+  model: "gpt-4.1"   # replace or use .env / Azure config
+  api_base: "https://api.openai.com/v1"
+  api_key: ${OPENAI_API_KEY}
+embeddings:
+  model: "text-embedding-3-small"
+workflows:
+  - create_communities
+  - create_community_reports
+# For Local/DRIFT also add: generate_text_embeddings
+"""
+(OUT_DIR.parent / "settings.yaml").write_text(SETTINGS)
+print("Wrote settings.yaml")
+
+# Simple provenance note
+provenance = {
+    "note": "This smoke graph was hand-authored to exercise the BYOG path. Real implementation must emit the same columns from tree-sitter + semantic analyzers with full provenance.",
+    "required_columns": {
+        "entities": ["id", "title", "description", "text_unit_ids"],
+        "relationships": ["id", "source", "target", "description", "weight", "text_unit_ids"],
+    },
+    "code_extensions": ["source_file", "span", "extractor", "confidence", "is_deterministic"],
+}
+(OUT_DIR / "provenance_smoke.json").write_text(json.dumps(provenance, indent=2))
+print("Done.")

@@ -1,0 +1,32 @@
+# GraphRAG outputs
+output/
+input/
+*.parquet
+ragtest/
+.env
+
+# Python / test caches
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+__pycache__/
+*.pyc
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# OS
+.DS_Store
+
+# Rust
+target/
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp

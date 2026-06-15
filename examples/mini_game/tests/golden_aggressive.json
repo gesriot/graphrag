@@ -1,0 +1,412 @@
+{
+  "name": "aggressive",
+  "jumps": [
+    1,
+    5,
+    12,
+    20,
+    28
+  ],
+  "trace": [
+    {
+      "tick": 0,
+      "x": 1.0,
+      "y": -0.8,
+      "vy": -0.8,
+      "score": 1,
+      "collided": false
+    },
+    {
+      "tick": 1,
+      "x": 2.0,
+      "y": 4.4,
+      "vy": 5.2,
+      "score": 2,
+      "collided": false
+    },
+    {
+      "tick": 2,
+      "x": 3.0,
+      "y": 8.8,
+      "vy": 4.4,
+      "score": 3,
+      "collided": false
+    },
+    {
+      "tick": 3,
+      "x": 4.0,
+      "y": 12.4,
+      "vy": 3.6,
+      "score": 4,
+      "collided": false
+    },
+    {
+      "tick": 4,
+      "x": 5.0,
+      "y": 15.2,
+      "vy": 2.8,
+      "score": 5,
+      "collided": false
+    },
+    {
+      "tick": 5,
+      "x": 6.0,
+      "y": 20.4,
+      "vy": 5.2,
+      "score": 6,
+      "collided": false
+    },
+    {
+      "tick": 6,
+      "x": 7.0,
+      "y": 24.8,
+      "vy": 4.4,
+      "score": 7,
+      "collided": false
+    },
+    {
+      "tick": 7,
+      "x": 8.0,
+      "y": 28.4,
+      "vy": 3.6,
+      "score": 8,
+      "collided": false
+    },
+    {
+      "tick": 8,
+      "x": 9.0,
+      "y": 31.2,
+      "vy": 2.8,
+      "score": 9,
+      "collided": false
+    },
+    {
+      "tick": 9,
+      "x": 10.0,
+      "y": 33.2,
+      "vy": 2.0,
+      "score": 10,
+      "collided": false
+    },
+    {
+      "tick": 10,
+      "x": 11.0,
+      "y": 34.4,
+      "vy": 1.2,
+      "score": 11,
+      "collided": false
+    },
+    {
+      "tick": 11,
+      "x": 12.0,
+      "y": 34.8,
+      "vy": 0.4,
+      "score": 12,
+      "collided": false
+    },
+    {
+      "tick": 12,
+      "x": 13.0,
+      "y": 40.0,
+      "vy": 5.2,
+      "score": 13,
+      "collided": false
+    },
+    {
+      "tick": 13,
+      "x": 14.0,
+      "y": 44.4,
+      "vy": 4.4,
+      "score": 14,
+      "collided": false
+    },
+    {
+      "tick": 14,
+      "x": 15.0,
+      "y": 48.0,
+      "vy": 3.6,
+      "score": 15,
+      "collided": false
+    },
+    {
+      "tick": 15,
+      "x": 16.0,
+      "y": 50.8,
+      "vy": 2.8,
+      "score": 16,
+      "collided": false
+    },
+    {
+      "tick": 16,
+      "x": 17.0,
+      "y": 52.8,
+      "vy": 2.0,
+      "score": 17,
+      "collided": false
+    },
+    {
+      "tick": 17,
+      "x": 18.0,
+      "y": 54.0,
+      "vy": 1.2,
+      "score": 18,
+      "collided": false
+    },
+    {
+      "tick": 18,
+      "x": 19.0,
+      "y": 54.4,
+      "vy": 0.4,
+      "score": 19,
+      "collided": false
+    },
+    {
+      "tick": 19,
+      "x": 20.0,
+      "y": 54.0,
+      "vy": -0.4,
+      "score": 20,
+      "collided": false
+    },
+    {
+      "tick": 20,
+      "x": 21.0,
+      "y": 59.2,
+      "vy": 5.2,
+      "score": 21,
+      "collided": false
+    },
+    {
+      "tick": 21,
+      "x": 22.0,
+      "y": 63.6,
+      "vy": 4.4,
+      "score": 22,
+      "collided": false
+    },
+    {
+      "tick": 22,
+      "x": 23.0,
+      "y": 67.2,
+      "vy": 3.6,
+      "score": 23,
+      "collided": false
+    },
+    {
+      "tick": 23,
+      "x": 24.0,
+      "y": 70.0,
+      "vy": 2.8,
+      "score": 24,
+      "collided": false
+    },
+    {
+      "tick": 24,
+      "x": 25.0,
+      "y": 72.0,
+      "vy": 2.0,
+      "score": 25,
+      "collided": false
+    },
+    {
+      "tick": 25,
+      "x": 26.0,
+      "y": 73.2,
+      "vy": 1.2,
+      "score": 26,
+      "collided": false
+    },
+    {
+      "tick": 26,
+      "x": 27.0,
+      "y": 73.6,
+      "vy": 0.4,
+      "score": 27,
+      "collided": false
+    },
+    {
+      "tick": 27,
+      "x": 28.0,
+      "y": 73.2,
+      "vy": -0.4,
+      "score": 28,
+      "collided": false
+    },
+    {
+      "tick": 28,
+      "x": 29.0,
+      "y": 78.4,
+      "vy": 5.2,
+      "score": 29,
+      "collided": false
+    },
+    {
+      "tick": 29,
+      "x": 30.0,
+      "y": 82.8,
+      "vy": 4.4,
+      "score": 30,
+      "collided": false
+    },
+    {
+      "tick": 30,
+      "x": 31.0,
+      "y": 86.4,
+      "vy": 3.6,
+      "score": 31,
+      "collided": false
+    },
+    {
+      "tick": 31,
+      "x": 32.0,
+      "y": 89.2,
+      "vy": 2.8,
+      "score": 32,
+      "collided": false
+    },
+    {
+      "tick": 32,
+      "x": 33.0,
+      "y": 91.2,
+      "vy": 2.0,
+      "score": 33,
+      "collided": false
+    },
+    {
+      "tick": 33,
+      "x": 34.0,
+      "y": 92.4,
+      "vy": 1.2,
+      "score": 34,
+      "collided": false
+    },
+    {
+      "tick": 34,
+      "x": 35.0,
+      "y": 92.8,
+      "vy": 0.4,
+      "score": 35,
+      "collided": false
+    },
+    {
+      "tick": 35,
+      "x": 36.0,
+      "y": 92.4,
+      "vy": -0.4,
+      "score": 36,
+      "collided": false
+    },
+    {
+      "tick": 36,
+      "x": 37.0,
+      "y": 91.2,
+      "vy": -1.2,
+      "score": 37,
+      "collided": false
+    },
+    {
+      "tick": 37,
+      "x": 38.0,
+      "y": 89.2,
+      "vy": -2.0,
+      "score": 38,
+      "collided": false
+    },
+    {
+      "tick": 38,
+      "x": 39.0,
+      "y": 86.4,
+      "vy": -2.8,
+      "score": 39,
+      "collided": false
+    },
+    {
+      "tick": 39,
+      "x": 40.0,
+      "y": 82.8,
+      "vy": -3.6,
+      "score": 40,
+      "collided": false
+    },
+    {
+      "tick": 40,
+      "x": 41.0,
+      "y": 78.4,
+      "vy": -4.4,
+      "score": 41,
+      "collided": false
+    },
+    {
+      "tick": 41,
+      "x": 42.0,
+      "y": 73.2,
+      "vy": -5.2,
+      "score": 42,
+      "collided": false
+    },
+    {
+      "tick": 42,
+      "x": 43.0,
+      "y": 67.2,
+      "vy": -6.0,
+      "score": 43,
+      "collided": false
+    },
+    {
+      "tick": 43,
+      "x": 44.0,
+      "y": 60.4,
+      "vy": -6.8,
+      "score": 44,
+      "collided": false
+    },
+    {
+      "tick": 44,
+      "x": 45.0,
+      "y": 52.8,
+      "vy": -7.6,
+      "score": 45,
+      "collided": false
+    },
+    {
+      "tick": 45,
+      "x": 46.0,
+      "y": 44.4,
+      "vy": -8.4,
+      "score": 46,
+      "collided": false
+    },
+    {
+      "tick": 46,
+      "x": 47.0,
+      "y": 35.2,
+      "vy": -9.2,
+      "score": 47,
+      "collided": false
+    },
+    {
+      "tick": 47,
+      "x": 48.0,
+      "y": 25.2,
+      "vy": -10.0,
+      "score": 48,
+      "collided": false
+    },
+    {
+      "tick": 48,
+      "x": 49.0,
+      "y": 14.4,
+      "vy": -10.8,
+      "score": 49,
+      "collided": false
+    },
+    {
+      "tick": 49,
+      "x": 50.0,
+      "y": 2.8,
+      "vy": -11.6,
+      "score": 50,
+      "collided": false
+    }
+  ]
+}
