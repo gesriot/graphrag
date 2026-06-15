@@ -56,4 +56,5 @@ GOLDEN_INPUTS: Dict[str, List[int]] = {
     "jump_once": [3],
     "jump_to_clear_first": [3, 8],
     "aggressive": [1, 5, 12, 20, 28],
+    "collision_first": [6],  # triggers collided=True at tick ~9 on first obstacle
 }

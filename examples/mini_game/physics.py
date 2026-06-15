@@ -58,7 +58,7 @@ def update_player(state: PlayerState, did_jump: bool, cfg: Config) -> bool:
     return collided_now
 
 
-def find_obstacle_at_x(x: float, cfg: Config) -> Optional[Dict[str, float]]:
+def find_obstacle_at_x(x: float, cfg: Config) -> dict[str, float] | None:
     for obs in cfg.obstacles:
         if abs(x - obs["x"]) < 0.7:
             return obs

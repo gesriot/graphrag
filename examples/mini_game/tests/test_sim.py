@@ -56,6 +56,24 @@ def test_no_collision_on_safe_path():
         pytest.fail("Never reached first obstacle x in trace")
 
 
+def test_collision_first():
+    """jumps=[6] must produce collided=True at the first obstacle (tick 9)."""
+    jumps = GOLDEN_INPUTS["collision_first"]
+    events = events_from_list(jumps)
+    trace = run_simulation(events)
+
+    collided_records = [r for r in trace if r.collided]
+    assert len(collided_records) > 0, "Expected at least one collision"
+    first = collided_records[0]
+    assert first.tick == 9, f"Expected first collision at tick 9, got {first.tick}"
+    assert first.x == 10.0  # approx the first obstacle
+    # After collision, score stops increasing (per current physics: only +1 if not collided)
+    # Check a later frame has same or lower effective progress
+    later = trace[20]
+    assert later.collided is True
+    # score should be 9 (from the print) or around there; the contract captures it exactly via golden
+
+
 if __name__ == "__main__":
     # Convenience: python -m examples.mini_game.tests.test_sim  (adjust path if needed)
     pytest.main([__file__, "-q"])

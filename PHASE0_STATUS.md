@@ -15,7 +15,7 @@
 - Official GraphRAG BYOG path exercised:
   - `scripts/make_byog_smoke.py` produces `entities.parquet`, `relationships.parquet`, `text_units.parquet` with our required provenance columns (`source_file`, `span`, `extractor`, `confidence`, `is_deterministic`).
   - `byog_smoke/settings.yaml` with the minimal `workflows: [create_communities, create_community_reports]`.
-  - `graphrag index --root byog_smoke` reaches the config/LLM stage and correctly consumes the tables (fails only on missing `OPENAI_API_KEY` — expected and documented boundary).
+  - BYOG parquet files (entities/relationships/text_units) are generated and locally schema-valid (with provenance extensions). `graphrag index --root byog_smoke` fails early at config parsing on `${OPENAI_API_KEY}` (before any workflow or community detection). Full end-to-end GraphRAG ingestion (communities + reports) on custom BYOG not yet exercised without an LLM key / dry-run path. This is documented as a caveat.
   - Parquet column validation passed.
 
 - First parser prototype: `scripts/extract_python.py`
@@ -35,8 +35,12 @@
 - GraphRAG BYOG workflow ingestion path works up to the LLM requirement.
 - Extractor runs and produces usable entity/rel records with spans and confidence.
 
-## Notes / Blockers / Next
-- Full `create_community_reports` and query synthesis require a real LLM key (OpenAI/Azure or local via config). This is by design for Phase 0.
+## Notes / Blockers / Next (post user review fixes)
+- Caveat 1 clarified: BYOG files locally valid + schema-checked; full `graphrag index` still fails at config parse on ${OPENAI_API_KEY} (no workflow run yet).
+- Caveat 2 fixed in smoke + bridge: relationships.source/target now use entity titles (FQN style in bridge).
+- Caveat 3 fixed: added golden_collision_first + explicit test (collided=True at tick 9).
+- New: full-package bridge (scripts/mini_game_to_byog.py), schema tests (test_byog_schema.py), physics Optional fix, python req lowered to >=3.12.
+- Next real LLM/GraphRAG community run only after these rails (per user recs). No commits made.
 - The tree-sitter extractor is syntax-only and deliberately naive on calls (no resolution). Phase 1 will add better intra-file + cross-file resolution + Python stdlib `ast` / Jedi signals.
 - No heavy LLM calls were made yet (baseline port in Phase 0 was deprioritized until we have `context-pack` + summaries from real BYOG run).
 - The mini-game is an excellent MVP target: deterministic, has tests/golden traces, multiple modules, clear "physics" vs "sim" separation — ideal for first Python→Rust port experiment.

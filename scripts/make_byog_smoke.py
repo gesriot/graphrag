@@ -34,19 +34,25 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 text_units = pd.DataFrame([
     {
         "id": "tu:mod1",
+        "human_readable_id": 1,
         "text": "module: mini_example.py\n\nContains update() and helper().",
         "n_tokens": 12,
+        "document_id": "doc:mini_example",
         "document_ids": ["doc:mini_example"],
         "entity_ids": ["ent:file:mini_example", "ent:fn:update", "ent:fn:helper"],
         "relationship_ids": ["rel:update_calls_helper"],
+        "covariate_ids": [],
     },
     {
         "id": "tu:fn_update",
+        "human_readable_id": 2,
         "text": "def update(state):\n    ... calls helper()",
         "n_tokens": 8,
+        "document_id": "doc:mini_example",
         "document_ids": ["doc:mini_example"],
         "entity_ids": ["ent:fn:update"],
         "relationship_ids": ["rel:update_calls_helper"],
+        "covariate_ids": [],
     },
 ])
 
@@ -97,9 +103,9 @@ entities = pd.DataFrame([
 relationships = pd.DataFrame([
     {
         "id": "rel:update_calls_helper",
-        "source": "ent:fn:update",
-        "target": "ent:fn:helper",
-        "type": "calls",  # or description only
+        "source": "update",  # canonical title (must match entity.title for GraphRAG 3.1 create_communities)
+        "target": "helper",
+        "type": "calls",
         "description": "update() invokes helper() on every physics step for collision checks.",
         "weight": 1.0,  # important for Leiden community detection
         "text_unit_ids": ["tu:fn_update", "tu:mod1"],
