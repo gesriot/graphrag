@@ -16,6 +16,7 @@ Run:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Iterator
 
@@ -29,6 +30,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parents[3] / "scripts"))
 from make_byog_smoke import build_smoke_byog  # type: ignore
 from mini_game_to_byog import build_byog_for_package  # type: ignore
+from examples.mini_game.sim import GOLDEN_INPUTS
 
 
 @pytest.fixture
@@ -166,3 +168,19 @@ def test_main_cross_file_calls_to_sim(mini_game_byog_root: Path):
     }
     missing = expected - pairs
     assert not missing, f"Missing cross-file call edges from main.py into sim: {missing}"
+
+
+def test_behavior_contract_matches_golden_inputs():
+    """Machine-readable contract should stay in sync with committed golden scenarios."""
+    contract_path = Path(__file__).parent / "behavior_contract.json"
+    contract = json.loads(contract_path.read_text())
+
+    scenarios = contract["scenarios"]
+    assert set(scenarios) == set(GOLDEN_INPUTS)
+    for name, jumps in GOLDEN_INPUTS.items():
+        assert scenarios[name]["jumps"] == jumps
+        assert (Path(__file__).parent / f"golden_{name}.json").exists()
+
+    trace_names = set(contract["golden_traces"])
+    expected_trace_names = {f"golden_{name}.json" for name in GOLDEN_INPUTS}
+    assert trace_names == expected_trace_names

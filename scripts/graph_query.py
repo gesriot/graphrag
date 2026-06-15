@@ -1,0 +1,209 @@
+#!/usr/bin/env python
+"""
+Local graph queries over BYOG parquets (no external API).
+
+Provides:
+- callers(symbol)
+- callees(symbol)
+- neighbors(symbol)
+- dependency_order()
+- impact(symbol)
+- symbol(query)
+
+Designed to be used from agent loops, context-pack, or directly from the shell.
+
+Example:
+    uv run python scripts/graph_query.py callers sim:run_simulation --graph byog_mini_game
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import List, Dict, Any
+
+import pandas as pd
+import typer
+
+app = typer.Typer(help="Local BYOG graph queries (callers, callees, impact, etc.)")
+
+
+def load_graph(graph_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+    out = graph_dir / "output"
+    ents = pd.read_parquet(out / "entities.parquet")
+    rels = pd.read_parquet(out / "relationships.parquet")
+    return ents, rels
+
+
+def _resolve_symbol(ents: pd.DataFrame, query: str) -> str | None:
+    """Return the canonical title for a partial or exact query."""
+    titles = ents["title"].astype(str)
+    exact = ents[titles == query]
+    if len(exact) == 1:
+        return str(exact.iloc[0]["title"])
+
+    if "type" in ents.columns:
+        types = ents["type"].astype(str).str.lower()
+        module_alias = ents[
+            (types == "module")
+            & (
+                (titles == query)
+                | (titles == f"{query}:{query}")
+                | titles.str.endswith(":" + query)
+            )
+        ]
+        if len(module_alias) == 1:
+            return str(module_alias.iloc[0]["title"])
+
+    partial = ents[titles.str.contains(query, case=False, na=False)]
+    if len(partial) == 1:
+        return str(partial.iloc[0]["title"])
+    return None
+
+
+def callers(ents: pd.DataFrame, rels: pd.DataFrame, symbol: str) -> List[str]:
+    title = _resolve_symbol(ents, symbol)
+    if not title:
+        return []
+    mask = (rels["target"].astype(str) == title) & (rels["type"].astype(str) == "calls")
+    return sorted(rels[mask]["source"].astype(str).unique().tolist())
+
+
+def callees(ents: pd.DataFrame, rels: pd.DataFrame, symbol: str) -> List[str]:
+    title = _resolve_symbol(ents, symbol)
+    if not title:
+        return []
+    mask = (rels["source"].astype(str) == title) & (rels["type"].astype(str) == "calls")
+    return sorted(rels[mask]["target"].astype(str).unique().tolist())
+
+
+def neighbors(ents: pd.DataFrame, rels: pd.DataFrame, symbol: str) -> Dict[str, List[str]]:
+    title = _resolve_symbol(ents, symbol)
+    if not title:
+        return {"incoming": [], "outgoing": []}
+    inc = rels[(rels["target"].astype(str) == title)]["source"].astype(str).unique().tolist()
+    out = rels[(rels["source"].astype(str) == title)]["target"].astype(str).unique().tolist()
+    return {"incoming": sorted(inc), "outgoing": sorted(out)}
+
+
+def dependency_order(ents: pd.DataFrame, rels: pd.DataFrame) -> List[str]:
+    """Very simple topological order based on 'contains' edges (modules/files first)."""
+    contains = rels[rels["type"].astype(str) == "contains"][["source", "target"]].astype(str)
+    # Build graph of containment (source contains target)
+    from collections import defaultdict, deque
+
+    graph: Dict[str, List[str]] = defaultdict(list)
+    indeg: Dict[str, int] = defaultdict(int)
+
+    all_nodes = set(ents["title"].astype(str))
+    for _, row in contains.iterrows():
+        src, tgt = row["source"], row["target"]
+        graph[src].append(tgt)
+        indeg[tgt] += 1
+        all_nodes.add(src)
+        all_nodes.add(tgt)
+
+    q = deque([n for n in all_nodes if indeg[n] == 0])
+    order = []
+    while q:
+        n = q.popleft()
+        order.append(n)
+        for nei in graph[n]:
+            indeg[nei] -= 1
+            if indeg[nei] == 0:
+                q.append(nei)
+    # If cycle or disconnected, just return what we have + remaining
+    remaining = sorted(all_nodes - set(order))
+    return order + remaining
+
+
+def impact(ents: pd.DataFrame, rels: pd.DataFrame, symbol: str) -> List[str]:
+    """Transitive callers (who would be affected if this symbol changes)."""
+    title = _resolve_symbol(ents, symbol)
+    if not title:
+        return []
+    # Build reverse call graph
+    from collections import defaultdict, deque
+
+    rev: Dict[str, List[str]] = defaultdict(list)
+    call_mask = rels["type"].astype(str) == "calls"
+    for _, row in rels[call_mask].astype(str).iterrows():
+        rev[row["target"]].append(row["source"])
+
+    # BFS from the symbol
+    seen = set()
+    q = deque([title])
+    while q:
+        cur = q.popleft()
+        if cur in seen:
+            continue
+        seen.add(cur)
+        for pred in rev.get(cur, []):
+            if pred not in seen:
+                q.append(pred)
+    seen.discard(title)
+    return sorted(seen)
+
+
+def symbol_lookup(ents: pd.DataFrame, query: str) -> Dict[str, Any] | None:
+    title = _resolve_symbol(ents, query)
+    if not title:
+        return None
+    row = ents[ents["title"].astype(str) == title].iloc[0]
+    snippet = row.get("snippet", None) if "snippet" in row else None
+    snippet_preview = str(snippet)[:200] if snippet else None
+    return {
+        "title": title,
+        "type": row.get("type"),
+        "description": row.get("description"),
+        "source_file": row.get("source_file"),
+        "span": row.get("span"),
+        "snippet_preview": snippet_preview,
+    }
+
+
+@app.command("callers")
+def cli_callers(symbol: str, graph: Path = typer.Option(Path("byog_mini_game"), "--graph")):
+    ents, rels = load_graph(graph)
+    print("\n".join(callers(ents, rels, symbol)))
+
+
+@app.command("callees")
+def cli_callees(symbol: str, graph: Path = typer.Option(Path("byog_mini_game"), "--graph")):
+    ents, rels = load_graph(graph)
+    print("\n".join(callees(ents, rels, symbol)))
+
+
+@app.command("neighbors")
+def cli_neighbors(symbol: str, graph: Path = typer.Option(Path("byog_mini_game"), "--graph")):
+    ents, rels = load_graph(graph)
+    n = neighbors(ents, rels, symbol)
+    print("incoming:", n["incoming"])
+    print("outgoing:", n["outgoing"])
+
+
+@app.command("dependency-order")
+def cli_dep_order(graph: Path = typer.Option(Path("byog_mini_game"), "--graph")):
+    ents, rels = load_graph(graph)
+    for t in dependency_order(ents, rels):
+        print(t)
+
+
+@app.command("impact")
+def cli_impact(symbol: str, graph: Path = typer.Option(Path("byog_mini_game"), "--graph")):
+    ents, rels = load_graph(graph)
+    print("\n".join(impact(ents, rels, symbol)))
+
+
+@app.command("symbol")
+def cli_symbol(query: str, graph: Path = typer.Option(Path("byog_mini_game"), "--graph")):
+    ents, _ = load_graph(graph)
+    res = symbol_lookup(ents, query)
+    if res:
+        print(json.dumps(res, indent=2, ensure_ascii=False))
+    else:
+        print("Not found")
+
+
+if __name__ == "__main__":
+    app()

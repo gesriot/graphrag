@@ -40,6 +40,9 @@ def load_byog(graph_dir: Path) -> Dict[str, pd.DataFrame]:
 
 def find_entity(ents: pd.DataFrame, symbol: str) -> pd.Series | None:
     """Exact match preferred. On ambiguous partial matches, error with candidates list."""
+    titles = ents["title"].astype(str)
+    types = ents["type"].astype(str).str.lower() if "type" in ents.columns else pd.Series([], dtype=str)
+
     exact = ents[ents["title"].astype(str) == symbol]
     if len(exact) == 1:
         return exact.iloc[0]
@@ -48,7 +51,25 @@ def find_entity(ents: pd.DataFrame, symbol: str) -> pd.Series | None:
         typer.secho(f"Multiple exact matches for '{symbol}': {cands}", fg=typer.colors.RED)
         return None
 
-    partial = ents[ents["title"].astype(str).str.contains(symbol, case=False, na=False)]
+    # Bare module aliases: "sim" should resolve to the module entity "sim:sim",
+    # not become ambiguous with sim.py and all sim:* symbols.
+    if len(types) == len(ents):
+        module_alias = ents[
+            (types == "module")
+            & (
+                (titles == symbol)
+                | (titles == f"{symbol}:{symbol}")
+                | titles.str.endswith(":" + symbol)
+            )
+        ]
+        if len(module_alias) == 1:
+            return module_alias.iloc[0]
+        if len(module_alias) > 1:
+            cands = list(module_alias["title"].astype(str))
+            typer.secho(f"Ambiguous module alias '{symbol}'. Candidates: {cands}", fg=typer.colors.YELLOW)
+            return None
+
+    partial = ents[titles.str.contains(symbol, case=False, na=False)]
     if len(partial) == 0:
         return None
     if len(partial) > 1:
@@ -66,6 +87,17 @@ def get_neighbors(rels: pd.DataFrame, entity_id: str, entity_title: str) -> List
     mask = (rels["source"].astype(str) == entity_title) | (rels["target"].astype(str) == entity_title) | \
            (rels["source"].astype(str) == entity_id) | (rels["target"].astype(str) == entity_id)
     return rels[mask].to_dict(orient="records")
+
+
+def compact_relationship(rel: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": rel.get("id"),
+        "source": rel.get("source"),
+        "target": rel.get("target"),
+        "type": rel.get("type"),
+        "description": rel.get("description"),
+        "weight": rel.get("weight"),
+    }
 
 
 def _to_list(val: Any) -> List[Any]:
@@ -118,8 +150,45 @@ def pack(
         raise typer.Exit(2)
 
     ent_dict = ent.to_dict()
+
+    # Build base pack first
     neighbors = get_neighbors(rels, str(ent_dict.get("id", "")), str(ent_dict.get("title", "")))
     texts = get_text_units(tus, ent, neighbors)
+
+    pack: Dict[str, Any] = {
+        "symbol": ent_dict.get("title"),
+        "purpose": purpose,
+        "entity": {
+            k: v for k, v in ent_dict.items()
+            if k in ("id", "title", "type", "description", "source_file", "span", "extractor", "confidence", "is_deterministic")
+        },
+        "neighbors": [compact_relationship(nr) for nr in neighbors[:30]],
+    }
+
+    # Auto-detect module/subsystem pack
+    is_module_pack = str(ent_dict.get("type", "")).lower() == "module"
+    if is_module_pack:
+        module_title = str(ent_dict.get("title"))
+        module_stem = module_title.split(":", 1)[0] if ":" in module_title else module_title
+        module_prefix = module_stem + ":"
+        entity_titles = ents["title"].astype(str)
+        members_mask = entity_titles.str.startswith(module_prefix)
+        members = ents[members_mask][["title", "type", "description"]].to_dict(orient="records")
+        member_titles = set(ents[members_mask]["title"].astype(str))
+        rel_mask = rels["source"].astype(str).isin(member_titles) | rels["target"].astype(str).isin(member_titles)
+        module_relationships = rels[rel_mask].to_dict(orient="records")
+        wanted_text_units = set()
+        for _, member in ents[members_mask].iterrows():
+            wanted_text_units.update(str(x) for x in _to_list(member.get("text_unit_ids")))
+        for rel in module_relationships:
+            wanted_text_units.update(str(x) for x in _to_list(rel.get("text_unit_ids")))
+        if wanted_text_units and len(tus) > 0:
+            text_mask = tus["id"].astype(str).isin(wanted_text_units)
+            texts = tus[text_mask].to_dict(orient="records")
+        pack["is_module_pack"] = True
+        pack["module_prefix"] = module_prefix
+        pack["members"] = members[:50]
+        pack["module_neighbors"] = [compact_relationship(r) for r in module_relationships[:100]]
 
     # Golden contract note for mini_game symbols
     golden_note = ""
@@ -145,24 +214,8 @@ def pack(
             "truncated": was_truncated,
         })
 
-    pack: Dict[str, Any] = {
-        "symbol": ent_dict.get("title"),
-        "purpose": purpose,
-        "entity": {
-            k: v for k, v in ent_dict.items()
-            if k in ("id", "title", "type", "description", "source_file", "span", "extractor", "confidence", "is_deterministic")
-        },
-        "neighbors": [
-            {
-                "id": nr.get("id"),
-                "source": nr.get("source"),
-                "target": nr.get("target"),
-                "type": nr.get("type"),
-                "description": nr.get("description"),
-                "weight": nr.get("weight"),
-            }
-            for nr in neighbors[:30]  # cap for prompt size
-        ],
+    # Augment the pack we built earlier
+    pack.update({
         "text_units": packed_texts,
         "provenance": {
             "source_file": ent_dict.get("source_file"),
@@ -172,12 +225,13 @@ def pack(
             "is_deterministic": ent_dict.get("is_deterministic"),
         },
         "golden_contract_note": golden_note if golden_note else None,
+        "behavior_contract": "examples/mini_game/tests/behavior_contract.json (load for machine-readable invariants and expected values per scenario)" if "mini_game" in str(graph) else None,
         "usage_hint": "Use this pack + the original source of the listed files when prompting an LLM to port the symbol to Rust while preserving exact observable behavior on the golden inputs.",
         "truncation": {
             "max_text_chars": max_text_chars if max_text_chars > 0 else None,
             "full_text": full_text or max_text_chars <= 0,
         },
-    }
+    })
 
     result = json.dumps(pack, indent=2, ensure_ascii=False)
     if output:
