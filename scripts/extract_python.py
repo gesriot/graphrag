@@ -74,6 +74,7 @@ def extract_from_file(path: Path) -> Dict[str, List[Dict[str, Any]]]:
 
     # Collect top-level defs
     defined_names: List[str] = []
+    defined_kinds: Dict[str, str] = {}
 
     for child in root.children:
         if child.type in ("function_definition", "class_definition"):
@@ -110,6 +111,7 @@ def extract_from_file(path: Path) -> Dict[str, List[Dict[str, Any]]]:
                 }
             )
             defined_names.append(name)
+            defined_kinds[name] = kind
 
             # contains edge
             relationships.append(
@@ -130,14 +132,88 @@ def extract_from_file(path: Path) -> Dict[str, List[Dict[str, Any]]]:
                 }
             )
 
-    # Very conservative intra-file calls (look for call nodes whose function is identifier matching a defined name)
+    # Structured imports (for cross-file resolution in bridge)
+    imports: List[Dict[str, Any]] = []
+    for child in root.children:
+        if child.type in ("import_statement", "import_from_statement"):
+            text = get_text(source, child)
+            module_name = ""
+            imported_names: List[str] = []
+            is_relative = False
+
+            # Try to extract module and names from tree-sitter structure
+            module_node = child.child_by_field_name("module")
+            if module_node:
+                module_name = get_text(source, module_node).lstrip(".")
+            if child.type == "import_from_statement":
+                # names are usually under "name" or children
+                for c in child.children:
+                    if c.type == "relative_import":
+                        is_relative = True
+                    if c.type == "dotted_name" or c.type == "identifier":
+                        nm = get_text(source, c).lstrip(".")
+                        if nm and nm != module_name and nm not in imported_names:
+                            imported_names.append(nm)
+                    if c.type == "aliased_import":
+                        # handle "foo as bar"
+                        for gc in c.children:
+                            if gc.type in ("identifier", "dotted_name"):
+                                nm = get_text(source, gc).lstrip(".")
+                                if nm and nm not in imported_names:
+                                    imported_names.append(nm)
+            else:
+                # plain import foo, bar
+                for c in child.children:
+                    if c.type in ("dotted_name", "identifier"):
+                        nm = get_text(source, c).lstrip(".")
+                        if nm and nm not in imported_names:
+                            imported_names.append(nm)
+
+            if text.startswith("from .") or module_name.startswith("."):
+                is_relative = True
+
+            imports.append({
+                "module": module_name or text,
+                "names": imported_names or [text],
+                "is_relative": is_relative,
+                "text": text,
+            })
+
+            # Keep a (rough) relationship for now; bridge will create better module-module ones
+            relationships.append(
+                {
+                    "id": f"rel:import:{path.name}:{len(relationships)}",
+                    "source": file_id,
+                    "target": f"ent:module:{(module_name or text)[:40]}",
+                    "type": "imports",
+                    "description": text,
+                    "weight": 0.5,
+                    "text_unit_ids": [f"tu:file:{path.name}"],
+                    "human_readable_id": len(relationships) + 1,
+                    "source_file": source_file,
+                    "span": f"{child.start_point[0]+1}",
+                    "extractor": "tree-sitter-python",
+                    "confidence": 0.8,
+                    "is_deterministic": True,
+                }
+            )
+
+    imported_call_names = {
+        name.split(".")[-1]
+        for imp in imports
+        for name in imp.get("names", [])
+        if name and " import " not in name
+    }
+    callable_names = set(defined_names) | imported_call_names
+
+    # Conservative calls: local definitions and explicitly imported names only.
     # This is syntax only — real version will need name resolution.
     def walk_calls(node: Node):
         if node.type == "call":
             func = node.child_by_field_name("function")
             if func and func.type == "identifier":
                 callee = get_text(source, func)
-                if callee in defined_names:
+                if callee in callable_names:
                     # naive: assume the first defined fn that matches is caller? Better: find enclosing def
                     # For MVP we emit a relationship from "unknown-caller" or scan parents.
                     # Simpler: emit a "potential_call" edge that later passes can strengthen.
@@ -153,20 +229,26 @@ def extract_from_file(path: Path) -> Dict[str, List[Dict[str, Any]]]:
                         cur = cur.parent
 
                     if caller != "unknown" and caller in defined_names:
+                        is_local = callee in defined_names
+                        callee_target = (
+                            make_id(defined_kinds.get(callee, "fn"), callee, source_file)
+                            if is_local
+                            else callee
+                        )
                         relationships.append(
                             {
                                 "id": f"rel:call:{caller}:{callee}:{node.start_point[0]}",
                                 "source": make_id("fn", caller, source_file),
-                                "target": make_id("fn", callee, source_file),
+                                "target": callee_target,
                                 "type": "calls",
-                                "description": f"{caller} may call {callee} (syntax only, name match)",
-                                "weight": 0.6,
+                                "description": f"{caller} may call {callee} (syntax only, {'local name match' if is_local else 'imported name match'})",
+                                "weight": 0.75 if is_local else 0.65,
                                 "text_unit_ids": [f"tu:file:{path.name}"],
                                 "human_readable_id": len(relationships) + 1,
                                 "source_file": source_file,
                                 "span": f"{node.start_point[0]+1}:{node.start_point[1]}",
                                 "extractor": "tree-sitter-python",
-                                "confidence": 0.6,
+                                "confidence": 0.75 if is_local else 0.65,
                                 "is_deterministic": False,  # name match only, no resolution
                             }
                         )
@@ -175,29 +257,45 @@ def extract_from_file(path: Path) -> Dict[str, List[Dict[str, Any]]]:
 
     walk_calls(root)
 
-    # Imports (very rough)
-    for child in root.children:
-        if child.type == "import_statement" or child.type == "import_from_statement":
-            text = get_text(source, child)
-            relationships.append(
-                {
-                    "id": f"rel:import:{path.name}:{len(relationships)}",
-                    "source": file_id,
-                    "target": f"ent:module:{text[:40]}",
-                    "type": "imports",
-                    "description": text,
-                    "weight": 0.5,
-                    "text_unit_ids": [f"tu:file:{path.name}"],
-                    "human_readable_id": len(relationships) + 1,
-                    "source_file": source_file,
-                    "span": f"{child.start_point[0]+1}",
-                    "extractor": "tree-sitter-python",
-                    "confidence": 0.8,
-                    "is_deterministic": True,
-                }
-            )
+    # Module entity for the file (stem)
+    module_title = Path(path).stem
+    module_id = f"ent:module:{module_title}"
+    entities.append({
+        "id": module_id,
+        "title": module_title,
+        "type": "module",
+        "description": f"Python module {module_title} (from {path.name})",
+        "text_unit_ids": [f"tu:file:{path.name}"],
+        "human_readable_id": len(entities) + 1,
+        "source_file": source_file,
+        "span": "module",
+        "extractor": "tree-sitter-python",
+        "confidence": 1.0,
+        "is_deterministic": True,
+    })
+    # file contains module (lightweight)
+    relationships.append({
+        "id": f"rel:contains-module:{path.name}",
+        "source": file_id,
+        "target": module_id,
+        "type": "contains",
+        "description": f"{path.name} defines module {module_title}",
+        "weight": 1.0,
+        "text_unit_ids": [f"tu:file:{path.name}"],
+        "human_readable_id": len(relationships) + 1,
+        "source_file": source_file,
+        "span": "",
+        "extractor": "tree-sitter-python",
+        "confidence": 1.0,
+        "is_deterministic": True,
+    })
 
-    return {"entities": entities, "relationships": relationships}
+    return {
+        "entities": entities,
+        "relationships": relationships,
+        "imports": imports,
+        "module_title": module_title,
+    }
 
 
 def main(argv: list[str]) -> int:

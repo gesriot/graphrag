@@ -26,108 +26,131 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 
-OUT_DIR = Path("byog_smoke/output")
-OUT_DIR.mkdir(parents=True, exist_ok=True)
+def build_smoke_byog() -> dict:
+    """Return the BYOG data dict (entities, relationships, text_units) for the smoke example.
+    Used by CLI and by self-contained tests (no disk side effects).
+    """
+    # --- text_units (source "chunks" the graph was "extracted" from) ---
+    text_units = pd.DataFrame([
+        {
+            "id": "tu:mod1",
+            "human_readable_id": 1,
+            "text": "module: mini_example.py\n\nContains update() and helper().",
+            "n_tokens": 12,
+            "document_id": "doc:mini_example",
+            "document_ids": ["doc:mini_example"],
+            "entity_ids": ["ent:file:mini_example", "ent:fn:update", "ent:fn:helper"],
+            "relationship_ids": ["rel:update_calls_helper"],
+            "covariate_ids": [],
+        },
+        {
+            "id": "tu:fn_update",
+            "human_readable_id": 2,
+            "text": "def update(state):\n    ... calls helper()",
+            "n_tokens": 8,
+            "document_id": "doc:mini_example",
+            "document_ids": ["doc:mini_example"],
+            "entity_ids": ["ent:fn:update"],
+            "relationship_ids": ["rel:update_calls_helper"],
+            "covariate_ids": [],
+        },
+    ])
 
-# --- text_units (source "chunks" the graph was "extracted" from) ---
-# For code we will treat logical symbols + doc snippets as units.
-text_units = pd.DataFrame([
-    {
-        "id": "tu:mod1",
-        "human_readable_id": 1,
-        "text": "module: mini_example.py\n\nContains update() and helper().",
-        "n_tokens": 12,
-        "document_id": "doc:mini_example",
-        "document_ids": ["doc:mini_example"],
-        "entity_ids": ["ent:file:mini_example", "ent:fn:update", "ent:fn:helper"],
-        "relationship_ids": ["rel:update_calls_helper"],
-        "covariate_ids": [],
-    },
-    {
-        "id": "tu:fn_update",
-        "human_readable_id": 2,
-        "text": "def update(state):\n    ... calls helper()",
-        "n_tokens": 8,
-        "document_id": "doc:mini_example",
-        "document_ids": ["doc:mini_example"],
-        "entity_ids": ["ent:fn:update"],
-        "relationship_ids": ["rel:update_calls_helper"],
-        "covariate_ids": [],
-    },
-])
+    # --- entities (nodes) ---
+    entities = pd.DataFrame([
+        {
+            "id": "ent:file:mini_example",
+            "title": "mini_example.py",
+            "type": "file",
+            "description": "Top-level module containing simulation helpers.",
+            "text_unit_ids": ["tu:mod1"],
+            "human_readable_id": 1,
+            "source_file": "examples/mini_game/sim.py",
+            "span": "1:0-50:0",
+            "extractor": "manual-smoke",
+            "confidence": 1.0,
+            "is_deterministic": True,
+            "document_ids": ["doc:mini_example"],
+            "covariate_ids": [],
+        },
+        {
+            "id": "ent:fn:update",
+            "title": "update",
+            "type": "function",
+            "description": "Main simulation step. Mutates state and may call helper.",
+            "text_unit_ids": ["tu:fn_update"],
+            "human_readable_id": 2,
+            "source_file": "examples/mini_game/sim.py",
+            "span": "def update",
+            "extractor": "manual-smoke",
+            "confidence": 1.0,
+            "is_deterministic": True,
+            "document_ids": ["doc:mini_example"],
+            "covariate_ids": [],
+        },
+        {
+            "id": "ent:fn:helper",
+            "title": "helper",
+            "type": "function",
+            "description": "Low-level physics helper called by update.",
+            "text_unit_ids": ["tu:mod1"],
+            "human_readable_id": 3,
+            "source_file": "examples/mini_game/physics.py",
+            "span": "def helper",
+            "extractor": "manual-smoke",
+            "confidence": 0.9,
+            "is_deterministic": False,
+            "document_ids": ["doc:mini_example"],
+            "covariate_ids": [],
+        },
+    ])
 
-# --- entities (nodes) ---
-entities = pd.DataFrame([
-    {
-        "id": "ent:file:mini_example",
-        "title": "mini_example.py",
-        "type": "file",  # code-specific
-        "description": "Top-level module containing simulation helpers.",
-        "text_unit_ids": ["tu:mod1"],
-        "human_readable_id": 1,
-        "source_file": "examples/mini_game/sim.py",  # provenance
-        "span": "1:0-50:0",
-        "extractor": "manual-smoke",
-        "confidence": 1.0,
-        "is_deterministic": True,
-    },
-    {
-        "id": "ent:fn:update",
-        "title": "update",
-        "type": "function",
-        "description": "Main simulation step. Mutates state and may call helper.",
-        "text_unit_ids": ["tu:fn_update"],
-        "human_readable_id": 2,
-        "source_file": "examples/mini_game/sim.py",
-        "span": "def update",
-        "extractor": "manual-smoke",
-        "confidence": 1.0,
-        "is_deterministic": True,
-    },
-    {
-        "id": "ent:fn:helper",
-        "title": "helper",
-        "type": "function",
-        "description": "Low-level physics helper called by update.",
-        "text_unit_ids": ["tu:mod1"],
-        "human_readable_id": 3,
-        "source_file": "examples/mini_game/physics.py",
-        "span": "def helper",
-        "extractor": "manual-smoke",
-        "confidence": 0.9,
-        "is_deterministic": False,  # pretend LLM added some semantic color
-    },
-])
+    # --- relationships (edges) ---
+    relationships = pd.DataFrame([
+        {
+            "id": "rel:update_calls_helper",
+            "source": "update",  # canonical title (must match entity.title for GraphRAG 3.1 create_communities)
+            "target": "helper",
+            "type": "calls",
+            "description": "update() invokes helper() on every physics step for collision checks.",
+            "weight": 1.0,
+            "text_unit_ids": ["tu:fn_update", "tu:mod1"],
+            "human_readable_id": 1,
+            "source_file": "examples/mini_game/sim.py",
+            "span": "update: calls helper",
+            "extractor": "manual-smoke",
+            "confidence": 1.0,
+            "is_deterministic": True,
+            "document_ids": ["doc:mini_example"],
+            "covariate_ids": [],
+        },
+    ])
 
-# --- relationships (edges) ---
-relationships = pd.DataFrame([
-    {
-        "id": "rel:update_calls_helper",
-        "source": "update",  # canonical title (must match entity.title for GraphRAG 3.1 create_communities)
-        "target": "helper",
-        "type": "calls",
-        "description": "update() invokes helper() on every physics step for collision checks.",
-        "weight": 1.0,  # important for Leiden community detection
-        "text_unit_ids": ["tu:fn_update", "tu:mod1"],
-        "human_readable_id": 1,
-        "source_file": "examples/mini_game/sim.py",
-        "span": "update: calls helper",
-        "extractor": "manual-smoke",
-        "confidence": 1.0,
-        "is_deterministic": True,
-    },
-])
+    return {
+        "entities": entities,
+        "relationships": relationships,
+        "text_units": text_units,
+    }
 
-# Write as parquet (the exact format GraphRAG BYOG expects)
-pq.write_table(pa.Table.from_pandas(text_units), OUT_DIR / "text_units.parquet")
-pq.write_table(pa.Table.from_pandas(entities), OUT_DIR / "entities.parquet")
-pq.write_table(pa.Table.from_pandas(relationships), OUT_DIR / "relationships.parquet")
 
-print("Wrote BYOG tables to", OUT_DIR)
-print("entities:", len(entities), "relationships:", len(relationships))
+def main() -> None:
+    """CLI entrypoint that writes to the conventional location (for backward compat and manual use)."""
+    OUT_DIR = Path("byog_smoke/output")
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# Also write a minimal settings.yaml for the smoke root
-SETTINGS = """\
+    data = build_smoke_byog()
+    entities = data["entities"]
+    relationships = data["relationships"]
+    text_units = data["text_units"]
+
+    pq.write_table(pa.Table.from_pandas(text_units), OUT_DIR / "text_units.parquet")
+    pq.write_table(pa.Table.from_pandas(entities), OUT_DIR / "entities.parquet")
+    pq.write_table(pa.Table.from_pandas(relationships), OUT_DIR / "relationships.parquet")
+
+    print("Wrote BYOG tables to", OUT_DIR)
+    print("entities:", len(entities), "relationships:", len(relationships))
+
+    SETTINGS = """\
 # Minimal BYOG settings for code graph experiments.
 # See https://microsoft.github.io/graphrag/index/byog/
 input:
@@ -137,7 +160,7 @@ input:
 output:
   base_dir: "output"
 llm:
-  model: "gpt-4.1"   # replace or use .env / Azure config
+  model: "gpt-4.1"
   api_base: "https://api.openai.com/v1"
   api_key: ${OPENAI_API_KEY}
 embeddings:
@@ -145,19 +168,21 @@ embeddings:
 workflows:
   - create_communities
   - create_community_reports
-# For Local/DRIFT also add: generate_text_embeddings
 """
-(OUT_DIR.parent / "settings.yaml").write_text(SETTINGS)
-print("Wrote settings.yaml")
+    (OUT_DIR.parent / "settings.yaml").write_text(SETTINGS)
+    print("Wrote settings.yaml")
 
-# Simple provenance note
-provenance = {
-    "note": "This smoke graph was hand-authored to exercise the BYOG path. Real implementation must emit the same columns from tree-sitter + semantic analyzers with full provenance.",
-    "required_columns": {
-        "entities": ["id", "title", "description", "text_unit_ids"],
-        "relationships": ["id", "source", "target", "description", "weight", "text_unit_ids"],
-    },
-    "code_extensions": ["source_file", "span", "extractor", "confidence", "is_deterministic"],
-}
-(OUT_DIR / "provenance_smoke.json").write_text(json.dumps(provenance, indent=2))
-print("Done.")
+    provenance = {
+        "note": "This smoke graph was hand-authored to exercise the BYOG path. Real implementation must emit the same columns from tree-sitter + semantic analyzers with full provenance.",
+        "required_columns": {
+            "entities": ["id", "title", "description", "text_unit_ids"],
+            "relationships": ["id", "source", "target", "description", "weight", "text_unit_ids"],
+        },
+        "code_extensions": ["source_file", "span", "extractor", "confidence", "is_deterministic"],
+    }
+    (OUT_DIR / "provenance_smoke.json").write_text(json.dumps(provenance, indent=2))
+    print("Done.")
+
+
+if __name__ == "__main__":
+    main()

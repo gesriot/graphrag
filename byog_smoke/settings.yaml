@@ -7,7 +7,7 @@ input:
 output:
   base_dir: "output"
 llm:
-  model: "gpt-4.1"   # replace or use .env / Azure config
+  model: "gpt-4.1"
   api_base: "https://api.openai.com/v1"
   api_key: ${OPENAI_API_KEY}
 embeddings:
@@ -15,4 +15,3 @@ embeddings:
 workflows:
   - create_communities
   - create_community_reports
-# For Local/DRIFT also add: generate_text_embeddings

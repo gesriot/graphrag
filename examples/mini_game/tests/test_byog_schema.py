@@ -1,26 +1,69 @@
-"""Schema validation tests for GraphRAG BYOG outputs.
+"""Schema validation tests for GraphRAG BYOG outputs (self-contained).
 
-Ensures:
-- Required columns present
-- No dangling edges (relationship source/target resolve to entity titles)
-- weight, provenance (source_file, extractor, confidence, is_deterministic) present
-- human_readable_id etc.
+The tests generate fresh BYOG artifacts in temporary directories using the
+build functions from the generators. This makes them independent of any
+pre-generated (and typically gitignored) byog_*/output directories.
 
-Run after generating bridges/smoke:
+Key checks:
+- Required columns for BYOG + communities
+- No dangling relationship endpoints (source/target resolve to entity titles)
+- No dangling text_unit_ids references (entities/rels -> text_units)
+- Provenance fields, weight, etc.
+
+Run:
     PYTHONPATH=. uv run python -m pytest examples/mini_game/tests/test_byog_schema.py -q
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Iterator
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
-BYOG_ROOTS = [
-    Path(__file__).parents[3] / "byog_smoke",       # the hand-fixed smoke
-    Path(__file__).parents[3] / "byog_mini_game",   # the bridge output
-]
+# Import the pure build functions (no side effects on disk)
+import sys
+sys.path.insert(0, str(Path(__file__).parents[3] / "scripts"))
+from make_byog_smoke import build_smoke_byog  # type: ignore
+from mini_game_to_byog import build_byog_for_package  # type: ignore
+
+
+@pytest.fixture
+def smoke_byog_root(tmp_path: Path) -> Iterator[Path]:
+    """Generate smoke BYOG into a temp dir and return the project root."""
+    data = build_smoke_byog()
+    out = tmp_path / "output"
+    out.mkdir(parents=True)
+    for name, df in [
+        ("entities.parquet", data["entities"]),
+        ("relationships.parquet", data["relationships"]),
+        ("text_units.parquet", data["text_units"]),
+    ]:
+        pq.write_table(pa.Table.from_pandas(df), out / name)
+
+    # Minimal settings stub (not used by schema tests but good for completeness)
+    (tmp_path / "settings.yaml").write_text("workflows: [create_communities, create_community_reports]\n")
+    yield tmp_path
+
+
+@pytest.fixture
+def mini_game_byog_root(tmp_path: Path) -> Iterator[Path]:
+    """Generate full mini_game bridge BYOG into a temp dir."""
+    raw = build_byog_for_package()
+    out = tmp_path / "output"
+    out.mkdir(parents=True)
+    for name, raw_data in [
+        ("entities.parquet", raw["entities"]),
+        ("relationships.parquet", raw["relationships"]),
+        ("text_units.parquet", raw["text_units"]),
+    ]:
+        df = pd.DataFrame(raw_data) if isinstance(raw_data, list) else raw_data
+        pq.write_table(pa.Table.from_pandas(df), out / name)
+    (tmp_path / "settings.yaml").write_text("workflows: [create_communities, create_community_reports]\n")
+    yield tmp_path
 
 
 def _load_parquets(root: Path):
@@ -31,11 +74,9 @@ def _load_parquets(root: Path):
     return ents, rels, tus
 
 
-@pytest.mark.parametrize("root", BYOG_ROOTS)
-def test_byog_required_columns_and_no_dangling(root):
-    if not (root / "output" / "entities.parquet").exists():
-        pytest.skip(f"No BYOG output at {root}")
-
+@pytest.mark.parametrize("byog_fixture", ["smoke_byog_root", "mini_game_byog_root"])
+def test_byog_required_columns_and_no_dangling(byog_fixture, request):
+    root: Path = request.getfixturevalue(byog_fixture)
     ents, rels, tus = _load_parquets(root)
 
     # Required for BYOG + communities (per GraphRAG + our extensions)
@@ -56,35 +97,32 @@ def test_byog_required_columns_and_no_dangling(root):
     # weight present and sensible
     assert (rels["weight"] > 0).all()
 
-    # No dangling: every rel source/target must appear in entity titles (the canonical for matching)
+    # No dangling relationship endpoints (must resolve to entity titles)
     entity_titles = set(ents["title"].astype(str))
     for _, r in rels.iterrows():
         assert str(r["source"]) in entity_titles, f"dangling source {r['source']} not in titles"
         assert str(r["target"]) in entity_titles, f"dangling target {r['target']} not in titles"
 
-    # No dangling text-unit references from entities/relationships.
-    text_unit_ids = set(tus["id"].astype(str))
-    for frame_name, frame in (("entities", ents), ("relationships", rels)):
-        for _, row in frame.iterrows():
-            for text_unit_id in row["text_unit_ids"]:
-                assert str(text_unit_id) in text_unit_ids, (
-                    f"{frame_name} row {row['id']} references missing text unit {text_unit_id}"
-                )
+    # No dangling text-unit references from entities or relationships
+    if len(tus) > 0:
+        text_unit_ids = set(tus["id"].astype(str))
+        for frame_name, frame in (("entities", ents), ("relationships", rels)):
+            for _, row in frame.iterrows():
+                for tuid in row.get("text_unit_ids", []):
+                    assert str(tuid) in text_unit_ids, (
+                        f"{frame_name} row {row.get('id')} references missing text unit {tuid}"
+                    )
 
-    # human_readable_id if used
+    # human_readable_id sanity
     if "human_readable_id" in ents.columns:
         assert ents["human_readable_id"].notna().all()
 
 
-def test_byog_smoke_specific_alignment():
-    """Explicit check on the smoke that we fixed source/target to titles."""
-    root = Path(__file__).parents[3] / "byog_smoke"
-    if not (root / "output" / "entities.parquet").exists():
-        pytest.skip("smoke not generated")
-    ents, rels, _ = _load_parquets(root)
+def test_byog_smoke_specific_alignment(smoke_byog_root: Path):
+    """Explicit check on the smoke (generated in tmp) that source/target use titles."""
+    ents, rels, _ = _load_parquets(smoke_byog_root)
     titles = set(ents["title"].astype(str))
     for _, r in rels.iterrows():
         assert r["source"] in titles
         assert r["target"] in titles
-        # In our fix we used short titles "update", "helper"
         assert r["source"] in {"update", "helper"} or "update" in str(r["source"])

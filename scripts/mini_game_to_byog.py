@@ -37,7 +37,6 @@ from extract_python import extract_from_file  # type: ignore
 PACKAGE_DIR = ROOT / "examples" / "mini_game"
 OUT_ROOT = ROOT / "byog_mini_game"
 OUT_DIR = OUT_ROOT / "output"
-OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def build_byog_for_package() -> Dict[str, List[Dict[str, Any]]]:
@@ -162,6 +161,31 @@ def build_byog_for_package() -> Dict[str, List[Dict[str, Any]]]:
     for tu in all_text_units:
         tu["relationship_ids"] = relationship_ids_by_tu.get(tu["id"], [])
 
+    # Cross-file call resolution (enhancement for point 2)
+    # Build bare name -> possible FQN titles from what we have
+    bare_to_fqns: Dict[str, List[str]] = {}
+    for t in title_to_id:
+        bare = t.split(":")[-1]
+        bare_to_fqns.setdefault(bare, []).append(t)
+
+    # Simple post-pass: if a call rel target is a bare name that is defined in another module via import, upgrade target
+    upgraded_calls = []
+    for r in all_relationships:
+        if r.get("type") != "calls":
+            upgraded_calls.append(r)
+            continue
+        tgt = str(r.get("target", ""))
+        src = str(r.get("source", ""))
+        if ":" not in tgt:  # bare or partially qualified
+            candidates = bare_to_fqns.get(tgt, [])
+            if len(candidates) == 1:
+                r["target"] = candidates[0]
+                r["description"] = r.get("description", "") + " (cross-file resolved)"
+                r["confidence"] = 0.75
+                r["is_deterministic"] = False
+        upgraded_calls.append(r)
+    all_relationships = upgraded_calls
+
     return {
         "entities": all_entities,
         "relationships": all_relationships,
@@ -182,6 +206,7 @@ def main() -> None:
             if col not in df.columns:
                 df[col] = [[] for _ in range(len(df))]
 
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
     pq.write_table(pa.Table.from_pandas(ents_df), OUT_DIR / "entities.parquet")
     pq.write_table(pa.Table.from_pandas(rels_df), OUT_DIR / "relationships.parquet")
     pq.write_table(pa.Table.from_pandas(tus_df), OUT_DIR / "text_units.parquet")
