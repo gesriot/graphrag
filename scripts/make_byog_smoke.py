@@ -19,11 +19,48 @@ Then (when LLM configured):
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+
+
+def _atomic_write_parquet(df: pd.DataFrame, final_path: Path) -> None:
+    final_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        dir=final_path.parent, suffix=".parquet.tmp", delete=False
+    ) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        table = pa.Table.from_pandas(df)
+        pq.write_table(table, tmp_path)
+        os.replace(tmp_path, final_path)
+    finally:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except Exception:
+                pass
+
+
+def _atomic_write_text(text: str, final_path: Path) -> None:
+    final_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        dir=final_path.parent, suffix=".tmp", delete=False, mode="w", encoding="utf-8"
+    ) as tmp:
+        tmp.write(text)
+        tmp_path = Path(tmp.name)
+    try:
+        os.replace(tmp_path, final_path)
+    finally:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except Exception:
+                pass
 
 
 def build_smoke_byog() -> dict:
@@ -143,9 +180,9 @@ def main() -> None:
     relationships = data["relationships"]
     text_units = data["text_units"]
 
-    pq.write_table(pa.Table.from_pandas(text_units), OUT_DIR / "text_units.parquet")
-    pq.write_table(pa.Table.from_pandas(entities), OUT_DIR / "entities.parquet")
-    pq.write_table(pa.Table.from_pandas(relationships), OUT_DIR / "relationships.parquet")
+    _atomic_write_parquet(text_units, OUT_DIR / "text_units.parquet")
+    _atomic_write_parquet(entities, OUT_DIR / "entities.parquet")
+    _atomic_write_parquet(relationships, OUT_DIR / "relationships.parquet")
 
     print("Wrote BYOG tables to", OUT_DIR)
     print("entities:", len(entities), "relationships:", len(relationships))
@@ -169,7 +206,7 @@ workflows:
   - create_communities
   - create_community_reports
 """
-    (OUT_DIR.parent / "settings.yaml").write_text(SETTINGS)
+    _atomic_write_text(SETTINGS, OUT_DIR.parent / "settings.yaml")
     print("Wrote settings.yaml")
 
     provenance = {
@@ -180,7 +217,7 @@ workflows:
         },
         "code_extensions": ["source_file", "span", "extractor", "confidence", "is_deterministic"],
     }
-    (OUT_DIR / "provenance_smoke.json").write_text(json.dumps(provenance, indent=2))
+    _atomic_write_text(json.dumps(provenance, indent=2), OUT_DIR / "provenance_smoke.json")
     print("Done.")
 
 

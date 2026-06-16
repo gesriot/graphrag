@@ -29,6 +29,9 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+import os
+import tempfile
+
 # Make extractor importable
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -37,6 +40,47 @@ from extract_python import extract_from_file  # type: ignore
 PACKAGE_DIR = ROOT / "examples" / "mini_game"
 OUT_ROOT = ROOT / "byog_mini_game"
 OUT_DIR = OUT_ROOT / "output"
+
+
+def _atomic_write_parquet(df: pd.DataFrame, final_path: Path) -> None:
+    """Write a single parquet atomically (tmp file in same dir + os.replace).
+
+    Prevents graph readers (context_pack, graph_query, tests, agent readers)
+    from seeing a half-written parquet while the agent_loop is regenerating.
+    """
+    final_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        dir=final_path.parent, suffix=".parquet.tmp", delete=False
+    ) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        table = pa.Table.from_pandas(df)
+        pq.write_table(table, tmp_path)
+        os.replace(tmp_path, final_path)  # atomic on POSIX and modern Windows
+    finally:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except Exception:
+                pass
+
+
+def _atomic_write_text(text: str, final_path: Path) -> None:
+    """Atomic write for text files such as settings.yaml."""
+    final_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        dir=final_path.parent, suffix=".tmp", delete=False, mode="w", encoding="utf-8"
+    ) as tmp:
+        tmp.write(text)
+        tmp_path = Path(tmp.name)
+    try:
+        os.replace(tmp_path, final_path)
+    finally:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except Exception:
+                pass
 
 
 def build_byog_for_package() -> Dict[str, List[Dict[str, Any]]]:
@@ -218,12 +262,14 @@ def main() -> None:
             if col not in df.columns:
                 df[col] = [[] for _ in range(len(df))]
 
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    pq.write_table(pa.Table.from_pandas(ents_df), OUT_DIR / "entities.parquet")
-    pq.write_table(pa.Table.from_pandas(rels_df), OUT_DIR / "relationships.parquet")
-    pq.write_table(pa.Table.from_pandas(tus_df), OUT_DIR / "text_units.parquet")
+    # Atomic per-file writes so that concurrent readers (context_pack,
+    # graph_query, pytest fixtures, agent_loop readers) never observe a
+    # half-written parquet.
+    _atomic_write_parquet(ents_df, OUT_DIR / "entities.parquet")
+    _atomic_write_parquet(rels_df, OUT_DIR / "relationships.parquet")
+    _atomic_write_parquet(tus_df, OUT_DIR / "text_units.parquet")
 
-    # Minimal settings for later
+    # Minimal settings for later (also atomic)
     settings = """\
 input:
   type: file
@@ -240,7 +286,7 @@ workflows:
   - create_communities
   - create_community_reports
 """
-    (OUT_ROOT / "settings.yaml").write_text(settings)
+    _atomic_write_text(settings, OUT_ROOT / "settings.yaml")
 
     print(f"Bridge complete. Entities: {len(ents_df)}, Relationships: {len(rels_df)}, TextUnits: {len(tus_df)}")
     print(f"Parquets written to {OUT_DIR}")

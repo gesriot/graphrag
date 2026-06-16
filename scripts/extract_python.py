@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import ast
 import json
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
@@ -340,6 +341,25 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                 local = alias.asname or alias.name
                 import_map[local] = alias.name
 
+    function_spans: List[tuple[str, int, int]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            function_spans.append(
+                (node.name, node.lineno, getattr(node, "end_lineno", node.lineno))
+            )
+
+    def enclosing_function_name(call_node: ast.AST) -> str:
+        lineno = getattr(call_node, "lineno", -1)
+        matches = [
+            (start, end, name)
+            for name, start, end in function_spans
+            if start <= lineno <= end
+        ]
+        if not matches:
+            return "unknown"
+        matches.sort(key=lambda item: (item[0], -item[1]), reverse=True)
+        return matches[0][2]
+
     # Improve existing tree-sitter calls with direct import hints. This keeps row
     # counts stable while giving the bridge better targets for cross-file calls.
     for rel in relationships:
@@ -381,10 +401,112 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                     if mod:
                         callee = f"{mod}.{callee}"
 
+                # Handle Attribute calls (module.func) - set resolved hint on matching
+                # tree-sitter call edge if one exists for the caller/callee bare name.
+                # This keeps edge count stable while giving high-quality hints.
+                if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+                    base = func.value.id
+                    attr = func.attr
+                    resolved_mod = import_map.get(base, base)
+                    hint = f"{resolved_mod.split('.')[-1]}:{attr}"
+                    bare_callee = attr
+                    # Find a call rel from the current file that matches the bare callee
+                    # and annotate it (the tree-sitter pass may have created a heuristic one).
+                    for rel in relationships:
+                        if rel.get("type") != "calls":
+                            continue
+                        tgt = str(rel.get("target", ""))
+                        if bare_callee in tgt or tgt.endswith(":" + bare_callee):
+                            rel["resolved_target_hint"] = hint
+                            rel["description"] = (
+                                rel.get("description", "")
+                                + f" (ast Attribute hint: {resolved_mod}.{attr})"
+                            )
+                            rel["confidence"] = max(
+                                float(rel.get("confidence", 0.0) or 0.0), 0.80
+                            )
+                            rel["weight"] = max(float(rel.get("weight", 0.0) or 0.0), 0.80)
+                            rel["extractor"] = "tree-sitter-python+ast"
+                            rel["is_deterministic"] = True
+                            break  # annotate the first reasonable match
+
                 # Next step: emit resolved Attribute calls that tree-sitter's
                 # identifier-only pass does not see.
                 pass  # placeholder for richer logic if we collect more in future iterations
 
+    # After the walk, create concrete call relationships for Attribute cases
+    # (module.func) that the tree-sitter Name-only detector missed.
+    # This is the concrete expansion requested.
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+                base = func.value.id
+                attr = func.attr
+                resolved_mod = import_map.get(base, base)
+                hint = f"{resolved_mod.split('.')[-1]}:{attr}"
+
+                caller = enclosing_function_name(node)
+                if caller != "unknown":
+                    caller_id = make_id("fn", caller, str(path))
+                    callee_id = make_id("fn", attr, str(path))
+                    relationships.append(
+                        {
+                            "id": f"rel:call:{caller}:{attr}:attr:{node.lineno}:{node.col_offset}",
+                            "source": caller_id,
+                            "target": callee_id,
+                            "type": "calls",
+                            "description": f"{caller} calls {attr} (ast Attribute: {resolved_mod}.{attr})",
+                            "weight": 0.80,
+                            "text_unit_ids": [f"tu:file:{path.name}"],
+                            "human_readable_id": len(relationships) + 1,
+                            "source_file": str(path),
+                            "span": f"{node.lineno}:{node.col_offset}",
+                            "extractor": "tree-sitter-python+ast",
+                            "confidence": 0.80,
+                            "is_deterministic": True,
+                            "resolved_target_hint": hint,
+                        }
+                    )
+
+
+def _try_jedi_adapter(source: bytes, path: Path) -> List[Dict[str, Any]]:
+    """Optional future adapter for Jedi-backed reference resolution.
+
+    Returns an empty list when Jedi is unavailable or cannot analyze the file.
+    Intended confidence tier: ~0.92, non-deterministic because it depends on
+    environment/import resolution.
+    """
+    try:
+        import jedi  # type: ignore
+    except Exception:
+        return []
+
+    try:
+        jedi.Script(code=source.decode("utf-8", errors="replace"), path=str(path))
+    except Exception:
+        return []
+    return []
+
+
+def _try_pyright_adapter(path: Path) -> List[Dict[str, Any]]:
+    """Optional future adapter for Pyright JSON diagnostics/reference metadata.
+
+    Returns an empty list when pyright is unavailable or fails. Intended
+    confidence tier: ~0.90, non-deterministic because it depends on external
+    project configuration and executable availability.
+    """
+    try:
+        subprocess.run(
+            ["pyright", "--version"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception:
+        return []
+    return []
 
 
 def main(argv: list[str]) -> int:

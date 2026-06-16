@@ -211,3 +211,46 @@ def test_graph_query_impact_symbol(mini_game_byog_root: Path):
     s = symbol_lookup(ents, "sim:run_simulation")
     assert s is not None and s.get("title") == "sim:run_simulation"
     assert "snippet_preview" in s or "source_file" in s
+
+
+def test_ast_attribute_resolution_regression(tmp_path: Path):
+    """Separate regression fixture for AST Attribute call resolution (module.func).
+
+    We feed a small synthetic Python snippet that uses attribute call style
+    (after an import) and assert that the extractor produces a call relationship
+    carrying resolved_target_hint with good confidence.
+    """
+    from scripts.extract_python import extract_from_file
+
+    src = '''
+import physics
+
+def before(state, cfg):
+    return None
+
+def caller(state, cfg):
+    physics.update_player(state, True, cfg)
+
+def after(state, cfg):
+    return None
+'''
+
+    py_file = tmp_path / "regression_attr.py"
+    py_file.write_text(src)
+
+    result = extract_from_file(py_file)
+    calls = [r for r in result.get("relationships", []) if r.get("type") == "calls"]
+
+    # We expect at least one call that picked up the Attribute and got a hint
+    hinted = [
+        r for r in calls
+        if r.get("resolved_target_hint") and "update_player" in str(r.get("resolved_target_hint"))
+    ]
+    assert len(hinted) >= 1, f"No Attribute-resolved call hint found. Calls: {calls}"
+
+    h = hinted[0]
+    assert "resolved_target_hint" in h
+    assert str(h.get("source", "")).endswith(":caller")
+    assert float(h.get("confidence", 0)) >= 0.80
+    assert h.get("is_deterministic") is True
+    assert "tree-sitter-python+ast" in str(h.get("extractor", ""))
