@@ -36,6 +36,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from extract_python import extract_from_file  # type: ignore
+from byog_graph import publish_byog_snapshot  # full snapshot atomic publish + current pointer
 
 PACKAGE_DIR = ROOT / "examples" / "mini_game"
 OUT_ROOT = ROOT / "byog_mini_game"
@@ -262,14 +263,11 @@ def main() -> None:
             if col not in df.columns:
                 df[col] = [[] for _ in range(len(df))]
 
-    # Atomic per-file writes so that concurrent readers (context_pack,
-    # graph_query, pytest fixtures, agent_loop readers) never observe a
-    # half-written parquet.
-    _atomic_write_parquet(ents_df, OUT_DIR / "entities.parquet")
-    _atomic_write_parquet(rels_df, OUT_DIR / "relationships.parquet")
-    _atomic_write_parquet(tus_df, OUT_DIR / "text_units.parquet")
-
-    # Minimal settings for later (also atomic)
+    # Snapshot-level atomic publish.
+    # All three parquets + settings are written inside a fresh snapshots/<id>/
+    # using per-file atomic writes, then the "current" pointer is updated
+    # with a single atomic replace. Readers always see a consistent previous
+    # snapshot (no version skew between entities/relationships/text_units).
     settings = """\
 input:
   type: file
@@ -286,10 +284,11 @@ workflows:
   - create_communities
   - create_community_reports
 """
-    _atomic_write_text(settings, OUT_ROOT / "settings.yaml")
+    snap_dir = publish_byog_snapshot(ents_df, rels_df, tus_df, OUT_ROOT, settings)
 
     print(f"Bridge complete. Entities: {len(ents_df)}, Relationships: {len(rels_df)}, TextUnits: {len(tus_df)}")
-    print(f"Parquets written to {OUT_DIR}")
+    print(f"Snapshot published under {snap_dir}")
+    print("Current pointer updated atomically.")
     print("Titles used for rel endpoints (sample):")
     if len(rels_df):
         print("  ", rels_df.iloc[0][["source", "target"]].to_dict())
