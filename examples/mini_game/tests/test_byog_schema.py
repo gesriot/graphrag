@@ -467,6 +467,15 @@ def runner():
     w = Demo()
     w = Other()
     w.helper()                            # ctor rebind across classes with overlapping .helper → ambiguous
+
+    # Builtin container mutations (separate from plain reassignment guards)
+    trace = []
+    trace.append(42)                      # should be "builtin/container call observation", not "guarded by reassignment"
+    cfg = {}
+    _ = cfg.get("missing", None)          # container .get
+    mixed = []
+    mixed = Demo()
+    mixed.helper()                        # prior container marker must not pollute ctor resolution
 """)
 
     # Run the bridge on the synthetic package (this exercises title normalization,
@@ -528,10 +537,21 @@ def runner():
     assert any("ambiguous" in str(r) for r in obs_reasons), f"Missing 'ambiguous' reason in observations: {obs_reasons[:5]}"
     # Also the post-reassign guard on d.helper should be observable
     assert any("guarded" in str(r) for r in obs_reasons) or any("d.helper" in d and "reassigned" in d for d in obs_descs)
+    # Builtin container mutations (trace.append etc.) must get their own reason, not be
+    # misclassified as generic "guarded by reassignment".
+    assert any("trace.append" in t or "cfg.get" in t for t in obs_targets), f"Missing container call display_target: {obs_targets[:5]}"
+    assert any("builtin/container" in str(r) for r in obs_reasons), f"Missing builtin/container reason: {obs_reasons[:5]}"
+    assert not any("mixed.helper" in t for t in obs_targets), f"Resolved mixed.helper should not be an observation: {obs_targets[:5]}"
     # Their confidence must be the downgraded tier
     if len(obs):
         low_conf_mask = obs["confidence"].astype(float) < 0.7
         assert low_conf_mask.any(), "Expected at least one low-confidence observation"
+
+    mixed_calls = call_rels[
+        call_rels["description"].astype(str).str.contains("mixed.helper", na=False)
+    ]
+    assert len(mixed_calls) == 1
+    assert mixed_calls.iloc[0].get("resolved_target_hint") == "main:Demo.helper"
 
     phys_direct_calls = call_rels[
         call_rels["description"].astype(str).str.contains("phys_direct.update_player", na=False)
@@ -558,7 +578,7 @@ def runner():
 
     runner_helper_calls = call_rels[
         (call_rels["source"].astype(str) == "main:runner")
-        & (call_rels["description"].astype(str).str.contains("d.helper", na=False))
+        & (call_rels["description"].astype(str).str.contains("ast Attribute: d.helper ", regex=False, na=False))
     ]
     assert len(runner_helper_calls) == 1
     assert runner_helper_calls.iloc[0]["target"] == "main:Demo.helper"
@@ -676,6 +696,15 @@ def runner():
     w = Demo()
     w = Other()
     w.helper()                            # rebind different class → ambiguous
+
+    # Builtin container mutations (separate from plain reassignment guards)
+    trace = []
+    trace.append(42)                      # should produce distinct "builtin/container call observation"
+    cfg = {}
+    _ = cfg.get("missing", None)
+    mixed = []
+    mixed = Demo()
+    mixed.helper()                        # prior container marker must not pollute ctor resolution
 """)
 
     # Also a submodule for qualified test
@@ -822,9 +851,33 @@ def runner():
         assert float(c.get("confidence", 1.0)) <= 0.55
         assert c.get("is_deterministic") is False
 
+    mixed_calls = [
+        c for c in calls
+        if "ast Attribute: mixed.helper " in str(c.get("description", ""))
+    ]
+    assert len(mixed_calls) == 1
+    assert mixed_calls[0].get("resolved_target_hint") == "main:Demo.helper"
+    assert float(mixed_calls[0].get("confidence", 0)) >= 0.80
+    assert mixed_calls[0].get("is_deterministic") is True
+
+    # Builtin container calls (trace.append, cfg.get etc.) must be classified separately
+    # from generic "guarded by reassignment". They get their own reason in observations.
+    container_calls = [
+        c for c in calls
+        if any(b in str(c.get("description", "")) for b in ("trace.append", "cfg.get"))
+        and "ast Attribute:" in str(c.get("description", ""))
+    ]
+    assert len(container_calls) >= 1
+    for c in container_calls:
+        desc = str(c.get("description", ""))
+        assert "builtin container" in desc
+        assert not c.get("resolved_target_hint")
+        assert float(c.get("confidence", 1.0)) <= 0.45
+        assert c.get("is_deterministic") is False
+
     # All created call relationships from AST should have good metadata
     ast_calls = [c for c in calls if "tree-sitter-python+ast" in str(c.get("extractor", ""))]
-    guarded_weak_calls = guarded_d_helper + inner_dd_calls + ambiguous_calls
+    guarded_weak_calls = guarded_d_helper + inner_dd_calls + ambiguous_calls + container_calls
     for c in ast_calls:
         assert "resolved_target_hint" in c or "description" in c
         if c in guarded_weak_calls:

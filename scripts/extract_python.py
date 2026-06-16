@@ -520,25 +520,38 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                 value = node.value
             if value is None:
                 continue
-            is_constructor = isinstance(value, ast.Call)
+            # Detect constructor calls *and* builtin container literals (list/dict/set and their ctors).
+            # These get a special marker so that later .append / .get etc. can be classified
+            # as "builtin/container call observation" with its own reason, instead of being
+            # lumped together with real type reassignments like d = "bad".
+            container_kind: str | None = None
+            if isinstance(value, ast.List):
+                container_kind = "list"
+            elif isinstance(value, ast.Dict):
+                container_kind = "dict"
+            elif isinstance(value, ast.Set):
+                container_kind = "set"
+            elif isinstance(value, ast.Call):
+                ctor_name = get_dotted_name(value.func) or ""
+                if ctor_name.lower() in ("list", "dict", "set"):
+                    container_kind = ctor_name.lower()
+            is_constructor = isinstance(value, ast.Call) and container_kind is None
             for target in targets:
                 if isinstance(target, ast.Name):
                     var = target.id
-                    # Determine the *innermost* enclosing function for this assignment
-                    # (reuses the lineno-based logic, but we compute it for every assign)
-                    # We can reuse enclosing_function_name by temporarily treating it as call site
-                    # (the function only uses lineno, so it works).
                     enclosing = enclosing_function_name(node)
                     if enclosing == "unknown":
                         continue
-                    if is_constructor:
+                    if container_kind:
+                        assign_events[enclosing].append((lineno, var, f"container:{container_kind}"))
+                    elif is_constructor:
                         constructor = get_dotted_name(value.func)
                         if constructor:
                             assign_events[enclosing].append(
                                 (lineno, var, constructor_type_hint(constructor))
                             )
                     else:
-                        # reassignment to non-constructor: guard from this point onward in *this* scope
+                        # reassignment to non-constructor (string, int, unknown var, etc.)
                         assign_events[enclosing].append((lineno, var, None))
 
     # self/cls resolution using class_for_method. Emit bridge-resolvable method
@@ -606,13 +619,11 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                     continue
 
                 # Reassignment guard + ambiguity/confidence tiers lookup (next layer after qualified scopes).
-                # - last relevant assign is non-ctor (string etc) → 0.40 weak, no hint (guarded)
-                # - multiple distinct ctors seen for this base before site (if/else different assigns,
-                #   rebind between two classes that share method names like .helper, alias shadowing
-                #   a name to a different class) → 0.50 ambiguous, no resolved_target_hint, not deterministic.
-                #   The graph must *honestly downgrade* instead of over-resolving.
+                # - container literal (trace = []; trace.append) → 0.40 "builtin container list", distinct reason
+                # - last relevant assign is non-ctor (string etc) → 0.40 weak, no hint (guarded by reassignment)
+                # - multiple distinct ctors ... → 0.50 ambiguous ...
                 # - single tracked ctor → 0.80 + specific hint
-                # - else fallback import/attr (0.80)
+                # - else fallback (0.80)
                 has_var_event = False
                 last_type_for_var: str | None = None
                 distinct_ctors: set[str] = set()
@@ -622,9 +633,24 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                     if ev_v == base_expr and ev_l <= call_lineno:
                         has_var_event = True
                         last_type_for_var = ev_t
-                        if ev_t is not None:
+                        if ev_t is not None and not str(ev_t).startswith("container:"):
                             distinct_ctors.add(ev_t)
-                if has_var_event and last_type_for_var is None:
+                if has_var_event and last_type_for_var and str(last_type_for_var).startswith("container:"):
+                    kind = str(last_type_for_var).split(":", 1)[1]
+                    container_methods = {"append", "extend", "insert", "pop", "remove", "clear", "add", "discard", "update", "get", "setdefault", "keys", "values", "items"}
+                    if attr in container_methods:
+                        # Distinct from plain "guarded by reassignment" (e.g. d="bad").
+                        # This is a call on a locally-created container (trace=[] ; trace.append).
+                        hint = None
+                        resolved_display = f"{base_expr}.{attr} (builtin container {kind})"
+                        confidence = 0.40
+                        deterministic = False
+                    else:
+                        hint = None
+                        resolved_display = f"{base_expr}.{attr} (guarded by reassignment)"
+                        confidence = 0.40
+                        deterministic = False
+                elif has_var_event and last_type_for_var is None:
                     # guarded by a non-constructor reassignment (latest action)
                     hint = None
                     resolved_display = f"{base_expr}.{attr} (guarded by reassignment)"

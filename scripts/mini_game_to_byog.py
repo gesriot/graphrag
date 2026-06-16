@@ -221,7 +221,9 @@ def build_byog_for_package(use_advanced: bool = False, package_dir: Path | None 
                 conf = float(r.get("confidence", 0.0) or 0.0)
                 has_good_hint = bool(r.get("resolved_target_hint"))
                 reason = ""
-                if "ambiguous constructors" in orig_desc:
+                if "builtin container" in orig_desc:
+                    reason = "builtin/container call observation"
+                elif "ambiguous constructors" in orig_desc:
                     reason = "ambiguous constructors"
                 elif "guarded by reassignment" in orig_desc:
                     reason = "guarded by reassignment"
