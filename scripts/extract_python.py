@@ -493,34 +493,98 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
     def get_type_from_annotation(ann: ast.AST | None) -> str | None:
         """Return a type marker from annotation.
 
-        - Simple: Demo -> "Demo"
-        - Qualified: pkg.Demo -> "pkg.Demo"
-        - Container generic: list[Event], List["Event"] -> "container:list"
-        This allows bare annotations and typed containers to provide hints
-        for later attribute calls (e.g. x.helper() after "x: Demo").
+        Supports:
+        - bare/qualified: Demo, pkg.Demo -> "Demo" or "pkg.Demo" (later resolved via constructor_type_hint)
+        - containers: list[T], List[T], typing.List[T], collections.abc.Sequence[T] -> "container:list"
+        - unions: Optional[Demo], Demo | None, Union[Demo, None], Demo | Other -> primary non-None type (or None if ambiguous multiple classes)
+        This gives honest hints on real code that uses typing aliases and PEP 604 unions.
         """
         if ann is None:
             return None
+
+        def is_none_marker(marker: str | None) -> bool:
+            return marker is not None and str(marker).lower() in {"none", "nonetype"}
+
+        def single_union_type(candidates: List[str]) -> str | None:
+            real = []
+            for candidate in candidates:
+                if candidate and not is_none_marker(candidate):
+                    real.append(candidate)
+            unique = list(dict.fromkeys(real))
+            if len(unique) == 1:
+                return unique[0]
+            if len(unique) > 1:
+                return "ambiguous:annotation"
+            return None
+
+        def container_marker(base_name: str | None) -> str | None:
+            if not base_name:
+                return None
+            base = base_name.lower()
+            simple = base.rsplit(".", 1)[-1]
+            if simple in ("list", "dict", "set", "tuple"):
+                return f"container:{simple}"
+            if simple in ("sequence", "iterable", "mutablesequence"):
+                return "container:list"
+            return None
+
+        # PEP 604 unions: Demo | None
+        if isinstance(ann, ast.BinOp) and isinstance(getattr(ann, "op", None), ast.BitOr):
+            def collect_union_parts(node: ast.AST) -> List[str]:
+                if isinstance(node, ast.BinOp) and isinstance(getattr(node, "op", None), ast.BitOr):
+                    return collect_union_parts(node.left) + collect_union_parts(node.right)
+                marker = get_type_from_annotation(node)
+                return [marker] if marker else []
+
+            return single_union_type(collect_union_parts(ann))
+
+        if isinstance(ann, ast.Constant) and ann.value is None:
+            return "None"
+
         if isinstance(ann, ast.Name):
             name = ann.id
-            if name.lower() in ("list", "dict", "set", "tuple"):
-                return f"container:{name.lower()}"
+            marker = container_marker(name)
+            if marker:
+                return marker
             return name
+
         if isinstance(ann, ast.Attribute):
             return get_dotted_name(ann)
+
         if isinstance(ann, ast.Subscript):
-            # list[T], dict[K,V], etc.
             val = ann.value
             base = None
             if isinstance(val, ast.Name):
                 base = val.id.lower()
             elif isinstance(val, ast.Attribute):
-                base = get_dotted_name(val).lower()
-            if base in ("list", "dict", "set", "tuple"):
-                return f"container:{base}"
+                dotted = get_dotted_name(val)
+                base = dotted.lower() if dotted else None
+
+            # typing.List, List, collections.abc.Sequence etc. → container
+            marker = container_marker(base)
+            if marker:
+                return marker
+
+            # Optional[T], Union[T, ...] → unwrap to primary type
+            if base and (base in ("optional", "union") or base.endswith(".optional") or base.endswith(".union")):
+                slice_node = ann.slice
+                candidates = []
+                if isinstance(slice_node, ast.Tuple):
+                    for elt in getattr(slice_node, "elts", []):
+                        t = get_type_from_annotation(elt)
+                        if t:
+                            candidates.append(t)
+                else:
+                    t = get_type_from_annotation(slice_node)
+                    if t:
+                        candidates.append(t)
+                # Multiple real types or only None → no single useful type for hint (honesty).
+                return single_union_type(candidates)
+
             if isinstance(val, (ast.Name, ast.Attribute)):
                 return get_dotted_name(val)
             return None
+
         return None
 
     class_for_method: Dict[str, str] = {}  # qualified (or bare) method name -> ClassName for self resolution within file
@@ -680,7 +744,11 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                     if ev_v == base_expr and ev_l <= call_lineno:
                         has_var_event = True
                         last_type_for_var = ev_t
-                        if ev_t is not None and not str(ev_t).startswith("container:"):
+                        if (
+                            ev_t is not None
+                            and not str(ev_t).startswith("container:")
+                            and not str(ev_t).startswith("ambiguous:")
+                        ):
                             distinct_ctors.add(ev_t)
                 if has_var_event and last_type_for_var and str(last_type_for_var).startswith("container:"):
                     kind = str(last_type_for_var).split(":", 1)[1]
@@ -697,6 +765,11 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                         resolved_display = f"{base_expr}.{attr} (guarded by reassignment)"
                         confidence = 0.40
                         deterministic = False
+                elif has_var_event and last_type_for_var and str(last_type_for_var).startswith("ambiguous:"):
+                    hint = None
+                    resolved_display = f"{base_expr}.{attr} (ambiguous annotation)"
+                    confidence = 0.50
+                    deterministic = False
                 elif has_var_event and last_type_for_var is None:
                     # guarded by a non-constructor reassignment (latest action)
                     hint = None

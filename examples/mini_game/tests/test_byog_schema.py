@@ -492,6 +492,23 @@ def runner():
     wrong_annot.helper()                  # explicit scalar initializer must not become high-conf
     events: list = []
     events.append(99)                     # container via annot + literal
+
+    # typing aliases + PEP 604 unions (the next requested support)
+    items: List[Demo] = []
+    items.append(Demo())                  # container via typing.List alias
+    typing_items: typing.List[Demo] = []
+    typing_items.append(Demo())
+    seq_items: collections.abc.Sequence[Demo] = []
+    seq_items.append(Demo())
+    opt: Optional[Demo] = Demo()
+    opt.helper()                          # Optional unwrapped to Demo → high conf
+    uni: Demo | None
+    uni = Demo()
+    uni.helper()                          # PEP604 union → high Demo
+    amb_union: Demo | Other
+    amb_union.helper()                    # multiple real union types → ambiguous, no hint
+    amb_typing_union: Union[Demo, Other]
+    amb_typing_union.helper()
 """)
 
     # Run the bridge on the synthetic package (this exercises title normalization,
@@ -555,11 +572,18 @@ def runner():
     assert any("guarded" in str(r) for r in obs_reasons) or any("d.helper" in d and "reassigned" in d for d in obs_descs)
     # Builtin container mutations (trace.append etc.) must get their own reason, not be
     # misclassified as generic "guarded by reassignment".
-    assert any("trace.append" in t or "cfg.get" in t for t in obs_targets), f"Missing container call display_target: {obs_targets[:5]}"
+    assert any(
+        any(target in t for target in ("trace.append", "cfg.get", "items.append", "typing_items.append", "seq_items.append"))
+        for t in obs_targets
+    ), f"Missing container call display_target: {obs_targets[:5]}"
     assert any("builtin/container" in str(r) for r in obs_reasons), f"Missing builtin/container reason: {obs_reasons[:5]}"
+    assert any("amb_union.helper" in t or "amb_typing_union.helper" in t for t in obs_targets), \
+        f"Missing ambiguous union observation: {obs_targets[:5]}"
+    assert any("ambiguous annotation" in str(r) for r in obs_reasons), \
+        f"Missing ambiguous annotation reason: {obs_reasons[:5]}"
     assert not any("mixed.helper" in t for t in obs_targets), f"Resolved mixed.helper should not be an observation: {obs_targets[:5]}"
     # Annotated high-conf cases (x, y, z) must resolve properly and not appear as weak obs
-    assert not any(any(bad in t for bad in ("x.helper", "y.helper", "z.helper")) for t in obs_targets), \
+    assert not any(any(bad in t for bad in ("x.helper", "y.helper", "z.helper", "opt.helper", "uni.helper")) for t in obs_targets), \
         f"High-conf annotated calls leaked to weak observations: {obs_targets[:5]}"
     assert any("guarded_annot.helper" in t for t in obs_targets), f"Missing guarded annotation observation: {obs_targets[:5]}"
     assert any("wrong_annot.helper" in t for t in obs_targets), f"Missing contradictory annotation observation: {obs_targets[:5]}"
@@ -748,6 +772,23 @@ def runner():
     wrong_annot.helper()
     events: list = []
     events.append(99)
+
+    # typing aliases + PEP 604 unions
+    items: List[Demo] = []
+    items.append(Demo())
+    typing_items: typing.List[Demo] = []
+    typing_items.append(Demo())
+    seq_items: collections.abc.Sequence[Demo] = []
+    seq_items.append(Demo())
+    opt: Optional[Demo] = Demo()
+    opt.helper()
+    uni: Demo | None
+    uni = Demo()
+    uni.helper()
+    amb_union: Demo | Other
+    amb_union.helper()
+    amb_typing_union: Union[Demo, Other]
+    amb_typing_union.helper()
 """)
 
     # Also a submodule for qualified test
@@ -945,11 +986,59 @@ def runner():
     assert float(wrong_annot_calls[0].get("confidence", 1.0)) <= 0.45
     assert wrong_annot_calls[0].get("is_deterministic") is False
 
+    # typing.List / Optional / | union high-conf cases (new parser support)
+    items_append_calls = [
+        c for c in calls
+        if any(name in str(c.get("description", "")) for name in (
+            "ast Attribute: items.append ",
+            "ast Attribute: typing_items.append ",
+            "ast Attribute: seq_items.append ",
+        ))
+    ]
+    assert len(items_append_calls) >= 3
+    for c in items_append_calls:
+        assert "builtin container" in str(c.get("description", ""))
+        assert not c.get("resolved_target_hint")
+        assert float(c.get("confidence", 1)) <= 0.45
+
+    opt_calls = [
+        c for c in calls
+        if "ast Attribute: opt.helper " in str(c.get("description", ""))
+    ]
+    assert len(opt_calls) == 1
+    assert opt_calls[0].get("resolved_target_hint") == "main:Demo.helper"
+    assert float(opt_calls[0].get("confidence", 0)) >= 0.80
+
+    uni_calls = [
+        c for c in calls
+        if "ast Attribute: uni.helper " in str(c.get("description", ""))
+    ]
+    assert len(uni_calls) == 1
+    assert uni_calls[0].get("resolved_target_hint") == "main:Demo.helper"
+    assert float(uni_calls[0].get("confidence", 0)) >= 0.80
+
+    ambiguous_union_calls = [
+        c for c in calls
+        if any(name in str(c.get("description", "")) for name in (
+            "ast Attribute: amb_union.helper ",
+            "ast Attribute: amb_typing_union.helper ",
+        ))
+    ]
+    assert len(ambiguous_union_calls) == 2
+    for c in ambiguous_union_calls:
+        assert not c.get("resolved_target_hint")
+        assert "ambiguous annotation" in str(c.get("description", ""))
+        assert float(c.get("confidence", 1.0)) <= 0.55
+        assert c.get("is_deterministic") is False
+
     # Builtin container calls (trace.append, cfg.get etc.) must be classified separately
     # from generic "guarded by reassignment". They get their own reason in observations.
     container_calls = [
         c for c in calls
-        if any(b in str(c.get("description", "")) for b in ("trace.append", "cfg.get", "events.append"))
+        if any(
+            b in str(c.get("description", ""))
+            for b in ("trace.append", "cfg.get", "events.append", "items.append", "typing_items.append", "seq_items.append")
+        )
         and "ast Attribute:" in str(c.get("description", ""))
     ]
     assert len(container_calls) >= 1
@@ -963,7 +1052,14 @@ def runner():
     # All created call relationships from AST should have good metadata
     ast_calls = [c for c in calls if "tree-sitter-python+ast" in str(c.get("extractor", ""))]
     guarded_weak_calls = (
-        guarded_d_helper + inner_dd_calls + ambiguous_calls + container_calls + guarded_annot_calls + wrong_annot_calls
+        guarded_d_helper
+        + inner_dd_calls
+        + ambiguous_calls
+        + container_calls
+        + guarded_annot_calls
+        + wrong_annot_calls
+        + items_append_calls
+        + ambiguous_union_calls
     )
     for c in ast_calls:
         assert "resolved_target_hint" in c or "description" in c

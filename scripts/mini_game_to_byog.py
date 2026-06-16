@@ -223,6 +223,8 @@ def build_byog_for_package(use_advanced: bool = False, package_dir: Path | None 
                 reason = ""
                 if "builtin container" in orig_desc:
                     reason = "builtin/container call observation"
+                elif "ambiguous annotation" in orig_desc:
+                    reason = "ambiguous annotation"
                 elif "ambiguous constructors" in orig_desc:
                     reason = "ambiguous constructors"
                 elif "guarded by reassignment" in orig_desc:
