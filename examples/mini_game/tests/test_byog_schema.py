@@ -394,6 +394,10 @@ class Demo:
     def helper(self):
         pass
 
+class Other:
+    def helper(self):
+        pass
+
 def outer():
     dd = Demo()
     def inner():
@@ -424,6 +428,20 @@ def runner():
     d.helper()                            # guard: no high-conf Demo.helper after this
     outer()
     another_outer()
+
+    # Ambiguity / confidence tiers cases (two classes with same method name,
+    # if branches with different assignments to same var, ctor rebind).
+    # These must downgrade instead of emitting a strong resolved_target_hint.
+    o = Other()
+    o.helper()                            # clear single-ctor for Other → high "main:Other.helper"
+    if 0:
+        v = Demo()
+    else:
+        v = Other()
+    v.helper()                            # ambiguous (multiple ctors seen) → 0.50, no hint
+    w = Demo()
+    w = Other()
+    w.helper()                            # ctor rebind across classes with overlapping .helper → ambiguous
 """)
 
     # Run the bridge on the synthetic package (this exercises title normalization,
@@ -461,6 +479,13 @@ def runner():
     assert any("sub.mod:deep_call" in h or "mod:deep_call" in h for h in hints), f"Missing submodule hint in {hints}"
     assert "physics:Engine.tick" in hints, f"Missing method hint in {hints}"
     assert "main:Demo.helper" in hints, f"Missing self/cls method hint in {hints}"
+    assert "main:Other.helper" in hints, f"Missing clear Other helper hint (single-ctor) in {hints}"
+    # Ambiguous v/w (branches/rebinds) must not survive bridge as spurious
+    # high-conf specific calls.
+    ambiguous_bridge_calls = call_rels[
+        call_rels["description"].astype(str).str.contains("v.helper|w.helper", regex=True, na=False)
+    ]
+    assert ambiguous_bridge_calls.empty
 
     phys_direct_calls = call_rels[
         call_rels["description"].astype(str).str.contains("phys_direct.update_player", na=False)
@@ -556,6 +581,10 @@ class Demo:
     def helper(self):
         pass
 
+class Other:
+    def helper(self):
+        pass
+
 def outer():
     dd = Demo()
     def inner():
@@ -587,6 +616,20 @@ def runner():
     d.helper()
     outer()
     another_outer()
+
+    # Ambiguity / confidence tiers cases (two classes same method, if branches
+    # different assignments, alias/ctor rebind). Must produce weak edges without
+    # strong resolved_target_hint (honest downgrade, not resolve-or-nothing).
+    o = Other()
+    o.helper()                            # clear, single ctor → high conf + "main:Other.helper"
+    if 0:
+        v = Demo()
+    else:
+        v = Other()
+    v.helper()                            # branch: two ctors → ambiguous 0.50 no hint
+    w = Demo()
+    w = Other()
+    w.helper()                            # rebind different class → ambiguous
 """)
 
     # Also a submodule for qualified test
@@ -711,9 +754,31 @@ def runner():
         assert float(c.get("confidence", 1.0)) < 0.80
         assert c.get("is_deterministic") is False
 
+    # Ambiguity / confidence tiers (if branches with different assignments,
+    # two classes sharing method name, ctor rebind/alias shadowing on same var).
+    # Must downgrade honestly (0.50, no resolved_target_hint) rather than pick one.
+    other_helper_calls = [
+        c for c in calls
+        if "ast Attribute: o.helper " in str(c.get("description", ""))
+    ]
+    assert len(other_helper_calls) == 1
+    assert other_helper_calls[0].get("resolved_target_hint") == "main:Other.helper"
+    assert float(other_helper_calls[0].get("confidence", 0)) >= 0.80
+
+    ambiguous_calls = [
+        c for c in calls
+        if any(b in str(c.get("description", "")) for b in ("v.helper", "w.helper"))
+        and "ast Attribute:" in str(c.get("description", ""))
+    ]
+    assert len(ambiguous_calls) >= 2
+    for c in ambiguous_calls:
+        assert not c.get("resolved_target_hint"), f"Ambiguous must not have resolved_target_hint: {c}"
+        assert float(c.get("confidence", 1.0)) <= 0.55
+        assert c.get("is_deterministic") is False
+
     # All created call relationships from AST should have good metadata
     ast_calls = [c for c in calls if "tree-sitter-python+ast" in str(c.get("extractor", ""))]
-    guarded_weak_calls = guarded_d_helper + inner_dd_calls
+    guarded_weak_calls = guarded_d_helper + inner_dd_calls + ambiguous_calls
     for c in ast_calls:
         assert "resolved_target_hint" in c or "description" in c
         if c in guarded_weak_calls:

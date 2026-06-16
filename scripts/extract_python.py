@@ -501,10 +501,11 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                     class_for_method[qname] = current_class
                     class_for_method[item.name] = current_class  # compat for any bare-name callers
 
-    # Collect assign events with lineno for reassignment guards.
-    # Use the *actual enclosing function* for the assignment node (via lineno),
-    # so that assignments inside nested/inner functions do not pollute the outer
-    # function's scope (proper static analysis scoping).
+    # Collect assign events with lineno for reassignment guards + ambiguity tiers.
+    # Use the *actual enclosing function* (qualified) for the assignment node (via lineno).
+    # Multiple distinct constructors for the same var (if branches, rebinds between
+    # classes with overlapping methods, alias shadowing to different types) will later
+    # cause confidence downgrade instead of blindly picking a target.
     assign_events: Dict[str, List[tuple[int, str, str | None]]] = defaultdict(list)
     for node in ast.walk(tree):
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
@@ -604,24 +605,44 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                 if caller == "unknown":
                     continue
 
-                # Reassignment guard lookup
+                # Reassignment guard + ambiguity/confidence tiers lookup (next layer after qualified scopes).
+                # - last relevant assign is non-ctor (string etc) → 0.40 weak, no hint (guarded)
+                # - multiple distinct ctors seen for this base before site (if/else different assigns,
+                #   rebind between two classes that share method names like .helper, alias shadowing
+                #   a name to a different class) → 0.50 ambiguous, no resolved_target_hint, not deterministic.
+                #   The graph must *honestly downgrade* instead of over-resolving.
+                # - single tracked ctor → 0.80 + specific hint
+                # - else fallback import/attr (0.80)
                 has_var_event = False
-                var_type: str | None = None
+                last_type_for_var: str | None = None
+                distinct_ctors: set[str] = set()
                 events = sorted(assign_events.get(caller, []), key=lambda x: x[0])
+                call_lineno = getattr(node, "lineno", 0)
                 for ev_l, ev_v, ev_t in events:
-                    if ev_v == base_expr and ev_l <= getattr(node, "lineno", 0):
+                    if ev_v == base_expr and ev_l <= call_lineno:
                         has_var_event = True
-                        var_type = ev_t
-                if has_var_event and var_type:
-                    hint: str | None = f"{var_type}.{attr}"
-                    resolved_display = hint
-                    confidence = 0.80
-                    deterministic = True
-                elif has_var_event:
+                        last_type_for_var = ev_t
+                        if ev_t is not None:
+                            distinct_ctors.add(ev_t)
+                if has_var_event and last_type_for_var is None:
+                    # guarded by a non-constructor reassignment (latest action)
                     hint = None
                     resolved_display = f"{base_expr}.{attr} (guarded by reassignment)"
                     confidence = 0.40
                     deterministic = False
+                elif has_var_event and len(distinct_ctors) > 1:
+                    # ambiguity tier: >1 known constructor types for the receiver in scope history
+                    hint = None
+                    resolved_display = f"{base_expr}.{attr} (ambiguous constructors)"
+                    confidence = 0.50
+                    deterministic = False
+                elif has_var_event and distinct_ctors:
+                    # single known ctor type → high conf specific hint
+                    the_type = next(iter(distinct_ctors))
+                    hint = f"{the_type}.{attr}"
+                    resolved_display = hint
+                    confidence = 0.80
+                    deterministic = True
                 else:
                     hint, resolved_display = module_attr_hint(base_expr, attr)
                     confidence = 0.80
