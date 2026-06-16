@@ -399,13 +399,14 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
     import_map: Dict[str, str] = {}  # local_name -> module (e.g. "update_player" -> "physics")
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
-            mod = node.module or ""
-            if node.level:  # relative
-                # For mini_game package we can treat ".physics" as "physics"
-                mod = mod.lstrip(".")
             for alias in node.names:
                 local = alias.asname or alias.name
-                import_map[local] = mod
+                if node.module:
+                    mod = ('.' * node.level + node.module) if node.level else node.module
+                else:
+                    # from . import foo   or from . import foo as bar
+                    mod = ('.' * node.level + alias.name) if node.level else alias.name
+                import_map[local] = mod.lstrip(".")
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 local = alias.asname or alias.name.split(".")[0]
@@ -464,18 +465,25 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
         return f"{module_title(module_path)}:{attr}", f"{module_path}.{attr}"
 
     local_var_types: Dict[tuple[str, str], str] = {}
-    for fn in ast.walk(tree):
-        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+    class_for_method: Dict[str, str] = {}  # method_name -> ClassName for self resolution within file
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            current_class = node.name
+            for item in node.body:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    class_for_method[item.name] = current_class
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        for node in ast.walk(fn):
+        for sub in ast.walk(node):
             targets: List[ast.AST] = []
             value: ast.AST | None = None
-            if isinstance(node, ast.Assign):
-                targets = list(node.targets)
-                value = node.value
-            elif isinstance(node, ast.AnnAssign):
-                targets = [node.target]
-                value = node.value
+            if isinstance(sub, ast.Assign):
+                targets = list(sub.targets)
+                value = sub.value
+            elif isinstance(sub, ast.AnnAssign):
+                targets = [sub.target]
+                value = sub.value
             if not isinstance(value, ast.Call):
                 continue
             constructor = get_dotted_name(value.func)
@@ -493,7 +501,38 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                 continue
             for target in targets:
                 if isinstance(target, ast.Name):
-                    local_var_types[(fn.name, target.id)] = type_hint
+                    local_var_types[(node.name, target.id)] = type_hint
+
+    # self/cls resolution using class_for_method. Emit bridge-resolvable method
+    # titles so these edges survive the two-pass FQN normalization.
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            base = node.func.value
+            if isinstance(base, ast.Name) and base.id in ("self", "cls"):
+                attr = node.func.attr
+                caller = enclosing_function_name(node)
+                if caller in class_for_method:
+                    class_name = class_for_method[caller]
+                    source_title = f"{Path(path).stem}:{class_name}.{caller}"
+                    hint = f"{Path(path).stem}:{class_name}.{attr}"
+                    relationships.append(
+                        {
+                            "id": f"rel:call:{class_name}.{caller}:{base.id}.{attr}:{getattr(node, 'lineno', 0)}",
+                            "source": source_title,
+                            "target": hint,
+                            "type": "calls",
+                            "description": f"{class_name}.{caller} calls {base.id}.{attr} (self/cls method in {class_name})",
+                            "weight": 0.80,
+                            "text_unit_ids": [f"tu:file:{path.name}"],
+                            "human_readable_id": len(relationships) + 1,
+                            "source_file": str(path),
+                            "span": f"{getattr(node, 'lineno', 0)}",
+                            "extractor": "tree-sitter-python+ast",
+                            "confidence": 0.80,
+                            "is_deterministic": True,
+                            "resolved_target_hint": hint,
+                        }
+                    )
 
     # Improve existing tree-sitter calls with direct import hints. This keeps row
     # counts stable while giving the bridge better targets for cross-file calls.
@@ -521,6 +560,8 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
             dotted = get_dotted_name(func)
             if isinstance(func, ast.Attribute) and dotted and "." in dotted:
                 base_expr, attr = dotted.rsplit(".", 1)
+                if base_expr in ("self", "cls"):
+                    continue
                 caller = enclosing_function_name(node)
                 if caller == "unknown":
                     continue

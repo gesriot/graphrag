@@ -383,13 +383,26 @@ from .physics import update_player
 import physics as phys
 from .physics import Engine
 import pkg.sub.mod as submod
+from . import physics as phys_direct   # from . import module
+
+class Demo:
+    def run(self):
+        self.helper()   # self. method call
+    @classmethod
+    def cm(cls):
+        cls.helper()    # cls. method call
+    def helper(self):
+        pass
 
 def runner():
     update_player(None, False, None)      # from-import
     phys.update_player(None, True, None)  # aliased module.attr
     submod.deep_call()                    # submodule.func
     eng = Engine()
-    eng.tick()                            # method call
+    eng.tick()                            # constructor-tracked method
+    phys_direct.update_player(None, False, None)  # from . import module
+    d = Demo()
+    d.run()                               # exercises self via instance
 """)
 
     # Run the bridge on the synthetic package (this exercises title normalization,
@@ -426,6 +439,13 @@ def runner():
     assert any("physics:update_player" in h for h in hints), f"Missing physics hint in {hints}"
     assert any("sub.mod:deep_call" in h or "mod:deep_call" in h for h in hints), f"Missing submodule hint in {hints}"
     assert "physics:Engine.tick" in hints, f"Missing method hint in {hints}"
+    assert "main:Demo.helper" in hints, f"Missing self/cls method hint in {hints}"
+
+    phys_direct_calls = call_rels[
+        call_rels["description"].astype(str).str.contains("phys_direct.update_player", na=False)
+    ]
+    assert not phys_direct_calls.empty
+    assert set(phys_direct_calls["target"].astype(str)) == {"physics:update_player"}
 
     # Check that at least some have the high-confidence AST metadata
     ast_calls = call_rels[call_rels["extractor"].astype(str).str.contains("ast", na=False)]
@@ -439,6 +459,9 @@ def runner():
     assert "physics:update_player" in callees
     assert "mod:deep_call" in callees
     assert "physics:Engine.tick" in callees
+    assert "main:Demo.run" in callees
+    assert g.callees("main:Demo.run") == ["main:Demo.helper"]
+    assert g.callees("main:Demo.cm") == ["main:Demo.helper"]
 
 
 def test_python_name_resolution_regression(tmp_path: Path):
@@ -477,9 +500,21 @@ class Engine:
 from .physics import update_player
 import physics as phys
 from .physics import Engine
+from . import physics as phys_direct
 
 import pkg.sub.mod
 import pkg.sub.mod as submod   # for submodule test
+
+class Demo:
+    def run(self):
+        self.helper()
+
+    @classmethod
+    def cm(cls):
+        cls.helper()
+
+    def helper(self):
+        pass
 
 def runner():
     update_player(None, False, None)           # from-import bare
@@ -488,6 +523,9 @@ def runner():
     submod.deep_call()                         # alias to dotted module
     eng = Engine()
     eng.tick()                                 # method call
+    phys_direct.update_player(None, False, None)
+    d = Demo()
+    d.run()
 """)
 
     # Also a submodule for qualified test
@@ -538,6 +576,29 @@ def runner():
         and "eng.tick" in str(c.get("description", ""))
     ]
     assert method_calls, "method call (obj.method) not recorded"
+
+    direct_module_calls = [
+        c for c in calls
+        if c.get("resolved_target_hint") == "physics:update_player"
+        and "phys_direct.update_player" in str(c.get("description", ""))
+    ]
+    assert direct_module_calls, "from . import module alias call missing hint"
+
+    self_calls = [
+        c for c in calls
+        if c.get("source") == "main:Demo.run"
+        and c.get("resolved_target_hint") == "main:Demo.helper"
+        and "self.helper" in str(c.get("description", ""))
+    ]
+    assert self_calls, "self.method call missing bridge-resolvable hint"
+
+    cls_calls = [
+        c for c in calls
+        if c.get("source") == "main:Demo.cm"
+        and c.get("resolved_target_hint") == "main:Demo.helper"
+        and "cls.helper" in str(c.get("description", ""))
+    ]
+    assert cls_calls, "cls.method call missing bridge-resolvable hint"
 
     # All created call relationships from AST should have good metadata
     ast_calls = [c for c in calls if "tree-sitter-python+ast" in str(c.get("extractor", ""))]
