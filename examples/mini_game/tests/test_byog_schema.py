@@ -248,6 +248,38 @@ def test_generic_python_bridge_uses_relative_module_keys(tmp_path: Path):
     assert len(titles) == len(set(titles))
 
 
+def test_generic_python_bridge_keeps_same_named_callers_separate(tmp_path: Path):
+    """Calls from repeated function names (main, run, etc.) must stay module-qualified."""
+    from scripts.mini_game_to_byog import build_byog_for_package
+
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "alpha.py").write_text(
+        "def target_alpha():\n"
+        "    pass\n\n"
+        "def main():\n"
+        "    target_alpha()\n"
+    )
+    (pkg / "beta.py").write_text(
+        "def target_beta():\n"
+        "    pass\n\n"
+        "def main():\n"
+        "    target_beta()\n"
+    )
+
+    data = build_byog_for_package(package_dir=pkg)
+    calls = [
+        r for r in data["relationships"]
+        if r.get("type") == "calls"
+    ]
+    pairs = {(r.get("source"), r.get("target")) for r in calls}
+
+    assert ("alpha:main", "alpha:target_alpha") in pairs
+    assert ("beta:main", "beta:target_beta") in pairs
+    assert ("alpha:main", "beta:target_beta") not in pairs
+    assert ("beta:main", "alpha:target_alpha") not in pairs
+
+
 def test_ast_attribute_resolution_regression(tmp_path: Path):
     """Separate regression fixture for AST Attribute call resolution (module.func).
 

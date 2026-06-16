@@ -210,6 +210,30 @@ def build_byog_for_package(use_advanced: bool = False, package_dir: Path | None 
                     return ""
                 if raw in title_to_id:
                     return raw
+                # Internal extractor ids are file-stem based (e.g. ent:fn:index_python:main).
+                # Resolve them in the context of the current module key instead of falling
+                # back to a global bare-name match, which can leak calls across same-named
+                # functions such as multiple main() definitions.
+                if raw.startswith("ent:"):
+                    parts = raw.split(":")
+                    if len(parts) >= 3:
+                        if parts[1] == "file":
+                            symbol = ":".join(parts[2:])
+                        elif len(parts) >= 4:
+                            symbol = ":".join(parts[3:])
+                        else:
+                            symbol = parts[-1]
+                        for candidate in (
+                            f"{stem}:{symbol}",
+                            f"{stem}:{symbol.replace('_', '.')}",
+                        ):
+                            if candidate in title_to_id:
+                                return candidate
+                if ":" in raw:
+                    _, symbol = raw.split(":", 1)
+                    contextual = f"{stem}:{symbol}"
+                    if contextual in title_to_id:
+                        return contextual
                 last = raw.split(":")[-1].strip()
                 for t in list(title_to_id.keys()):
                     if t == last or t.endswith(":" + last):
