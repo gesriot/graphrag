@@ -87,7 +87,7 @@ def _atomic_write_text(text: str, final_path: Path) -> None:
                 pass
 
 
-def build_byog_for_package(use_advanced: bool = False) -> Dict[str, List[Dict[str, Any]]]:
+def build_byog_for_package(use_advanced: bool = False, package_dir: Path | None = None) -> Dict[str, List[Dict[str, Any]]]:
     """Two-pass bridge (P1 fix).
 
     Pass 1: collect *all* entities and titles across every file first.
@@ -95,12 +95,13 @@ def build_byog_for_package(use_advanced: bool = False) -> Dict[str, List[Dict[st
     This prevents dropping cross-file calls (e.g. main.py -> sim.run_simulation)
     that were previously filtered before later files contributed their titles.
     """
+    pkg_dir = package_dir or PACKAGE_DIR
     all_entities: List[Dict[str, Any]] = []
     all_relationships: List[Dict[str, Any]] = []
     all_text_units: List[Dict[str, Any]] = []
 
     py_files = sorted(
-        p for p in PACKAGE_DIR.rglob("*.py")
+        p for p in pkg_dir.rglob("*.py")
         if "tests" not in p.parts and p.name != "__init__.py"
     )
 
@@ -268,7 +269,7 @@ def main(
         help="Try optional Jedi/Pyright for richer name resolution (still local, higher confidence tier). Falls back gracefully.",
     ),
 ) -> None:
-    data = build_byog_for_package(use_advanced=use_advanced)
+    data = build_byog_for_package(use_advanced=use_advanced, package_dir=PACKAGE_DIR)
 
     ents_df = pd.DataFrame(data["entities"])
     rels_df = pd.DataFrame(data["relationships"])

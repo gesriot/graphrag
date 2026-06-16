@@ -146,6 +146,64 @@ def extract_from_file(path: Path, use_advanced: bool = False) -> Dict[str, List[
                 }
             )
 
+            if kind == "class" and body:
+                for method_child in body.named_children:
+                    method_node = method_child
+                    if method_child.type == "decorated_definition":
+                        defn = method_child.child_by_field_name("definition")
+                        if defn is not None and defn.type == "function_definition":
+                            method_node = defn
+                        else:
+                            continue
+                    if method_node.type != "function_definition":
+                        continue
+                    method_name_node = method_node.child_by_field_name("name")
+                    if method_name_node is None:
+                        continue
+                    method_name = get_text(source, method_name_node)
+                    qualified_method = f"{name}.{method_name}"
+                    method_id = make_id("method", qualified_method, source_file)
+                    method_span_node = (
+                        method_child
+                        if method_child.type == "decorated_definition"
+                        else method_node
+                    )
+                    method_snippet = get_text(source, method_span_node)
+
+                    entities.append(
+                        {
+                            "id": method_id,
+                            "title": qualified_method,
+                            "type": "method",
+                            "description": f"method {qualified_method} defined in {path.name}",
+                            "snippet": method_snippet,
+                            "text_unit_ids": [f"tu:file:{path.name}"],
+                            "human_readable_id": len(entities) + 1,
+                            "source_file": source_file,
+                            "span": f"{method_span_node.start_point[0]+1}:{method_span_node.start_point[1]}-{method_span_node.end_point[0]+1}:{method_span_node.end_point[1]}",
+                            "extractor": "tree-sitter-python",
+                            "confidence": 1.0,
+                            "is_deterministic": True,
+                        }
+                    )
+                    relationships.append(
+                        {
+                            "id": f"rel:contains:{path.name}:{qualified_method}",
+                            "source": ent_id,
+                            "target": qualified_method,
+                            "type": "contains",
+                            "description": f"{name} contains method {method_name}",
+                            "weight": 1.0,
+                            "text_unit_ids": [f"tu:file:{path.name}"],
+                            "human_readable_id": len(relationships) + 1,
+                            "source_file": source_file,
+                            "span": "",
+                            "extractor": "tree-sitter-python",
+                            "confidence": 1.0,
+                            "is_deterministic": True,
+                        }
+                    )
+
     # Structured imports (for cross-file resolution in bridge)
     imports: List[Dict[str, Any]] = []
     for child in root.children:

@@ -342,6 +342,105 @@ def test_snapshot_keep_last_n_and_fallback(tmp_path: Path):
     assert sorted(d.name for d in snaps_zero.iterdir()) == ["20240101-000000-aaaa"]
 
 
+def test_bridge_level_synthetic_package_resolution(tmp_path: Path):
+    """Bridge-level test: extractor hints must survive the full pipeline
+    extractor → two-pass bridge → parquet → ByogGraph.
+
+    We create a minimal synthetic package with interesting import/call patterns,
+    run build_byog_for_package on it (with use_advanced), publish the resulting
+    data through the real snapshot writer, load via ByogGraph, and assert that
+    call relationships carry the correct resolved_target_hint, high confidence,
+    is_deterministic=True, and proper FQN titles.
+    """
+    from scripts.mini_game_to_byog import build_byog_for_package
+    from scripts.byog_graph import ByogGraph, publish_byog_snapshot
+    import pandas as pd
+
+    # Create synthetic package
+    pkg = tmp_path / "synth_pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+
+    # Target module with functions and class
+    (pkg / "physics.py").write_text("""
+def update_player(state, did_jump, cfg):
+    pass
+
+class Engine:
+    def tick(self):
+        pass
+""")
+
+    # Submodule
+    sub = pkg / "sub"
+    sub.mkdir()
+    (sub / "__init__.py").write_text("")
+    (sub / "mod.py").write_text("def deep_call(): pass")
+
+    # Main exercising patterns
+    (pkg / "main.py").write_text("""
+from .physics import update_player
+import physics as phys
+from .physics import Engine
+import pkg.sub.mod as submod
+
+def runner():
+    update_player(None, False, None)      # from-import
+    phys.update_player(None, True, None)  # aliased module.attr
+    submod.deep_call()                    # submodule.func
+    eng = Engine()
+    eng.tick()                            # method call
+""")
+
+    # Run the bridge on the synthetic package (this exercises title normalization,
+    # hint preservation in relationships, etc.)
+    data = build_byog_for_package(use_advanced=True, package_dir=pkg)
+
+    # Build dfs and publish them through the real snapshot writer. This exercises
+    # parquet roundtrip, atomic snapshot layout, current pointer resolution, and
+    # ByogGraph loading in one path.
+    ents_df = pd.DataFrame(data["entities"])
+    rels_df = pd.DataFrame(data["relationships"])
+    tus_df = pd.DataFrame(data["text_units"])
+
+    graph_root = tmp_path / "synth_graph"
+    snap_dir = publish_byog_snapshot(
+        ents_df,
+        rels_df,
+        tus_df,
+        graph_root / "output",
+        keep_last=2,
+        source_root=pkg,
+    )
+
+    # Load via ByogGraph (simulates what context_pack / graph_query / agent do)
+    g = ByogGraph(graph_root)
+    assert g._snap_base == snap_dir
+
+    # Inspect relationships for preserved hints
+    call_rels = g.rels[g.rels["type"].astype(str) == "calls"]
+
+    # We expect hints from the AST pass to be present on the call edges
+    # after bridge normalization (titles are FQN like "main:runner", "physics:update_player")
+    hints = call_rels["resolved_target_hint"].dropna().astype(str).tolist()
+    assert any("physics:update_player" in h for h in hints), f"Missing physics hint in {hints}"
+    assert any("sub.mod:deep_call" in h or "mod:deep_call" in h for h in hints), f"Missing submodule hint in {hints}"
+    assert "physics:Engine.tick" in hints, f"Missing method hint in {hints}"
+
+    # Check that at least some have the high-confidence AST metadata
+    ast_calls = call_rels[call_rels["extractor"].astype(str).str.contains("ast", na=False)]
+    assert len(ast_calls) > 0
+    for _, row in ast_calls.iterrows():
+        assert float(row.get("confidence", 0)) >= 0.80
+        assert row.get("is_deterministic") is True or str(row.get("is_deterministic")).lower() == "true"
+
+    # Bonus: ByogGraph queries should work on the resulting graph
+    callees = g.callees("main:runner")
+    assert "physics:update_player" in callees
+    assert "mod:deep_call" in callees
+    assert "physics:Engine.tick" in callees
+
+
 def test_python_name_resolution_regression(tmp_path: Path):
     """Real regression fixtures for Python import/call patterns using pure AST + tree-sitter.
 
