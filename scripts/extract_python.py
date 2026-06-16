@@ -484,13 +484,13 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                 if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     class_for_method[item.name] = current_class
 
-    # Collect assign events with lineno for reassignment guards (per fn)
+    # Collect assign events with lineno for reassignment guards.
+    # Use the *actual enclosing function* for the assignment node (via lineno),
+    # so that assignments inside nested/inner functions do not pollute the outer
+    # function's scope (proper static analysis scoping).
     assign_events: Dict[str, List[tuple[int, str, str | None]]] = defaultdict(list)
-    for fn in ast.walk(tree):
-        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        fn_name = fn.name
-        for node in ast.walk(fn):
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
             targets: List[ast.AST] = []
             value: ast.AST | None = None
             lineno = getattr(node, "lineno", 0)
@@ -506,15 +506,22 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
             for target in targets:
                 if isinstance(target, ast.Name):
                     var = target.id
+                    # Determine the *innermost* enclosing function for this assignment
+                    # (reuses the lineno-based logic, but we compute it for every assign)
+                    # We can reuse enclosing_function_name by temporarily treating it as call site
+                    # (the function only uses lineno, so it works).
+                    enclosing = enclosing_function_name(node)
+                    if enclosing == "unknown":
+                        continue
                     if is_constructor:
                         constructor = get_dotted_name(value.func)
                         if constructor:
-                            assign_events[fn_name].append(
+                            assign_events[enclosing].append(
                                 (lineno, var, constructor_type_hint(constructor))
                             )
                     else:
-                        # reassignment to non-constructor: guard from this point
-                        assign_events[fn_name].append((lineno, var, None))
+                        # reassignment to non-constructor: guard from this point onward in *this* scope
+                        assign_events[enclosing].append((lineno, var, None))
 
     # self/cls resolution using class_for_method. Emit bridge-resolvable method
     # titles so these edges survive the two-pass FQN normalization.

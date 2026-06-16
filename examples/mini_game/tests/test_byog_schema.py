@@ -394,6 +394,14 @@ class Demo:
     def helper(self):
         pass
 
+def outer():
+    dd = Demo()
+    def inner():
+        dd = "bad in inner"
+        dd.helper()                       # inner scope: guarded weak edge
+    dd.helper()                           # outer scope: high-conf
+    inner()
+
 def runner():
     update_player(None, False, None)      # from-import
     phys.update_player(None, True, None)  # aliased module.attr
@@ -406,6 +414,7 @@ def runner():
     d.helper()                            # high-conf before reassignment
     d = "reassigned to str"
     d.helper()                            # guard: no high-conf Demo.helper after this
+    outer()
 """)
 
     # Run the bridge on the synthetic package (this exercises title normalization,
@@ -474,6 +483,14 @@ def runner():
     assert len(runner_helper_calls) == 1
     assert runner_helper_calls.iloc[0]["target"] == "main:Demo.helper"
 
+    # Nested/inner function scope + reassignment guard. If inner's assignment
+    # polluted outer's scope, this high-conf edge would be missing after bridge.
+    assert "main:Demo.helper" in g.callees("main:outer")
+    assert not (
+        (call_rels["source"].astype(str) == "main:inner")
+        & (call_rels["target"].astype(str) == "main:Demo.helper")
+    ).any()
+
 
 def test_python_name_resolution_regression(tmp_path: Path):
     """Real regression fixtures for Python import/call patterns using pure AST + tree-sitter.
@@ -527,6 +544,14 @@ class Demo:
     def helper(self):
         pass
 
+def outer():
+    dd = Demo()
+    def inner():
+        dd = "bad in inner"
+        dd.helper()
+    dd.helper()
+    inner()
+
 def runner():
     update_player(None, False, None)           # from-import bare
     phys.update_player(None, True, None)       # import-as + bare attr
@@ -540,6 +565,7 @@ def runner():
     d.helper()
     d = "reassigned to str"
     d.helper()
+    outer()
 """)
 
     # Also a submodule for qualified test
@@ -616,7 +642,7 @@ def runner():
 
     d_helper_calls = [
         c for c in calls
-        if "d.helper" in str(c.get("description", ""))
+        if "ast Attribute: d.helper " in str(c.get("description", ""))
     ]
     assert len(d_helper_calls) == 2
     high_conf_d_helper = [
@@ -632,11 +658,31 @@ def runner():
     assert float(guarded_d_helper[0].get("confidence", 1.0)) < 0.80
     assert guarded_d_helper[0].get("is_deterministic") is False
 
+    outer_dd_calls = [
+        c for c in calls
+        if c.get("source") == "ent:fn:main:outer"
+        and "ast Attribute: dd.helper " in str(c.get("description", ""))
+    ]
+    assert len(outer_dd_calls) == 1
+    assert outer_dd_calls[0].get("resolved_target_hint") == "main:Demo.helper"
+    assert float(outer_dd_calls[0].get("confidence", 0)) >= 0.80
+
+    inner_dd_calls = [
+        c for c in calls
+        if c.get("source") == "ent:fn:main:inner"
+        and "ast Attribute: dd.helper " in str(c.get("description", ""))
+    ]
+    assert len(inner_dd_calls) == 1
+    assert not inner_dd_calls[0].get("resolved_target_hint")
+    assert float(inner_dd_calls[0].get("confidence", 1.0)) < 0.80
+    assert inner_dd_calls[0].get("is_deterministic") is False
+
     # All created call relationships from AST should have good metadata
     ast_calls = [c for c in calls if "tree-sitter-python+ast" in str(c.get("extractor", ""))]
+    guarded_weak_calls = guarded_d_helper + inner_dd_calls
     for c in ast_calls:
         assert "resolved_target_hint" in c or "description" in c
-        if c in guarded_d_helper:
+        if c in guarded_weak_calls:
             continue
         assert float(c.get("confidence", 0)) >= 0.80
         assert c.get("is_deterministic") is True
