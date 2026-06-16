@@ -230,6 +230,24 @@ def test_byog_graph_observations_symbol_and_module(mini_game_byog_root: Path):
     assert any(o.get("reason") == "builtin/container call observation" for o in module_obs)
 
 
+def test_generic_python_bridge_uses_relative_module_keys(tmp_path: Path):
+    """Generic indexing must not collide on repeated basenames like a/models.py and b/models.py."""
+    from scripts.mini_game_to_byog import build_byog_for_package
+
+    pkg = tmp_path / "pkg"
+    (pkg / "a").mkdir(parents=True)
+    (pkg / "b").mkdir(parents=True)
+    (pkg / "a" / "models.py").write_text("class Alpha:\n    pass\n")
+    (pkg / "b" / "models.py").write_text("class Beta:\n    pass\n")
+
+    data = build_byog_for_package(package_dir=pkg)
+    titles = [e["title"] for e in data["entities"]]
+
+    assert "a.models:Alpha" in titles
+    assert "b.models:Beta" in titles
+    assert len(titles) == len(set(titles))
+
+
 def test_ast_attribute_resolution_regression(tmp_path: Path):
     """Separate regression fixture for AST Attribute call resolution (module.func).
 
@@ -632,7 +650,7 @@ def runner():
     # Bonus: ByogGraph queries should work on the resulting graph
     callees = g.callees("main:runner")
     assert "physics:update_player" in callees
-    assert "mod:deep_call" in callees
+    assert "sub.mod:deep_call" in callees
     assert "physics:Engine.tick" in callees
     assert "main:Demo.run" in callees
     assert "main:Demo.helper" in callees

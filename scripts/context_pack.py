@@ -121,21 +121,21 @@ def get_text_units(tus: pd.DataFrame, entity_row: pd.Series, neighbor_rels: List
 @app.command()
 def pack(
     symbol: str = typer.Argument(..., help="Symbol title or partial, e.g. sim:run_simulation or update_player"),
-    graph: Path = typer.Option(Path("byog_mini_game"), "--graph", "-g", help="Directory containing the BYOG (with output/ subdir)"),
+    graph: Path = typer.Option(Path("byog_mini_game"), "--graph", "-g", help="BYOG graph root (snapshot layout or legacy output/ layout)"),
     purpose: str = typer.Option("port-to-rust", "--purpose", "-p"),
     output: Path | None = typer.Option(None, "--output", "-o", help="Write JSON to this path instead of stdout"),
     max_text_chars: int = typer.Option(300, "--max-text-chars", help="Truncate text units to this many chars (0 or negative = no limit)"),
     full_text: bool = typer.Option(False, "--full-text", help="Equivalent to --max-text-chars 0 (no truncation)"),
 ):
     """Assemble and print (or save) a context pack for the given symbol."""
-    if not (graph / "output" / "entities.parquet").exists():
-        typer.secho(f"BYOG not found under {graph}. Run the bridge or smoke generator first.", fg=typer.colors.RED)
-        raise typer.Exit(1)
-
     if full_text:
         max_text_chars = 0
 
-    data = load_byog(graph)
+    try:
+        data = load_byog(graph)
+    except FileNotFoundError:
+        typer.secho(f"BYOG not found under {graph}. Run an indexer or bridge first.", fg=typer.colors.RED)
+        raise typer.Exit(1)
     ents, rels, tus = data["entities"], data["relationships"], data["text_units"]
 
     ent = find_entity(ents, symbol)

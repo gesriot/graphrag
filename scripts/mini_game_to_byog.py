@@ -118,10 +118,19 @@ def build_byog_for_package(use_advanced: bool = False, package_dir: Path | None 
     def slug(value: str) -> str:
         return re.sub(r"[^A-Za-z0-9_.:-]+", "_", value).strip("_")
 
+    def module_key(py_file: Path) -> str:
+        """Stable dotted module key relative to the indexed package root."""
+        try:
+            rel = py_file.relative_to(pkg_dir)
+        except ValueError:
+            rel = py_file.name
+        without_suffix = Path(rel).with_suffix("")
+        return ".".join(without_suffix.parts)
+
     # ===================== PASS 1: collect entities + titles =====================
     for py_file in py_files:
         rel = extract_from_file(py_file, use_advanced=use_advanced)
-        stem = py_file.stem
+        stem = module_key(py_file)
 
         file_entities = []
         for e in rel["entities"]:
