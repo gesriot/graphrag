@@ -64,6 +64,11 @@ def mini_game_byog_root(tmp_path: Path) -> Iterator[Path]:
     ]:
         df = pd.DataFrame(raw_data) if isinstance(raw_data, list) else raw_data
         pq.write_table(pa.Table.from_pandas(df), out / name)
+    # Persist observations (if any) so ByogGraph flat load and context_pack see them
+    obs = raw.get("call_observations", [])
+    if obs:
+        obs_df = pd.DataFrame(obs) if isinstance(obs, list) else obs
+        pq.write_table(pa.Table.from_pandas(obs_df), out / "call_observations.parquet")
     (tmp_path / "settings.yaml").write_text("workflows: [create_communities, create_community_reports]\n")
     yield tmp_path
 
@@ -330,6 +335,26 @@ def test_snapshot_keep_last_n_and_fallback(tmp_path: Path):
     # The resolved base should be the flat output dir
     assert _resolve_output_base(flat_out) == flat_out
 
+    # Root-level snapshot layout is the generator's current production format:
+    # <graph>/current + <graph>/snapshots/<id> should win over stale <graph>/output.
+    root_layout = tmp_path / "root_layout"
+    root_snap_id = "20240105-000000-root"
+    root_snap = root_layout / "snapshots" / root_snap_id
+    root_snap.mkdir(parents=True)
+    pq.write_table(pa.Table.from_pandas(pd.DataFrame({"id": ["e1"], "title": ["root_current"]})), root_snap / "entities.parquet")
+    pq.write_table(pa.Table.from_pandas(dummy_r), root_snap / "relationships.parquet")
+    pq.write_table(pa.Table.from_pandas(dummy_t), root_snap / "text_units.parquet")
+    (root_layout / "current").write_text(root_snap_id)
+    stale_out = root_layout / "output"
+    stale_out.mkdir()
+    pq.write_table(pa.Table.from_pandas(pd.DataFrame({"id": ["e1"], "title": ["stale_output"]})), stale_out / "entities.parquet")
+    pq.write_table(pa.Table.from_pandas(dummy_r), stale_out / "relationships.parquet")
+    pq.write_table(pa.Table.from_pandas(dummy_t), stale_out / "text_units.parquet")
+    g_root = ByogGraph(root_layout)
+    assert "20240105" in str(g_root._snap_base)
+    assert "root_current" in list(g_root.ents["title"].astype(str))
+    assert "stale_output" not in list(g_root.ents["title"].astype(str))
+
     # keep_last=0 is clamped to 1, and current is still protected.
     out_zero = tmp_path / "zero_keep" / "output"
     snaps_zero = out_zero / "snapshots"
@@ -454,6 +479,7 @@ def runner():
     ents_df = pd.DataFrame(data["entities"])
     rels_df = pd.DataFrame(data["relationships"])
     tus_df = pd.DataFrame(data["text_units"])
+    obs_df = pd.DataFrame(data.get("call_observations", []))
 
     graph_root = tmp_path / "synth_graph"
     snap_dir = publish_byog_snapshot(
@@ -463,6 +489,7 @@ def runner():
         graph_root / "output",
         keep_last=2,
         source_root=pkg,
+        call_observations_df=obs_df if len(obs_df) > 0 else None,
     )
 
     # Load via ByogGraph (simulates what context_pack / graph_query / agent do)
@@ -486,6 +513,25 @@ def runner():
         call_rels["description"].astype(str).str.contains("v.helper|w.helper", regex=True, na=False)
     ]
     assert ambiguous_bridge_calls.empty
+
+    # First-class observations must capture the weak/ambiguous calls (they are
+    # intentionally not in core rels, per the negative above). This makes
+    # uncertain call sites available to context_pack and the port agent.
+    obs = getattr(g, "call_observations", pd.DataFrame())
+    assert len(obs) > 0, "call_observations should have been published for the synthetic"
+    # Look for our guarded and ambiguous cases by display_target or description
+    obs_descs = obs.get("description", pd.Series(dtype=str)).astype(str).tolist() if len(obs) else []
+    obs_reasons = obs.get("reason", pd.Series(dtype=str)).astype(str).tolist() if len(obs) else []
+    obs_targets = obs.get("display_target", pd.Series(dtype=str)).astype(str).tolist() if len(obs) else []
+    assert any("v.helper" in d or "w.helper" in d for d in obs_descs), f"Missing ambiguous v/w in observations: {obs_descs[:5]}"
+    assert any("v.helper" in t or "w.helper" in t for t in obs_targets), f"Missing display target for ambiguous v/w: {obs_targets[:5]}"
+    assert any("ambiguous" in str(r) for r in obs_reasons), f"Missing 'ambiguous' reason in observations: {obs_reasons[:5]}"
+    # Also the post-reassign guard on d.helper should be observable
+    assert any("guarded" in str(r) for r in obs_reasons) or any("d.helper" in d and "reassigned" in d for d in obs_descs)
+    # Their confidence must be the downgraded tier
+    if len(obs):
+        low_conf_mask = obs["confidence"].astype(float) < 0.7
+        assert low_conf_mask.any(), "Expected at least one low-confidence observation"
 
     phys_direct_calls = call_rels[
         call_rels["description"].astype(str).str.contains("phys_direct.update_player", na=False)

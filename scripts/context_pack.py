@@ -229,6 +229,31 @@ def pack(
         },
     })
 
+    # Surface first-class weak/ambiguous call observations (from call_observations.parquet)
+    # so the porting agent can see uncertain call sites with honest confidence tiers.
+    obs = data.get("call_observations")
+    if obs is not None and len(obs) > 0:
+        symbol_title = str(ent_dict.get("title", ""))
+        # Match on source title (exact or module prefix for members)
+        try:
+            obs_src = obs["source"].astype(str)
+            mask = (obs_src == symbol_title) | obs_src.str.startswith(symbol_title + ":") | obs_src.str.contains(symbol_title.split(":")[-1], case=False, na=False)
+            relevant = obs[mask].head(15)
+            if len(relevant) > 0:
+                uncertain = []
+                for _, o in relevant.iterrows():
+                    uncertain.append({
+                        "source": str(o.get("source", "")),
+                        "display_target": str(o.get("display_target", "")),
+                        "confidence": float(o.get("confidence", 0.0)),
+                        "reason": str(o.get("reason", "")),
+                        "provenance": f"{o.get('source_file', '')}:{o.get('span', '')}",
+                    })
+                pack["uncertain_calls"] = uncertain
+                pack["analysis_note"] = "Some call sites were tracked with low confidence or ambiguity (see uncertain_calls). Review during port."
+        except Exception:
+            pass  # best-effort; observations are supplemental
+
     result = json.dumps(pack, indent=2, ensure_ascii=False)
     if output:
         output.parent.mkdir(parents=True, exist_ok=True)

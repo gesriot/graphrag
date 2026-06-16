@@ -171,6 +171,8 @@ def build_byog_for_package(use_advanced: bool = False, package_dir: Path | None 
         })
 
     # ===================== PASS 2: resolve relationships with complete map =====================
+    call_observations: List[Dict[str, Any]] = []
+
     for raw in per_file_raw:
         stem = raw["stem"]
         py_file = raw["py_file"]
@@ -185,6 +187,14 @@ def build_byog_for_package(use_advanced: bool = False, package_dir: Path | None 
 
             src_title = r.get("source", "")
             tgt_title = r.get("resolved_target_hint") or r.get("target", "")
+            raw_target = r.get("target", "")
+
+            def observation_display_target(rel: Dict[str, Any]) -> str:
+                desc = str(rel.get("description", ""))
+                marker = "ast Attribute: "
+                if marker in desc:
+                    return desc.split(marker, 1)[1].split(" -> ", 1)[0].strip()
+                return str(rel.get("resolved_target_hint") or tgt_title or raw_target)
 
             def resolve_to_title(raw: str) -> str:
                 if not raw:
@@ -202,6 +212,34 @@ def build_byog_for_package(use_advanced: bool = False, package_dir: Path | None 
             r["source"] = src_res
             r["target"] = tgt_res
 
+            # Preserve ambiguous/weak calls (guarded reassigns, branch ctor ambiguity, low-conf)
+            # as first-class observations so they are not lost in the core relationships filter.
+            # Core relationships stay clean (high-quality resolved only). Observations carry
+            # source, display_target, confidence, reason, provenance for context_pack / agents.
+            if r.get("type") == "calls" and "tree-sitter-python+ast" in str(r.get("extractor", "")):
+                orig_desc = str(r.get("description", ""))
+                conf = float(r.get("confidence", 0.0) or 0.0)
+                has_good_hint = bool(r.get("resolved_target_hint"))
+                reason = ""
+                if "ambiguous constructors" in orig_desc:
+                    reason = "ambiguous constructors"
+                elif "guarded by reassignment" in orig_desc:
+                    reason = "guarded by reassignment"
+                elif conf < 0.6:
+                    reason = "low confidence"
+                if reason or conf < 0.7 or not has_good_hint:
+                    obs = {
+                        "source": src_res or src_title,
+                        "display_target": observation_display_target(r),
+                        "confidence": conf,
+                        "reason": reason or "low confidence call observation",
+                        "source_file": r.get("source_file", ""),
+                        "span": r.get("span", ""),
+                        "extractor": r.get("extractor", ""),
+                        "description": orig_desc,
+                    }
+                    call_observations.append(obs)
+
             if src_res and tgt_res and src_res in title_to_id and tgt_res in title_to_id:
                 text_unit_ids = []
                 for title in (src_res, tgt_res):
@@ -210,7 +248,7 @@ def build_byog_for_package(use_advanced: bool = False, package_dir: Path | None 
                         text_unit_ids.append(tu_ref)
                 r["text_unit_ids"] = text_unit_ids
                 all_relationships.append(r)
-            # else: dropped (bad imports etc.)
+            # else: dropped from core relationships (ambiguous/weak go to observations instead)
 
     # Cross-file call resolution (now safe because title_to_id is complete)
     bare_to_fqns: Dict[str, List[str]] = {}
@@ -251,6 +289,7 @@ def build_byog_for_package(use_advanced: bool = False, package_dir: Path | None 
         "entities": all_entities,
         "relationships": all_relationships,
         "text_units": all_text_units,
+        "call_observations": call_observations,
     }
 
 
@@ -274,6 +313,7 @@ def main(
     ents_df = pd.DataFrame(data["entities"])
     rels_df = pd.DataFrame(data["relationships"])
     tus_df = pd.DataFrame(data["text_units"])
+    obs_df = pd.DataFrame(data.get("call_observations", []))
 
     # Ensure required columns exist (add empties if missing for full compatibility)
     for df in (ents_df, rels_df, tus_df):
@@ -286,6 +326,8 @@ def main(
     # using per-file atomic writes, then the "current" pointer is updated
     # with a single atomic replace. Readers always see a consistent previous
     # snapshot (no version skew between entities/relationships/text_units).
+    # call_observations.parquet (if any) is also published to preserve weak/ambiguous
+    # analysis signals without polluting the core resolved relationships.
     settings = """\
 input:
   type: file
@@ -306,6 +348,7 @@ workflows:
         ents_df, rels_df, tus_df, OUT_ROOT, settings,
         keep_last=keep_snapshots,
         source_root=PACKAGE_DIR,
+        call_observations_df=obs_df if len(obs_df) > 0 else None,
     )
 
     print(f"Bridge complete. Entities: {len(ents_df)}, Relationships: {len(rels_df)}, TextUnits: {len(tus_df)}")

@@ -51,6 +51,32 @@ def _resolve_output_base(base: Path) -> Path:
     return base
 
 
+def _has_core_parquets(base: Path) -> bool:
+    return (
+        (base / "entities.parquet").exists()
+        and (base / "relationships.parquet").exists()
+        and (base / "text_units.parquet").exists()
+    )
+
+
+def _resolve_graph_base(root: Path) -> Path:
+    """Resolve active parquet base from either root-level snapshots or output/ fallback."""
+    root = Path(root)
+
+    root_base = _resolve_output_base(root)
+    if _has_core_parquets(root_base):
+        return root_base
+
+    out_base = root / "output"
+    output_base = _resolve_output_base(out_base)
+    if _has_core_parquets(output_base):
+        return output_base
+
+    # Keep the historical failure mode: let pandas raise a useful file-not-found
+    # against output/ when neither layout exists.
+    return output_base
+
+
 def _atomic_write_parquet(df: pd.DataFrame, final_path: Path) -> None:
     final_path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
@@ -94,6 +120,7 @@ def publish_byog_snapshot(
     settings_text: str | None = None,
     keep_last: int = 5,
     source_root: Optional[Path] = None,
+    call_observations_df: Optional[pd.DataFrame] = None,
 ) -> Path:
     """Write a complete BYOG snapshot atomically and publish a 'current' pointer.
 
@@ -105,6 +132,7 @@ def publish_byog_snapshot(
                     entities.parquet
                     relationships.parquet
                     text_units.parquet
+                    call_observations.parquet (if provided)
                     settings.yaml   (if provided)
                     manifest.json
 
@@ -130,10 +158,17 @@ def publish_byog_snapshot(
     _atomic_write_parquet(relationships_df, snap_dir / "relationships.parquet")
     _atomic_write_parquet(text_units_df, snap_dir / "text_units.parquet")
 
+    has_obs = call_observations_df is not None and len(call_observations_df) > 0
+    if has_obs:
+        _atomic_write_parquet(call_observations_df, snap_dir / "call_observations.parquet")
+
     if settings_text:
         _atomic_write_text(settings_text, snap_dir / "settings.yaml")
 
     # manifest
+    files_list = ["entities.parquet", "relationships.parquet", "text_units.parquet"]
+    if has_obs:
+        files_list.append("call_observations.parquet")
     manifest = {
         "id": snap_id,
         "created_at": datetime.now().isoformat(),
@@ -142,8 +177,9 @@ def publish_byog_snapshot(
             "entities": len(entities_df),
             "relationships": len(relationships_df),
             "text_units": len(text_units_df),
+            "call_observations": len(call_observations_df) if has_obs else 0,
         },
-        "files": ["entities.parquet", "relationships.parquet", "text_units.parquet"],
+        "files": files_list,
         "source_root": str(source_root) if source_root else None,
         "git_commit": None,
         "total_size_bytes": None,
@@ -164,7 +200,10 @@ def publish_byog_snapshot(
 
     # Total size of the snapshot
     total_size = 0
-    for fname in ["entities.parquet", "relationships.parquet", "text_units.parquet"]:
+    size_files = ["entities.parquet", "relationships.parquet", "text_units.parquet"]
+    if has_obs:
+        size_files.append("call_observations.parquet")
+    for fname in size_files:
         f = snap_dir / fname
         if f.exists():
             total_size += f.stat().st_size
@@ -244,13 +283,16 @@ class ByogGraph:
 
     def __init__(self, graph_dir: Path):
         self.root = Path(graph_dir)
-        out_base = self.root / "output"
-        self._snap_base = _resolve_output_base(out_base)
+        self._snap_base = _resolve_graph_base(self.root)
         self.ents: pd.DataFrame = pd.read_parquet(self._snap_base / "entities.parquet")
         self.rels: pd.DataFrame = pd.read_parquet(self._snap_base / "relationships.parquet")
         tus_path = self._snap_base / "text_units.parquet"
         self.tus: pd.DataFrame = (
             pd.read_parquet(tus_path) if tus_path.exists() else pd.DataFrame()
+        )
+        obs_path = self._snap_base / "call_observations.parquet"
+        self.call_observations: pd.DataFrame = (
+            pd.read_parquet(obs_path) if obs_path.exists() else pd.DataFrame()
         )
 
         # Precompute for fast resolve
@@ -392,11 +434,14 @@ class ByogGraph:
 # Back-compat helpers for existing code that expects dataframes
 def load_byog(graph_dir: Path) -> Dict[str, pd.DataFrame]:
     g = ByogGraph(graph_dir)
-    return {
+    res = {
         "entities": g.ents,
         "relationships": g.rels,
         "text_units": g.tus,
     }
+    if len(g.call_observations) > 0:
+        res["call_observations"] = g.call_observations
+    return res
 
 
 def load_graph(graph_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
