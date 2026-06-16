@@ -12,7 +12,7 @@ Outputs the three canonical parquets + a settings stub.
 This is the "Phase 1 bridge" to give a solid rail before spending LLM tokens.
 
 Run:
-    uv run python scripts/mini_game_to_byog.py
+    uv run python scripts/mini_game_to_byog.py --keep-snapshots 5
 Then (with key later):
     uv run graphrag index --root byog_mini_game
 """
@@ -28,6 +28,7 @@ from typing import Any, Dict, List
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+import typer
 
 import os
 import tempfile
@@ -41,6 +42,8 @@ from byog_graph import publish_byog_snapshot  # full snapshot atomic publish + c
 PACKAGE_DIR = ROOT / "examples" / "mini_game"
 OUT_ROOT = ROOT / "byog_mini_game"
 OUT_DIR = OUT_ROOT / "output"
+
+app = typer.Typer(help="Generate BYOG snapshot for the mini_game package (atomic writes + retention).")
 
 
 def _atomic_write_parquet(df: pd.DataFrame, final_path: Path) -> None:
@@ -250,7 +253,15 @@ def build_byog_for_package() -> Dict[str, List[Dict[str, Any]]]:
     }
 
 
-def main() -> None:
+@app.command()
+def main(
+    keep_snapshots: int = typer.Option(
+        5,
+        "--keep-snapshots",
+        "--keep-last",
+        help="Maximum number of snapshots to retain (current is always protected and counts toward the limit).",
+    )
+) -> None:
     data = build_byog_for_package()
 
     ents_df = pd.DataFrame(data["entities"])
@@ -284,7 +295,11 @@ workflows:
   - create_communities
   - create_community_reports
 """
-    snap_dir = publish_byog_snapshot(ents_df, rels_df, tus_df, OUT_ROOT, settings)
+    snap_dir = publish_byog_snapshot(
+        ents_df, rels_df, tus_df, OUT_ROOT, settings,
+        keep_last=keep_snapshots,
+        source_root=PACKAGE_DIR,
+    )
 
     print(f"Bridge complete. Entities: {len(ents_df)}, Relationships: {len(rels_df)}, TextUnits: {len(tus_df)}")
     print(f"Snapshot published under {snap_dir}")
@@ -295,4 +310,4 @@ workflows:
 
 
 if __name__ == "__main__":
-    main()
+    app()

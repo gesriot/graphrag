@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import tempfile
 import uuid
 from datetime import datetime
@@ -92,6 +93,7 @@ def publish_byog_snapshot(
     out_root: Path,
     settings_text: str | None = None,
     keep_last: int = 5,
+    source_root: Optional[Path] = None,
 ) -> Path:
     """Write a complete BYOG snapshot atomically and publish a 'current' pointer.
 
@@ -134,9 +136,40 @@ def publish_byog_snapshot(
     # manifest
     manifest = {
         "id": snap_id,
-        "created": datetime.now().isoformat(),
+        "created_at": datetime.now().isoformat(),
+        "schema_version": 1,
+        "counts": {
+            "entities": len(entities_df),
+            "relationships": len(relationships_df),
+            "text_units": len(text_units_df),
+        },
         "files": ["entities.parquet", "relationships.parquet", "text_units.parquet"],
+        "source_root": str(source_root) if source_root else None,
+        "git_commit": None,
+        "total_size_bytes": None,
+        "corpus_hash": None,
     }
+
+    # Try to capture git commit (best effort)
+    try:
+        git_commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=out_root,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        manifest["git_commit"] = git_commit
+    except Exception:
+        pass
+
+    # Total size of the snapshot
+    total_size = 0
+    for fname in ["entities.parquet", "relationships.parquet", "text_units.parquet"]:
+        f = snap_dir / fname
+        if f.exists():
+            total_size += f.stat().st_size
+    manifest["total_size_bytes"] = total_size
+
     _atomic_write_text(json.dumps(manifest, indent=2), snap_dir / "manifest.json")
 
     # Atomically publish the pointer
