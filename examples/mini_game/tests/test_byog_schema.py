@@ -476,6 +476,22 @@ def runner():
     mixed = []
     mixed = Demo()
     mixed.helper()                        # prior container marker must not pollute ctor resolution
+
+    # Typed annotations: provide hints from annot even without (or in addition to) ctor expr.
+    x: Demo = Demo()
+    x.helper()                            # high conf "main:Demo.helper" via annotation
+    y: Demo
+    y.helper()                            # bare annotation only, no ctor expression
+    z: Demo
+    z = Demo()
+    z.helper()
+    guarded_annot: Demo
+    guarded_annot = "bad"
+    guarded_annot.helper()                # later reassignment must override annotation hint
+    wrong_annot: Demo = "bad"
+    wrong_annot.helper()                  # explicit scalar initializer must not become high-conf
+    events: list = []
+    events.append(99)                     # container via annot + literal
 """)
 
     # Run the bridge on the synthetic package (this exercises title normalization,
@@ -542,6 +558,11 @@ def runner():
     assert any("trace.append" in t or "cfg.get" in t for t in obs_targets), f"Missing container call display_target: {obs_targets[:5]}"
     assert any("builtin/container" in str(r) for r in obs_reasons), f"Missing builtin/container reason: {obs_reasons[:5]}"
     assert not any("mixed.helper" in t for t in obs_targets), f"Resolved mixed.helper should not be an observation: {obs_targets[:5]}"
+    # Annotated high-conf cases (x, y, z) must resolve properly and not appear as weak obs
+    assert not any(any(bad in t for bad in ("x.helper", "y.helper", "z.helper")) for t in obs_targets), \
+        f"High-conf annotated calls leaked to weak observations: {obs_targets[:5]}"
+    assert any("guarded_annot.helper" in t for t in obs_targets), f"Missing guarded annotation observation: {obs_targets[:5]}"
+    assert any("wrong_annot.helper" in t for t in obs_targets), f"Missing contradictory annotation observation: {obs_targets[:5]}"
     # Their confidence must be the downgraded tier
     if len(obs):
         low_conf_mask = obs["confidence"].astype(float) < 0.7
@@ -552,6 +573,12 @@ def runner():
     ]
     assert len(mixed_calls) == 1
     assert mixed_calls.iloc[0].get("resolved_target_hint") == "main:Demo.helper"
+
+    annot_y_calls = call_rels[
+        call_rels["description"].astype(str).str.contains("ast Attribute: y.helper ", regex=False, na=False)
+    ]
+    assert len(annot_y_calls) == 1
+    assert annot_y_calls.iloc[0].get("resolved_target_hint") == "main:Demo.helper"
 
     phys_direct_calls = call_rels[
         call_rels["description"].astype(str).str.contains("phys_direct.update_player", na=False)
@@ -705,6 +732,22 @@ def runner():
     mixed = []
     mixed = Demo()
     mixed.helper()                        # prior container marker must not pollute ctor resolution
+
+    # Typed annotations
+    x: Demo = Demo()
+    x.helper()
+    y: Demo
+    y.helper()
+    z: Demo
+    z = Demo()
+    z.helper()
+    guarded_annot: Demo
+    guarded_annot = "bad"
+    guarded_annot.helper()
+    wrong_annot: Demo = "bad"
+    wrong_annot.helper()
+    events: list = []
+    events.append(99)
 """)
 
     # Also a submodule for qualified test
@@ -860,11 +903,53 @@ def runner():
     assert float(mixed_calls[0].get("confidence", 0)) >= 0.80
     assert mixed_calls[0].get("is_deterministic") is True
 
+    # Typed annotation cases
+    annot_x_calls = [
+        c for c in calls
+        if "ast Attribute: x.helper " in str(c.get("description", ""))
+    ]
+    assert len(annot_x_calls) == 1
+    assert annot_x_calls[0].get("resolved_target_hint") == "main:Demo.helper"
+    assert float(annot_x_calls[0].get("confidence", 0)) >= 0.80
+
+    annot_y_calls = [
+        c for c in calls
+        if "ast Attribute: y.helper " in str(c.get("description", ""))
+    ]
+    assert len(annot_y_calls) == 1
+    assert annot_y_calls[0].get("resolved_target_hint") == "main:Demo.helper"
+    assert float(annot_y_calls[0].get("confidence", 0)) >= 0.80
+
+    annot_z_calls = [
+        c for c in calls
+        if "ast Attribute: z.helper " in str(c.get("description", ""))
+    ]
+    assert len(annot_z_calls) == 1
+    assert annot_z_calls[0].get("resolved_target_hint") == "main:Demo.helper"
+
+    guarded_annot_calls = [
+        c for c in calls
+        if "ast Attribute: guarded_annot.helper " in str(c.get("description", ""))
+    ]
+    assert len(guarded_annot_calls) == 1
+    assert not guarded_annot_calls[0].get("resolved_target_hint")
+    assert float(guarded_annot_calls[0].get("confidence", 1.0)) <= 0.45
+    assert guarded_annot_calls[0].get("is_deterministic") is False
+
+    wrong_annot_calls = [
+        c for c in calls
+        if "ast Attribute: wrong_annot.helper " in str(c.get("description", ""))
+    ]
+    assert len(wrong_annot_calls) == 1
+    assert not wrong_annot_calls[0].get("resolved_target_hint")
+    assert float(wrong_annot_calls[0].get("confidence", 1.0)) <= 0.45
+    assert wrong_annot_calls[0].get("is_deterministic") is False
+
     # Builtin container calls (trace.append, cfg.get etc.) must be classified separately
     # from generic "guarded by reassignment". They get their own reason in observations.
     container_calls = [
         c for c in calls
-        if any(b in str(c.get("description", "")) for b in ("trace.append", "cfg.get"))
+        if any(b in str(c.get("description", "")) for b in ("trace.append", "cfg.get", "events.append"))
         and "ast Attribute:" in str(c.get("description", ""))
     ]
     assert len(container_calls) >= 1
@@ -877,7 +962,9 @@ def runner():
 
     # All created call relationships from AST should have good metadata
     ast_calls = [c for c in calls if "tree-sitter-python+ast" in str(c.get("extractor", ""))]
-    guarded_weak_calls = guarded_d_helper + inner_dd_calls + ambiguous_calls + container_calls
+    guarded_weak_calls = (
+        guarded_d_helper + inner_dd_calls + ambiguous_calls + container_calls + guarded_annot_calls + wrong_annot_calls
+    )
     for c in ast_calls:
         assert "resolved_target_hint" in c or "description" in c
         if c in guarded_weak_calls:

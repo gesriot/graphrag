@@ -490,6 +490,39 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
             return imported_hint[0]
         return None
 
+    def get_type_from_annotation(ann: ast.AST | None) -> str | None:
+        """Return a type marker from annotation.
+
+        - Simple: Demo -> "Demo"
+        - Qualified: pkg.Demo -> "pkg.Demo"
+        - Container generic: list[Event], List["Event"] -> "container:list"
+        This allows bare annotations and typed containers to provide hints
+        for later attribute calls (e.g. x.helper() after "x: Demo").
+        """
+        if ann is None:
+            return None
+        if isinstance(ann, ast.Name):
+            name = ann.id
+            if name.lower() in ("list", "dict", "set", "tuple"):
+                return f"container:{name.lower()}"
+            return name
+        if isinstance(ann, ast.Attribute):
+            return get_dotted_name(ann)
+        if isinstance(ann, ast.Subscript):
+            # list[T], dict[K,V], etc.
+            val = ann.value
+            base = None
+            if isinstance(val, ast.Name):
+                base = val.id.lower()
+            elif isinstance(val, ast.Attribute):
+                base = get_dotted_name(val).lower()
+            if base in ("list", "dict", "set", "tuple"):
+                return f"container:{base}"
+            if isinstance(val, (ast.Name, ast.Attribute)):
+                return get_dotted_name(val)
+            return None
+        return None
+
     class_for_method: Dict[str, str] = {}  # qualified (or bare) method name -> ClassName for self resolution within file
 
     for node in ast.walk(tree):
@@ -511,6 +544,7 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
             targets: List[ast.AST] = []
             value: ast.AST | None = None
+            annotation: ast.AST | None = None
             lineno = getattr(node, "lineno", 0)
             if isinstance(node, ast.Assign):
                 targets = list(node.targets)
@@ -518,23 +552,26 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
             elif isinstance(node, ast.AnnAssign):
                 targets = [node.target]
                 value = node.value
-            if value is None:
+                annotation = node.annotation
+            if value is None and annotation is None:
                 continue
+            type_from_annot = get_type_from_annotation(annotation)
             # Detect constructor calls *and* builtin container literals (list/dict/set and their ctors).
-            # These get a special marker so that later .append / .get etc. can be classified
-            # as "builtin/container call observation" with its own reason, instead of being
-            # lumped together with real type reassignments like d = "bad".
+            # Annotations (x: Demo, items: list[Event]) provide additional static type info
+            # so that method calls can get honest hints even without a constructor expression
+            # in the same scope, or to reinforce container classification.
             container_kind: str | None = None
-            if isinstance(value, ast.List):
-                container_kind = "list"
-            elif isinstance(value, ast.Dict):
-                container_kind = "dict"
-            elif isinstance(value, ast.Set):
-                container_kind = "set"
-            elif isinstance(value, ast.Call):
-                ctor_name = get_dotted_name(value.func) or ""
-                if ctor_name.lower() in ("list", "dict", "set"):
-                    container_kind = ctor_name.lower()
+            if value is not None:
+                if isinstance(value, ast.List):
+                    container_kind = "list"
+                elif isinstance(value, ast.Dict):
+                    container_kind = "dict"
+                elif isinstance(value, ast.Set):
+                    container_kind = "set"
+                elif isinstance(value, ast.Call):
+                    ctor_name = get_dotted_name(value.func) or ""
+                    if ctor_name.lower() in ("list", "dict", "set"):
+                        container_kind = ctor_name.lower()
             is_constructor = isinstance(value, ast.Call) and container_kind is None
             for target in targets:
                 if isinstance(target, ast.Name):
@@ -542,16 +579,26 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                     enclosing = enclosing_function_name(node)
                     if enclosing == "unknown":
                         continue
+                    effective: str | None = None
                     if container_kind:
-                        assign_events[enclosing].append((lineno, var, f"container:{container_kind}"))
+                        effective = f"container:{container_kind}"
                     elif is_constructor:
                         constructor = get_dotted_name(value.func)
                         if constructor:
-                            assign_events[enclosing].append(
-                                (lineno, var, constructor_type_hint(constructor))
-                            )
-                    else:
-                        # reassignment to non-constructor (string, int, unknown var, etc.)
+                            effective = constructor_type_hint(constructor)
+                    contradicts_annotation = value is not None and isinstance(value, ast.Constant)
+                    if effective is None and type_from_annot and not contradicts_annotation:
+                        # annotation provides the type (bare "x: Demo" or unresolved call result).
+                        if type_from_annot.startswith("container:"):
+                            effective = type_from_annot
+                        else:
+                            effective = constructor_type_hint(type_from_annot)
+                            if effective is None:
+                                effective = type_from_annot
+                    if effective:
+                        assign_events[enclosing].append((lineno, var, effective))
+                    elif value is not None:
+                        # non-ctor value with no annot type info
                         assign_events[enclosing].append((lineno, var, None))
 
     # self/cls resolution using class_for_method. Emit bridge-resolvable method
