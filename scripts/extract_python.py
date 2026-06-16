@@ -46,7 +46,7 @@ def make_id(kind: str, name: str, source_file: str) -> str:
     return f"ent:{kind}:{Path(source_file).stem}:{safe}"
 
 
-def extract_from_file(path: Path) -> Dict[str, List[Dict[str, Any]]]:
+def extract_from_file(path: Path, use_advanced: bool = False) -> Dict[str, List[Dict[str, Any]]]:
     source = path.read_bytes()
     tree = parser.parse(source)
     root = tree.root_node
@@ -306,6 +306,18 @@ def extract_from_file(path: Path) -> Dict[str, List[Dict[str, Any]]]:
 
     _enhance_with_ast(source, path, entities, relationships, defined_names)
 
+    if use_advanced:
+        for rel in _try_jedi_adapter(source, path) + _try_pyright_adapter(path):
+            rel.setdefault("id", f"rel:advanced:{path.name}:{len(relationships) + 1}")
+            rel.setdefault("source_file", source_file)
+            rel.setdefault("span", "")
+            rel.setdefault("text_unit_ids", [f"tu:file:{path.name}"])
+            rel.setdefault("human_readable_id", len(relationships) + 1)
+            rel.setdefault("extractor", "advanced-resolver")
+            rel.setdefault("confidence", 0.90)
+            rel.setdefault("is_deterministic", False)
+            relationships.append(rel)
+
     return {
         "entities": entities,
         "relationships": relationships,
@@ -338,8 +350,9 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                 import_map[local] = mod
         elif isinstance(node, ast.Import):
             for alias in node.names:
-                local = alias.asname or alias.name
+                local = alias.asname or alias.name.split(".")[0]
                 import_map[local] = alias.name
+                import_map[alias.name] = alias.name
 
     function_spans: List[tuple[str, int, int]] = []
     for node in ast.walk(tree):
@@ -360,6 +373,70 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
         matches.sort(key=lambda item: (item[0], -item[1]), reverse=True)
         return matches[0][2]
 
+    def get_dotted_name(node: ast.AST) -> str | None:
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.Attribute):
+            parent = get_dotted_name(node.value)
+            return f"{parent}.{node.attr}" if parent else node.attr
+        return None
+
+    def module_title(module_path: str) -> str:
+        return module_path.split(".")[-1] if module_path else Path(path).stem
+
+    def imported_callable_hint(name: str) -> tuple[str, str] | None:
+        module = import_map.get(name)
+        if module:
+            return f"{module_title(module)}:{name}", f"{module}.{name}"
+        if name in defined_names:
+            return f"{Path(path).stem}:{name}", name
+        return None
+
+    def module_attr_hint(base_expr: str, attr: str) -> tuple[str, str]:
+        module_path = import_map.get(base_expr)
+        if not module_path:
+            parts = base_expr.split(".")
+            root = parts[0]
+            if root in import_map:
+                root_target = import_map[root]
+                rest = parts[1:]
+                module_path = ".".join([root_target] + rest) if rest else root_target
+            else:
+                module_path = base_expr
+        return f"{module_title(module_path)}:{attr}", f"{module_path}.{attr}"
+
+    local_var_types: Dict[tuple[str, str], str] = {}
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for node in ast.walk(fn):
+            targets: List[ast.AST] = []
+            value: ast.AST | None = None
+            if isinstance(node, ast.Assign):
+                targets = list(node.targets)
+                value = node.value
+            elif isinstance(node, ast.AnnAssign):
+                targets = [node.target]
+                value = node.value
+            if not isinstance(value, ast.Call):
+                continue
+            constructor = get_dotted_name(value.func)
+            if not constructor:
+                continue
+            type_hint: str | None = None
+            if "." in constructor:
+                base_expr, attr = constructor.rsplit(".", 1)
+                type_hint, _ = module_attr_hint(base_expr, attr)
+            else:
+                imported_hint = imported_callable_hint(constructor)
+                if imported_hint:
+                    type_hint = imported_hint[0]
+            if not type_hint:
+                continue
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    local_var_types[(fn.name, target.id)] = type_hint
+
     # Improve existing tree-sitter calls with direct import hints. This keeps row
     # counts stable while giving the bridge better targets for cross-file calls.
     for rel in relationships:
@@ -377,97 +454,46 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
             rel["extractor"] = "tree-sitter-python+ast"
             rel["is_deterministic"] = True
 
-    # Foundation for the next increment: this pass sees Attribute calls too
-    # (e.g. physics.update_player), even though we only annotate existing edges
-    # for now to avoid duplicate relationships.
+    # Create concrete call relationships for Attribute cases (module.func,
+    # module.submodule.func, and simple constructor-tracked method calls) that
+    # the tree-sitter Name-only detector misses.
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             func = node.func
-            callee = None
-            if isinstance(func, ast.Name):
-                callee = func.id
-            elif isinstance(func, ast.Attribute):
-                # e.g. physics.update_player or self.foo
-                if isinstance(func.value, ast.Name):
-                    mod = func.value.id
-                    callee = f"{mod}.{func.attr}"
-                else:
-                    callee = func.attr
-
-            if callee:
-                # resolve bare name via imports
-                if "." not in callee and callee in import_map:
-                    mod = import_map[callee]
-                    if mod:
-                        callee = f"{mod}.{callee}"
-
-                # Handle Attribute calls (module.func) - set resolved hint on matching
-                # tree-sitter call edge if one exists for the caller/callee bare name.
-                # This keeps edge count stable while giving high-quality hints.
-                if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
-                    base = func.value.id
-                    attr = func.attr
-                    resolved_mod = import_map.get(base, base)
-                    hint = f"{resolved_mod.split('.')[-1]}:{attr}"
-                    bare_callee = attr
-                    # Find a call rel from the current file that matches the bare callee
-                    # and annotate it (the tree-sitter pass may have created a heuristic one).
-                    for rel in relationships:
-                        if rel.get("type") != "calls":
-                            continue
-                        tgt = str(rel.get("target", ""))
-                        if bare_callee in tgt or tgt.endswith(":" + bare_callee):
-                            rel["resolved_target_hint"] = hint
-                            rel["description"] = (
-                                rel.get("description", "")
-                                + f" (ast Attribute hint: {resolved_mod}.{attr})"
-                            )
-                            rel["confidence"] = max(
-                                float(rel.get("confidence", 0.0) or 0.0), 0.80
-                            )
-                            rel["weight"] = max(float(rel.get("weight", 0.0) or 0.0), 0.80)
-                            rel["extractor"] = "tree-sitter-python+ast"
-                            rel["is_deterministic"] = True
-                            break  # annotate the first reasonable match
-
-                # Next step: emit resolved Attribute calls that tree-sitter's
-                # identifier-only pass does not see.
-                pass  # placeholder for richer logic if we collect more in future iterations
-
-    # After the walk, create concrete call relationships for Attribute cases
-    # (module.func) that the tree-sitter Name-only detector missed.
-    # This is the concrete expansion requested.
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            func = node.func
-            if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
-                base = func.value.id
-                attr = func.attr
-                resolved_mod = import_map.get(base, base)
-                hint = f"{resolved_mod.split('.')[-1]}:{attr}"
-
+            dotted = get_dotted_name(func)
+            if isinstance(func, ast.Attribute) and dotted and "." in dotted:
+                base_expr, attr = dotted.rsplit(".", 1)
                 caller = enclosing_function_name(node)
-                if caller != "unknown":
-                    caller_id = make_id("fn", caller, str(path))
-                    callee_id = make_id("fn", attr, str(path))
-                    relationships.append(
-                        {
-                            "id": f"rel:call:{caller}:{attr}:attr:{node.lineno}:{node.col_offset}",
-                            "source": caller_id,
-                            "target": callee_id,
-                            "type": "calls",
-                            "description": f"{caller} calls {attr} (ast Attribute: {resolved_mod}.{attr})",
-                            "weight": 0.80,
-                            "text_unit_ids": [f"tu:file:{path.name}"],
-                            "human_readable_id": len(relationships) + 1,
-                            "source_file": str(path),
-                            "span": f"{node.lineno}:{node.col_offset}",
-                            "extractor": "tree-sitter-python+ast",
-                            "confidence": 0.80,
-                            "is_deterministic": True,
-                            "resolved_target_hint": hint,
-                        }
-                    )
+                if caller == "unknown":
+                    continue
+
+                var_type = local_var_types.get((caller, base_expr))
+                if var_type:
+                    hint = f"{var_type}.{attr}"
+                    resolved_display = hint
+                else:
+                    hint, resolved_display = module_attr_hint(base_expr, attr)
+
+                caller_id = make_id("fn", caller, str(path))
+                callee_id = make_id("fn", attr, str(path))
+                relationships.append(
+                    {
+                        "id": f"rel:call:{caller}:{attr}:attr:{node.lineno}:{node.col_offset}",
+                        "source": caller_id,
+                        "target": callee_id,
+                        "type": "calls",
+                        "description": f"{caller} calls {attr} (ast Attribute: {dotted} -> {resolved_display})",
+                        "weight": 0.80,
+                        "text_unit_ids": [f"tu:file:{path.name}"],
+                        "human_readable_id": len(relationships) + 1,
+                        "source_file": str(path),
+                        "span": f"{node.lineno}:{node.col_offset}",
+                        "extractor": "tree-sitter-python+ast",
+                        "confidence": 0.80,
+                        "is_deterministic": True,
+                        "resolved_target_hint": hint,
+                    }
+                )
 
 
 def _try_jedi_adapter(source: bytes, path: Path) -> List[Dict[str, Any]]:

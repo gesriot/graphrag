@@ -12,7 +12,7 @@ Outputs the three canonical parquets + a settings stub.
 This is the "Phase 1 bridge" to give a solid rail before spending LLM tokens.
 
 Run:
-    uv run python scripts/mini_game_to_byog.py --keep-snapshots 5
+    uv run python scripts/mini_game_to_byog.py --keep-snapshots 5 [--use-advanced]
 Then (with key later):
     uv run graphrag index --root byog_mini_game
 """
@@ -87,7 +87,7 @@ def _atomic_write_text(text: str, final_path: Path) -> None:
                 pass
 
 
-def build_byog_for_package() -> Dict[str, List[Dict[str, Any]]]:
+def build_byog_for_package(use_advanced: bool = False) -> Dict[str, List[Dict[str, Any]]]:
     """Two-pass bridge (P1 fix).
 
     Pass 1: collect *all* entities and titles across every file first.
@@ -119,7 +119,7 @@ def build_byog_for_package() -> Dict[str, List[Dict[str, Any]]]:
 
     # ===================== PASS 1: collect entities + titles =====================
     for py_file in py_files:
-        rel = extract_from_file(py_file)
+        rel = extract_from_file(py_file, use_advanced=use_advanced)
         stem = py_file.stem
 
         file_entities = []
@@ -260,9 +260,15 @@ def main(
         "--keep-snapshots",
         "--keep-last",
         help="Maximum number of snapshots to retain (current is always protected and counts toward the limit).",
-    )
+    ),
+    use_advanced: bool = typer.Option(
+        False,
+        "--use-advanced",
+        "--use-jedi-pyright",
+        help="Try optional Jedi/Pyright for richer name resolution (still local, higher confidence tier). Falls back gracefully.",
+    ),
 ) -> None:
-    data = build_byog_for_package()
+    data = build_byog_for_package(use_advanced=use_advanced)
 
     ents_df = pd.DataFrame(data["entities"])
     rels_df = pd.DataFrame(data["relationships"])

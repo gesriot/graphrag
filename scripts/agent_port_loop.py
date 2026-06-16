@@ -32,6 +32,12 @@ def run(
     port_dir: Path = typer.Option(Path("examples/mini_game_rust"), "--port-dir", help="Directory containing the port (must have Cargo.toml + golden test)"),
     target: str = typer.Option("mini_game", "--target", help="Logical target name"),
     keep_snapshots: int = typer.Option(5, "--keep-snapshots", help="Max snapshots to retain via the generator."),
+    use_advanced: bool = typer.Option(
+        False,
+        "--use-advanced",
+        "--use-jedi-pyright",
+        help="Enable optional local Jedi/Pyright resolution in the bridge.",
+    ),
 ):
     root = Path(__file__).resolve().parents[1]
     if not graph.is_absolute():
@@ -44,8 +50,16 @@ def run(
     # 1. (Re)generate BYOG using the existing bridge
     log("\n[1/4] Regenerating BYOG via bridge...")
     bridge_script = root / "scripts" / "mini_game_to_byog.py"
+    bridge_cmd = [
+        sys.executable,
+        str(bridge_script),
+        "--keep-snapshots",
+        str(keep_snapshots),
+    ]
+    if use_advanced:
+        bridge_cmd.append("--use-advanced")
     subprocess.check_call(
-        [sys.executable, str(bridge_script), "--keep-snapshots", str(keep_snapshots)],
+        bridge_cmd,
         cwd=root,
     )
     log("    BYOG regenerated.")

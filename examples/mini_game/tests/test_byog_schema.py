@@ -340,3 +340,112 @@ def test_snapshot_keep_last_n_and_fallback(tmp_path: Path):
     (out_zero / "current").write_text("20240101-000000-aaaa")
     assert cleanup_old_snapshots(out_zero, keep_last=0) == 1
     assert sorted(d.name for d in snaps_zero.iterdir()) == ["20240101-000000-aaaa"]
+
+
+def test_python_name_resolution_regression(tmp_path: Path):
+    """Real regression fixtures for Python import/call patterns using pure AST + tree-sitter.
+
+    Patterns covered (as requested):
+    - from module import name  → bare call gets resolved_target_hint
+    - import module as alias   → alias.func gets hint
+    - module.submodule.func    → qualified Attribute
+    - method calls (obj.method)
+    - relative imports in package context
+
+    We assert on the data returned by extract_from_file (before bridge normalization).
+    This acts as a living fixture for the deterministic resolution.
+    """
+    from scripts.extract_python import extract_from_file
+
+    # Create a tiny package structure for relative imports
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+
+    # physics.py (target module)
+    (pkg / "physics.py").write_text("""
+def update_player(state, did_jump, cfg):
+    pass
+
+class Engine:
+    def tick(self):
+        pass
+""")
+
+    # main.py exercising patterns
+    main_py = pkg / "main.py"
+    main_py.write_text("""
+from .physics import update_player
+import physics as phys
+from .physics import Engine
+
+import pkg.sub.mod
+import pkg.sub.mod as submod   # for submodule test
+
+def runner():
+    update_player(None, False, None)           # from-import bare
+    phys.update_player(None, True, None)       # import-as + bare attr
+    pkg.sub.mod.deep_call()                    # module.submodule.func style
+    submod.deep_call()                         # alias to dotted module
+    eng = Engine()
+    eng.tick()                                 # method call
+""")
+
+    # Also a submodule for qualified test
+    sub = pkg / "sub"
+    sub.mkdir()
+    (sub / "__init__.py").write_text("")
+    (sub / "mod.py").write_text("def deep_call(): pass")
+
+    result = extract_from_file(main_py)
+
+    calls = [r for r in result.get("relationships", []) if r.get("type") == "calls"]
+
+    # 1. from .physics import update_player → bare call should have hint
+    bare_calls = [
+        c for c in calls
+        if c.get("target") == "update_player"
+        and c.get("resolved_target_hint") == "physics:update_player"
+    ]
+    assert bare_calls, "from-import bare call did not get resolved_target_hint"
+
+    # 2. import physics as phys → alias.attr call
+    alias_calls = [
+        c for c in calls
+        if c.get("resolved_target_hint") == "physics:update_player"
+        and "phys.update_player" in str(c.get("description", ""))
+    ]
+    assert alias_calls, "aliased import + Attribute call missing hint"
+
+    # 3. module.submodule.func style (we created pkg.sub.mod.deep_call)
+    dotted = [
+        c for c in calls
+        if c.get("resolved_target_hint") == "mod:deep_call"
+        and "pkg.sub.mod.deep_call" in str(c.get("description", ""))
+    ]
+    assert dotted, "module.submodule.func style call not detected"
+
+    alias_dotted = [
+        c for c in calls
+        if c.get("resolved_target_hint") == "mod:deep_call"
+        and "submod.deep_call" in str(c.get("description", ""))
+    ]
+    assert alias_dotted, "dotted module alias call not detected"
+
+    # 4. Method call (Engine.tick)
+    method_calls = [
+        c for c in calls
+        if c.get("resolved_target_hint") == "physics:Engine.tick"
+        and "eng.tick" in str(c.get("description", ""))
+    ]
+    assert method_calls, "method call (obj.method) not recorded"
+
+    # All created call relationships from AST should have good metadata
+    ast_calls = [c for c in calls if "tree-sitter-python+ast" in str(c.get("extractor", ""))]
+    for c in ast_calls:
+        assert "resolved_target_hint" in c or "description" in c
+        assert float(c.get("confidence", 0)) >= 0.80
+        assert c.get("is_deterministic") is True
+
+    # Also sanity: imports were parsed
+    assert any("physics" in str(imp) for imp in result.get("imports", []))
