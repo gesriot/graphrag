@@ -9,11 +9,13 @@ Provides:
 - dependency_order()
 - impact(symbol)
 - symbol(query)
+- observations(symbol_or_module)   # weak/ambiguous/container resolver diagnostics
 
 Designed to be used from agent loops, context-pack, or directly from the shell.
 
 Example:
     uv run python scripts/graph_query.py callers sim:run_simulation --graph byog_mini_game
+    uv run python scripts/graph_query.py observations sim:run_simulation --graph byog_mini_game
 """
 
 from __future__ import annotations
@@ -201,6 +203,36 @@ def cli_symbol(query: str, graph: Path = typer.Option(Path("byog_mini_game"), "-
         print(json.dumps(res, indent=2, ensure_ascii=False))
     else:
         print("Not found")
+
+
+@app.command("observations")
+def cli_observations(query: str, graph: Path = typer.Option(Path("byog_mini_game"), "--graph")):
+    """Show weak/ambiguous/container call observations for a symbol or module.
+
+    Lightweight diagnostic for the Python resolver (annotations, guards, builtins)
+    without needing a full context pack.
+    """
+    g = ByogGraph(graph)
+    obs = g.observations(query)
+    if not obs:
+        print(f"No observations for {query}")
+        return
+    for o in obs:
+        src = o.get("source", "?")
+        tgt = o.get("display_target", "?")
+        conf = o.get("confidence", "?")
+        reason = o.get("reason", "")
+        prov = ""
+        sf = o.get("source_file")
+        sp = o.get("span")
+        if sf:
+            prov = f"{sf}:{sp}" if sp else sf
+        line = f"{src} -> {tgt}  conf={conf}"
+        if reason:
+            line += f"  [{reason}]"
+        print(line)
+        if prov:
+            print(f"    {prov}")
 
 
 if __name__ == "__main__":

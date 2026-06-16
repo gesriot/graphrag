@@ -218,6 +218,18 @@ def test_graph_query_impact_symbol(mini_game_byog_root: Path):
     assert "snippet_preview" in s or "source_file" in s
 
 
+def test_byog_graph_observations_symbol_and_module(mini_game_byog_root: Path):
+    from scripts.byog_graph import ByogGraph
+
+    g = ByogGraph(mini_game_byog_root)
+    symbol_obs = g.observations("sim:run_simulation")
+    module_obs = g.observations("sim")
+
+    assert any(o.get("display_target") == "trace.append" for o in symbol_obs)
+    assert any(o.get("display_target") == "trace.append" for o in module_obs)
+    assert any(o.get("reason") == "builtin/container call observation" for o in module_obs)
+
+
 def test_ast_attribute_resolution_regression(tmp_path: Path):
     """Separate regression fixture for AST Attribute call resolution (module.func).
 

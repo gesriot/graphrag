@@ -430,6 +430,37 @@ class ByogGraph:
             "snippet_preview": str(snippet)[:200] if snippet else None,
         }
 
+    def observations(self, query: str) -> List[Dict[str, Any]]:
+        """Return weak/ambiguous/container call observations for a symbol or module.
+
+        This is a lightweight diagnostic for the resolver (annotation tracking,
+        reassignment guards, builtin containers, ambiguous unions) without
+        materializing a full context pack.
+        """
+        if len(self.call_observations) == 0:
+            return []
+        title = self.resolve(query)
+        if title:
+            ent = self.get_entity(title)
+            is_module = ent is not None and str(ent.get("type", "")).lower() == "module"
+            if is_module:
+                module_prefix = title.split(":", 1)[0]
+                mask = (
+                    (self.call_observations["source"].astype(str) == title) |
+                    (self.call_observations["source"].astype(str) == module_prefix) |
+                    self.call_observations["source"].astype(str).str.startswith(module_prefix + ":")
+                )
+            else:
+                mask = self.call_observations["source"].astype(str) == title
+        else:
+            # treat raw query as prefix (e.g. "sim" or "sim:run_simulation")
+            mask = self.call_observations["source"].astype(str).str.startswith(query)
+        if not mask.any():
+            return []
+        cols = [c for c in ["source", "display_target", "confidence", "reason", "source_file", "span"]
+                if c in self.call_observations.columns]
+        return self.call_observations.loc[mask, cols].to_dict(orient="records")
+
 
 # Back-compat helpers for existing code that expects dataframes
 def load_byog(graph_dir: Path) -> Dict[str, pd.DataFrame]:
