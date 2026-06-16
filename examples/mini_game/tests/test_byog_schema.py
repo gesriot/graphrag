@@ -403,6 +403,9 @@ def runner():
     phys_direct.update_player(None, False, None)  # from . import module
     d = Demo()
     d.run()                               # exercises self via instance
+    d.helper()                            # high-conf before reassignment
+    d = "reassigned to str"
+    d.helper()                            # guard: no high-conf Demo.helper after this
 """)
 
     # Run the bridge on the synthetic package (this exercises title normalization,
@@ -460,8 +463,16 @@ def runner():
     assert "mod:deep_call" in callees
     assert "physics:Engine.tick" in callees
     assert "main:Demo.run" in callees
+    assert "main:Demo.helper" in callees
     assert g.callees("main:Demo.run") == ["main:Demo.helper"]
     assert g.callees("main:Demo.cm") == ["main:Demo.helper"]
+
+    runner_helper_calls = call_rels[
+        (call_rels["source"].astype(str) == "main:runner")
+        & (call_rels["description"].astype(str).str.contains("d.helper", na=False))
+    ]
+    assert len(runner_helper_calls) == 1
+    assert runner_helper_calls.iloc[0]["target"] == "main:Demo.helper"
 
 
 def test_python_name_resolution_regression(tmp_path: Path):
@@ -526,6 +537,9 @@ def runner():
     phys_direct.update_player(None, False, None)
     d = Demo()
     d.run()
+    d.helper()
+    d = "reassigned to str"
+    d.helper()
 """)
 
     # Also a submodule for qualified test
@@ -600,10 +614,30 @@ def runner():
     ]
     assert cls_calls, "cls.method call missing bridge-resolvable hint"
 
+    d_helper_calls = [
+        c for c in calls
+        if "d.helper" in str(c.get("description", ""))
+    ]
+    assert len(d_helper_calls) == 2
+    high_conf_d_helper = [
+        c for c in d_helper_calls
+        if c.get("resolved_target_hint") == "main:Demo.helper"
+    ]
+    assert len(high_conf_d_helper) == 1
+    guarded_d_helper = [
+        c for c in d_helper_calls
+        if not c.get("resolved_target_hint")
+    ]
+    assert len(guarded_d_helper) == 1
+    assert float(guarded_d_helper[0].get("confidence", 1.0)) < 0.80
+    assert guarded_d_helper[0].get("is_deterministic") is False
+
     # All created call relationships from AST should have good metadata
     ast_calls = [c for c in calls if "tree-sitter-python+ast" in str(c.get("extractor", ""))]
     for c in ast_calls:
         assert "resolved_target_hint" in c or "description" in c
+        if c in guarded_d_helper:
+            continue
         assert float(c.get("confidence", 0)) >= 0.80
         assert c.get("is_deterministic") is True
 

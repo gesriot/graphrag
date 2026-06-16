@@ -172,10 +172,9 @@ def publish_byog_snapshot(
 
     _atomic_write_text(json.dumps(manifest, indent=2), snap_dir / "manifest.json")
 
-    # Atomically publish the pointer
-    current_tmp = out_root / "current.tmp"
-    current_tmp.write_text(snap_id)
-    os.replace(current_tmp, out_root / "current")
+    # Atomically publish the pointer. Use a unique temp file so concurrent
+    # snapshot writers do not race on a shared current.tmp path.
+    _atomic_write_text(snap_id, out_root / "current")
 
     # Cleanup old snapshots (always protect current)
     cleanup_old_snapshots(out_root, keep_last=keep_last)

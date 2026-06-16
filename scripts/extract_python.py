@@ -26,6 +26,7 @@ import ast
 import json
 import subprocess
 import sys
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -464,7 +465,16 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                 module_path = base_expr
         return f"{module_title(module_path)}:{attr}", f"{module_path}.{attr}"
 
-    local_var_types: Dict[tuple[str, str], str] = {}
+    def constructor_type_hint(constructor: str) -> str | None:
+        if "." in constructor:
+            base_expr, attr = constructor.rsplit(".", 1)
+            hint, _ = module_attr_hint(base_expr, attr)
+            return hint
+        imported_hint = imported_callable_hint(constructor)
+        if imported_hint:
+            return imported_hint[0]
+        return None
+
     class_for_method: Dict[str, str] = {}  # method_name -> ClassName for self resolution within file
 
     for node in ast.walk(tree):
@@ -473,35 +483,38 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
             for item in node.body:
                 if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     class_for_method[item.name] = current_class
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+
+    # Collect assign events with lineno for reassignment guards (per fn)
+    assign_events: Dict[str, List[tuple[int, str, str | None]]] = defaultdict(list)
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        for sub in ast.walk(node):
+        fn_name = fn.name
+        for node in ast.walk(fn):
             targets: List[ast.AST] = []
             value: ast.AST | None = None
-            if isinstance(sub, ast.Assign):
-                targets = list(sub.targets)
-                value = sub.value
-            elif isinstance(sub, ast.AnnAssign):
-                targets = [sub.target]
-                value = sub.value
-            if not isinstance(value, ast.Call):
+            lineno = getattr(node, "lineno", 0)
+            if isinstance(node, ast.Assign):
+                targets = list(node.targets)
+                value = node.value
+            elif isinstance(node, ast.AnnAssign):
+                targets = [node.target]
+                value = node.value
+            if value is None:
                 continue
-            constructor = get_dotted_name(value.func)
-            if not constructor:
-                continue
-            type_hint: str | None = None
-            if "." in constructor:
-                base_expr, attr = constructor.rsplit(".", 1)
-                type_hint, _ = module_attr_hint(base_expr, attr)
-            else:
-                imported_hint = imported_callable_hint(constructor)
-                if imported_hint:
-                    type_hint = imported_hint[0]
-            if not type_hint:
-                continue
+            is_constructor = isinstance(value, ast.Call)
             for target in targets:
                 if isinstance(target, ast.Name):
-                    local_var_types[(node.name, target.id)] = type_hint
+                    var = target.id
+                    if is_constructor:
+                        constructor = get_dotted_name(value.func)
+                        if constructor:
+                            assign_events[fn_name].append(
+                                (lineno, var, constructor_type_hint(constructor))
+                            )
+                    else:
+                        # reassignment to non-constructor: guard from this point
+                        assign_events[fn_name].append((lineno, var, None))
 
     # self/cls resolution using class_for_method. Emit bridge-resolvable method
     # titles so these edges survive the two-pass FQN normalization.
@@ -566,33 +579,49 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                 if caller == "unknown":
                     continue
 
-                var_type = local_var_types.get((caller, base_expr))
-                if var_type:
-                    hint = f"{var_type}.{attr}"
+                # Reassignment guard lookup
+                has_var_event = False
+                var_type: str | None = None
+                events = sorted(assign_events.get(caller, []), key=lambda x: x[0])
+                for ev_l, ev_v, ev_t in events:
+                    if ev_v == base_expr and ev_l <= getattr(node, "lineno", 0):
+                        has_var_event = True
+                        var_type = ev_t
+                if has_var_event and var_type:
+                    hint: str | None = f"{var_type}.{attr}"
                     resolved_display = hint
+                    confidence = 0.80
+                    deterministic = True
+                elif has_var_event:
+                    hint = None
+                    resolved_display = f"{base_expr}.{attr} (guarded by reassignment)"
+                    confidence = 0.40
+                    deterministic = False
                 else:
                     hint, resolved_display = module_attr_hint(base_expr, attr)
+                    confidence = 0.80
+                    deterministic = True
 
                 caller_id = make_id("fn", caller, str(path))
                 callee_id = make_id("fn", attr, str(path))
-                relationships.append(
-                    {
-                        "id": f"rel:call:{caller}:{attr}:attr:{node.lineno}:{node.col_offset}",
-                        "source": caller_id,
-                        "target": callee_id,
-                        "type": "calls",
-                        "description": f"{caller} calls {attr} (ast Attribute: {dotted} -> {resolved_display})",
-                        "weight": 0.80,
-                        "text_unit_ids": [f"tu:file:{path.name}"],
-                        "human_readable_id": len(relationships) + 1,
-                        "source_file": str(path),
-                        "span": f"{node.lineno}:{node.col_offset}",
-                        "extractor": "tree-sitter-python+ast",
-                        "confidence": 0.80,
-                        "is_deterministic": True,
-                        "resolved_target_hint": hint,
-                    }
-                )
+                rel = {
+                    "id": f"rel:call:{caller}:{attr}:attr:{node.lineno}:{node.col_offset}",
+                    "source": caller_id,
+                    "target": callee_id,
+                    "type": "calls",
+                    "description": f"{caller} calls {attr} (ast Attribute: {dotted} -> {resolved_display})",
+                    "weight": confidence,
+                    "text_unit_ids": [f"tu:file:{path.name}"],
+                    "human_readable_id": len(relationships) + 1,
+                    "source_file": str(path),
+                    "span": f"{node.lineno}:{node.col_offset}",
+                    "extractor": "tree-sitter-python+ast",
+                    "confidence": confidence,
+                    "is_deterministic": deterministic,
+                }
+                if hint:
+                    rel["resolved_target_hint"] = hint
+                relationships.append(rel)
 
 
 def _try_jedi_adapter(source: bytes, path: Path) -> List[Dict[str, Any]]:
