@@ -206,14 +206,23 @@ def cli_symbol(query: str, graph: Path = typer.Option(Path("byog_mini_game"), "-
 
 
 @app.command("observations")
-def cli_observations(query: str, graph: Path = typer.Option(Path("byog_mini_game"), "--graph")):
+def cli_observations(
+    query: str,
+    graph: Path = typer.Option(Path("byog_mini_game"), "--graph"),
+    json_output: bool = typer.Option(False, "--json", help="Output machine-readable JSON (for agent loops / diagnostics)"),
+):
     """Show weak/ambiguous/container call observations for a symbol or module.
 
     Lightweight diagnostic for the Python resolver (annotations, guards, builtins)
     without needing a full context pack.
+
+    Use --json for programmatic consumption by agents.
     """
     g = ByogGraph(graph)
     obs = g.observations(query)
+    if json_output:
+        print(json.dumps(obs, indent=2, ensure_ascii=False))
+        return
     if not obs:
         print(f"No observations for {query}")
         return
