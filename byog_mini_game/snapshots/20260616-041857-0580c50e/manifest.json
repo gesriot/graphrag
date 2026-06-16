@@ -1,9 +1,0 @@
-{
-  "id": "20260616-041857-0580c50e",
-  "created": "2026-06-16T04:18:57.208753",
-  "files": [
-    "entities.parquet",
-    "relationships.parquet",
-    "text_units.parquet"
-  ]
-}
