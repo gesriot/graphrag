@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import tempfile
 import uuid
 from datetime import datetime
@@ -90,6 +91,7 @@ def publish_byog_snapshot(
     text_units_df: pd.DataFrame,
     out_root: Path,
     settings_text: str | None = None,
+    keep_last: int = 5,
 ) -> Path:
     """Write a complete BYOG snapshot atomically and publish a 'current' pointer.
 
@@ -109,6 +111,9 @@ def publish_byog_snapshot(
 
     This allows concurrent readers to always see a consistent previous snapshot
     while a new one is being built (e.g. by agent_port_loop).
+
+    After publishing, automatically runs keep-last-N cleanup (default 5),
+    always protecting the newly published current snapshot.
     """
     out_root = Path(out_root)
     snapshots_dir = out_root / "snapshots"
@@ -139,7 +144,67 @@ def publish_byog_snapshot(
     current_tmp.write_text(snap_id)
     os.replace(current_tmp, out_root / "current")
 
+    # Cleanup old snapshots (always protect current)
+    cleanup_old_snapshots(out_root, keep_last=keep_last)
+
     return snap_dir
+
+
+def cleanup_old_snapshots(out_root: Path, keep_last: int = 5) -> int:
+    """Delete old snapshot directories, keeping at most the most recent `keep_last`.
+
+    - Always reads `current` first and protects that snapshot (never deletes it).
+    - `keep_last` is clamped to at least 1 because current must be retained.
+    - Keeps current plus the newest remaining snapshots up to the total limit.
+    - Snapshot dirs are sorted by name (timestamped names sort chronologically).
+    - Only directories under snapshots/ are considered for deletion.
+    - Returns the number of deleted snapshot directories.
+    """
+    out_root = Path(out_root)
+    keep_last = max(1, keep_last)
+    snapshots_dir = out_root / "snapshots"
+    if not snapshots_dir.exists():
+        return 0
+
+    current_file = out_root / "current"
+    current_id: Optional[str] = None
+    if current_file.exists():
+        try:
+            current_id = current_file.read_text().strip()
+        except Exception:
+            current_id = None
+
+    snap_dirs = [d for d in snapshots_dir.iterdir() if d.is_dir()]
+    if not snap_dirs:
+        return 0
+
+    # Sort by name (YYYYMMDD-... format sorts correctly)
+    snap_dirs.sort(key=lambda p: p.name)
+
+    # Determine which to keep: current first, then newest remaining snapshots
+    # until the total keep_last limit is reached.
+    keep: set[Path] = set()
+    if current_id:
+        current_dir = snapshots_dir / current_id
+        if current_dir.exists():
+            keep.add(current_dir)
+
+    slots_left = max(0, keep_last - len(keep))
+    if slots_left > 0:
+        candidates = [d for d in snap_dirs if d not in keep]
+        keep.update(candidates[-slots_left:])
+
+    deleted = 0
+    for d in snap_dirs:
+        if d not in keep:
+            try:
+                shutil.rmtree(d)
+                deleted += 1
+            except Exception:
+                # Best effort; do not fail the whole operation
+                pass
+
+    return deleted
 
 
 class ByogGraph:

@@ -254,3 +254,89 @@ def after(state, cfg):
     assert float(h.get("confidence", 0)) >= 0.80
     assert h.get("is_deterministic") is True
     assert "tree-sitter-python+ast" in str(h.get("extractor", ""))
+
+
+def test_snapshot_keep_last_n_and_fallback(tmp_path: Path):
+    """Test keep-last-N cleanup + current/fallback resolution.
+
+    - Creates multiple timestamped snapshot dirs.
+    - Sets 'current' to one of them.
+    - Runs cleanup(keep_last=2).
+    - Verifies only the 2 most recent (including current) remain.
+    - Verifies ByogGraph can resolve and load from current.
+    - Verifies flat fallback still works when no snapshots/current.
+    """
+    from scripts.byog_graph import ByogGraph, cleanup_old_snapshots, _resolve_output_base
+
+    out = tmp_path / "output"
+    snapshots = out / "snapshots"
+    snapshots.mkdir(parents=True)
+
+    # Create 4 fake snapshots (names sort chronologically)
+    snap_ids = [
+        "20240101-000000-aaaa",
+        "20240102-000000-bbbb",
+        "20240103-000000-cccc",  # will be set as current
+        "20240104-000000-dddd",
+    ]
+    # Minimal valid dataframes for the test snapshots
+    import pandas as pd
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    dummy_e = pd.DataFrame({"id": ["e1"], "title": ["dummy"]})
+    dummy_r = pd.DataFrame({"id": ["r1"], "source": ["s"], "target": ["t"]})
+    dummy_t = pd.DataFrame({"id": ["t1"], "text": ["sample"]})
+    for sid in snap_ids:
+        sd = snapshots / sid
+        sd.mkdir()
+        pq.write_table(pa.Table.from_pandas(dummy_e), sd / "entities.parquet")
+        pq.write_table(pa.Table.from_pandas(dummy_r), sd / "relationships.parquet")
+        pq.write_table(pa.Table.from_pandas(dummy_t), sd / "text_units.parquet")
+        (sd / "manifest.json").write_text(json.dumps({"id": sid}))
+
+    # Set current to the third one
+    (out / "current").write_text("20240103-000000-cccc")
+
+    # Run cleanup keep_last=2
+    deleted = cleanup_old_snapshots(out, keep_last=2)
+    assert deleted == 2
+
+    remaining = sorted([d.name for d in snapshots.iterdir()])
+    assert remaining == ["20240103-000000-cccc", "20240104-000000-dddd"]
+
+    # ByogGraph should load the current snapshot
+    g = ByogGraph(tmp_path)  # pass the parent root, not the output subdir
+    assert len(g.ents) >= 0  # at least doesn't crash
+    # For robustness in test, just check resolve works and _snap_base points inside snapshots
+    assert "20240103" in str(g._snap_base)
+
+    # Test flat fallback (structure: <parent>/output/<parquets flat>)
+    flat_parent = tmp_path / "flat_parent"
+    flat_out = flat_parent / "output"
+    flat_out.mkdir(parents=True)
+    # Write minimal valid parquets for all three directly in the output dir (flat)
+    import pandas as pd
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    dummy_e = pd.DataFrame({"id": ["e1"], "title": ["test"]})
+    pq.write_table(pa.Table.from_pandas(dummy_e), flat_out / "entities.parquet")
+    dummy_r = pd.DataFrame({"id": ["r1"], "source": ["s"], "target": ["t"]})
+    pq.write_table(pa.Table.from_pandas(dummy_r), flat_out / "relationships.parquet")
+    dummy_t = pd.DataFrame({"id": ["t1"], "text": ["sample"]})
+    pq.write_table(pa.Table.from_pandas(dummy_t), flat_out / "text_units.parquet")
+
+    g2 = ByogGraph(flat_parent)  # root is parent; no current/snapshots -> fallback to flat_out
+    assert "test" in list(g2.ents["title"].astype(str))
+    # The resolved base should be the flat output dir
+    assert _resolve_output_base(flat_out) == flat_out
+
+    # keep_last=0 is clamped to 1, and current is still protected.
+    out_zero = tmp_path / "zero_keep" / "output"
+    snaps_zero = out_zero / "snapshots"
+    snaps_zero.mkdir(parents=True)
+    for sid in ["20240101-000000-aaaa", "20240102-000000-bbbb"]:
+        sd = snaps_zero / sid
+        sd.mkdir()
+    (out_zero / "current").write_text("20240101-000000-aaaa")
+    assert cleanup_old_snapshots(out_zero, keep_last=0) == 1
+    assert sorted(d.name for d in snaps_zero.iterdir()) == ["20240101-000000-aaaa"]
