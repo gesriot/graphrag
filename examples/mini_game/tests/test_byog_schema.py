@@ -402,6 +402,14 @@ def outer():
     dd.helper()                           # outer scope: high-conf
     inner()
 
+def another_outer():
+    dd = Demo()
+    def inner():
+        dd = "bad in another"
+        dd.helper()                       # another_inner scope: guarded independently
+    dd.helper()                           # another_outer scope: high-conf, must not be polluted by any inner
+    inner()
+
 def runner():
     update_player(None, False, None)      # from-import
     phys.update_player(None, True, None)  # aliased module.attr
@@ -415,6 +423,7 @@ def runner():
     d = "reassigned to str"
     d.helper()                            # guard: no high-conf Demo.helper after this
     outer()
+    another_outer()
 """)
 
     # Run the bridge on the synthetic package (this exercises title normalization,
@@ -483,11 +492,14 @@ def runner():
     assert len(runner_helper_calls) == 1
     assert runner_helper_calls.iloc[0]["target"] == "main:Demo.helper"
 
-    # Nested/inner function scope + reassignment guard. If inner's assignment
-    # polluted outer's scope, this high-conf edge would be missing after bridge.
+    # Nested/inner function scope + reassignment guard (qualified keys).
+    # If assignment from inner() polluted outer's scope (or cross-polluted between two inners),
+    # the high-conf edge from that outer would be missing (or wrong target).
+    # Using qualified scope keys ("outer.inner", "another_outer.inner") isolates the buckets.
     assert "main:Demo.helper" in g.callees("main:outer")
+    assert "main:Demo.helper" in g.callees("main:another_outer")
     assert not (
-        (call_rels["source"].astype(str) == "main:inner")
+        call_rels["source"].astype(str).str.contains("inner", na=False)
         & (call_rels["target"].astype(str) == "main:Demo.helper")
     ).any()
 
@@ -552,6 +564,14 @@ def outer():
     dd.helper()
     inner()
 
+def another_outer():
+    dd = Demo()
+    def inner():
+        dd = "bad in another"
+        dd.helper()
+    dd.helper()
+    inner()
+
 def runner():
     update_player(None, False, None)           # from-import bare
     phys.update_player(None, True, None)       # import-as + bare attr
@@ -566,6 +586,7 @@ def runner():
     d = "reassigned to str"
     d.helper()
     outer()
+    another_outer()
 """)
 
     # Also a submodule for qualified test
@@ -667,15 +688,28 @@ def runner():
     assert outer_dd_calls[0].get("resolved_target_hint") == "main:Demo.helper"
     assert float(outer_dd_calls[0].get("confidence", 0)) >= 0.80
 
-    inner_dd_calls = [
+    another_outer_dd_calls = [
         c for c in calls
-        if c.get("source") == "ent:fn:main:inner"
+        if c.get("source") == "ent:fn:main:another_outer"
         and "ast Attribute: dd.helper " in str(c.get("description", ""))
     ]
-    assert len(inner_dd_calls) == 1
-    assert not inner_dd_calls[0].get("resolved_target_hint")
-    assert float(inner_dd_calls[0].get("confidence", 1.0)) < 0.80
-    assert inner_dd_calls[0].get("is_deterministic") is False
+    assert len(another_outer_dd_calls) == 1
+    assert another_outer_dd_calls[0].get("resolved_target_hint") == "main:Demo.helper"
+    assert float(another_outer_dd_calls[0].get("confidence", 0)) >= 0.80
+
+    # Qualified scope keys: two different inners (outer.inner and another_outer.inner)
+    # must have independent guard buckets; neither gets high-conf "main:Demo.helper".
+    # The produced caller source for nested uses qualified -> make_id safe name (dots -> _).
+    inner_dd_calls = [
+        c for c in calls
+        if c.get("source") in ("ent:fn:main:outer_inner", "ent:fn:main:another_outer_inner")
+        and "ast Attribute: dd.helper " in str(c.get("description", ""))
+    ]
+    assert len(inner_dd_calls) == 2
+    for c in inner_dd_calls:
+        assert not c.get("resolved_target_hint")
+        assert float(c.get("confidence", 1.0)) < 0.80
+        assert c.get("is_deterministic") is False
 
     # All created call relationships from AST should have good metadata
     ast_calls = [c for c in calls if "tree-sitter-python+ast" in str(c.get("extractor", ""))]

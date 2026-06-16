@@ -414,12 +414,27 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                 import_map[local] = alias.name
                 import_map[alias.name] = alias.name
 
-    function_spans: List[tuple[str, int, int]] = []
-    for node in ast.walk(tree):
+    def _collect_qualified_functions(node: ast.AST, prefix: str = "") -> List[tuple[str, int, int]]:
+        """Collect (qualified_name, lineno, end_lineno) for all functions, respecting nesting.
+        Qualified names use dots for nesting (e.g. 'outer.inner', 'Demo.run').
+        """
+        spans: List[tuple[str, int, int]] = []
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            function_spans.append(
-                (node.name, node.lineno, getattr(node, "end_lineno", node.lineno))
-            )
+            qname = f"{prefix}.{node.name}" if prefix else node.name
+            end = getattr(node, "end_lineno", node.lineno)
+            spans.append((qname, node.lineno, end))
+            for child in node.body:
+                spans.extend(_collect_qualified_functions(child, qname))
+        elif isinstance(node, ast.ClassDef):
+            cprefix = f"{prefix}.{node.name}" if prefix else node.name
+            for child in node.body:
+                spans.extend(_collect_qualified_functions(child, cprefix))
+        else:
+            for child in ast.iter_child_nodes(node):
+                spans.extend(_collect_qualified_functions(child, prefix))
+        return spans
+
+    function_spans: List[tuple[str, int, int]] = _collect_qualified_functions(tree)
 
     def enclosing_function_name(call_node: ast.AST) -> str:
         lineno = getattr(call_node, "lineno", -1)
@@ -475,14 +490,16 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
             return imported_hint[0]
         return None
 
-    class_for_method: Dict[str, str] = {}  # method_name -> ClassName for self resolution within file
+    class_for_method: Dict[str, str] = {}  # qualified (or bare) method name -> ClassName for self resolution within file
 
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
             current_class = node.name
             for item in node.body:
                 if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    class_for_method[item.name] = current_class
+                    qname = f"{current_class}.{item.name}"
+                    class_for_method[qname] = current_class
+                    class_for_method[item.name] = current_class  # compat for any bare-name callers
 
     # Collect assign events with lineno for reassignment guards.
     # Use the *actual enclosing function* for the assignment node (via lineno),
@@ -533,15 +550,16 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                 caller = enclosing_function_name(node)
                 if caller in class_for_method:
                     class_name = class_for_method[caller]
-                    source_title = f"{Path(path).stem}:{class_name}.{caller}"
+                    method_bare = caller.split(".")[-1] if "." in caller else caller
+                    source_title = f"{Path(path).stem}:{class_name}.{method_bare}"
                     hint = f"{Path(path).stem}:{class_name}.{attr}"
                     relationships.append(
                         {
-                            "id": f"rel:call:{class_name}.{caller}:{base.id}.{attr}:{getattr(node, 'lineno', 0)}",
+                            "id": f"rel:call:{class_name}.{method_bare}:{base.id}.{attr}:{getattr(node, 'lineno', 0)}",
                             "source": source_title,
                             "target": hint,
                             "type": "calls",
-                            "description": f"{class_name}.{caller} calls {base.id}.{attr} (self/cls method in {class_name})",
+                            "description": f"{class_name}.{method_bare} calls {base.id}.{attr} (self/cls method in {class_name})",
                             "weight": 0.80,
                             "text_unit_ids": [f"tu:file:{path.name}"],
                             "human_readable_id": len(relationships) + 1,
