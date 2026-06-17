@@ -388,6 +388,7 @@ def test_module_entity_title_does_not_collide_with_main_function(tmp_path: Path)
 
 def test_unresolved_attribute_receiver_does_not_bind_to_module_function(tmp_path: Path):
     """obj.match() must not become a high-confidence edge to module-level match()."""
+    from scripts.byog_graph import ByogGraph, publish_byog_snapshot
     from scripts.mini_game_to_byog import build_byog_for_package
 
     pkg = tmp_path / "pkg"
@@ -428,6 +429,20 @@ def test_unresolved_attribute_receiver_does_not_bind_to_module_function(tmp_path
         for o in observations
     ), observations
     assert not any(str(o.get("source", "")).startswith("ent:") for o in observations), observations
+
+    graph_root = tmp_path / "graph"
+    publish_byog_snapshot(
+        pd.DataFrame(data["entities"]),
+        pd.DataFrame(data["relationships"]),
+        pd.DataFrame(data["text_units"]),
+        graph_root / "output",
+        keep_last=1,
+        source_root=pkg,
+        call_observations_df=pd.DataFrame(observations),
+    )
+    g = ByogGraph(graph_root)
+    assert any(o.get("source") == "mod:Wrapper._caller" for o in g.observations("mod:Wrapper"))
+    assert any(o.get("source") == "mod:Wrapper._caller" for o in g.observations("mod:Wrapper._caller"))
 
 
 def test_audit_flags_attribute_call_to_module_function_suspicion():

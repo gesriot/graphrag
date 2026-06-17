@@ -452,7 +452,8 @@ class ByogGraph:
                     self.call_observations["source"].astype(str).str.startswith(module_prefix + ":")
                 )
             else:
-                mask = self.call_observations["source"].astype(str) == title
+                obs_src = self.call_observations["source"].astype(str)
+                mask = (obs_src == title) | obs_src.str.startswith(title + ".")
         else:
             # treat raw query as prefix (e.g. "sim" or "sim:run_simulation")
             mask = self.call_observations["source"].astype(str).str.startswith(query)
