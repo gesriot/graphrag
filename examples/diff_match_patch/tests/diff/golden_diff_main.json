@@ -1,0 +1,495 @@
+{
+  "name": "diff_main",
+  "cases": [
+    {
+      "op": "diff",
+      "text1": "abc",
+      "text2": "abc",
+      "checklines": false,
+      "diffs": [
+        [
+          0,
+          "abc"
+        ]
+      ]
+    },
+    {
+      "op": "diff",
+      "text1": "",
+      "text2": "",
+      "checklines": false,
+      "diffs": []
+    },
+    {
+      "op": "diff",
+      "text1": "",
+      "text2": "abc",
+      "checklines": false,
+      "diffs": [
+        [
+          1,
+          "abc"
+        ]
+      ]
+    },
+    {
+      "op": "diff",
+      "text1": "abc",
+      "text2": "",
+      "checklines": false,
+      "diffs": [
+        [
+          -1,
+          "abc"
+        ]
+      ]
+    },
+    {
+      "op": "diff",
+      "text1": "abc",
+      "text2": "xyz",
+      "checklines": false,
+      "diffs": [
+        [
+          -1,
+          "abc"
+        ],
+        [
+          1,
+          "xyz"
+        ]
+      ]
+    },
+    {
+      "op": "diff",
+      "text1": "1234abc",
+      "text2": "1234xyz",
+      "checklines": false,
+      "diffs": [
+        [
+          0,
+          "1234"
+        ],
+        [
+          -1,
+          "abc"
+        ],
+        [
+          1,
+          "xyz"
+        ]
+      ]
+    },
+    {
+      "op": "diff",
+      "text1": "abc1234",
+      "text2": "xyz1234",
+      "checklines": false,
+      "diffs": [
+        [
+          -1,
+          "abc"
+        ],
+        [
+          1,
+          "xyz"
+        ],
+        [
+          0,
+          "1234"
+        ]
+      ]
+    },
+    {
+      "op": "diff",
+      "text1": "The cat",
+      "text2": "The dog",
+      "checklines": false,
+      "diffs": [
+        [
+          0,
+          "The "
+        ],
+        [
+          -1,
+          "cat"
+        ],
+        [
+          1,
+          "dog"
+        ]
+      ]
+    },
+    {
+      "op": "diff",
+      "text1": "abc",
+      "text2": "a123bc",
+      "checklines": false,
+      "diffs": [
+        [
+          0,
+          "a"
+        ],
+        [
+          1,
+          "123"
+        ],
+        [
+          0,
+          "bc"
+        ]
+      ]
+    },
+    {
+      "op": "diff",
+      "text1": "The quick brown fox",
+      "text2": "The slow brown fox",
+      "checklines": false,
+      "diffs": [
+        [
+          0,
+          "The "
+        ],
+        [
+          -1,
+          "quick"
+        ],
+        [
+          1,
+          "slow"
+        ],
+        [
+          0,
+          " brown fox"
+        ]
+      ]
+    },
+    {
+      "op": "diff",
+      "text1": "aaa",
+      "text2": "aa",
+      "checklines": false,
+      "diffs": [
+        [
+          0,
+          "aa"
+        ],
+        [
+          -1,
+          "a"
+        ]
+      ]
+    },
+    {
+      "op": "diff",
+      "text1": "abcdef",
+      "text2": "abcXdef",
+      "checklines": false,
+      "diffs": [
+        [
+          0,
+          "abc"
+        ],
+        [
+          1,
+          "X"
+        ],
+        [
+          0,
+          "def"
+        ]
+      ]
+    },
+    {
+      "op": "diff",
+      "text1": "Hello World Goodbye",
+      "text2": "Hello Brave World Goodbye",
+      "checklines": true,
+      "diffs": [
+        [
+          0,
+          "Hello "
+        ],
+        [
+          1,
+          "Brave "
+        ],
+        [
+          0,
+          "World Goodbye"
+        ]
+      ]
+    },
+    {
+      "op": "diff",
+      "text1": "1234567890",
+      "text2": "abcdef1234567890ghij",
+      "checklines": false,
+      "diffs": [
+        [
+          1,
+          "abcdef"
+        ],
+        [
+          0,
+          "1234567890"
+        ],
+        [
+          1,
+          "ghij"
+        ]
+      ]
+    },
+    {
+      "op": "diff",
+      "text1": "line one\nline two\nline three\nline four\nline five\n",
+      "text2": "line one\nline 2\nline three\nline FOUR\nline five\n",
+      "checklines": true,
+      "diffs": [
+        [
+          0,
+          "line one\nline "
+        ],
+        [
+          -1,
+          "two"
+        ],
+        [
+          1,
+          "2"
+        ],
+        [
+          0,
+          "\nline three\nline "
+        ],
+        [
+          -1,
+          "four"
+        ],
+        [
+          1,
+          "FOUR"
+        ],
+        [
+          0,
+          "\nline five\n"
+        ]
+      ]
+    },
+    {
+      "op": "diff",
+      "text1": "line one\nline two\nline three\nline four\nline five\n",
+      "text2": "line one\nline 2\nline three\nline FOUR\nline five\n",
+      "checklines": false,
+      "diffs": [
+        [
+          0,
+          "line one\nline "
+        ],
+        [
+          -1,
+          "two"
+        ],
+        [
+          1,
+          "2"
+        ],
+        [
+          0,
+          "\nline three\nline "
+        ],
+        [
+          -1,
+          "four"
+        ],
+        [
+          1,
+          "FOUR"
+        ],
+        [
+          0,
+          "\nline five\n"
+        ]
+      ]
+    },
+    {
+      "op": "diff",
+      "text1": "row 0\nrow 1\nrow 2\nrow 3\nrow 4\nrow 5\nrow 6\nrow 7\nrow 8\nrow 9\nrow 10\nrow 11\nrow 12\nrow 13\nrow 14\nrow 15\nrow 16\nrow 17\nrow 18\nrow 19\nrow 20\nrow 21\nrow 22\nrow 23\nrow 24\nrow 25\nrow 26\nrow 27\nrow 28\nrow 29\nrow 30\nrow 31\nrow 32\nrow 33\nrow 34\nrow 35\nrow 36\nrow 37\nrow 38\nrow 39",
+      "text2": "row 0\nrow 1\nrow 2\nrow 3\nrow 4\nrow 5\nrow 6\nrow 7\nrow 8\nrow 9\nrow 10\nrow 11\nrow 12\nrow 13\nrow 14\nrow 15\nrow 16\nROW seventeen\nrow 18\nrow 19\nrow 20\nrow 21\nrow 22\nrow 23\nrow 24\nrow 25\nrow 26\nrow 27\nrow 28\nrow 29\nrow 30\nrow 31\nrow 32\nrow 33\nrow 34\nrow 35\nrow 36\nrow 37\nrow 38\nrow 39",
+      "checklines": true,
+      "diffs": [
+        [
+          0,
+          "row 0\nrow 1\nrow 2\nrow 3\nrow 4\nrow 5\nrow 6\nrow 7\nrow 8\nrow 9\nrow 10\nrow 11\nrow 12\nrow 13\nrow 14\nrow 15\nrow 16\n"
+        ],
+        [
+          -1,
+          "row"
+        ],
+        [
+          1,
+          "ROW"
+        ],
+        [
+          0,
+          " "
+        ],
+        [
+          -1,
+          "17"
+        ],
+        [
+          1,
+          "seventeen"
+        ],
+        [
+          0,
+          "\nrow 18\nrow 19\nrow 20\nrow 21\nrow 22\nrow 23\nrow 24\nrow 25\nrow 26\nrow 27\nrow 28\nrow 29\nrow 30\nrow 31\nrow 32\nrow 33\nrow 34\nrow 35\nrow 36\nrow 37\nrow 38\nrow 39"
+        ]
+      ]
+    },
+    {
+      "op": "diff",
+      "text1": "row 0\nrow 1\nrow 2\nrow 3\nrow 4\nrow 5\nrow 6\nrow 7\nrow 8\nrow 9\nrow 10\nrow 11\nrow 12\nrow 13\nrow 14\nrow 15\nrow 16\nrow 17\nrow 18\nrow 19\nrow 20\nrow 21\nrow 22\nrow 23\nrow 24\nrow 25\nrow 26\nrow 27\nrow 28\nrow 29\nrow 30\nrow 31\nrow 32\nrow 33\nrow 34\nrow 35\nrow 36\nrow 37\nrow 38\nrow 39",
+      "text2": "row 0\nrow 1\nrow 2\nrow 3\nrow 4\nrow 5\nrow 6\nrow 7\nrow 8\nrow 9\nrow 10\nrow 11\nrow 12\nrow 13\nrow 14\nrow 15\nrow 16\nROW seventeen\nrow 18\nrow 19\nrow 20\nrow 21\nrow 22\nrow 23\nrow 24\nrow 25\nrow 26\nrow 27\nrow 28\nrow 29\nrow 30\nrow 31\nrow 32\nrow 33\nrow 34\nrow 35\nrow 36\nrow 37\nrow 38\nrow 39",
+      "checklines": false,
+      "diffs": [
+        [
+          0,
+          "row 0\nrow 1\nrow 2\nrow 3\nrow 4\nrow 5\nrow 6\nrow 7\nrow 8\nrow 9\nrow 10\nrow 11\nrow 12\nrow 13\nrow 14\nrow 15\nrow 16\n"
+        ],
+        [
+          -1,
+          "row"
+        ],
+        [
+          1,
+          "ROW"
+        ],
+        [
+          0,
+          " "
+        ],
+        [
+          -1,
+          "17"
+        ],
+        [
+          1,
+          "seventeen"
+        ],
+        [
+          0,
+          "\nrow 18\nrow 19\nrow 20\nrow 21\nrow 22\nrow 23\nrow 24\nrow 25\nrow 26\nrow 27\nrow 28\nrow 29\nrow 30\nrow 31\nrow 32\nrow 33\nrow 34\nrow 35\nrow 36\nrow 37\nrow 38\nrow 39"
+        ]
+      ]
+    },
+    {
+      "op": "diff",
+      "text1": "привет мир",
+      "text2": "пока мир",
+      "checklines": false,
+      "diffs": [
+        [
+          0,
+          "п"
+        ],
+        [
+          -1,
+          "ривет"
+        ],
+        [
+          1,
+          "ока"
+        ],
+        [
+          0,
+          " мир"
+        ]
+      ]
+    },
+    {
+      "op": "diff",
+      "text1": "a😀b",
+      "text2": "a😎b",
+      "checklines": false,
+      "diffs": [
+        [
+          0,
+          "a"
+        ],
+        [
+          -1,
+          "😀"
+        ],
+        [
+          1,
+          "😎"
+        ],
+        [
+          0,
+          "b"
+        ]
+      ]
+    },
+    {
+      "op": "diff",
+      "text1": "café",
+      "text2": "café",
+      "checklines": false,
+      "diffs": [
+        [
+          0,
+          "caf"
+        ],
+        [
+          -1,
+          "é"
+        ],
+        [
+          1,
+          "é"
+        ]
+      ]
+    },
+    {
+      "op": "diff",
+      "text1": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "text2": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxyxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "checklines": false,
+      "diffs": [
+        [
+          0,
+          "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        ],
+        [
+          1,
+          "y"
+        ],
+        [
+          0,
+          "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        ]
+      ]
+    },
+    {
+      "op": "diff",
+      "text1": "same",
+      "text2": "same",
+      "checklines": true,
+      "diffs": [
+        [
+          0,
+          "same"
+        ]
+      ]
+    },
+    {
+      "op": "diff",
+      "text1": "",
+      "text2": "",
+      "checklines": true,
+      "diffs": []
+    }
+  ]
+}

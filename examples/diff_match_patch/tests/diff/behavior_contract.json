@@ -1,0 +1,26 @@
+{
+  "name": "diff_match_patch_diff_v1",
+  "version": 1,
+  "description": "Behavior contract for the v1 (diff) scope of diff-match-patch. The golden ops are intentionally EXACT: they pin the specific Python implementation (diff-match-patch 20241021), not merely 'a valid minimal diff'. Any Rust port must reproduce these exact operation sequences.",
+  "config": {
+    "Diff_Timeout": 0,
+    "Diff_EditCost": 4,
+    "note": "Diff_Timeout=0 removes the time-based bisect bail so diff_main is deterministic. Diff_EditCost=4 is fixed for the efficiency cleanup cases."
+  },
+  "op_codes": {
+    "-1": "DIFF_DELETE",
+    "0": "DIFF_EQUAL",
+    "1": "DIFF_INSERT"
+  },
+  "invariants": {
+    "ops_only_minus1_0_1": "Every diff operation code is one of -1, 0, 1.",
+    "reconstruct_text1": "Concatenating the text of EQUAL and DELETE ops yields text1.",
+    "reconstruct_text2": "Concatenating the text of EQUAL and INSERT ops yields text2.",
+    "merged_no_empty_ops": "After diff_cleanupMerge, no operation has empty text (except a possible single leading empty EQUAL kept by the reference).",
+    "merged_no_adjacent_same_type": "After diff_cleanupMerge, no two adjacent operations share the same op code."
+  },
+  "scope": {
+    "covered": ["diff_main (checklines true/false)", "diff_cleanupSemantic", "diff_cleanupEfficiency", "diff_cleanupMerge"],
+    "out_of_scope_until_later": ["match_main (v2)", "patch_make/apply/toText/fromText (v3)", "diff_cleanupSemanticLossless as a standalone op", "delta/HTML/text serialization helpers"]
+  }
+}
