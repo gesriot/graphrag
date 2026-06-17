@@ -1,0 +1,12 @@
+[package]
+name = "mini_lang_rust"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Pure std interpreter for the deterministic Python->Rust port experiment.
+
+[dev-dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# Dev-deps for golden JSON verification against the committed Python golden_*.json.
