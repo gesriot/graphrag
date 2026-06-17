@@ -29,9 +29,11 @@ Vendored-file SHA-256 values (verified directly against the wheel):
 - `diff_match_patch.py`: `c5aecc2945441f53cdfe413b59c23e88eb43bfa61e444ca8ff0eee5823232a71`
 
 ## Port scope (staged, same gate per stage)
-- **v1 (diff):** `diff_main` + cleanups (`diff_cleanupSemantic` / `Efficiency` /
-  `Merge`) with `Diff_Timeout = 0` for determinism. golden = (text1, text2) -> diff ops.
-- **v2 (match):** `match_main` (Bitap), with location / distance / threshold edge cases.
+- **v1 (diff, complete):** `diff_main` + cleanups (`diff_cleanupSemantic` /
+  `Efficiency` / `Merge`) with `Diff_Timeout = 0` for determinism; 44 golden
+  cases and `overall_pass=True` with 0 recorded manual fixes.
+- **v2 (match, next):** `match_main` (Bitap), with location / distance /
+  threshold edge cases.
 - **v3 (patch):** `patch_make` / `patch_apply` / `patch_toText` / `patch_fromText`,
   including application against imperfect source.
 

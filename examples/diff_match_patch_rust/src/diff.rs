@@ -276,6 +276,28 @@ fn diff_line_mode_chars(t1: &[char], t2: &[char]) -> CDiff {
     diffs
 }
 
+const SURROGATE_START: usize = 0xD800;
+const SURROGATE_END: usize = 0xE000;
+const MAX_LINE_INDEX: usize = 0x10FFFF - (SURROGATE_END - SURROGATE_START);
+
+fn line_index_to_char(index: usize) -> char {
+    let scalar = if index >= SURROGATE_START {
+        index + (SURROGATE_END - SURROGATE_START)
+    } else {
+        index
+    };
+    char::from_u32(scalar as u32).expect("line index exceeds Unicode scalar capacity")
+}
+
+fn char_to_line_index(value: char) -> usize {
+    let scalar = value as usize;
+    if scalar >= SURROGATE_END {
+        scalar - (SURROGATE_END - SURROGATE_START)
+    } else {
+        scalar
+    }
+}
+
 fn diff_lines_to_chars(t1: &[char], t2: &[char]) -> (Vec<char>, Vec<char>, Vec<Vec<char>>) {
     use std::collections::HashMap;
     let mut line_array: Vec<Vec<char>> = vec![vec![]];
@@ -299,7 +321,7 @@ fn diff_lines_to_chars(t1: &[char], t2: &[char]) -> (Vec<char>, Vec<char>, Vec<V
             let mut line: Vec<char> = text[line_start..=le].to_vec();
             let mut le = le;
             if let Some(&idx) = line_hash.get(&line) {
-                chars.push(char::from_u32(idx as u32).expect("line index is a valid scalar"));
+                chars.push(line_index_to_char(idx));
             } else {
                 if line_array.len() == max_lines {
                     line = text[line_start..].to_vec();
@@ -307,10 +329,7 @@ fn diff_lines_to_chars(t1: &[char], t2: &[char]) -> (Vec<char>, Vec<char>, Vec<V
                 }
                 line_array.push(line.clone());
                 line_hash.insert(line, line_array.len() - 1);
-                chars.push(
-                    char::from_u32((line_array.len() - 1) as u32)
-                        .expect("line index is a valid scalar"),
-                );
+                chars.push(line_index_to_char(line_array.len() - 1));
             }
             line_start = le + 1;
             line_end = le as i64;
@@ -319,7 +338,7 @@ fn diff_lines_to_chars(t1: &[char], t2: &[char]) -> (Vec<char>, Vec<char>, Vec<V
     }
 
     let chars1 = munge(t1, &mut line_array, &mut line_hash, 666666);
-    let chars2 = munge(t2, &mut line_array, &mut line_hash, 1114111);
+    let chars2 = munge(t2, &mut line_array, &mut line_hash, MAX_LINE_INDEX);
     (chars1, chars2, line_array)
 }
 
@@ -327,7 +346,7 @@ fn diff_chars_to_lines(diffs: &mut CDiff, line_array: &[Vec<char>]) {
     for d in diffs.iter_mut() {
         let mut text: Vec<char> = Vec::new();
         for c in &d.1 {
-            text.extend(line_array[*c as usize].iter());
+            text.extend(line_array[char_to_line_index(*c)].iter());
         }
         d.1 = text;
     }
@@ -764,5 +783,22 @@ impl DiffMatchPatch {
         let mut c = to_cdiff(diffs);
         cleanup_efficiency_chars(&mut c, self.diff_edit_cost);
         *diffs = to_diff(c);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{char_to_line_index, line_index_to_char, MAX_LINE_INDEX, SURROGATE_START};
+
+    #[test]
+    fn line_index_encoding_skips_unicode_surrogates() {
+        for index in [
+            SURROGATE_START - 1,
+            SURROGATE_START,
+            SURROGATE_START + 1,
+            MAX_LINE_INDEX,
+        ] {
+            assert_eq!(char_to_line_index(line_index_to_char(index)), index);
+        }
     }
 }
