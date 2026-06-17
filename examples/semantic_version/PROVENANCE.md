@@ -23,7 +23,15 @@ were our own code). Vendored so indexing / golden / port are reproducible.
   pull in Django (not pure-stdlib).
 
 ## Port scope
-- **v1 (now):** `Version` — parse / stringify / compare / ordering / invalid inputs
-  (with its identifier-comparison helpers: `MaxIdentifier`, `NumericIdentifier`,
-  `AlphaIdentifier`, `_has_leading_zero`, plus `compare` / `validate`).
-- **v2 (later, only if v1 passes the gate):** `SimpleSpec` / `NpmSpec` range matching.
+- **v1 (complete):** `Version` — parse / stringify / compare / ordering / invalid
+  inputs (with its identifier-comparison helpers plus `compare` / `validate`).
+- **v2a (complete):** `SimpleSpec` match / select / filter and invalid-spec
+  behavior.
+- **v2b (complete):** `NpmSpec` match / select / filter and invalid-spec behavior.
+
+The shared contract contains 147 golden cases across 13 files, all consumed by
+the Rust integration tests. This is the complete **core porting scope**, not a
+claim of full Python package API compatibility. Deliberately out of scope are
+the deprecated `SpecItem` and `LegacySpec` / `Spec` compatibility APIs,
+top-level `match`, full Clause equality/hash/iteration behavior, warnings and
+Python-specific representations, and the omitted Django integration.

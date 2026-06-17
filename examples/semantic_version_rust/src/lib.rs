@@ -1,5 +1,6 @@
 //! Structure-preserving Rust port of the vendored Python `semantic_version`
-//! (v1 scope: `Version` only). See examples/semantic_version/PROVENANCE.md.
+//! core scope: `Version`, `SimpleSpec`, and `NpmSpec`. See
+//! examples/semantic_version/PROVENANCE.md for explicit API boundaries.
 //!
 //! Verified against the same golden_*.json contract as the Python reference.
 

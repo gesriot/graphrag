@@ -47,7 +47,7 @@ Important implementation correction: do **not** rely on generic GraphRAG entity 
 3. **Graph clean** — `audit_call_edges` on the project's graph shows `pass_rate=1.0` with no dangling targets, OR every remaining weak/false edge is demoted to `call_observations` (never a high-confidence deterministic edge).
 4. **Then `port_eval`** — only after 1–3, run the end-to-end harness and record the report (graph pass rate, golden cases, manual-fix count, `overall_pass`).
 
-Validated end-to-end on two projects: `mini_game` (greenhouse) and `mini_lang` (interpreter; lexer→parser→eval, 28 golden cases, `overall_pass=True`, 0 manual fixes). Next is a genuinely external permissive pure-Python project through the same gate.
+Validated end-to-end on three projects, all with `overall_pass=True` and 0 recorded manual fixes: `mini_game` (greenhouse), `mini_lang` (interpreter; lexer→parser→eval, 28 golden cases), and the external BSD-licensed `semantic_version` 2.10.0 core scope (`Version`, `SimpleSpec`, and `NpmSpec`; 147 golden cases across 13 files). The next evaluation target should be a fourth project from a different behavioral domain rather than another version/parser dialect.
 
 ## 2. High-Level Architecture (Replicable Version)
 
