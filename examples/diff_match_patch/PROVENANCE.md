@@ -32,9 +32,11 @@ Vendored-file SHA-256 values (verified directly against the wheel):
 - **v1 (diff, complete):** `diff_main` + cleanups (`diff_cleanupSemantic` /
   `Efficiency` / `Merge`) with `Diff_Timeout = 0` for determinism; 44 golden
   cases and `overall_pass=True` with 0 recorded manual fixes.
-- **v2 (match, next):** `match_main` (Bitap), with location / distance /
-  threshold edge cases.
-- **v3 (patch):** `patch_make` / `patch_apply` / `patch_toText` / `patch_fromText`,
+- **v2 (match, complete):** `match_main` (Bitap), including location / distance /
+  threshold edge cases, Unicode code-point indexes, and arbitrary-length
+  patterns via unbounded bit arrays; 30 golden cases and `overall_pass=True`
+  with 0 recorded manual fixes.
+- **v3 (patch, next):** `patch_make` / `patch_apply` / `patch_toText` / `patch_fromText`,
   including application against imperfect source.
 
 Each stage: license/provenance (done) → golden before Rust → `audit_call_edges`
