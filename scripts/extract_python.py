@@ -829,7 +829,8 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                         confidence = 0.40
                         deterministic = False
 
-                caller_id = make_id("fn", caller, str(path))
+                caller_kind = "method" if caller in class_for_method else "fn"
+                caller_id = make_id(caller_kind, caller, str(path))
                 callee_id = make_id("fn", attr, str(path))
                 rel = {
                     "id": f"rel:call:{caller}:{attr}:attr:{node.lineno}:{node.col_offset}",

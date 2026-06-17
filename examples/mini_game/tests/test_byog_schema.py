@@ -398,6 +398,9 @@ def test_unresolved_attribute_receiver_does_not_bind_to_module_function(tmp_path
         "class Matcher:\n"
         "    def match(self, value):\n"
         "        return True\n\n"
+        "class Wrapper:\n"
+        "    def _caller(self, obj):\n"
+        "        return obj.match('x')\n\n"
         "def caller(obj):\n"
         "    return obj.match('x')\n"
     )
@@ -418,6 +421,13 @@ def test_unresolved_attribute_receiver_does_not_bind_to_module_function(tmp_path
         and float(o.get("confidence", 1.0)) < 0.7
         for o in observations
     ), observations
+    assert any(
+        o.get("source") == "mod:Wrapper._caller"
+        and o.get("display_target") == "obj.match"
+        and o.get("reason") == "unresolved receiver"
+        for o in observations
+    ), observations
+    assert not any(str(o.get("source", "")).startswith("ent:") for o in observations), observations
 
 
 def test_audit_flags_attribute_call_to_module_function_suspicion():

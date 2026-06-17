@@ -110,6 +110,7 @@ def build_byog_for_package(use_advanced: bool = False, package_dir: Path | None 
     rel_id = 0
 
     title_to_id: Dict[str, str] = {}
+    id_to_title: Dict[str, str] = {}
     title_to_text_unit: Dict[str, str] = {}
 
     # Raw data collected in pass 1
@@ -135,6 +136,7 @@ def build_byog_for_package(use_advanced: bool = False, package_dir: Path | None 
         file_entities = []
         for e in rel["entities"]:
             human_id += 1
+            original_id = e["id"]
             original_title = e["title"]
             fqn_title = f"{stem}:{original_title}" if stem != "mini_game" else original_title
             symbol_tu_id = f"tu:{stem}:{slug(original_title)}"
@@ -146,7 +148,13 @@ def build_byog_for_package(use_advanced: bool = False, package_dir: Path | None 
                 e["document_ids"] = [f"doc:{stem}"]
             if "covariate_ids" not in e:
                 e["covariate_ids"] = []
+            id_to_title[original_id] = fqn_title
+            if e["type"] == "method" and original_id.startswith("ent:method:"):
+                # Older extractor rows used ent:fn for some method call sources.
+                # Keep observations/context packs human-readable across both forms.
+                id_to_title[original_id.replace("ent:method:", "ent:fn:", 1)] = fqn_title
             title_to_id[fqn_title] = e["id"]
+            id_to_title[e["id"]] = fqn_title
             title_to_text_unit[fqn_title] = symbol_tu_id
             all_entities.append(e)
             file_entities.append(e)
@@ -210,6 +218,8 @@ def build_byog_for_package(use_advanced: bool = False, package_dir: Path | None 
                     return ""
                 if raw in title_to_id:
                     return raw
+                if raw in id_to_title:
+                    return id_to_title[raw]
                 # Internal extractor ids are file-stem based (e.g. ent:fn:index_python:main).
                 # Resolve them in the context of the current module key instead of falling
                 # back to a global bare-name match, which can leak calls across same-named
