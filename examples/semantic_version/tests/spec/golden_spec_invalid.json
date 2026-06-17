@@ -1,0 +1,50 @@
+{
+  "name": "spec_invalid",
+  "cases": [
+    {
+      "op": "invalid",
+      "spec": "",
+      "error": "Invalid simple block ''"
+    },
+    {
+      "op": "invalid",
+      "spec": "not-a-spec",
+      "error": "Invalid simple block 'not-a-spec'"
+    },
+    {
+      "op": "invalid",
+      "spec": ">=1.2.x-foo",
+      "error": "Invalid simple block '>=1.2.x-foo'"
+    },
+    {
+      "op": "invalid",
+      "spec": ">1.2.3+build",
+      "error": "Invalid simple spec: '>1.2.3+build'"
+    },
+    {
+      "op": "invalid",
+      "spec": "==1.2.3.4",
+      "error": "Invalid simple block '==1.2.3.4'"
+    },
+    {
+      "op": "invalid",
+      "spec": "foo,>=1.0.0",
+      "error": "Invalid simple block 'foo'"
+    },
+    {
+      "op": "invalid",
+      "spec": "~",
+      "error": "Invalid simple block '~'"
+    },
+    {
+      "op": "invalid",
+      "spec": "^",
+      "error": "Invalid simple block '^'"
+    },
+    {
+      "op": "invalid",
+      "spec": "==",
+      "error": "Invalid simple block '=='"
+    }
+  ]
+}

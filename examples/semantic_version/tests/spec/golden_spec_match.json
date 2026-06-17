@@ -1,0 +1,239 @@
+{
+  "name": "spec_match",
+  "cases": [
+    {
+      "op": "match",
+      "spec": "==1.2.3",
+      "version": "1.2.3",
+      "result": true
+    },
+    {
+      "op": "match",
+      "spec": "==1.2.3",
+      "version": "1.2.4",
+      "result": false
+    },
+    {
+      "op": "match",
+      "spec": "=1.2.3",
+      "version": "1.2.3",
+      "result": true
+    },
+    {
+      "op": "match",
+      "spec": "1.2.3",
+      "version": "1.2.3",
+      "result": true
+    },
+    {
+      "op": "match",
+      "spec": ">=1.0.0",
+      "version": "1.0.1",
+      "result": true
+    },
+    {
+      "op": "match",
+      "spec": ">=1.0.0",
+      "version": "0.9.9",
+      "result": false
+    },
+    {
+      "op": "match",
+      "spec": ">1.0.0",
+      "version": "1.0.0",
+      "result": false
+    },
+    {
+      "op": "match",
+      "spec": ">1.0.0",
+      "version": "1.0.1",
+      "result": true
+    },
+    {
+      "op": "match",
+      "spec": "<2.0.0",
+      "version": "1.9.9",
+      "result": true
+    },
+    {
+      "op": "match",
+      "spec": "<2.0.0",
+      "version": "2.0.0",
+      "result": false
+    },
+    {
+      "op": "match",
+      "spec": "<=2.0.0",
+      "version": "2.0.0",
+      "result": true
+    },
+    {
+      "op": "match",
+      "spec": "<=2.0.0",
+      "version": "2.0.1",
+      "result": false
+    },
+    {
+      "op": "match",
+      "spec": "!=1.2.3",
+      "version": "1.2.3",
+      "result": false
+    },
+    {
+      "op": "match",
+      "spec": "!=1.2.3",
+      "version": "1.2.4",
+      "result": true
+    },
+    {
+      "op": "match",
+      "spec": "^1.2.3",
+      "version": "1.2.3",
+      "result": true
+    },
+    {
+      "op": "match",
+      "spec": "^1.2.3",
+      "version": "1.9.9",
+      "result": true
+    },
+    {
+      "op": "match",
+      "spec": "^1.2.3",
+      "version": "2.0.0",
+      "result": false
+    },
+    {
+      "op": "match",
+      "spec": "^0.2.3",
+      "version": "0.2.9",
+      "result": true
+    },
+    {
+      "op": "match",
+      "spec": "^0.2.3",
+      "version": "0.3.0",
+      "result": false
+    },
+    {
+      "op": "match",
+      "spec": "~1.2.3",
+      "version": "1.2.9",
+      "result": true
+    },
+    {
+      "op": "match",
+      "spec": "~1.2.3",
+      "version": "1.3.0",
+      "result": false
+    },
+    {
+      "op": "match",
+      "spec": "~=1.4.5",
+      "version": "1.4.9",
+      "result": true
+    },
+    {
+      "op": "match",
+      "spec": "~=1.4.5",
+      "version": "1.5.0",
+      "result": false
+    },
+    {
+      "op": "match",
+      "spec": "==1.2.*",
+      "version": "1.2.9",
+      "result": true
+    },
+    {
+      "op": "match",
+      "spec": "==1.2.*",
+      "version": "1.3.0",
+      "result": false
+    },
+    {
+      "op": "match",
+      "spec": "==1.*",
+      "version": "1.9.9",
+      "result": true
+    },
+    {
+      "op": "match",
+      "spec": "==1.*",
+      "version": "2.0.0",
+      "result": false
+    },
+    {
+      "op": "match",
+      "spec": ">=1.0.0,<2.0.0",
+      "version": "1.5.0",
+      "result": true
+    },
+    {
+      "op": "match",
+      "spec": ">=1.0.0,<2.0.0",
+      "version": "2.0.0",
+      "result": false
+    },
+    {
+      "op": "match",
+      "spec": ">=1.0.0",
+      "version": "1.0.0-alpha",
+      "result": false
+    },
+    {
+      "op": "match",
+      "spec": ">=1.0.0-alpha",
+      "version": "1.0.0-alpha",
+      "result": true
+    },
+    {
+      "op": "match",
+      "spec": ">=1.0.0-alpha",
+      "version": "1.0.0-beta",
+      "result": true
+    },
+    {
+      "op": "match",
+      "spec": "^1.0.0-alpha",
+      "version": "1.0.0-beta",
+      "result": false
+    },
+    {
+      "op": "match",
+      "spec": "*",
+      "version": "9.9.9",
+      "result": true
+    },
+    {
+      "op": "match",
+      "spec": "*",
+      "version": "0.0.1",
+      "result": true
+    },
+    {
+      "op": "match",
+      "spec": ">1.2",
+      "version": "2.0.0",
+      "result": true
+    },
+    {
+      "op": "match",
+      "spec": "<=1.2",
+      "version": "1.2.9",
+      "result": true
+    },
+    {
+      "op": "match",
+      "spec": "!=1.2",
+      "version": "1.3.0",
+      "result": true
+    },
+    {
+      "op": "match",
+      "spec": "!=1.2",
+      "version": "1.2.5",
+      "result": false
+    }
+  ]
+}

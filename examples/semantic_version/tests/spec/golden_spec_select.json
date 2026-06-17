@@ -1,0 +1,44 @@
+{
+  "name": "spec_select",
+  "cases": [
+    {
+      "op": "select",
+      "spec": ">=1.0.0",
+      "versions": [
+        "1.0.0",
+        "1.2.0",
+        "0.9.0"
+      ],
+      "selected": "1.2.0"
+    },
+    {
+      "op": "select",
+      "spec": "<2.0.0",
+      "versions": [
+        "1.0.0",
+        "2.0.0",
+        "1.5.0"
+      ],
+      "selected": "1.5.0"
+    },
+    {
+      "op": "select",
+      "spec": "^1.0.0",
+      "versions": [
+        "1.0.0",
+        "1.9.9",
+        "2.0.0"
+      ],
+      "selected": "1.9.9"
+    },
+    {
+      "op": "select",
+      "spec": ">=5.0.0",
+      "versions": [
+        "1.0.0",
+        "2.0.0"
+      ],
+      "selected": null
+    }
+  ]
+}
