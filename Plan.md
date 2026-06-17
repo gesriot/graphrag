@@ -41,6 +41,14 @@ Important implementation correction: do **not** rely on generic GraphRAG entity 
 
 **Means vs. ends — verification boundary (recorded 2026-06-16):** graph-quality auditing is the *means*, Python→Rust fidelity is the *north-star end*. A correct graph is necessary but not sufficient; it must be measured separately from the port outcome. Two repeatable harnesses make this explicit: `scripts/audit_call_edges.py` measures the graph (structural pass rate of CALLS edges, dangling targets, seeded precision sample), and `scripts/port_eval.py` measures the end-to-end port (graph quality → context packs → `cargo fmt/check/test/run` → golden scenarios → manual-fix count) as one comparable report. C/C++ input remains "maybe, later"; Python→Rust is the capability that must work flawlessly and is the primary acceptance metric.
 
+**Porting gate (per-project checklist, recorded 2026-06-16):** before porting any project to Rust, pass these gates in order — do not start the port until all are green:
+1. **License captured** — project is permissively licensed; license + provenance recorded (esp. for external/third-party code).
+2. **Golden/contract captured first** — `golden_*.json` (or trace contract) exists and the Python reference passes them *before* any Rust is written. The contract scope is stated explicitly (e.g. for mini_lang: `run_source` semantics are pinned; CLI file I/O error text is out of scope, only its pass/fail outcome is kept faithful).
+3. **Graph clean** — `audit_call_edges` on the project's graph shows `pass_rate=1.0` with no dangling targets, OR every remaining weak/false edge is demoted to `call_observations` (never a high-confidence deterministic edge).
+4. **Then `port_eval`** — only after 1–3, run the end-to-end harness and record the report (graph pass rate, golden cases, manual-fix count, `overall_pass`).
+
+Validated end-to-end on two projects: `mini_game` (greenhouse) and `mini_lang` (interpreter; lexer→parser→eval, 28 golden cases, `overall_pass=True`, 0 manual fixes). Next is a genuinely external permissive pure-Python project through the same gate.
+
 ## 2. High-Level Architecture (Replicable Version)
 
 ```
