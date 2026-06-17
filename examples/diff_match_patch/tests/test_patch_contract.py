@@ -60,12 +60,15 @@ def test_golden_case(case):
         assert d.patch_toText(patches) == case["patch_text"]
     elif op == "apply":
         patches = d.patch_fromText(case["patch_text"])
+        patches_before = d.patch_toText(patches)
         new_text, results = d.patch_apply(patches, case["source"])
         assert new_text == case["result"]
         assert results == case["results"]
-        # patch_apply must not mutate its input patches: re-applying gives the same.
+        assert d.patch_toText(patches) == patches_before
+        # Re-applying the same patch objects must remain stable as well.
         new_text2, results2 = d.patch_apply(patches, case["source"])
         assert (new_text2, results2) == (new_text, results)
+        assert d.patch_toText(patches) == patches_before
     elif op == "roundtrip":
         assert d.patch_toText(d.patch_fromText(case["patch_text"])) == case["expected"]
     elif op == "invalid":

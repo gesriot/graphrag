@@ -40,6 +40,21 @@
       "op": "roundtrip",
       "patch_text": "@@ -1,29 +1,29 @@\n-abcde\n+ABCDE\n fghijabcdefghijabcdefghi\n",
       "expected": "@@ -1,29 +1,29 @@\n-abcde\n+ABCDE\n fghijabcdefghijabcdefghi\n"
+    },
+    {
+      "op": "roundtrip",
+      "patch_text": "@@ -1,19 +1,19 @@\n-!~*'();/?:@&=+$,# \n+!~*'();/?:@&=+$,# \n",
+      "expected": "@@ -1,19 +1,19 @@\n-!~*'();/?:@&=+$,# \n+!~*'();/?:@&=+$,# \n"
+    },
+    {
+      "op": "roundtrip",
+      "patch_text": "@@ -1 +1 @@\n-%ZZ\n+x\n",
+      "expected": "@@ -1 +1 @@\n-%25ZZ\n+x\n"
+    },
+    {
+      "op": "roundtrip",
+      "patch_text": "@@ -1 +1 @@\n-%FF\n+x\n",
+      "expected": "@@ -1 +1 @@\n-%EF%BF%BD\n+x\n"
     }
   ]
 }

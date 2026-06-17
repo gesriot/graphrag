@@ -54,6 +54,12 @@
       "text1": "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij",
       "text2": "ABCDEfghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij",
       "patch_text": "@@ -1,29 +1,29 @@\n-abcde\n+ABCDE\n fghijabcdefghijabcdefghi\n"
+    },
+    {
+      "op": "make",
+      "text1": "a",
+      "text2": "b",
+      "patch_text": "@@ -1 +1 @@\n-a\n+b\n"
     }
   ]
 }

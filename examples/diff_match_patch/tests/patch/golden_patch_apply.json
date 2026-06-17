@@ -65,6 +65,27 @@
       "results": [
         true
       ]
+    },
+    {
+      "op": "apply",
+      "patch_text": "@@ -1,56 +1,10 @@\n abc\n-defghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOP\n+XYZ\n QRST\n",
+      "source": "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+      "result": "abcXYZQRSTUVWXYZ",
+      "results": [
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "op": "apply",
+      "patch_text": "@@ -7,13 +7,11 @@\n ick \n-brown\n+red\n  fox\n@@ -35,8 +35,8 @@\n azy \n-dog\n+cat\n .\n",
+      "source": "The quick brown fox jumps over an entirely unrelated ending.",
+      "result": "The quick red fox jumps over an entirely unrelated ending.",
+      "results": [
+        true,
+        false
+      ]
     }
   ]
 }
