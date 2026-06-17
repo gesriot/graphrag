@@ -1,0 +1,70 @@
+{
+  "name": "patch_apply",
+  "cases": [
+    {
+      "op": "apply",
+      "patch_text": "@@ -1,11 +1,17 @@\n hello \n+brave \n world\n",
+      "source": "hello world",
+      "result": "hello brave world",
+      "results": [
+        true
+      ]
+    },
+    {
+      "op": "apply",
+      "patch_text": "@@ -1,11 +1,17 @@\n hello \n+brave \n world\n",
+      "source": "hello cruel world",
+      "result": "hello cruel brave world",
+      "results": [
+        true
+      ]
+    },
+    {
+      "op": "apply",
+      "patch_text": "@@ -7,13 +7,11 @@\n ick \n-brown\n+red\n  fox\n@@ -35,8 +35,8 @@\n azy \n-dog\n+cat\n .\n",
+      "source": "The quick brown fox jumps over the lazy dog.",
+      "result": "The quick red fox jumps over the lazy cat.",
+      "results": [
+        true,
+        true
+      ]
+    },
+    {
+      "op": "apply",
+      "patch_text": "@@ -7,13 +7,11 @@\n ick \n-brown\n+red\n  fox\n@@ -35,8 +35,8 @@\n azy \n-dog\n+cat\n .\n",
+      "source": "The quick brown fox jumps over the lazy dog!!",
+      "result": "The quick red fox jumps over the lazy cat!!",
+      "results": [
+        true,
+        true
+      ]
+    },
+    {
+      "op": "apply",
+      "patch_text": "@@ -1,13 +1,12 @@\n The \n-quick\n+slow\n  bro\n",
+      "source": "Totally different text, no match here at all.",
+      "result": "Totally different text, no match here at all.",
+      "results": [
+        false
+      ]
+    },
+    {
+      "op": "apply",
+      "patch_text": "@@ -2,9 +2,9 @@\n af%C3%A9 \n-cr%C3%A8m\n+latt\n e\n",
+      "source": "café crème",
+      "result": "café latte",
+      "results": [
+        true
+      ]
+    },
+    {
+      "op": "apply",
+      "patch_text": "@@ -1,29 +1,29 @@\n-abcde\n+ABCDE\n fghijabcdefghijabcdefghi\n",
+      "source": "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij",
+      "result": "ABCDEfghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij",
+      "results": [
+        true
+      ]
+    }
+  ]
+}

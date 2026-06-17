@@ -1,0 +1,45 @@
+{
+  "name": "patch_roundtrip",
+  "cases": [
+    {
+      "op": "roundtrip",
+      "patch_text": "@@ -1,11 +1,17 @@\n hello \n+brave \n world\n",
+      "expected": "@@ -1,11 +1,17 @@\n hello \n+brave \n world\n"
+    },
+    {
+      "op": "roundtrip",
+      "patch_text": "@@ -7,13 +7,11 @@\n ick \n-brown\n+red\n  fox\n@@ -35,8 +35,8 @@\n azy \n-dog\n+cat\n .\n",
+      "expected": "@@ -7,13 +7,11 @@\n ick \n-brown\n+red\n  fox\n@@ -35,8 +35,8 @@\n azy \n-dog\n+cat\n .\n"
+    },
+    {
+      "op": "roundtrip",
+      "patch_text": "@@ -0,0 +1,3 @@\n+abc\n",
+      "expected": "@@ -0,0 +1,3 @@\n+abc\n"
+    },
+    {
+      "op": "roundtrip",
+      "patch_text": "@@ -1,3 +0,0 @@\n-abc\n",
+      "expected": "@@ -1,3 +0,0 @@\n-abc\n"
+    },
+    {
+      "op": "roundtrip",
+      "patch_text": "@@ -1,18 +1,18 @@\n line1%0A\n-line\n+LINE\n 2%0Aline3%0A\n",
+      "expected": "@@ -1,18 +1,18 @@\n line1%0A\n-line\n+LINE\n 2%0Aline3%0A\n"
+    },
+    {
+      "op": "roundtrip",
+      "patch_text": "@@ -2,9 +2,9 @@\n af%C3%A9 \n-cr%C3%A8m\n+latt\n e\n",
+      "expected": "@@ -2,9 +2,9 @@\n af%C3%A9 \n-cr%C3%A8m\n+latt\n e\n"
+    },
+    {
+      "op": "roundtrip",
+      "patch_text": "@@ -1,7 +1,7 @@\n a%25b \n-c\n+X\n +d\n",
+      "expected": "@@ -1,7 +1,7 @@\n a%25b \n-c\n+X\n +d\n"
+    },
+    {
+      "op": "roundtrip",
+      "patch_text": "@@ -1,29 +1,29 @@\n-abcde\n+ABCDE\n fghijabcdefghijabcdefghi\n",
+      "expected": "@@ -1,29 +1,29 @@\n-abcde\n+ABCDE\n fghijabcdefghijabcdefghi\n"
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "name": "patch_make",
+  "cases": [
+    {
+      "op": "make",
+      "text1": "hello world",
+      "text2": "hello brave world",
+      "patch_text": "@@ -1,11 +1,17 @@\n hello \n+brave \n world\n"
+    },
+    {
+      "op": "make",
+      "text1": "The quick brown fox jumps over the lazy dog.",
+      "text2": "The quick red fox jumps over the lazy cat.",
+      "patch_text": "@@ -7,13 +7,11 @@\n ick \n-brown\n+red\n  fox\n@@ -35,8 +35,8 @@\n azy \n-dog\n+cat\n .\n"
+    },
+    {
+      "op": "make",
+      "text1": "",
+      "text2": "abc",
+      "patch_text": "@@ -0,0 +1,3 @@\n+abc\n"
+    },
+    {
+      "op": "make",
+      "text1": "abc",
+      "text2": "",
+      "patch_text": "@@ -1,3 +0,0 @@\n-abc\n"
+    },
+    {
+      "op": "make",
+      "text1": "aaa",
+      "text2": "aaa",
+      "patch_text": ""
+    },
+    {
+      "op": "make",
+      "text1": "line1\nline2\nline3\n",
+      "text2": "line1\nLINE2\nline3\n",
+      "patch_text": "@@ -1,18 +1,18 @@\n line1%0A\n-line\n+LINE\n 2%0Aline3%0A\n"
+    },
+    {
+      "op": "make",
+      "text1": "café crème",
+      "text2": "café latte",
+      "patch_text": "@@ -2,9 +2,9 @@\n af%C3%A9 \n-cr%C3%A8m\n+latt\n e\n"
+    },
+    {
+      "op": "make",
+      "text1": "a%b c+d",
+      "text2": "a%b X+d",
+      "patch_text": "@@ -1,7 +1,7 @@\n a%25b \n-c\n+X\n +d\n"
+    },
+    {
+      "op": "make",
+      "text1": "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij",
+      "text2": "ABCDEfghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij",
+      "patch_text": "@@ -1,29 +1,29 @@\n-abcde\n+ABCDE\n fghijabcdefghijabcdefghi\n"
+    }
+  ]
+}

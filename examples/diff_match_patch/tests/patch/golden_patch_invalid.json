@@ -1,0 +1,20 @@
+{
+  "name": "patch_invalid",
+  "cases": [
+    {
+      "op": "invalid",
+      "patch_text": "Bad\n",
+      "error": "Invalid patch string: Bad"
+    },
+    {
+      "op": "invalid",
+      "patch_text": "@@ bad header @@\n",
+      "error": "Invalid patch string: @@ bad header @@"
+    },
+    {
+      "op": "invalid",
+      "patch_text": "@@ -1,1 +1,1 @@\n*bad mode\n",
+      "error": "Invalid patch mode: '*'\nbad mode"
+    }
+  ]
+}
