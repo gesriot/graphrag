@@ -9,6 +9,7 @@ algorithm — Myers diff, Bitap fuzzy match, and patch make/apply.
   Google's Diff-Match-Patch libraries.
 - Upstream: https://github.com/diff-match-patch-python/diff-match-patch
 - Retrieved: 2026-06-17 from the PyPI wheel `diff_match_patch-20241021-py3-none-any.whl`
+- Wheel SHA-256: `93cea333fb8b2bc0d181b0de5e16df50dd344ce64828226bda07728818936782`
 - Pure Python; `diff_match_patch.py` imports only stdlib (`re`, `sys`, `time`, `urllib.parse`).
 
 ## License — gate step 1 (captured)
@@ -20,6 +21,12 @@ algorithm — Myers diff, Bitap fuzzy match, and patch make/apply.
 - `__init__.py`, `__version__.py` — **verbatim** (no install-time machinery; both
   import cleanly without the package being pip-installed).
 - `tests/` — **omitted**: upstream's own test suite, not part of the port target.
+
+Vendored-file SHA-256 values (verified directly against the wheel):
+- `LICENSE`: `cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30`
+- `__init__.py`: `8ca504bf886e3b7eba9ffde6e9cf2b7a58eb51a8cad46eae6a13e73cb88dd0ca`
+- `__version__.py`: `681b782269688ffecde257236d62e0fe242001a01002fb3c3a814d58f0f10bcb`
+- `diff_match_patch.py`: `c5aecc2945441f53cdfe413b59c23e88eb43bfa61e444ca8ff0eee5823232a71`
 
 ## Port scope (staged, same gate per stage)
 - **v1 (diff):** `diff_main` + cleanups (`diff_cleanupSemantic` / `Efficiency` /
