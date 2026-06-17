@@ -57,6 +57,21 @@ def _check_invariants(diffs, text1, text2):
     assert "".join(t for op, t in diffs if op in (EQUAL, INSERT)) == text2
 
 
+def _reconstructed_texts(diffs):
+    return (
+        "".join(t for op, t in diffs if op in (EQUAL, DELETE)),
+        "".join(t for op, t in diffs if op in (EQUAL, INSERT)),
+    )
+
+
+def _check_merge_shape(diffs):
+    assert all(text or (index == 0 and op == EQUAL) for index, (op, text) in enumerate(diffs))
+    assert all(
+        left_op != right_op or left_op == EQUAL
+        for (left_op, _), (right_op, _) in zip(diffs, diffs[1:])
+    )
+
+
 def _run_case(case):
     op = case["op"]
     if op == "diff":
@@ -68,6 +83,7 @@ def _run_case(case):
     elif op in ("cleanup_semantic", "cleanup_efficiency", "cleanup_merge"):
         d = dmp_mod.diff_match_patch()
         diffs = _ops(case["input"])
+        before_texts = _reconstructed_texts(diffs)
         if op == "cleanup_semantic":
             d.diff_cleanupSemantic(diffs)
         elif op == "cleanup_efficiency":
@@ -76,6 +92,9 @@ def _run_case(case):
         else:
             d.diff_cleanupMerge(diffs)
         assert [[o, t] for o, t in diffs] == case["expected"]
+        assert _reconstructed_texts(diffs) == before_texts
+        if op == "cleanup_merge":
+            _check_merge_shape(diffs)
     else:  # pragma: no cover
         raise AssertionError(f"unknown op {op!r}")
 

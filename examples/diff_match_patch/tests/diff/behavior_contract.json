@@ -17,7 +17,7 @@
     "reconstruct_text1": "Concatenating the text of EQUAL and DELETE ops yields text1.",
     "reconstruct_text2": "Concatenating the text of EQUAL and INSERT ops yields text2.",
     "merged_no_empty_ops": "After diff_cleanupMerge, no operation has empty text (except a possible single leading empty EQUAL kept by the reference).",
-    "merged_no_adjacent_same_type": "After diff_cleanupMerge, no two adjacent operations share the same op code."
+    "merged_no_adjacent_edits_of_same_type": "After diff_cleanupMerge, adjacent INSERT or DELETE operations are merged. The reference may retain adjacent EQUAL operations after factoring an identical delete/insert pair."
   },
   "scope": {
     "covered": ["diff_main (checklines true/false)", "diff_cleanupSemantic", "diff_cleanupEfficiency", "diff_cleanupMerge"],
