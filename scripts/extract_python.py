@@ -80,6 +80,72 @@ def extract_from_file(path: Path, use_advanced: bool = False) -> Dict[str, List[
     defined_kinds: Dict[str, str] = {}
     defined_methods: List[str] = []
 
+    def emit_class_members(body_node: Node | None, class_qual: str, class_ent_id: str) -> None:
+        """Emit method (and nested-class) entities for a class body, recursively.
+
+        Nested classes (class inside class) get dotted titles like
+        ``Owner.Nested`` / ``Owner.Nested.method`` so callers and observations
+        carry clean titles instead of raw ``ent:fn:*`` ids.
+        """
+        if body_node is None:
+            return
+        for member in body_node.named_children:
+            inner = member
+            if member.type == "decorated_definition":
+                defn = member.child_by_field_name("definition")
+                if defn is None or defn.type not in ("function_definition", "class_definition"):
+                    continue
+                inner = defn
+            if inner.type not in ("function_definition", "class_definition"):
+                continue
+            mname_node = inner.child_by_field_name("name")
+            if mname_node is None:
+                continue
+            mname = get_text(source, mname_node)
+            qualified = f"{class_qual}.{mname}"
+            span_node = member if member.type == "decorated_definition" else inner
+            member_kind = "method" if inner.type == "function_definition" else "class"
+            member_id = make_id(member_kind, qualified, source_file)
+
+            entities.append(
+                {
+                    "id": member_id,
+                    "title": qualified,
+                    "type": member_kind,
+                    "description": f"{member_kind} {qualified} defined in {path.name}",
+                    "snippet": get_text(source, span_node),
+                    "text_unit_ids": [f"tu:file:{path.name}"],
+                    "human_readable_id": len(entities) + 1,
+                    "source_file": source_file,
+                    "span": f"{span_node.start_point[0]+1}:{span_node.start_point[1]}-{span_node.end_point[0]+1}:{span_node.end_point[1]}",
+                    "extractor": "tree-sitter-python",
+                    "confidence": 1.0,
+                    "is_deterministic": True,
+                }
+            )
+            relationships.append(
+                {
+                    "id": f"rel:contains:{path.name}:{qualified}",
+                    "source": class_ent_id,
+                    # methods point at the title (legacy), classes at the id.
+                    "target": qualified if member_kind == "method" else member_id,
+                    "type": "contains",
+                    "description": f"{class_qual} contains {member_kind} {mname}",
+                    "weight": 1.0,
+                    "text_unit_ids": [f"tu:file:{path.name}"],
+                    "human_readable_id": len(relationships) + 1,
+                    "source_file": source_file,
+                    "span": "",
+                    "extractor": "tree-sitter-python",
+                    "confidence": 1.0,
+                    "is_deterministic": True,
+                }
+            )
+            if member_kind == "method":
+                defined_methods.append(qualified)
+            else:
+                emit_class_members(inner.child_by_field_name("body"), qualified, member_id)
+
     for child in root.children:
         node = child
         if child.type == "decorated_definition":
@@ -149,63 +215,7 @@ def extract_from_file(path: Path, use_advanced: bool = False) -> Dict[str, List[
             )
 
             if kind == "class" and body:
-                for method_child in body.named_children:
-                    method_node = method_child
-                    if method_child.type == "decorated_definition":
-                        defn = method_child.child_by_field_name("definition")
-                        if defn is not None and defn.type == "function_definition":
-                            method_node = defn
-                        else:
-                            continue
-                    if method_node.type != "function_definition":
-                        continue
-                    method_name_node = method_node.child_by_field_name("name")
-                    if method_name_node is None:
-                        continue
-                    method_name = get_text(source, method_name_node)
-                    qualified_method = f"{name}.{method_name}"
-                    method_id = make_id("method", qualified_method, source_file)
-                    method_span_node = (
-                        method_child
-                        if method_child.type == "decorated_definition"
-                        else method_node
-                    )
-                    method_snippet = get_text(source, method_span_node)
-
-                    entities.append(
-                        {
-                            "id": method_id,
-                            "title": qualified_method,
-                            "type": "method",
-                            "description": f"method {qualified_method} defined in {path.name}",
-                            "snippet": method_snippet,
-                            "text_unit_ids": [f"tu:file:{path.name}"],
-                            "human_readable_id": len(entities) + 1,
-                            "source_file": source_file,
-                            "span": f"{method_span_node.start_point[0]+1}:{method_span_node.start_point[1]}-{method_span_node.end_point[0]+1}:{method_span_node.end_point[1]}",
-                            "extractor": "tree-sitter-python",
-                            "confidence": 1.0,
-                            "is_deterministic": True,
-                        }
-                    )
-                    defined_methods.append(qualified_method)
-                    relationships.append(
-                        {
-                            "id": f"rel:contains:{path.name}:{qualified_method}",
-                            "source": ent_id,
-                            "target": qualified_method,
-                            "type": "contains",
-                            "description": f"{name} contains method {method_name}",
-                            "weight": 1.0,
-                            "text_unit_ids": [f"tu:file:{path.name}"],
-                            "human_readable_id": len(relationships) + 1,
-                            "source_file": source_file,
-                            "span": "",
-                            "extractor": "tree-sitter-python",
-                            "confidence": 1.0,
-                            "is_deterministic": True,
-                        }
-                    )
+                emit_class_members(body, name, ent_id)
 
     # Structured imports (for cross-file resolution in bridge)
     imports: List[Dict[str, Any]] = []
@@ -617,14 +627,22 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
 
     class_for_method: Dict[str, str] = {}  # qualified (or bare) method name -> ClassName for self resolution within file
 
-    for node in ast.walk(tree):
+    def _index_class_methods(node: ast.AST, prefix: str = "") -> None:
         if isinstance(node, ast.ClassDef):
-            current_class = node.name
+            cqual = f"{prefix}.{node.name}" if prefix else node.name
             for item in node.body:
                 if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    qname = f"{current_class}.{item.name}"
-                    class_for_method[qname] = current_class
-                    class_for_method[item.name] = current_class  # compat for any bare-name callers
+                    # Value is the (possibly nested-qualified) class name, so self/cls
+                    # hints and caller titles match the extracted entity titles.
+                    class_for_method[f"{cqual}.{item.name}"] = cqual
+                    class_for_method.setdefault(item.name, cqual)  # bare-name compat (outer wins)
+                else:
+                    _index_class_methods(item, cqual)
+        else:
+            for child in ast.iter_child_nodes(node):
+                _index_class_methods(child, prefix)
+
+    _index_class_methods(tree)
 
     # Method names per (simple) class name, for resolving KnownClass.method()
     # calls made via the class name itself (e.g. classmethod Version.parse(...)).

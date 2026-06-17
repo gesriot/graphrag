@@ -486,6 +486,31 @@ def test_known_class_method_call_resolves_via_class_name(tmp_path: Path):
     assert ("mod:validate", "mod:Version.s") not in pairs
 
 
+def test_nested_class_method_has_clean_title(tmp_path: Path):
+    """Methods of a nested class (class inside class) must be extracted as entities
+    with a clean dotted title (Owner.Nested.method), so call observations from them
+    carry that title instead of a raw `ent:fn:*` id."""
+    from scripts.mini_game_to_byog import build_byog_for_package
+
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "mod.py").write_text(
+        "class Spec:\n"
+        "    class Parser:\n"
+        "        def parse(self, obj, s):\n"
+        "            return obj.match(s)\n"
+    )
+
+    data = build_byog_for_package(use_advanced=True, package_dir=pkg)
+    titles = {e["title"] for e in data["entities"]}
+    assert "mod:Spec.Parser" in titles, titles
+    assert "mod:Spec.Parser.parse" in titles, titles
+
+    obs = data.get("call_observations", [])
+    assert not any(str(o.get("source", "")).startswith("ent:") for o in obs), obs
+    assert any(o.get("source") == "mod:Spec.Parser.parse" for o in obs), obs
+
+
 def test_audit_flags_attribute_call_to_module_function_suspicion():
     """Structural audit needs a heuristic for target-side method/function collisions."""
     from scripts.audit_call_edges import semantic_suspicions
