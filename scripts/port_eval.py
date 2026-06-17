@@ -131,7 +131,8 @@ def build_eval_report(
 
     rust_ok = rust.get("all_ok", False)
     golden_passed = rust.get("golden_test", {}).get("status") == "ok" if not skip_rust else None
-    overall = bool(graph_res["clean"] and (skip_rust or (rust_ok and golden_passed)))
+    # Without the cargo stages we cannot assert the end-to-end (north-star) result.
+    overall = None if skip_rust else bool(graph_res["clean"] and rust_ok and golden_passed)
 
     return {
         "target": source.name,

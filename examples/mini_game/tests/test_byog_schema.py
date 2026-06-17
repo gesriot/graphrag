@@ -347,6 +347,25 @@ def test_audit_call_edges_clean_on_mini_game(mini_game_byog_root: Path):
     assert all(e["structural_ok"] for e in report["sample"]["edges"])
 
 
+def test_port_eval_graph_stage_and_golden(mini_game_byog_root: Path):
+    """port_eval graph stage must be clean and golden scenarios discoverable.
+
+    Keeps the suite fast/toolchain-independent by exercising the pure stages only
+    (no cargo); the cargo end-to-end path is covered by running the harness.
+    """
+    from scripts.port_eval import eval_graph, count_golden
+
+    g = eval_graph(mini_game_byog_root, reindex=False, use_advanced=False)
+    assert g["total_calls"] > 0
+    assert g["structural_anomalies"] == 0
+    assert g["dangling_targets"] == 0
+    assert g["clean"] is True
+
+    golden = count_golden(Path(__file__).parent.parent)
+    assert golden["count"] == 5
+    assert all(n.startswith("golden_") and n.endswith(".json") for n in golden["names"])
+
+
 def test_ast_attribute_resolution_regression(tmp_path: Path):
     """Separate regression fixture for AST Attribute call resolution (module.func).
 
