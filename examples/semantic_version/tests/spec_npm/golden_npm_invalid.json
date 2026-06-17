@@ -1,0 +1,45 @@
+{
+  "name": "npm_invalid",
+  "cases": [
+    {
+      "op": "invalid",
+      "spec": "blah",
+      "error": "Invalid NPM block in 'blah': 'blah'"
+    },
+    {
+      "op": "invalid",
+      "spec": ">=foo",
+      "error": "Invalid NPM block in '>=foo': '>=foo'"
+    },
+    {
+      "op": "invalid",
+      "spec": "1.2.3 - ",
+      "error": "Invalid NPM block in '1.2.3 - ': '-'"
+    },
+    {
+      "op": "invalid",
+      "spec": "^",
+      "error": "Invalid NPM block in '^': '^'"
+    },
+    {
+      "op": "invalid",
+      "spec": "~",
+      "error": "Invalid NPM block in '~': '~'"
+    },
+    {
+      "op": "invalid",
+      "spec": "1..2",
+      "error": "Invalid NPM block in '1..2': '1..2'"
+    },
+    {
+      "op": "invalid",
+      "spec": ">=1.0.0 <<2.0.0",
+      "error": "Invalid NPM block in '>=1.0.0 <<2.0.0': '<<2.0.0'"
+    },
+    {
+      "op": "invalid",
+      "spec": "1.2.3 4.5.6.7",
+      "error": "Invalid NPM block in '1.2.3 4.5.6.7': '4.5.6.7'"
+    }
+  ]
+}

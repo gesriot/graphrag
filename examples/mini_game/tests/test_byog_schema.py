@@ -590,18 +590,23 @@ def test_port_eval_graph_stage_and_golden(mini_game_byog_root: Path):
 
     semver_source = Path(__file__).parents[2] / "semantic_version"
     semver_golden = count_golden(semver_source)
-    assert semver_golden["count"] == 96
-    assert semver_golden["file_count"] == 9
+    assert semver_golden["count"] == 147
+    assert semver_golden["file_count"] == 13
     assert semver_golden["case_counts"]["spec/golden_spec_match.json"] == 39
     assert semver_golden["case_counts"]["spec/golden_spec_invalid.json"] == 9
     assert semver_golden["case_counts"]["spec/golden_spec_select.json"] == 4
     assert semver_golden["case_counts"]["spec/golden_spec_filter.json"] == 2
+    assert semver_golden["case_counts"]["spec_npm/golden_npm_match.json"] == 38
+    assert semver_golden["case_counts"]["spec_npm/golden_npm_invalid.json"] == 8
+    assert semver_golden["case_counts"]["spec_npm/golden_npm_select.json"] == 3
+    assert semver_golden["case_counts"]["spec_npm/golden_npm_filter.json"] == 2
     semver_coverage = golden_contract_coverage(
         semver_source,
         Path(__file__).parents[2] / "semantic_version_rust",
     )
     assert semver_coverage["expected"]["."] == "golden_contract.rs"
     assert semver_coverage["expected"]["spec"] == "spec_contract.rs"
+    assert semver_coverage["expected"]["spec_npm"] == "spec_npm_contract.rs"
 
 
 def test_ast_attribute_resolution_regression(tmp_path: Path):
