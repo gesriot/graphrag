@@ -411,7 +411,8 @@ def test_port_eval_graph_stage_and_golden(mini_game_byog_root: Path):
     """
     from scripts.port_eval import eval_graph, count_golden
 
-    g = eval_graph(mini_game_byog_root, reindex=False, use_advanced=False)
+    # source is unused when reindex=False; pass the graph root as a placeholder.
+    g = eval_graph(mini_game_byog_root, source=mini_game_byog_root, reindex=False, use_advanced=False)
     assert g["total_calls"] > 0
     assert g["structural_anomalies"] == 0
     assert g["dangling_targets"] == 0

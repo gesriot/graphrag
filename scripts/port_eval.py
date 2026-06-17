@@ -54,9 +54,12 @@ def _run(cmd: List[str], cwd: Path, timeout: int = 600) -> Dict[str, Any]:
     }
 
 
-def eval_graph(graph: Path, reindex: bool, use_advanced: bool) -> Dict[str, Any]:
+def eval_graph(graph: Path, source: Path, reindex: bool, use_advanced: bool) -> Dict[str, Any]:
     if reindex:
-        cmd = [sys.executable, str(ROOT / "scripts" / "mini_game_to_byog.py")]
+        cmd = [
+            sys.executable, str(ROOT / "scripts" / "index_python.py"),
+            "--package", str(source), "--graph", str(graph),
+        ]
         if use_advanced:
             cmd.append("--use-advanced")
         _run(cmd, cwd=ROOT)
@@ -73,6 +76,19 @@ def eval_graph(graph: Path, reindex: bool, use_advanced: bool) -> Dict[str, Any]
         "observations": int(len(g.call_observations)),
         "clean": s["anomaly_count"] == 0 and report["dangling_count"] == 0,
     }
+
+
+def default_key_symbols(graph: Path, n: int = 3) -> List[str]:
+    """Pick the most-called symbols as 'key' symbols when none are given.
+
+    Generic across projects: top targets by incoming call count that are real
+    entities (functions/methods), so the harness is not mini_game-specific.
+    """
+    g = ByogGraph(graph)
+    titles = set(g.ents["title"].astype(str))
+    calls = g.rels[g.rels["type"].astype(str) == "calls"]
+    counts = calls["target"].astype(str).value_counts()
+    return [t for t in counts.index if t in titles][:n]
 
 
 def gen_context_packs(symbols: List[str], graph: Path, out_dir: Path) -> Dict[str, Any]:
@@ -118,14 +134,17 @@ def build_eval_report(
     source: Path,
     port_dir: Path,
     graph: Path,
+    target: str,
     symbols: List[str],
     reindex: bool,
     use_advanced: bool,
     manual_fixes: int,
     skip_rust: bool,
 ) -> Dict[str, Any]:
-    graph_res = eval_graph(graph, reindex, use_advanced)
-    packs = gen_context_packs(symbols, graph, ROOT / "output" / "port_eval")
+    graph_res = eval_graph(graph, source, reindex, use_advanced)
+    if not symbols:
+        symbols = default_key_symbols(graph)
+    packs = gen_context_packs(symbols, graph, ROOT / "output" / "port_eval" / target)
     rust = {"status": "skipped", "reason": "--skip-rust"} if skip_rust else eval_rust(port_dir)
     golden = count_golden(source)
 
@@ -135,7 +154,7 @@ def build_eval_report(
     overall = None if skip_rust else bool(graph_res["clean"] and rust_ok and golden_passed)
 
     return {
-        "target": source.name,
+        "target": target,
         "graph": graph_res,
         "context_packs": packs,
         "rust": rust,
@@ -183,11 +202,12 @@ def main(
     graph: Path = typer.Option(..., "--graph", help="BYOG graph root (e.g. byog_mini_game)"),
     source: Path = typer.Option(Path("examples/mini_game"), "--source", help="Python source project"),
     port: Path = typer.Option(Path("examples/mini_game_rust"), "--port", help="Rust port (Cargo project)"),
+    target: Optional[str] = typer.Option(None, "--target", help="Logical target name (default: source dir name)"),
     symbol: List[str] = typer.Option(
-        ["sim:run_simulation", "sim"], "--symbol",
-        help="Key symbol(s)/module(s) to context-pack (repeatable)",
+        [], "--symbol",
+        help="Key symbol(s)/module(s) to context-pack (repeatable). If omitted, the most-called symbols are auto-selected.",
     ),
-    reindex: bool = typer.Option(False, "--reindex", help="Regenerate the graph via the bridge first"),
+    reindex: bool = typer.Option(False, "--reindex", help="Regenerate the graph from --source via index_python first"),
     use_advanced: bool = typer.Option(False, "--use-advanced", help="Advanced resolver when reindexing"),
     manual_fixes: int = typer.Option(0, "--manual-fixes", help="Manual interventions needed (recorded, set by hand for now)"),
     skip_rust: bool = typer.Option(False, "--skip-rust", help="Skip cargo stages (graph + packs only)"),
@@ -199,6 +219,7 @@ def main(
         source=source if source.is_absolute() else ROOT / source,
         port_dir=port if port.is_absolute() else ROOT / port,
         graph=graph,
+        target=target or source.name,
         symbols=symbol,
         reindex=reindex,
         use_advanced=use_advanced,
