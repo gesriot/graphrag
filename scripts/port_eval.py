@@ -39,7 +39,8 @@ def _run(cmd: List[str], cwd: Path, timeout: int = 600) -> Dict[str, Any]:
     """Run a command, capturing status + output tail (never raises on non-zero)."""
     try:
         proc = subprocess.run(
-            cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout
+            cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout,
+            stdin=subprocess.DEVNULL,  # so a CLI that reads stdin (cargo run) gets EOF, not a hang
         )
     except FileNotFoundError:
         return {"status": "skipped", "reason": f"{cmd[0]} not found", "cmd": " ".join(cmd)}
