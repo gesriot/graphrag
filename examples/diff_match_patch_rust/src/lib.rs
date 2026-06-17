@@ -5,5 +5,7 @@
 
 pub mod diff;
 pub mod matching;
+pub mod patch;
 
 pub use diff::{DiffMatchPatch, DELETE, EQUAL, INSERT};
+pub use patch::Patch;

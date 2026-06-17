@@ -746,6 +746,9 @@ pub struct DiffMatchPatch {
     pub diff_edit_cost: usize,
     pub match_threshold: f64,
     pub match_distance: i64,
+    pub patch_delete_threshold: f64,
+    pub patch_margin: i64,
+    pub match_max_bits: i64,
 }
 
 impl Default for DiffMatchPatch {
@@ -756,6 +759,9 @@ impl Default for DiffMatchPatch {
             diff_edit_cost: 4,
             match_threshold: 0.5,
             match_distance: 1000,
+            patch_delete_threshold: 0.5,
+            patch_margin: 4,
+            match_max_bits: 32,
         }
     }
 }
@@ -788,6 +794,80 @@ impl DiffMatchPatch {
         cleanup_efficiency_chars(&mut c, self.diff_edit_cost);
         *diffs = to_diff(c);
     }
+
+    pub fn diff_cleanup_semantic_lossless(&self, diffs: &mut Vec<Diff>) {
+        let mut c = to_cdiff(diffs);
+        cleanup_semantic_lossless_chars(&mut c);
+        *diffs = to_diff(c);
+    }
+}
+
+// ---- diff helpers used by the patch (v3) scope. Lengths are in code points. ----
+
+/// Source text: all EQUAL and DELETE op texts concatenated.
+pub fn diff_text1(diffs: &[Diff]) -> String {
+    diffs
+        .iter()
+        .filter(|(op, _)| *op != INSERT)
+        .map(|(_, t)| t.as_str())
+        .collect()
+}
+
+/// Destination text: all EQUAL and INSERT op texts concatenated.
+pub fn diff_text2(diffs: &[Diff]) -> String {
+    diffs
+        .iter()
+        .filter(|(op, _)| *op != DELETE)
+        .map(|(_, t)| t.as_str())
+        .collect()
+}
+
+/// Levenshtein distance implied by a diff (substitution = max(ins, del) per equality run).
+pub fn diff_levenshtein(diffs: &[Diff]) -> i64 {
+    let mut lev = 0i64;
+    let mut insertions = 0i64;
+    let mut deletions = 0i64;
+    for (op, data) in diffs {
+        let l = data.chars().count() as i64;
+        match *op {
+            INSERT => insertions += l,
+            DELETE => deletions += l,
+            _ => {
+                lev += insertions.max(deletions);
+                insertions = 0;
+                deletions = 0;
+            }
+        }
+    }
+    lev + insertions.max(deletions)
+}
+
+/// Map a location in text1 to the equivalent location in text2.
+pub fn diff_x_index(diffs: &[Diff], loc: i64) -> i64 {
+    let n = diffs.len();
+    let (mut chars1, mut chars2, mut last1, mut last2) = (0i64, 0i64, 0i64, 0i64);
+    let mut x = 0usize;
+    while x < n {
+        let (op, text) = &diffs[x];
+        let l = text.chars().count() as i64;
+        if *op != INSERT {
+            chars1 += l;
+        }
+        if *op != DELETE {
+            chars2 += l;
+        }
+        if chars1 > loc {
+            break;
+        }
+        last1 = chars1;
+        last2 = chars2;
+        x += 1;
+    }
+    let x = if x >= n { n.saturating_sub(1) } else { x };
+    if x < n && diffs[x].0 == DELETE {
+        return last2;
+    }
+    last2 + (loc - last1)
 }
 
 #[cfg(test)]
