@@ -224,6 +224,67 @@ impl Version {
             }
         }
     }
+
+    /// Precedence ordering (build ignored), used by Range `<`/`>`/`>=`/`<=`.
+    pub fn precedence_cmp(&self, other: &Version) -> Ordering {
+        self.cmp_key().cmp(&other.cmp_key())
+    }
+
+    /// truncate(level='patch'): keep major.minor.patch, drop prerelease + build.
+    pub fn truncate_to_patch(&self) -> Version {
+        Version {
+            major: self.major,
+            minor: self.minor,
+            patch: self.patch,
+            prerelease: Vec::new(),
+            build: Vec::new(),
+        }
+    }
+
+    /// truncate(level='prerelease'): keep major.minor.patch.prerelease, drop build.
+    pub fn truncate_to_prerelease(&self) -> Version {
+        Version {
+            major: self.major,
+            minor: self.minor,
+            patch: self.patch,
+            prerelease: self.prerelease.clone(),
+            build: Vec::new(),
+        }
+    }
+
+    fn bumped(major: u64, minor: u64, patch: u64) -> Version {
+        Version {
+            major,
+            minor,
+            patch,
+            prerelease: Vec::new(),
+            build: Vec::new(),
+        }
+    }
+
+    pub fn next_major(&self) -> Version {
+        if !self.prerelease.is_empty() && self.minor == 0 && self.patch == 0 {
+            Version::bumped(self.major, 0, 0)
+        } else {
+            Version::bumped(self.major + 1, 0, 0)
+        }
+    }
+
+    pub fn next_minor(&self) -> Version {
+        if !self.prerelease.is_empty() && self.patch == 0 {
+            Version::bumped(self.major, self.minor, 0)
+        } else {
+            Version::bumped(self.major, self.minor + 1, 0)
+        }
+    }
+
+    pub fn next_patch(&self) -> Version {
+        if !self.prerelease.is_empty() {
+            Version::bumped(self.major, self.minor, self.patch)
+        } else {
+            Version::bumped(self.major, self.minor, self.patch + 1)
+        }
+    }
 }
 
 fn validate_identifiers(identifiers: &[String], allow_leading_zeroes: bool) -> Result<(), String> {

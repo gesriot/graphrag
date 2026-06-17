@@ -3,7 +3,11 @@
 //!
 //! Verified against the same golden_*.json contract as the Python reference.
 
+pub mod clause;
 pub mod identifier;
+pub mod range;
+pub mod spec;
 pub mod version;
 
+pub use spec::SimpleSpec;
 pub use version::{compare, validate, Version};
