@@ -49,6 +49,7 @@ def _resolve_symbol(ents: pd.DataFrame, query: str) -> str | None:
             & (
                 (titles == query)
                 | (titles == f"{query}:{query}")
+                | (titles == f"{query}:__module__")
                 | titles.str.endswith(":" + query)
             )
         ]

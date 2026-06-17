@@ -78,6 +78,7 @@ def extract_from_file(path: Path, use_advanced: bool = False) -> Dict[str, List[
     # Collect top-level defs (including @dataclass etc. which are decorated_definition)
     defined_names: List[str] = []
     defined_kinds: Dict[str, str] = {}
+    defined_methods: List[str] = []
 
     for child in root.children:
         node = child
@@ -187,6 +188,7 @@ def extract_from_file(path: Path, use_advanced: bool = False) -> Dict[str, List[
                             "is_deterministic": True,
                         }
                     )
+                    defined_methods.append(qualified_method)
                     relationships.append(
                         {
                             "id": f"rel:contains:{path.name}:{qualified_method}",
@@ -278,6 +280,28 @@ def extract_from_file(path: Path, use_advanced: bool = False) -> Dict[str, List[
         if name and " import " not in name
     }
     callable_names = set(defined_names) | imported_call_names
+    known_callers = set(defined_names) | set(defined_methods)
+
+    def enclosing_callable_title(node: Node) -> str:
+        """Return the entity title for the nearest enclosing function/method."""
+        cur = node
+        while cur:
+            if cur.type == "function_definition":
+                nm = cur.child_by_field_name("name")
+                if nm is None:
+                    return "unknown"
+                fn_name = get_text(source, nm)
+                parent = cur.parent
+                while parent:
+                    if parent.type == "class_definition":
+                        class_name_node = parent.child_by_field_name("name")
+                        if class_name_node is not None:
+                            return f"{get_text(source, class_name_node)}.{fn_name}"
+                        break
+                    parent = parent.parent
+                return fn_name
+            cur = cur.parent
+        return "unknown"
 
     # Conservative calls: local definitions and explicitly imported names only.
     # This is syntax only - real version will need name resolution.
@@ -287,31 +311,20 @@ def extract_from_file(path: Path, use_advanced: bool = False) -> Dict[str, List[
             if func and func.type == "identifier":
                 callee = get_text(source, func)
                 if callee in callable_names:
-                    # naive: assume the first defined fn that matches is caller? Better: find enclosing def
-                    # For MVP we emit a relationship from "unknown-caller" or scan parents.
-                    # Simpler: emit a "potential_call" edge that later passes can strengthen.
-                    caller = "unknown"
-                    # Walk up to find nearest function_definition
-                    cur = node
-                    while cur:
-                        if cur.type == "function_definition":
-                            nm = cur.child_by_field_name("name")
-                            if nm:
-                                caller = get_text(source, nm)
-                            break
-                        cur = cur.parent
+                    caller = enclosing_callable_title(node)
 
-                    if caller != "unknown" and caller in defined_names:
+                    if caller != "unknown" and caller in known_callers:
                         is_local = callee in defined_names
                         callee_target = (
                             make_id(defined_kinds.get(callee, "fn"), callee, source_file)
                             if is_local
                             else callee
                         )
+                        caller_kind = "method" if "." in caller else "fn"
                         relationships.append(
                             {
                                 "id": f"rel:call:{caller}:{callee}:{node.start_point[0]}",
-                                "source": make_id("fn", caller, source_file),
+                                "source": make_id(caller_kind, caller, source_file),
                                 "target": callee_target,
                                 "type": "calls",
                                 "description": f"{caller} may call {callee} (syntax only, {'local name match' if is_local else 'imported name match'})",
@@ -330,14 +343,16 @@ def extract_from_file(path: Path, use_advanced: bool = False) -> Dict[str, List[
 
     walk_calls(root)
 
-    # Module entity for the file (stem)
-    module_title = Path(path).stem
+    # Module entity for the file. If a file is named main.py and also defines
+    # def main(), keep module and function titles distinct after BYOG prefixing.
+    path_stem = Path(path).stem
+    module_title = "__module__" if path_stem in defined_names else path_stem
     module_id = f"ent:module:{module_title}"
     entities.append({
         "id": module_id,
         "title": module_title,
         "type": "module",
-        "description": f"Python module {module_title} (from {path.name})",
+        "description": f"Python module {path_stem} (from {path.name})",
         "text_unit_ids": [f"tu:file:{path.name}"],
         "human_readable_id": len(entities) + 1,
         "source_file": source_file,
@@ -352,7 +367,7 @@ def extract_from_file(path: Path, use_advanced: bool = False) -> Dict[str, List[
         "source": file_id,
         "target": module_id,
         "type": "contains",
-        "description": f"{path.name} defines module {module_title}",
+        "description": f"{path.name} defines module {path_stem}",
         "weight": 1.0,
         "text_unit_ids": [f"tu:file:{path.name}"],
         "human_readable_id": len(relationships) + 1,

@@ -55,6 +55,7 @@ def find_entity(ents: pd.DataFrame, symbol: str) -> pd.Series | None:
             & (
                 (titles == symbol)
                 | (titles == f"{symbol}:{symbol}")
+                | (titles == f"{symbol}:__module__")
                 | titles.str.endswith(":" + symbol)
             )
         ]

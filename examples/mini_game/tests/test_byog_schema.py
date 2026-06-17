@@ -330,6 +330,62 @@ def test_same_named_callers_do_not_absorb_cross_module_targets(tmp_path: Path):
     assert main_sources == {"alpha:main", "beta:main"}, main_sources
 
 
+def test_bare_calls_inside_method_use_method_caller(tmp_path: Path):
+    """Bare calls inside Class.run must not be attributed to module-level run()."""
+    from scripts.mini_game_to_byog import build_byog_for_package
+
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "eval.py").write_text(
+        "class MiniLangError(Exception):\n"
+        "    pass\n\n"
+        "def format_number(value):\n"
+        "    return str(value)\n\n"
+        "class Interpreter:\n"
+        "    def run(self, stmts):\n"
+        "        format_number(1)\n"
+        "        MiniLangError('x')\n\n"
+        "def run(stmts):\n"
+        "    return Interpreter().run(stmts)\n"
+    )
+
+    data = build_byog_for_package(package_dir=pkg)
+    pairs = {
+        (r.get("source"), r.get("target"))
+        for r in data["relationships"]
+        if r.get("type") == "calls"
+    }
+
+    assert ("eval:Interpreter.run", "eval:format_number") in pairs
+    assert ("eval:Interpreter.run", "eval:MiniLangError") in pairs
+    assert ("eval:run", "eval:format_number") not in pairs
+    assert ("eval:run", "eval:MiniLangError") not in pairs
+
+
+def test_module_entity_title_does_not_collide_with_main_function(tmp_path: Path):
+    """main.py with def main() needs distinct module and function entity titles."""
+    from scripts.mini_game_to_byog import build_byog_for_package
+
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "main.py").write_text(
+        "def run_source(source):\n"
+        "    return source\n\n"
+        "def main():\n"
+        "    return run_source('x')\n"
+    )
+
+    data = build_byog_for_package(package_dir=pkg)
+    titles = [e["title"] for e in data["entities"]]
+    module_titles = [
+        e["title"] for e in data["entities"] if e.get("type") == "module"
+    ]
+
+    assert "main:main" in titles
+    assert "main:__module__" in module_titles
+    assert len(titles) == len(set(titles))
+
+
 def test_audit_call_edges_clean_on_mini_game(mini_game_byog_root: Path):
     """The reproducible audit tool must report zero structural anomalies and no
     dangling targets on the (correct) mini_game bridge graph.

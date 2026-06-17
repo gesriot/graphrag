@@ -319,6 +319,7 @@ class ByogGraph:
                 & (
                     (titles == query)
                     | (titles == f"{query}:{query}")
+                    | (titles == f"{query}:__module__")
                     | titles.str.endswith(":" + query)
                 )
             ]
