@@ -626,6 +626,15 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                     class_for_method[qname] = current_class
                     class_for_method[item.name] = current_class  # compat for any bare-name callers
 
+    # Method names per (simple) class name, for resolving KnownClass.method()
+    # calls made via the class name itself (e.g. classmethod Version.parse(...)).
+    class_methods: Dict[str, set[str]] = defaultdict(set)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            for item in node.body:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    class_methods[node.name].add(item.name)
+
     # Collect assign events with lineno for reassignment guards + ambiguity tiers.
     # Use the *actual enclosing function* (qualified) for the assignment node (via lineno).
     # Multiple distinct constructors for the same var (if branches, rebinds between
@@ -821,6 +830,14 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                     imported_hint = imported_module_attr_hint(base_expr, attr)
                     if imported_hint:
                         hint, resolved_display = imported_hint
+                        confidence = 0.80
+                        deterministic = True
+                    elif base_expr in class_methods and attr in class_methods[base_expr]:
+                        # KnownClass.method() via the class name itself (e.g. the
+                        # classmethod Version.parse(...)); receiver is a class
+                        # defined in this file, and attr is one of its methods.
+                        hint = f"{Path(path).stem}:{base_expr}.{attr}"
+                        resolved_display = hint
                         confidence = 0.80
                         deterministic = True
                     else:

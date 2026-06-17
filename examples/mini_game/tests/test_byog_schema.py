@@ -445,6 +445,47 @@ def test_unresolved_attribute_receiver_does_not_bind_to_module_function(tmp_path
     assert any(o.get("source") == "mod:Wrapper._caller" for o in g.observations("mod:Wrapper._caller"))
 
 
+def test_known_class_method_call_resolves_via_class_name(tmp_path: Path):
+    """KnownClass.method() (class-name receiver) resolves to Class.method as a
+    high-confidence core edge -- recovers recall like `validate -> Version.parse`,
+    without reintroducing unresolved-receiver false edges."""
+    from scripts.mini_game_to_byog import build_byog_for_package
+
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "mod.py").write_text(
+        "class Version:\n"
+        "    @classmethod\n"
+        "    def parse(cls, s):\n"
+        "        return s\n\n"
+        "def validate(s):\n"
+        "    return Version.parse(s)\n"
+    )
+
+    data = build_byog_for_package(use_advanced=True, package_dir=pkg)
+    calls = [r for r in data["relationships"] if r.get("type") == "calls"]
+    pairs = {(r.get("source"), r.get("target")) for r in calls}
+
+    assert ("mod:validate", "mod:Version.parse") in pairs, pairs
+    edge = next(
+        r for r in calls
+        if r.get("source") == "mod:validate" and r.get("target") == "mod:Version.parse"
+    )
+    assert float(edge["confidence"]) >= 0.80
+    assert edge["is_deterministic"] is True
+
+    # Must NOT also be demoted to a weak observation.
+    obs = data.get("call_observations", [])
+    assert not any(
+        o.get("source") == "mod:validate" and "parse" in str(o.get("display_target", ""))
+        for o in obs
+    ), obs
+
+    # An access to a class attribute that is NOT a method must stay unresolved
+    # (no false KnownClass.method edge for non-methods).
+    assert ("mod:validate", "mod:Version.s") not in pairs
+
+
 def test_audit_flags_attribute_call_to_module_function_suspicion():
     """Structural audit needs a heuristic for target-side method/function collisions."""
     from scripts.audit_call_edges import semantic_suspicions
