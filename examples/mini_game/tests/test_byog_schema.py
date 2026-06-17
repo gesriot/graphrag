@@ -280,6 +280,56 @@ def test_generic_python_bridge_keeps_same_named_callers_separate(tmp_path: Path)
     assert ("beta:main", "alpha:target_alpha") not in pairs
 
 
+def test_same_named_callers_do_not_absorb_cross_module_targets(tmp_path: Path):
+    """Regression for the P1 audit symptom on byog_tool_eval.
+
+    The companion test above uses module-local targets. The real bug was
+    subtler: the winning ``*:main`` also absorbed calls whose *targets* lived
+    in OTHER modules (e.g. ``extract_python:main`` owned
+    ``byog_graph:publish_byog_snapshot`` and
+    ``mini_game_to_byog:build_byog_for_package``). This reproduces that exact
+    topology: several same-named callers, each invoking a *different*
+    cross-module imported callee.
+    """
+    from scripts.mini_game_to_byog import build_byog_for_package
+
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "shared.py").write_text(
+        "def shared_a():\n    pass\n\n"
+        "def shared_b():\n    pass\n"
+    )
+    (pkg / "alpha.py").write_text(
+        "from .shared import shared_a\n\n"
+        "def main():\n"
+        "    shared_a()\n"
+    )
+    (pkg / "beta.py").write_text(
+        "from .shared import shared_b\n\n"
+        "def main():\n"
+        "    shared_b()\n"
+    )
+
+    data = build_byog_for_package(use_advanced=True, package_dir=pkg)
+    pairs = {
+        (r.get("source"), r.get("target"))
+        for r in data["relationships"]
+        if r.get("type") == "calls"
+    }
+
+    # Each main keeps its own cross-module call ...
+    assert ("alpha:main", "shared:shared_a") in pairs
+    assert ("beta:main", "shared:shared_b") in pairs
+    # ... and neither main absorbs the other's cross-module target.
+    assert ("alpha:main", "shared:shared_b") not in pairs
+    assert ("beta:main", "shared:shared_a") not in pairs
+    # No single main ends up owning calls that belong to a sibling (the precise
+    # byog_tool_eval symptom where one module's main hoarded every main's calls).
+    main_sources = {s for (s, _t) in pairs if str(s).endswith(":main")}
+    assert main_sources == {"alpha:main", "beta:main"}, main_sources
+
+
 def test_ast_attribute_resolution_regression(tmp_path: Path):
     """Separate regression fixture for AST Attribute call resolution (module.func).
 
