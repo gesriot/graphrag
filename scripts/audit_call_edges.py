@@ -112,6 +112,67 @@ def dangling_targets(ents: pd.DataFrame, calls: pd.DataFrame) -> List[Dict[str, 
     return out
 
 
+def _attribute_call_displays(description: str) -> Tuple[Optional[str], Optional[str]]:
+    """Return (raw_attribute_call, resolved_display) from extractor descriptions."""
+    marker = "ast Attribute: "
+    if marker not in description:
+        return None, None
+    rest = description.split(marker, 1)[1]
+    if " -> " not in rest:
+        raw = rest.strip()
+        return raw, raw
+    raw, resolved = rest.split(" -> ", 1)
+    # Drop explanatory suffixes such as "(unresolved receiver)".
+    resolved = resolved.split(" (", 1)[0].strip()
+    return raw.strip(), resolved
+
+
+def semantic_suspicions(ents: pd.DataFrame, calls: pd.DataFrame) -> List[Dict[str, Any]]:
+    """Flag resolved edges where an object-style attribute call became a module fn.
+
+    Structural checks can prove the call belongs to the caller body, but not that
+    ``obj.match()`` really targets a module-level ``match`` function. This
+    heuristic catches that false-confidence class while allowing known module
+    calls such as ``physics.update_player -> physics:update_player``.
+    """
+    type_by_title = {
+        str(row["title"]): str(row.get("type", "")).lower()
+        for _, row in ents.iterrows()
+    }
+    out: List[Dict[str, Any]] = []
+    for _, r in calls.iterrows():
+        target = str(r["target"])
+        if type_by_title.get(target) != "fn" or ":" not in target:
+            continue
+
+        raw_display, resolved_display = _attribute_call_displays(str(r.get("description", "")))
+        if not raw_display or "." not in raw_display:
+            continue
+
+        target_module, target_symbol = target.split(":", 1)
+        attr = raw_display.rsplit(".", 1)[-1]
+        if attr != target_symbol:
+            continue
+
+        resolved_base = None
+        if resolved_display and "." in resolved_display:
+            resolved_base = resolved_display.rsplit(".", 1)[0].split(".")[-1]
+        if resolved_base == target_module:
+            continue
+
+        out.append({
+            "kind": "attribute_call_to_module_function",
+            "source": str(r["source"]),
+            "target": target,
+            "span": str(r.get("span")),
+            "display": raw_display,
+            "resolved_display": resolved_display,
+            "confidence": r.get("confidence"),
+            "is_deterministic": r.get("is_deterministic"),
+        })
+    return out
+
+
 def sample_edges(
     calls: pd.DataFrame,
     ents: pd.DataFrame,
@@ -163,6 +224,7 @@ def build_report(
     total = len(calls)
     anomalies = structural_audit(g.ents, calls)
     dangling = dangling_targets(g.ents, calls)
+    suspicions = semantic_suspicions(g.ents, calls)
     clean = total - len(anomalies) - len(dangling)
     return {
         "graph": str(graph),
@@ -175,6 +237,8 @@ def build_report(
         },
         "dangling_count": len(dangling),
         "dangling_targets": dangling,
+        "semantic_suspicion_count": len(suspicions),
+        "semantic_suspicions": suspicions,
         "sample": {
             "seed": seed,
             "size": min(sample, total),
@@ -201,7 +265,8 @@ def main(
     print(f"snapshot : {report['snapshot']}")
     print(f"calls    : {report['total_calls']}")
     print(f"structural pass rate : {s['pass_rate']}  "
-          f"(anomalies={s['anomaly_count']}, dangling={report['dangling_count']})")
+          f"(anomalies={s['anomaly_count']}, dangling={report['dangling_count']}, "
+          f"semantic_suspicions={report['semantic_suspicion_count']})")
 
     if s["anomalies"]:
         print("\nSTRUCTURAL ANOMALIES (call span outside caller range):")
@@ -211,6 +276,13 @@ def main(
         print("\nDANGLING TARGETS (target not a known entity):")
         for d in report["dangling_targets"]:
             print(f"  {d['source']} -> {d['target']}  @{d['span']}")
+    if report["semantic_suspicions"]:
+        print("\nSEMANTIC SUSPICIONS (attribute call resolved to module-level function):")
+        for s in report["semantic_suspicions"]:
+            print(
+                f"  [{s['kind']}] {s['source']} -> {s['target']}  @{s['span']} "
+                f"display={s['display']} resolved={s['resolved_display']}"
+            )
 
     print(f"\nSAMPLE (seed={report['sample']['seed']}, n={report['sample']['size']}) "
           f"-- eyeball each for semantic precision:")

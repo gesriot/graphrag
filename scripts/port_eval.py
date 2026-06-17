@@ -74,8 +74,13 @@ def eval_graph(graph: Path, source: Path, reindex: bool, use_advanced: bool) -> 
         "structural_pass_rate": s["pass_rate"],
         "structural_anomalies": s["anomaly_count"],
         "dangling_targets": report["dangling_count"],
+        "semantic_suspicions": report.get("semantic_suspicion_count", 0),
         "observations": int(len(g.call_observations)),
-        "clean": s["anomaly_count"] == 0 and report["dangling_count"] == 0,
+        "clean": (
+            s["anomaly_count"] == 0
+            and report["dangling_count"] == 0
+            and report.get("semantic_suspicion_count", 0) == 0
+        ),
     }
 
 
@@ -186,7 +191,8 @@ def to_markdown(r: Dict[str, Any]) -> str:
         "",
         "## Graph (means)",
         f"- structural pass rate: **{g['structural_pass_rate']}** "
-        f"(anomalies={g['structural_anomalies']}, dangling={g['dangling_targets']})",
+        f"(anomalies={g['structural_anomalies']}, dangling={g['dangling_targets']}, "
+        f"semantic_suspicions={g.get('semantic_suspicions', 0)})",
         f"- calls: {g['total_calls']}  |  observations: {g['observations']}  |  clean: {g['clean']}",
         "",
         "## Context packs",
@@ -251,6 +257,7 @@ def main(
     print(f"target            : {report['target']}")
     print(f"graph pass rate   : {g['structural_pass_rate']} "
           f"(anomalies={g['structural_anomalies']}, dangling={g['dangling_targets']}, "
+          f"semantic_suspicions={g.get('semantic_suspicions', 0)}, "
           f"calls={g['total_calls']}, obs={g['observations']})")
     print(f"context packs     : {report['context_packs']['count']}/{len(report['context_packs']['requested'])} "
           f"{report['context_packs']['generated']}")

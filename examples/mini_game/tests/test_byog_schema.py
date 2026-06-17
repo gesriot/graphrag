@@ -386,6 +386,70 @@ def test_module_entity_title_does_not_collide_with_main_function(tmp_path: Path)
     assert len(titles) == len(set(titles))
 
 
+def test_unresolved_attribute_receiver_does_not_bind_to_module_function(tmp_path: Path):
+    """obj.match() must not become a high-confidence edge to module-level match()."""
+    from scripts.mini_game_to_byog import build_byog_for_package
+
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "mod.py").write_text(
+        "def match(value):\n"
+        "    return 'module'\n\n"
+        "class Matcher:\n"
+        "    def match(self, value):\n"
+        "        return True\n\n"
+        "def caller(obj):\n"
+        "    return obj.match('x')\n"
+    )
+
+    data = build_byog_for_package(package_dir=pkg)
+    pairs = {
+        (r.get("source"), r.get("target"))
+        for r in data["relationships"]
+        if r.get("type") == "calls"
+    }
+    observations = data.get("call_observations", [])
+
+    assert ("mod:caller", "mod:match") not in pairs
+    assert any(
+        o.get("source") == "mod:caller"
+        and o.get("display_target") == "obj.match"
+        and o.get("reason") == "unresolved receiver"
+        and float(o.get("confidence", 1.0)) < 0.7
+        for o in observations
+    ), observations
+
+
+def test_audit_flags_attribute_call_to_module_function_suspicion():
+    """Structural audit needs a heuristic for target-side method/function collisions."""
+    from scripts.audit_call_edges import semantic_suspicions
+
+    ents = pd.DataFrame(
+        [
+            {"title": "base:caller", "type": "fn", "span": "1:0-3:0"},
+            {"title": "base:match", "type": "fn", "span": "6:0-7:0"},
+        ]
+    )
+    calls = pd.DataFrame(
+        [
+            {
+                "source": "base:caller",
+                "target": "base:match",
+                "type": "calls",
+                "span": "2:11",
+                "description": "caller calls match (ast Attribute: obj.match -> obj.match)",
+                "confidence": 0.8,
+                "is_deterministic": True,
+            }
+        ]
+    )
+
+    suspicions = semantic_suspicions(ents, calls)
+    assert len(suspicions) == 1
+    assert suspicions[0]["kind"] == "attribute_call_to_module_function"
+    assert suspicions[0]["display"] == "obj.match"
+
+
 def test_audit_call_edges_clean_on_mini_game(mini_game_byog_root: Path):
     """The reproducible audit tool must report zero structural anomalies and no
     dangling targets on the (correct) mini_game bridge graph.
@@ -416,6 +480,7 @@ def test_port_eval_graph_stage_and_golden(mini_game_byog_root: Path):
     assert g["total_calls"] > 0
     assert g["structural_anomalies"] == 0
     assert g["dangling_targets"] == 0
+    assert g["semantic_suspicions"] == 0
     assert g["clean"] is True
 
     golden = count_golden(Path(__file__).parent.parent)

@@ -249,6 +249,7 @@ def build_byog_for_package(use_advanced: bool = False, package_dir: Path | None 
             # as first-class observations so they are not lost in the core relationships filter.
             # Core relationships stay clean (high-quality resolved only). Observations carry
             # source, display_target, confidence, reason, provenance for context_pack / agents.
+            drop_from_core = False
             if r.get("type") == "calls" and "tree-sitter-python+ast" in str(r.get("extractor", "")):
                 orig_desc = str(r.get("description", ""))
                 conf = float(r.get("confidence", 0.0) or 0.0)
@@ -262,6 +263,8 @@ def build_byog_for_package(use_advanced: bool = False, package_dir: Path | None 
                     reason = "ambiguous constructors"
                 elif "guarded by reassignment" in orig_desc:
                     reason = "guarded by reassignment"
+                elif "unresolved receiver" in orig_desc:
+                    reason = "unresolved receiver"
                 elif conf < 0.6:
                     reason = "low confidence"
                 if reason or conf < 0.7 or not has_good_hint:
@@ -276,6 +279,10 @@ def build_byog_for_package(use_advanced: bool = False, package_dir: Path | None 
                         "description": orig_desc,
                     }
                     call_observations.append(obs)
+                    drop_from_core = conf < 0.7 or not has_good_hint
+
+            if drop_from_core:
+                continue
 
             if src_res and tgt_res and src_res in title_to_id and tgt_res in title_to_id:
                 text_unit_ids = []

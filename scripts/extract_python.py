@@ -495,6 +495,19 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                 module_path = base_expr
         return f"{module_title(module_path)}:{attr}", f"{module_path}.{attr}"
 
+    def imported_module_attr_hint(base_expr: str, attr: str) -> tuple[str, str] | None:
+        """Resolve module.func only when the receiver is known to be an import.
+
+        Unknown attribute receivers such as regex.match(), obj.match(), or
+        clause.match() are method/dynamic calls until proven otherwise. Binding
+        them to a same-named module function would create false ground-truth
+        CALLS edges.
+        """
+        parts = base_expr.split(".")
+        if base_expr in import_map or (parts and parts[0] in import_map):
+            return module_attr_hint(base_expr, attr)
+        return None
+
     def constructor_type_hint(constructor: str) -> str | None:
         if "." in constructor:
             base_expr, attr = constructor.rsplit(".", 1)
@@ -805,9 +818,16 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                     confidence = 0.80
                     deterministic = True
                 else:
-                    hint, resolved_display = module_attr_hint(base_expr, attr)
-                    confidence = 0.80
-                    deterministic = True
+                    imported_hint = imported_module_attr_hint(base_expr, attr)
+                    if imported_hint:
+                        hint, resolved_display = imported_hint
+                        confidence = 0.80
+                        deterministic = True
+                    else:
+                        hint = None
+                        resolved_display = f"{base_expr}.{attr} (unresolved receiver)"
+                        confidence = 0.40
+                        deterministic = False
 
                 caller_id = make_id("fn", caller, str(path))
                 callee_id = make_id("fn", attr, str(path))
