@@ -127,8 +127,22 @@ def eval_rust(port_dir: Path) -> Dict[str, Any]:
 
 def count_golden(source: Path) -> Dict[str, Any]:
     tests_dir = source / "tests"
-    names = sorted(p.name for p in tests_dir.glob("golden_*.json")) if tests_dir.exists() else []
-    return {"count": len(names), "names": names}
+    files = sorted(tests_dir.glob("golden_*.json")) if tests_dir.exists() else []
+    names = [p.name for p in files]
+    case_counts: Dict[str, int] = {}
+    for p in files:
+        data = json.loads(p.read_text())
+        cases = data.get("cases")
+        # mini_lang groups many golden cases per file; mini_game uses one trace
+        # per file. Count the actual behavior cases when present, otherwise
+        # count the file as a single golden scenario.
+        case_counts[p.name] = len(cases) if isinstance(cases, list) else 1
+    return {
+        "count": sum(case_counts.values()),
+        "file_count": len(names),
+        "names": names,
+        "case_counts": case_counts,
+    }
 
 
 def build_eval_report(
@@ -190,8 +204,8 @@ def to_markdown(r: Dict[str, Any]) -> str:
     gs = r["golden_scenarios"]
     lines += [
         "",
-        "## Golden scenarios",
-        f"- {gs['count']} scenarios, passed: {gs['passed']}",
+        "## Golden cases",
+        f"- {gs['count']} cases/scenarios across {gs.get('file_count', len(gs['names']))} files, passed: {gs['passed']}",
         "",
         f"**manual_fix_count: {r['manual_fix_count']}**",
         f"**OVERALL PASS: {r['overall_pass']}**",
@@ -247,7 +261,10 @@ def main(
         print("rust              : " + "  ".join(
             f"{s}={rust.get(s, {}).get('status', '?')}" for s in ("fmt", "check", "golden_test", "run")))
     gs = report["golden_scenarios"]
-    print(f"golden scenarios  : {gs['count']} (passed={gs['passed']})")
+    print(
+        f"golden cases      : {gs['count']} across {gs.get('file_count', len(gs['names']))} files "
+        f"(passed={gs['passed']})"
+    )
     print(f"manual fixes      : {report['manual_fix_count']}")
     print(f"OVERALL PASS      : {report['overall_pass']}")
     if markdown is not None:

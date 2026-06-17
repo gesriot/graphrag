@@ -420,7 +420,12 @@ def test_port_eval_graph_stage_and_golden(mini_game_byog_root: Path):
 
     golden = count_golden(Path(__file__).parent.parent)
     assert golden["count"] == 5
+    assert golden["file_count"] == 5
     assert all(n.startswith("golden_") and n.endswith(".json") for n in golden["names"])
+
+    mini_lang_golden = count_golden(Path(__file__).parents[2] / "mini_lang")
+    assert mini_lang_golden["count"] == 28
+    assert mini_lang_golden["file_count"] == 3
 
 
 def test_ast_attribute_resolution_regression(tmp_path: Path):
