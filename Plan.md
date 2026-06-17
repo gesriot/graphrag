@@ -39,6 +39,8 @@ Important implementation correction: do **not** rely on generic GraphRAG entity 
 
 **Current execution strategy (decided 2026-06-15): no external API by default.** The first working system should not require OpenAI/Azure/Anthropic/xAI keys. Build the deterministic pipeline first: extractor → BYOG parquet → schema tests → local graph queries/context packs → manual or local-agent-assisted work in Codex / Claude Code / Grok Build. Official GraphRAG LLM workflows (`create_community_reports`, Global/Local/DRIFT search, embeddings) remain an optional later backend for evaluation or higher-quality summaries, not a blocker for Phase 1-3 progress.
 
+**Means vs. ends — verification boundary (recorded 2026-06-16):** graph-quality auditing is the *means*, Python→Rust fidelity is the *north-star end*. A correct graph is necessary but not sufficient; it must be measured separately from the port outcome. Two repeatable harnesses make this explicit: `scripts/audit_call_edges.py` measures the graph (structural pass rate of CALLS edges, dangling targets, seeded precision sample), and `scripts/port_eval.py` measures the end-to-end port (graph quality → context packs → `cargo fmt/check/test/run` → golden scenarios → manual-fix count) as one comparable report. C/C++ input remains "maybe, later"; Python→Rust is the capability that must work flawlessly and is the primary acceptance metric.
+
 ## 2. High-Level Architecture (Replicable Version)
 
 ```
