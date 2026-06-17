@@ -1,0 +1,95 @@
+{
+  "name": "compare",
+  "cases": [
+    {
+      "op": "compare",
+      "a": "1.0.0",
+      "b": "2.0.0",
+      "result": -1
+    },
+    {
+      "op": "compare",
+      "a": "2.0.0",
+      "b": "2.1.0",
+      "result": -1
+    },
+    {
+      "op": "compare",
+      "a": "2.1.0",
+      "b": "2.1.1",
+      "result": -1
+    },
+    {
+      "op": "compare",
+      "a": "1.0.0-alpha",
+      "b": "1.0.0",
+      "result": -1
+    },
+    {
+      "op": "compare",
+      "a": "1.0.0-alpha",
+      "b": "1.0.0-alpha.1",
+      "result": -1
+    },
+    {
+      "op": "compare",
+      "a": "1.0.0-alpha.1",
+      "b": "1.0.0-alpha.beta",
+      "result": -1
+    },
+    {
+      "op": "compare",
+      "a": "1.0.0-alpha.beta",
+      "b": "1.0.0-beta",
+      "result": -1
+    },
+    {
+      "op": "compare",
+      "a": "1.0.0-beta",
+      "b": "1.0.0-beta.2",
+      "result": -1
+    },
+    {
+      "op": "compare",
+      "a": "1.0.0-beta.2",
+      "b": "1.0.0-beta.11",
+      "result": -1
+    },
+    {
+      "op": "compare",
+      "a": "1.0.0-beta.11",
+      "b": "1.0.0-rc.1",
+      "result": -1
+    },
+    {
+      "op": "compare",
+      "a": "1.0.0-rc.1",
+      "b": "1.0.0",
+      "result": -1
+    },
+    {
+      "op": "compare",
+      "a": "1.0.0",
+      "b": "1.0.0",
+      "result": 0
+    },
+    {
+      "op": "compare",
+      "a": "1.0.0+build.1",
+      "b": "1.0.0+build.2",
+      "result": "incomparable"
+    },
+    {
+      "op": "compare",
+      "a": "1.0.0",
+      "b": "1.0.0+build.1",
+      "result": "incomparable"
+    },
+    {
+      "op": "compare",
+      "a": "1.0.0+build.1",
+      "b": "1.0.1+build.2",
+      "result": -1
+    }
+  ]
+}

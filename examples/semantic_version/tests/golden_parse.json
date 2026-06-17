@@ -1,0 +1,136 @@
+{
+  "name": "parse",
+  "cases": [
+    {
+      "op": "parse",
+      "input": "1.2.3",
+      "major": 1,
+      "minor": 2,
+      "patch": 3,
+      "prerelease": [],
+      "build": [],
+      "str": "1.2.3"
+    },
+    {
+      "op": "parse",
+      "input": "10.20.30",
+      "major": 10,
+      "minor": 20,
+      "patch": 30,
+      "prerelease": [],
+      "build": [],
+      "str": "10.20.30"
+    },
+    {
+      "op": "parse",
+      "input": "1.0.0-alpha",
+      "major": 1,
+      "minor": 0,
+      "patch": 0,
+      "prerelease": [
+        "alpha"
+      ],
+      "build": [],
+      "str": "1.0.0-alpha"
+    },
+    {
+      "op": "parse",
+      "input": "1.0.0-alpha.1",
+      "major": 1,
+      "minor": 0,
+      "patch": 0,
+      "prerelease": [
+        "alpha",
+        "1"
+      ],
+      "build": [],
+      "str": "1.0.0-alpha.1"
+    },
+    {
+      "op": "parse",
+      "input": "1.0.0-0.3.7",
+      "major": 1,
+      "minor": 0,
+      "patch": 0,
+      "prerelease": [
+        "0",
+        "3",
+        "7"
+      ],
+      "build": [],
+      "str": "1.0.0-0.3.7"
+    },
+    {
+      "op": "parse",
+      "input": "1.0.0-x.7.z.92",
+      "major": 1,
+      "minor": 0,
+      "patch": 0,
+      "prerelease": [
+        "x",
+        "7",
+        "z",
+        "92"
+      ],
+      "build": [],
+      "str": "1.0.0-x.7.z.92"
+    },
+    {
+      "op": "parse",
+      "input": "1.0.0+20130313144700",
+      "major": 1,
+      "minor": 0,
+      "patch": 0,
+      "prerelease": [],
+      "build": [
+        "20130313144700"
+      ],
+      "str": "1.0.0+20130313144700"
+    },
+    {
+      "op": "parse",
+      "input": "1.0.0-beta+exp.sha.5114f85",
+      "major": 1,
+      "minor": 0,
+      "patch": 0,
+      "prerelease": [
+        "beta"
+      ],
+      "build": [
+        "exp",
+        "sha",
+        "5114f85"
+      ],
+      "str": "1.0.0-beta+exp.sha.5114f85"
+    },
+    {
+      "op": "parse",
+      "input": "1.2.3-alpha.1+build.5",
+      "major": 1,
+      "minor": 2,
+      "patch": 3,
+      "prerelease": [
+        "alpha",
+        "1"
+      ],
+      "build": [
+        "build",
+        "5"
+      ],
+      "str": "1.2.3-alpha.1+build.5"
+    },
+    {
+      "op": "parse",
+      "input": "1.0.0+build.1",
+      "major": 1,
+      "minor": 0,
+      "patch": 0,
+      "prerelease": [],
+      "build": [
+        "build",
+        "1"
+      ],
+      "str": "1.0.0+build.1"
+    }
+  ]
+}

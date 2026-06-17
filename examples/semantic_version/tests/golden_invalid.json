@@ -1,0 +1,35 @@
+{
+  "name": "invalid",
+  "cases": [
+    {
+      "op": "invalid",
+      "input": "",
+      "error": "Invalid empty version string: ''"
+    },
+    {
+      "op": "invalid",
+      "input": "not.a.version",
+      "error": "Invalid version string: 'not.a.version'"
+    },
+    {
+      "op": "invalid",
+      "input": "1.2",
+      "error": "Invalid version string: '1.2'"
+    },
+    {
+      "op": "invalid",
+      "input": "1.2.3.4",
+      "error": "Invalid version string: '1.2.3.4'"
+    },
+    {
+      "op": "invalid",
+      "input": "01.2.3",
+      "error": "Invalid leading zero in major: '01.2.3'"
+    },
+    {
+      "op": "invalid",
+      "input": "1.0.0-",
+      "error": "Invalid version string: '1.0.0-'"
+    }
+  ]
+}

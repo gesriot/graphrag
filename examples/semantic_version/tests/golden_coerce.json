@@ -1,0 +1,25 @@
+{
+  "name": "coerce",
+  "cases": [
+    {
+      "op": "coerce",
+      "input": "1",
+      "str": "1.0.0"
+    },
+    {
+      "op": "coerce",
+      "input": "1.2",
+      "str": "1.2.0"
+    },
+    {
+      "op": "coerce",
+      "input": "1.2.3",
+      "str": "1.2.3"
+    },
+    {
+      "op": "coerce",
+      "input": "1.2.3.4",
+      "str": "1.2.3+4"
+    }
+  ]
+}

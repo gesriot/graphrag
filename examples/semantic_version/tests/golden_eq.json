@@ -1,0 +1,47 @@
+{
+  "name": "eq",
+  "cases": [
+    {
+      "op": "eq",
+      "a": "1.0.0",
+      "b": "1.0.0",
+      "result": true
+    },
+    {
+      "op": "eq",
+      "a": "1.0.0",
+      "b": "1.0.1",
+      "result": false
+    },
+    {
+      "op": "eq",
+      "a": "1.0.0-alpha",
+      "b": "1.0.0-alpha",
+      "result": true
+    },
+    {
+      "op": "eq",
+      "a": "1.0.0-alpha",
+      "b": "1.0.0-beta",
+      "result": false
+    },
+    {
+      "op": "eq",
+      "a": "1.0.0+build.1",
+      "b": "1.0.0+build.2",
+      "result": false
+    },
+    {
+      "op": "eq",
+      "a": "1.0.0+build.1",
+      "b": "1.0.0+build.1",
+      "result": true
+    },
+    {
+      "op": "eq",
+      "a": "1.0.0",
+      "b": "1.0.0+build.1",
+      "result": false
+    }
+  ]
+}
