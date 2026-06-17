@@ -1,0 +1,62 @@
+{
+  "name": "variables",
+  "cases": [
+    {
+      "source": "let x = 5\nx",
+      "stdout": [
+        "5"
+      ],
+      "error": null
+    },
+    {
+      "source": "let x = 5\nx*2",
+      "stdout": [
+        "10"
+      ],
+      "error": null
+    },
+    {
+      "source": "let a = 2\nlet b = 3\na*b",
+      "stdout": [
+        "6"
+      ],
+      "error": null
+    },
+    {
+      "source": "let a=2; let b=3; a*b+1",
+      "stdout": [
+        "7"
+      ],
+      "error": null
+    },
+    {
+      "source": "let x = 1\nlet x = x + 9\nx",
+      "stdout": [
+        "10"
+      ],
+      "error": null
+    },
+    {
+      "source": "let r = 2\nlet pi = 3\npi*r*r",
+      "stdout": [
+        "12"
+      ],
+      "error": null
+    },
+    {
+      "source": "let x = 10\nx; x/2",
+      "stdout": [
+        "10",
+        "5"
+      ],
+      "error": null
+    },
+    {
+      "source": "let n = -4\n-n",
+      "stdout": [
+        "4"
+      ],
+      "error": null
+    }
+  ]
+}

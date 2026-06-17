@@ -1,0 +1,89 @@
+{
+  "name": "arithmetic",
+  "cases": [
+    {
+      "source": "42",
+      "stdout": [
+        "42"
+      ],
+      "error": null
+    },
+    {
+      "source": "1+2",
+      "stdout": [
+        "3"
+      ],
+      "error": null
+    },
+    {
+      "source": "2+3*4",
+      "stdout": [
+        "14"
+      ],
+      "error": null
+    },
+    {
+      "source": "(2+3)*4",
+      "stdout": [
+        "20"
+      ],
+      "error": null
+    },
+    {
+      "source": "10-4-3",
+      "stdout": [
+        "3"
+      ],
+      "error": null
+    },
+    {
+      "source": "10/4",
+      "stdout": [
+        "2.5"
+      ],
+      "error": null
+    },
+    {
+      "source": "2*-3",
+      "stdout": [
+        "-6"
+      ],
+      "error": null
+    },
+    {
+      "source": "-(3+4)",
+      "stdout": [
+        "-7"
+      ],
+      "error": null
+    },
+    {
+      "source": "3.5*2",
+      "stdout": [
+        "7"
+      ],
+      "error": null
+    },
+    {
+      "source": "1+2*3-4/2",
+      "stdout": [
+        "5"
+      ],
+      "error": null
+    },
+    {
+      "source": "8/2/2",
+      "stdout": [
+        "2"
+      ],
+      "error": null
+    },
+    {
+      "source": "--3",
+      "stdout": [
+        "3"
+      ],
+      "error": null
+    }
+  ]
+}

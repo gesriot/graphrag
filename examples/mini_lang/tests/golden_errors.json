@@ -1,0 +1,45 @@
+{
+  "name": "errors",
+  "cases": [
+    {
+      "source": "x",
+      "stdout": [],
+      "error": "UndefinedVariable: variable 'x' is not defined"
+    },
+    {
+      "source": "1/0",
+      "stdout": [],
+      "error": "DivisionByZero: division by zero"
+    },
+    {
+      "source": "let y = 1/0\ny",
+      "stdout": [],
+      "error": "DivisionByZero: division by zero"
+    },
+    {
+      "source": "2+",
+      "stdout": [],
+      "error": "ParseError: unexpected end of input"
+    },
+    {
+      "source": "(1+2",
+      "stdout": [],
+      "error": "ParseError: expected RPAREN, got EOF ''"
+    },
+    {
+      "source": "1 $ 2",
+      "stdout": [],
+      "error": "LexError: unknown token '$' at position 2"
+    },
+    {
+      "source": "let = 5",
+      "stdout": [],
+      "error": "ParseError: expected IDENT, got EQUALS '='"
+    },
+    {
+      "source": "3 4",
+      "stdout": [],
+      "error": "ParseError: unexpected token '4' after statement"
+    }
+  ]
+}
