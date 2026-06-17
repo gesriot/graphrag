@@ -330,6 +330,23 @@ def test_same_named_callers_do_not_absorb_cross_module_targets(tmp_path: Path):
     assert main_sources == {"alpha:main", "beta:main"}, main_sources
 
 
+def test_audit_call_edges_clean_on_mini_game(mini_game_byog_root: Path):
+    """The reproducible audit tool must report zero structural anomalies and no
+    dangling targets on the (correct) mini_game bridge graph.
+
+    Guards both the resolver (no span-outside-caller / dangling regressions) and
+    the audit tool itself against drift.
+    """
+    from scripts.audit_call_edges import build_report
+
+    report = build_report(mini_game_byog_root, sample=5, seed=42)
+    assert report["total_calls"] > 0
+    assert report["structural"]["anomaly_count"] == 0, report["structural"]["anomalies"]
+    assert report["dangling_count"] == 0, report["dangling_targets"]
+    assert report["structural"]["pass_rate"] == 1.0
+    assert all(e["structural_ok"] for e in report["sample"]["edges"])
+
+
 def test_ast_attribute_resolution_regression(tmp_path: Path):
     """Separate regression fixture for AST Attribute call resolution (module.func).
 
