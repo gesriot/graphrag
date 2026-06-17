@@ -564,7 +564,7 @@ def test_port_eval_graph_stage_and_golden(mini_game_byog_root: Path):
     Keeps the suite fast/toolchain-independent by exercising the pure stages only
     (no cargo); the cargo end-to-end path is covered by running the harness.
     """
-    from scripts.port_eval import eval_graph, count_golden
+    from scripts.port_eval import eval_graph, count_golden, golden_contract_coverage
 
     # source is unused when reindex=False; pass the graph root as a placeholder.
     g = eval_graph(mini_game_byog_root, source=mini_game_byog_root, reindex=False, use_advanced=False)
@@ -582,6 +582,26 @@ def test_port_eval_graph_stage_and_golden(mini_game_byog_root: Path):
     mini_lang_golden = count_golden(Path(__file__).parents[2] / "mini_lang")
     assert mini_lang_golden["count"] == 28
     assert mini_lang_golden["file_count"] == 3
+    mini_lang_coverage = golden_contract_coverage(
+        Path(__file__).parents[2] / "mini_lang",
+        Path(__file__).parents[2] / "mini_lang_rust",
+    )
+    assert mini_lang_coverage["complete"] is True
+
+    semver_source = Path(__file__).parents[2] / "semantic_version"
+    semver_golden = count_golden(semver_source)
+    assert semver_golden["count"] == 96
+    assert semver_golden["file_count"] == 9
+    assert semver_golden["case_counts"]["spec/golden_spec_match.json"] == 39
+    assert semver_golden["case_counts"]["spec/golden_spec_invalid.json"] == 9
+    assert semver_golden["case_counts"]["spec/golden_spec_select.json"] == 4
+    assert semver_golden["case_counts"]["spec/golden_spec_filter.json"] == 2
+    semver_coverage = golden_contract_coverage(
+        semver_source,
+        Path(__file__).parents[2] / "semantic_version_rust",
+    )
+    assert semver_coverage["expected"]["."] == "golden_contract.rs"
+    assert semver_coverage["expected"]["spec"] == "spec_contract.rs"
 
 
 def test_ast_attribute_resolution_regression(tmp_path: Path):

@@ -122,7 +122,10 @@ def eval_rust(port_dir: Path) -> Dict[str, Any]:
     stages = {
         "fmt": ["cargo", "fmt", "--check"],
         "check": ["cargo", "check"],
-        "golden_test": ["cargo", "test", "--test", "golden_contract", "--", "--quiet"],
+        # Run all integration tests so multi-contract ports (e.g. Version +
+        # SimpleSpec) cannot pass port_eval by exercising only the first
+        # golden_contract.rs file.
+        "golden_test": ["cargo", "test", "--tests", "--", "--quiet"],
         "run": ["cargo", "run", "--quiet"],
     }
     results = {name: _run(cmd, cwd=port_dir) for name, cmd in stages.items()}
@@ -132,21 +135,42 @@ def eval_rust(port_dir: Path) -> Dict[str, Any]:
 
 def count_golden(source: Path) -> Dict[str, Any]:
     tests_dir = source / "tests"
-    files = sorted(tests_dir.glob("golden_*.json")) if tests_dir.exists() else []
-    names = [p.name for p in files]
+    files = sorted(tests_dir.rglob("golden_*.json")) if tests_dir.exists() else []
+    names = [str(p.relative_to(tests_dir)) for p in files]
     case_counts: Dict[str, int] = {}
     for p in files:
+        rel_name = str(p.relative_to(tests_dir))
         data = json.loads(p.read_text())
         cases = data.get("cases")
         # mini_lang groups many golden cases per file; mini_game uses one trace
         # per file. Count the actual behavior cases when present, otherwise
         # count the file as a single golden scenario.
-        case_counts[p.name] = len(cases) if isinstance(cases, list) else 1
+        case_counts[rel_name] = len(cases) if isinstance(cases, list) else 1
     return {
         "count": sum(case_counts.values()),
         "file_count": len(names),
         "names": names,
         "case_counts": case_counts,
+    }
+
+
+def golden_contract_coverage(source: Path, port_dir: Path) -> Dict[str, Any]:
+    """Map source golden groups to the Rust integration tests expected to cover them."""
+    tests_dir = source / "tests"
+    files = sorted(tests_dir.rglob("golden_*.json")) if tests_dir.exists() else []
+    groups = sorted({p.parent.relative_to(tests_dir) for p in files}, key=lambda p: str(p))
+    expected: Dict[str, str] = {}
+    missing: List[str] = []
+    for group in groups:
+        group_name = str(group)
+        test_name = "golden_contract.rs" if group_name == "." else f"{'_'.join(group.parts)}_contract.rs"
+        expected[group_name] = test_name
+        if not (port_dir / "tests" / test_name).exists():
+            missing.append(test_name)
+    return {
+        "expected": expected,
+        "missing": missing,
+        "complete": not missing,
     }
 
 
@@ -167,9 +191,14 @@ def build_eval_report(
     packs = gen_context_packs(symbols, graph, ROOT / "output" / "port_eval" / target)
     rust = {"status": "skipped", "reason": "--skip-rust"} if skip_rust else eval_rust(port_dir)
     golden = count_golden(source)
+    contract_coverage = golden_contract_coverage(source, port_dir)
 
     rust_ok = rust.get("all_ok", False)
-    golden_passed = rust.get("golden_test", {}).get("status") == "ok" if not skip_rust else None
+    golden_passed = (
+        rust.get("golden_test", {}).get("status") == "ok" and contract_coverage["complete"]
+        if not skip_rust
+        else None
+    )
     # Without the cargo stages we cannot assert the end-to-end (north-star) result.
     overall = None if skip_rust else bool(graph_res["clean"] and rust_ok and golden_passed)
 
@@ -178,7 +207,7 @@ def build_eval_report(
         "graph": graph_res,
         "context_packs": packs,
         "rust": rust,
-        "golden_scenarios": {**golden, "passed": golden_passed},
+        "golden_scenarios": {**golden, "passed": golden_passed, "contract_coverage": contract_coverage},
         "manual_fix_count": manual_fixes,
         "overall_pass": overall,
     }
@@ -212,6 +241,8 @@ def to_markdown(r: Dict[str, Any]) -> str:
         "",
         "## Golden cases",
         f"- {gs['count']} cases/scenarios across {gs.get('file_count', len(gs['names']))} files, passed: {gs['passed']}",
+        f"- contract coverage complete: {gs['contract_coverage']['complete']}"
+        f" (missing: {', '.join(gs['contract_coverage']['missing']) or '-'})",
         "",
         f"**manual_fix_count: {r['manual_fix_count']}**",
         f"**OVERALL PASS: {r['overall_pass']}**",
@@ -272,6 +303,9 @@ def main(
         f"golden cases      : {gs['count']} across {gs.get('file_count', len(gs['names']))} files "
         f"(passed={gs['passed']})"
     )
+    coverage = gs["contract_coverage"]
+    if not coverage["complete"]:
+        print(f"golden coverage   : missing {coverage['missing']}")
     print(f"manual fixes      : {report['manual_fix_count']}")
     print(f"OVERALL PASS      : {report['overall_pass']}")
     if markdown is not None:
