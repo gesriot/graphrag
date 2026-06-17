@@ -4,7 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# Pure std for the diff (v1) scope. (regex/url-equivalents arrive with v3 patch.)
+# Bitap (v2 match) uses arbitrary-precision bit arrays, mirroring Python's
+# unbounded ints (patterns may exceed 64/128 bits).
+num-bigint = "0.4"
+num-traits = "0.2"
 
 [dev-dependencies]
 serde = { version = "1.0", features = ["derive"] }

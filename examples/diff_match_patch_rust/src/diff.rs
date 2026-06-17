@@ -744,6 +744,8 @@ fn to_diff(c: CDiff) -> Vec<Diff> {
 pub struct DiffMatchPatch {
     pub diff_timeout: f64,
     pub diff_edit_cost: usize,
+    pub match_threshold: f64,
+    pub match_distance: i64,
 }
 
 impl Default for DiffMatchPatch {
@@ -752,6 +754,8 @@ impl Default for DiffMatchPatch {
         DiffMatchPatch {
             diff_timeout: 0.0,
             diff_edit_cost: 4,
+            match_threshold: 0.5,
+            match_distance: 1000,
         }
     }
 }

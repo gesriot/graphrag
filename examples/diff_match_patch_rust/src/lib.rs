@@ -4,5 +4,6 @@
 //! Verified against the same golden_*.json contract as the Python reference.
 
 pub mod diff;
+pub mod matching;
 
 pub use diff::{DiffMatchPatch, DELETE, EQUAL, INSERT};
