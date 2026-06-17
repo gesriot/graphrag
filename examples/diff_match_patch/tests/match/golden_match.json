@@ -1,0 +1,275 @@
+{
+  "name": "match",
+  "cases": [
+    {
+      "op": "match",
+      "text": "abcdefghijk",
+      "pattern": "fgh",
+      "loc": 5,
+      "match_threshold": 0.5,
+      "match_distance": 1000,
+      "result": 5
+    },
+    {
+      "op": "match",
+      "text": "abcdefghijk",
+      "pattern": "fgh",
+      "loc": 0,
+      "match_threshold": 0.5,
+      "match_distance": 1000,
+      "result": 5
+    },
+    {
+      "op": "match",
+      "text": "abcdefghijk",
+      "pattern": "efxhi",
+      "loc": 0,
+      "match_threshold": 0.5,
+      "match_distance": 1000,
+      "result": 4
+    },
+    {
+      "op": "match",
+      "text": "abcdefghijk",
+      "pattern": "cdefg",
+      "loc": 5,
+      "match_threshold": 0.5,
+      "match_distance": 1000,
+      "result": 2
+    },
+    {
+      "op": "match",
+      "text": "abcdefghijk",
+      "pattern": "bird",
+      "loc": 1,
+      "match_threshold": 0.5,
+      "match_distance": 1000,
+      "result": 1
+    },
+    {
+      "op": "match",
+      "text": "",
+      "pattern": "abc",
+      "loc": 0,
+      "match_threshold": 0.5,
+      "match_distance": 1000,
+      "result": -1
+    },
+    {
+      "op": "match",
+      "text": "abc",
+      "pattern": "",
+      "loc": 0,
+      "match_threshold": 0.5,
+      "match_distance": 1000,
+      "result": 0
+    },
+    {
+      "op": "match",
+      "text": "abcdef",
+      "pattern": "",
+      "loc": 3,
+      "match_threshold": 0.5,
+      "match_distance": 1000,
+      "result": 3
+    },
+    {
+      "op": "match",
+      "text": "abcdef",
+      "pattern": "abcdef",
+      "loc": 0,
+      "match_threshold": 0.5,
+      "match_distance": 1000,
+      "result": 0
+    },
+    {
+      "op": "match",
+      "text": "abcdef",
+      "pattern": "def",
+      "loc": -5,
+      "match_threshold": 0.5,
+      "match_distance": 1000,
+      "result": 3
+    },
+    {
+      "op": "match",
+      "text": "abcdef",
+      "pattern": "def",
+      "loc": 100,
+      "match_threshold": 0.5,
+      "match_distance": 1000,
+      "result": 3
+    },
+    {
+      "op": "match",
+      "text": "abcdefghijklmnopqrstuvwxyz",
+      "pattern": "defy",
+      "loc": 2,
+      "match_threshold": 0.5,
+      "match_distance": 1000,
+      "result": 3
+    },
+    {
+      "op": "match",
+      "text": "abcdefghijklmnopqrstuvwxyz",
+      "pattern": "abcdefy",
+      "loc": 0,
+      "match_threshold": 0.5,
+      "match_distance": 1000,
+      "result": 0
+    },
+    {
+      "op": "match",
+      "text": "abcdefghijklmnopqrstuvwxyz",
+      "pattern": "xxx",
+      "loc": 0,
+      "match_threshold": 0.5,
+      "match_distance": 1000,
+      "result": -1
+    },
+    {
+      "op": "match",
+      "text": "The quick brown fox",
+      "pattern": "brown",
+      "loc": 0,
+      "match_threshold": 0.5,
+      "match_distance": 1000,
+      "result": 10
+    },
+    {
+      "op": "match",
+      "text": "The quick brown fox",
+      "pattern": "brwn",
+      "loc": 10,
+      "match_threshold": 0.5,
+      "match_distance": 1000,
+      "result": 10
+    },
+    {
+      "op": "match",
+      "text": "abcdefghijklmnopqrstuvwxyz",
+      "pattern": "defy",
+      "loc": 0,
+      "match_threshold": 0.4,
+      "match_distance": 1000,
+      "result": 3
+    },
+    {
+      "op": "match",
+      "text": "abcdefghijklmnopqrstuvwxyz",
+      "pattern": "defy",
+      "loc": 0,
+      "match_threshold": 0.7,
+      "match_distance": 1000,
+      "result": 3
+    },
+    {
+      "op": "match",
+      "text": "abcdefghijk",
+      "pattern": "efxhi",
+      "loc": 0,
+      "match_threshold": 0.3,
+      "match_distance": 1000,
+      "result": 4
+    },
+    {
+      "op": "match",
+      "text": "abcdefghijklmnopqrstuvwxyzabcdef",
+      "pattern": "abc",
+      "loc": 26,
+      "match_threshold": 0.5,
+      "match_distance": 10,
+      "result": 26
+    },
+    {
+      "op": "match",
+      "text": "abcdefghijklmnopqrstuvwxyzabcdef",
+      "pattern": "abc",
+      "loc": 26,
+      "match_threshold": 0.5,
+      "match_distance": 1000,
+      "result": 26
+    },
+    {
+      "op": "match",
+      "text": "abcdefghijklmnopqrstuvwxyzabcdef",
+      "pattern": "abc",
+      "loc": 26,
+      "match_threshold": 0.5,
+      "match_distance": 0,
+      "result": 26
+    },
+    {
+      "op": "match",
+      "text": "αβγδεζ",
+      "pattern": "γδ",
+      "loc": 2,
+      "match_threshold": 0.5,
+      "match_distance": 1000,
+      "result": 2
+    },
+    {
+      "op": "match",
+      "text": "αβγδεζηθ",
+      "pattern": "δε",
+      "loc": 0,
+      "match_threshold": 0.5,
+      "match_distance": 1000,
+      "result": 3
+    },
+    {
+      "op": "match",
+      "text": "héllo wörld",
+      "pattern": "wörld",
+      "loc": 0,
+      "match_threshold": 0.5,
+      "match_distance": 1000,
+      "result": 6
+    },
+    {
+      "op": "match",
+      "text": "ab😀cd😎ef",
+      "pattern": "cd😎",
+      "loc": 0,
+      "match_threshold": 0.5,
+      "match_distance": 1000,
+      "result": 3
+    },
+    {
+      "op": "match",
+      "text": "XXXXXabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijYYYYY",
+      "pattern": "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij",
+      "loc": 5,
+      "match_threshold": 0.5,
+      "match_distance": 1000,
+      "result": 5
+    },
+    {
+      "op": "match",
+      "text": "XXXXXabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijYYYYY",
+      "pattern": "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghiZ",
+      "loc": 4,
+      "match_threshold": 0.5,
+      "match_distance": 1000,
+      "result": 5
+    },
+    {
+      "op": "match",
+      "text": "ZZ0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789ZZ",
+      "pattern": "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789",
+      "loc": 2,
+      "match_threshold": 0.5,
+      "match_distance": 1000,
+      "result": 2
+    },
+    {
+      "op": "match",
+      "text": "ZZ0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789ZZ",
+      "pattern": "012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678!",
+      "loc": 1,
+      "match_threshold": 0.5,
+      "match_distance": 1000,
+      "result": 2
+    }
+  ]
+}
