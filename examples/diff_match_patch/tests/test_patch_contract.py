@@ -48,7 +48,7 @@ def _all_cases():
 def test_golden_files_present_and_sized():
     assert GOLDEN_FILES, "no golden_*.json files under tests/patch/"
     total = sum(len(json.loads(gf.read_text())["cases"]) for gf in GOLDEN_FILES)
-    assert total >= 20, f"expected >= 20 patch golden cases, got {total}"
+    assert total >= 33, f"expected >= 33 patch golden cases, got {total}"
 
 
 @pytest.mark.parametrize("case", _all_cases())

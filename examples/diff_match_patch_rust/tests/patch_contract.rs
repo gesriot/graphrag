@@ -51,6 +51,14 @@ fn run_case(c: &Value) {
                 before,
                 "patches mutated by apply"
             );
+            // Re-applying the same patch objects must remain stable as well.
+            let (new_text2, results2) = dmp.patch_apply(&patches, c["source"].as_str().unwrap());
+            assert_eq!((new_text2, results2), (new_text, results));
+            assert_eq!(
+                dmp.patch_to_text(&patches),
+                before,
+                "patches mutated by repeated apply"
+            );
         }
         "roundtrip" => {
             let patches = dmp
@@ -94,8 +102,8 @@ fn patch_contract_all_cases() {
         }
     }
     assert!(
-        total >= 20,
-        "expected >= 20 patch golden cases, got {}",
+        total >= 33,
+        "expected >= 33 patch golden cases, got {}",
         total
     );
 }

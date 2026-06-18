@@ -36,8 +36,16 @@ Vendored-file SHA-256 values (verified directly against the wheel):
   threshold edge cases, Unicode code-point indexes, and arbitrary-length
   patterns via unbounded bit arrays; 30 golden cases and `overall_pass=True`
   with 0 recorded manual fixes.
-- **v3 (patch, next):** `patch_make` / `patch_apply` / `patch_toText` / `patch_fromText`,
-  including application against imperfect source.
+- **v3 (patch, complete):** `patch_make` / `patch_apply` / `patch_toText` /
+  `patch_fromText`, including fuzzy application against imperfect source,
+  split-max behavior, Unicode code-point offsets, and urllib-compatible percent
+  encoding; 33 golden cases and `overall_pass=True` with 0 recorded manual fixes.
+
+The completed Rust port covers the full staged **algorithmic core scope**
+(diff + match + patch), not every Python helper or calling convention.
+Deliberately out of scope are positive `Diff_Timeout` deadline/half-match
+behavior, `diff_prettyHtml`, delta serialization helpers, and the legacy
+overloaded forms of `patch_make` beyond the canonical `(text1, text2)` form.
 
 Each stage: license/provenance (done) → golden before Rust → `audit_call_edges`
 clean → Rust port → `port_eval`.

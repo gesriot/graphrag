@@ -47,7 +47,9 @@ Important implementation correction: do **not** rely on generic GraphRAG entity 
 3. **Graph clean** — `audit_call_edges` on the project's graph shows `pass_rate=1.0` with no dangling targets, OR every remaining weak/false edge is demoted to `call_observations` (never a high-confidence deterministic edge).
 4. **Then `port_eval`** — only after 1–3, run the end-to-end harness and record the report (graph pass rate, golden cases, manual-fix count, `overall_pass`).
 
-Validated end-to-end on four projects, all with `overall_pass=True` and 0 recorded manual fixes: `mini_game` (greenhouse), `mini_lang` (interpreter; lexer→parser→eval, 28 golden cases), the external BSD-licensed `semantic_version` 2.10.0 core scope (`Version`, `SimpleSpec`, and `NpmSpec`; 147 golden cases across 13 files), and v1 diff + v2 Bitap match of the external Apache-2.0 `diff-match-patch` 20241021 package (Myers/bisect, line mode, Unicode code-point behavior, cleanups, fuzzy matching, and arbitrary-length patterns; 74 golden cases). The remaining `diff-match-patch` scope is v3 patch.
+Validated end-to-end on four projects, all with `overall_pass=True` and 0 recorded manual fixes: `mini_game` (greenhouse), `mini_lang` (interpreter; lexer→parser→eval, 28 golden cases), the external BSD-licensed `semantic_version` 2.10.0 core scope (`Version`, `SimpleSpec`, and `NpmSpec`; 147 golden cases across 13 files), and the complete staged algorithmic core of the external Apache-2.0 `diff-match-patch` 20241021 package (Myers diff, line mode and cleanups; arbitrary-length Bitap fuzzy match; patch make/apply/split/serialization with Unicode and percent-codec fidelity; 107 golden cases across 9 files).
+
+**Readiness snapshot (reviewed 2026-06-17):** the small-project Python→Rust thesis is proven, but repository-scale readiness is not. Phase 0 is complete. The Python portion of Phase 1 and the deterministic core of Phase 2 are usable (generic package indexing, provenance, audited call edges, local traversals and context packs), while multi-language semantic analysis and optional LLM overlays remain open. Phase 3 exists as separate CLIs rather than one product surface. The Phase 4 small-project milestone is exceeded by four ports, but there is no autonomous translation controller claim. Phase 5 has a repeatable graph/port harness and strong golden contracts; its defining 5k–20k LOC scale trial, engineer-time measurement, property/fuzz coverage, and durable intervention log are still missing. Phases 6–7 are not started in substance. In short: a convincing research prototype with unusually good small-scope evidence, not yet a scalable migration product.
 
 ## 2. High-Level Architecture (Replicable Version)
 
@@ -253,18 +255,15 @@ Alternatives to evaluate: pure graph DB + LLM-to-Cypher (as in Graph-Code demos)
 - **Reproducibility of the anecdote:** The exact "no single error" on a complex proprietary codebase likely involved internal tooling, curated prompts, strong test suites, and expert oversight. Our version will aim for excellent results on open examples and document the gap.
 - **Source-claim drift:** Talks, issues, docs, and model capabilities change. **Mitigation:** Keep dated source notes in this plan; link to archived transcripts/issues where possible; avoid presenting paraphrased quotes as verified direct quotes until the transcript is captured.
 
-## 6. Immediate Next Actions (After Reading This Plan)
+## 6. Immediate Next Actions (Current Frontier)
 
-1. Watch the Russinovich talk(s) and the New Stack / other recaps.
-2. Capture dated source notes: exact video timestamps/transcript snippets, GraphRAG BYOG docs, issue #1779 status, and Galen Hunt clarification context.
-3. Set up the empty workspace: `uv init` or `python -m venv`, install GraphRAG + pyarrow/pandas + tree-sitter deps, add a small `examples/` dir.
-4. Run Microsoft GraphRAG quickstart on a toy text corpus, then run a BYOG smoke test with hand-written `entities.parquet` and `relationships.parquet`.
-5. Prototype a minimal Python extractor that outputs files/modules/classes/functions, containment edges, imports, and conservative call-ish edges with provenance.
-6. Convert the extracted graph into GraphRAG-compatible BYOG tables and make schema tests self-contained (fresh temp outputs, no dependency on ignored generated parquets).
-7. Create the first `context-pack` command for a function/module and answer architecture/behavior questions using local graph data only.
-8. Attempt the first structure-preserving Rust port using deterministic context packs + golden traces + local interactive agents/manual review. Measure compile/test success and manual fixes.
-9. Optional later: if a local or cloud LLM endpoint is configured, run `create_communities` + `create_community_reports` and compare quality/cost against local context packs.
-10. Create the first GitHub issues or sections in this repo for graph schema, BYOG export, context-pack, parser, query API, and agent loop.
+1. Select one permissively licensed, well-tested Python repository or cohesive component in the 10k–20k LOC range; pin its version/commit, license, included/excluded scope, and existing test command before indexing.
+2. Index it with the generic pipeline and record wall time, peak memory, graph size, observation count, and audit results. Add a seeded manual precision/recall sample for calls/imports instead of relying only on structural validity.
+3. Exercise cross-file realities before porting: package-relative imports, inheritance and method dispatch, decorators, generated/configured behavior, external dependencies, and ambiguous dynamic calls. Fix or explicitly demote weak facts; never tune the audit by silently dropping difficult files.
+4. Capture the behavior contract before Rust: run the upstream suite, add black-box/differential scenarios for the chosen component, and identify state/error/performance invariants. Preserve a durable run record so `manual_fix_count=0` is evidence rather than a command-line assertion.
+5. Port one dependency-bounded but genuinely cross-module component through the existing four gates. Record context-pack inputs, iterations, failures, engineer time, and behavioral deltas; add property/fuzz tests where the API admits them.
+6. Use the scale trial's measured bottleneck to choose the following branch: production CLI/MCP and benchmarks if orchestration dominates; semantic overlay if architectural retrieval is insufficient; C/clang only after the Python pipeline survives repository scale.
+7. In parallel but off the critical path, finish the dated primary-source notes and exact talk transcript/timestamps before making public claims about the Microsoft demo.
 
 ## 7. References & Further Reading (Key Sources)
 
@@ -279,4 +278,4 @@ This plan is designed to be executed iteratively with strong verification at eac
 
 Start small, measure everything (quality, cost, human effort), and expand. The combination of precise static structure + GraphRAG-style global memory is a powerful and replicable pattern.
 
-*Plan created: 2026-06-14. Reviewed/updated: 2026-06-15. Current implementation strategy: no external API by default; deterministic BYOG + local context-pack pipeline first.*
+*Plan created: 2026-06-14. Reviewed/updated: 2026-06-17. Current implementation strategy: prove deterministic BYOG + local context packs on a 10k–20k LOC Python target before expanding to C/C++, semantic overlays, or product packaging.*
