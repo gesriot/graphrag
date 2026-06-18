@@ -56,6 +56,7 @@ def _run(cmd: List[str], cwd: Path, timeout: int = 600) -> Dict[str, Any]:
 
 
 def eval_graph(graph: Path, source: Path, reindex: bool, use_advanced: bool) -> Dict[str, Any]:
+    reindex_result: Optional[Dict[str, Any]] = None
     if reindex:
         cmd = [
             sys.executable, str(ROOT / "scripts" / "index_python.py"),
@@ -63,7 +64,10 @@ def eval_graph(graph: Path, source: Path, reindex: bool, use_advanced: bool) -> 
         ]
         if use_advanced:
             cmd.append("--use-advanced")
-        _run(cmd, cwd=ROOT)
+        reindex_result = _run(cmd, cwd=ROOT)
+        if reindex_result["status"] != "ok":
+            detail = reindex_result.get("reason") or "\n".join(reindex_result.get("output_tail", []))
+            raise RuntimeError(f"reindex failed; refusing to evaluate a stale graph: {detail}")
     report = build_report(graph, sample=0)
     g = ByogGraph(graph)
     s = report["structural"]
@@ -81,6 +85,7 @@ def eval_graph(graph: Path, source: Path, reindex: bool, use_advanced: bool) -> 
             and report["dangling_count"] == 0
             and report.get("semantic_suspicion_count", 0) == 0
         ),
+        "reindex": reindex_result,
     }
 
 
@@ -270,7 +275,7 @@ def main(
     report = build_eval_report(
         source=source if source.is_absolute() else ROOT / source,
         port_dir=port if port.is_absolute() else ROOT / port,
-        graph=graph,
+        graph=graph if graph.is_absolute() else ROOT / graph,
         target=target or source.name,
         symbols=symbol,
         reindex=reindex,

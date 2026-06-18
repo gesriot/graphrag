@@ -187,9 +187,12 @@ def pack(
         pack["members"] = members[:50]
         pack["module_neighbors"] = [compact_relationship(r) for r in module_relationships[:100]]
 
-    # Golden contract note for mini_game symbols
+    # Golden contract note for the canonical mini_game graph only.  Symbol names
+    # such as `sim` or `physics` are not sufficient evidence: they are common in
+    # unrelated repositories and would contaminate a generic context pack.
+    is_mini_game_graph = "mini_game" in Path(graph).name
     golden_note = ""
-    if "mini_game" in str(graph) or "sim" in str(ent_dict.get("title", "")) or "physics" in str(ent_dict.get("title", "")):
+    if is_mini_game_graph:
         golden_note = (
             "GOLDEN BEHAVIOR CONTRACT: The mini_game simulator has committed golden traces (see examples/mini_game/tests/golden_*.json). "
             "All ports must pass the exact same state/collided/score traces for the defined input sequences, including the collision_first scenario (jumps=[6] produces collided=True at tick 9). "
@@ -222,7 +225,7 @@ def pack(
             "is_deterministic": ent_dict.get("is_deterministic"),
         },
         "golden_contract_note": golden_note if golden_note else None,
-        "behavior_contract": "examples/mini_game/tests/behavior_contract.json (load for machine-readable invariants and expected values per scenario)" if "mini_game" in str(graph) else None,
+        "behavior_contract": "examples/mini_game/tests/behavior_contract.json (load for machine-readable invariants and expected values per scenario)" if is_mini_game_graph else None,
         "usage_hint": "Use this pack + the original source of the listed files when prompting an LLM to port the symbol to Rust while preserving exact observable behavior on the golden inputs.",
         "truncation": {
             "max_text_chars": max_text_chars if max_text_chars > 0 else None,
@@ -238,7 +241,10 @@ def pack(
         # Match on source title (exact or module prefix for members)
         try:
             obs_src = obs["source"].astype(str)
-            mask = (obs_src == symbol_title) | obs_src.str.startswith(symbol_title + ":") | obs_src.str.contains(symbol_title.split(":")[-1], case=False, na=False)
+            if is_module_pack:
+                mask = (obs_src == symbol_title) | obs_src.str.startswith(module_prefix)
+            else:
+                mask = (obs_src == symbol_title) | obs_src.str.startswith(symbol_title + ".")
             relevant = obs[mask].head(15)
             if len(relevant) > 0:
                 uncertain = []
