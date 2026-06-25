@@ -23,9 +23,11 @@ Example:
 
 from __future__ import annotations
 
+import ast
 import json
 import random
 import sys
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -112,6 +114,18 @@ def dangling_targets(ents: pd.DataFrame, calls: pd.DataFrame) -> List[Dict[str, 
     return out
 
 
+def _clean_attribute_display_fragment(value: str) -> str:
+    """Normalize one side of an ``ast Attribute`` audit display."""
+    cleaned = value.split(" (", 1)[0].strip()
+    # Extractor descriptions wrap the whole ``ast Attribute: ...`` trailer in
+    # parentheses, so clean resolutions such as ``pkg.mod.fn`` arrive here as
+    # ``pkg.mod.fn)``.  Weak resolutions with explanatory suffixes were already
+    # truncated by the split above.
+    if cleaned.endswith(")"):
+        cleaned = cleaned[:-1].rstrip()
+    return cleaned
+
+
 def _attribute_call_displays(description: str) -> Tuple[Optional[str], Optional[str]]:
     """Return (raw_attribute_call, resolved_display) from extractor descriptions."""
     marker = "ast Attribute: "
@@ -119,12 +133,122 @@ def _attribute_call_displays(description: str) -> Tuple[Optional[str], Optional[
         return None, None
     rest = description.split(marker, 1)[1]
     if " -> " not in rest:
-        raw = rest.strip()
+        raw = _clean_attribute_display_fragment(rest)
         return raw, raw
     raw, resolved = rest.split(" -> ", 1)
-    # Drop explanatory suffixes such as "(unresolved receiver)".
-    resolved = resolved.split(" (", 1)[0].strip()
-    return raw.strip(), resolved
+    return _clean_attribute_display_fragment(raw), _clean_attribute_display_fragment(resolved)
+
+
+def _attribute_receiver(raw_display: str) -> Optional[str]:
+    if "." not in raw_display:
+        return None
+    receiver = raw_display.rsplit(".", 1)[0].strip()
+    return receiver or None
+
+
+def _is_clean_dotted_resolution(resolved_display: Optional[str]) -> bool:
+    """True for trusted-looking dotted paths, false for diagnostic displays."""
+    if not resolved_display or "." not in resolved_display:
+        return False
+    return not any(ch in resolved_display for ch in (" ", "(", ")"))
+
+
+@lru_cache(maxsize=256)
+def _imported_receiver_bindings_for_file(source_file: str) -> Dict[str, str]:
+    """Return local import bindings as ``local_name -> imported_path``.
+
+    This is intentionally shallow and best-effort: audit should never invent a
+    semantic pass from missing source, but when the source is present it can
+    distinguish ``from pkg import module; module.fn()`` from ``obj.fn()``.
+    """
+    path = Path(str(source_file))
+    if not path.exists() or not path.is_file():
+        return {}
+    try:
+        tree = ast.parse(path.read_text())
+    except Exception:
+        return {}
+
+    bindings: Dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                local = alias.asname or alias.name.split(".")[0]
+                bindings[local] = alias.name
+                if not alias.asname:
+                    bindings[alias.name] = alias.name
+        elif isinstance(node, ast.ImportFrom):
+            module = (("." * node.level) + (node.module or "")).lstrip(".")
+            for alias in node.names:
+                if alias.name == "*":
+                    continue
+                local = alias.asname or alias.name
+                imported_path = ".".join(part for part in (module, alias.name) if part)
+                bindings[local] = imported_path or alias.name
+                if not alias.asname:
+                    bindings[alias.name] = imported_path or alias.name
+    return bindings
+
+
+def _receiver_is_imported_module_call(
+    raw_receiver: Optional[str],
+    target_module: str,
+    module_titles: set[str],
+    source_file: Any,
+) -> bool:
+    """Best-effort allowlist for known module receivers.
+
+    The legacy suspicion is still useful for ``obj.match() -> base:match``.
+    But when the receiver is an imported module and the target side is a real
+    module entity (including package-qualified titles such as
+    ``engine.grouping``), the edge is a legitimate module-call shape rather than
+    an object-call collision.
+    """
+    if not raw_receiver or target_module not in module_titles:
+        return False
+
+    if source_file is None or str(source_file) in {"", "None", "nan"}:
+        return False
+
+    bindings = _imported_receiver_bindings_for_file(str(source_file))
+    if not bindings:
+        return False
+    receiver_root = raw_receiver.split(".", 1)[0]
+    imported_path = bindings.get(raw_receiver)
+    if imported_path is None and receiver_root in bindings:
+        suffix = raw_receiver.split(".", 1)[1] if "." in raw_receiver else ""
+        imported_path = ".".join(part for part in (bindings[receiver_root], suffix) if part)
+    if imported_path is None:
+        return False
+
+    target_leaf = target_module.rsplit(".", 1)[-1]
+    receiver_leaf = raw_receiver.rsplit(".", 1)[-1]
+    imported_leaf = imported_path.rsplit(".", 1)[-1]
+    return (
+        raw_receiver == target_module
+        or receiver_leaf == target_leaf
+        or imported_path == target_module
+        or imported_path.endswith(f".{target_module}")
+        or imported_leaf == target_leaf
+    )
+
+
+def _module_titles_from_entities(ents: pd.DataFrame) -> set[str]:
+    modules: set[str] = set()
+    for _, row in ents.iterrows():
+        title = str(row["title"])
+        typ = str(row.get("type", "")).lower()
+        if typ == "module":
+            modules.add(title)
+        elif typ == "file":
+            # Flat BYOG file entities are titled like ``engine.grouping:grouping.py``
+            # (or ``lexer:lexer.py``); call targets use the left side as the
+            # graph module prefix.
+            if ":" in title:
+                modules.add(title.split(":", 1)[0])
+            elif title.endswith(".py"):
+                modules.add(Path(title).stem)
+    return modules
 
 
 def semantic_suspicions(ents: pd.DataFrame, calls: pd.DataFrame) -> List[Dict[str, Any]]:
@@ -139,6 +263,7 @@ def semantic_suspicions(ents: pd.DataFrame, calls: pd.DataFrame) -> List[Dict[st
         str(row["title"]): str(row.get("type", "")).lower()
         for _, row in ents.iterrows()
     }
+    module_titles = _module_titles_from_entities(ents)
     out: List[Dict[str, Any]] = []
     for _, r in calls.iterrows():
         target = str(r["target"])
@@ -152,6 +277,18 @@ def semantic_suspicions(ents: pd.DataFrame, calls: pd.DataFrame) -> List[Dict[st
         target_module, target_symbol = target.split(":", 1)
         attr = raw_display.rsplit(".", 1)[-1]
         if attr != target_symbol:
+            continue
+
+        raw_receiver = _attribute_receiver(raw_display)
+        if (
+            _is_clean_dotted_resolution(resolved_display)
+            and _receiver_is_imported_module_call(
+                raw_receiver,
+                target_module,
+                module_titles,
+                r.get("source_file"),
+            )
+        ):
             continue
 
         resolved_base = None

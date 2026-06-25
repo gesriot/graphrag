@@ -539,6 +539,66 @@ def test_audit_flags_attribute_call_to_module_function_suspicion():
     assert len(suspicions) == 1
     assert suspicions[0]["kind"] == "attribute_call_to_module_function"
     assert suspicions[0]["display"] == "obj.match"
+    assert suspicions[0]["resolved_display"] == "obj.match"
+
+
+def test_audit_allows_imported_module_attribute_call(tmp_path: Path):
+    """Imported module calls are legitimate cross-package edges, not obj-call collisions."""
+    from scripts.audit_call_edges import semantic_suspicions
+
+    source = tmp_path / "filter_stack.py"
+    source.write_text(
+        "from sqlparse.engine import grouping\n"
+        "from sqlparse.engine import grouping as grp\n"
+        "\n"
+        "def run(stmt):\n"
+        "    return grouping.group(stmt)\n"
+        "\n"
+        "def run_alias(stmt):\n"
+        "    return grp.group(stmt)\n"
+    )
+
+    ents = pd.DataFrame(
+        [
+            {"title": "filter_stack", "type": "module", "span": "module"},
+            {"title": "engine.grouping", "type": "module", "span": "module"},
+            {"title": "filter_stack:run", "type": "fn", "span": "4:0-5:31"},
+            {"title": "filter_stack:run_alias", "type": "fn", "span": "7:0-8:24"},
+            {"title": "engine.grouping:group", "type": "fn", "span": "10:0-11:0"},
+        ]
+    )
+    calls = pd.DataFrame(
+        [
+            {
+                "source": "filter_stack:run",
+                "target": "engine.grouping:group",
+                "type": "calls",
+                "span": "5:11",
+                "description": (
+                    "run calls group "
+                    "(ast Attribute: grouping.group -> sqlparse.engine.group)"
+                ),
+                "source_file": str(source),
+                "confidence": 0.8,
+                "is_deterministic": True,
+            },
+            {
+                "source": "filter_stack:run_alias",
+                "target": "engine.grouping:group",
+                "type": "calls",
+                "span": "8:11",
+                "description": (
+                    "run_alias calls group "
+                    "(ast Attribute: grp.group -> sqlparse.engine.group)"
+                ),
+                "source_file": str(source),
+                "confidence": 0.8,
+                "is_deterministic": True,
+            }
+        ]
+    )
+
+    assert semantic_suspicions(ents, calls) == []
 
 
 def test_audit_call_edges_clean_on_mini_game(mini_game_byog_root: Path):
