@@ -1,0 +1,349 @@
+{
+  "name": "jsmn_parse",
+  "cases": [
+    {
+      "json": "{}",
+      "cap": 10,
+      "result": 1,
+      "tokens": [
+        {
+          "type": 1,
+          "start": 0,
+          "end": 2,
+          "size": 0
+        }
+      ]
+    },
+    {
+      "json": "{\"a\":1}",
+      "cap": 10,
+      "result": 3,
+      "tokens": [
+        {
+          "type": 1,
+          "start": 0,
+          "end": 7,
+          "size": 1
+        },
+        {
+          "type": 4,
+          "start": 2,
+          "end": 3,
+          "size": 1
+        },
+        {
+          "type": 8,
+          "start": 5,
+          "end": 6,
+          "size": 0
+        }
+      ]
+    },
+    {
+      "json": "[1,2,3]",
+      "cap": 10,
+      "result": 4,
+      "tokens": [
+        {
+          "type": 2,
+          "start": 0,
+          "end": 7,
+          "size": 3
+        },
+        {
+          "type": 8,
+          "start": 1,
+          "end": 2,
+          "size": 0
+        },
+        {
+          "type": 8,
+          "start": 3,
+          "end": 4,
+          "size": 0
+        },
+        {
+          "type": 8,
+          "start": 5,
+          "end": 6,
+          "size": 0
+        }
+      ]
+    },
+    {
+      "json": "\"hello\"",
+      "cap": 5,
+      "result": 1,
+      "tokens": [
+        {
+          "type": 4,
+          "start": 1,
+          "end": 6,
+          "size": 0
+        }
+      ]
+    },
+    {
+      "json": "123",
+      "cap": 5,
+      "result": 1,
+      "tokens": [
+        {
+          "type": 8,
+          "start": 0,
+          "end": 3,
+          "size": 0
+        }
+      ]
+    },
+    {
+      "json": "true",
+      "cap": 5,
+      "result": 1,
+      "tokens": [
+        {
+          "type": 8,
+          "start": 0,
+          "end": 4,
+          "size": 0
+        }
+      ]
+    },
+    {
+      "json": "null",
+      "cap": 5,
+      "result": 1,
+      "tokens": [
+        {
+          "type": 8,
+          "start": 0,
+          "end": 4,
+          "size": 0
+        }
+      ]
+    },
+    {
+      "json": "{\"a\":{\"b\":[1,2]}}",
+      "cap": 20,
+      "result": 7,
+      "tokens": [
+        {
+          "type": 1,
+          "start": 0,
+          "end": 17,
+          "size": 1
+        },
+        {
+          "type": 4,
+          "start": 2,
+          "end": 3,
+          "size": 1
+        },
+        {
+          "type": 1,
+          "start": 5,
+          "end": 16,
+          "size": 1
+        },
+        {
+          "type": 4,
+          "start": 7,
+          "end": 8,
+          "size": 1
+        },
+        {
+          "type": 2,
+          "start": 10,
+          "end": 15,
+          "size": 2
+        },
+        {
+          "type": 8,
+          "start": 11,
+          "end": 12,
+          "size": 0
+        },
+        {
+          "type": 8,
+          "start": 13,
+          "end": 14,
+          "size": 0
+        }
+      ]
+    },
+    {
+      "json": "{\"s\":\"a\\\"b\"}",
+      "cap": 10,
+      "result": 3,
+      "tokens": [
+        {
+          "type": 1,
+          "start": 0,
+          "end": 12,
+          "size": 1
+        },
+        {
+          "type": 4,
+          "start": 2,
+          "end": 3,
+          "size": 1
+        },
+        {
+          "type": 4,
+          "start": 6,
+          "end": 10,
+          "size": 0
+        }
+      ]
+    },
+    {
+      "json": "{\"u\":\"\\u00e9\"}",
+      "cap": 10,
+      "result": 3,
+      "tokens": [
+        {
+          "type": 1,
+          "start": 0,
+          "end": 14,
+          "size": 1
+        },
+        {
+          "type": 4,
+          "start": 2,
+          "end": 3,
+          "size": 1
+        },
+        {
+          "type": 4,
+          "start": 6,
+          "end": 12,
+          "size": 0
+        }
+      ]
+    },
+    {
+      "json": "{\"a\":1}",
+      "cap": -1,
+      "result": 3,
+      "tokens": []
+    },
+    {
+      "json": "[1,2,3]",
+      "cap": 2,
+      "result": -1,
+      "tokens": []
+    },
+    {
+      "json": "{\"a\":",
+      "cap": 10,
+      "result": -3,
+      "tokens": []
+    },
+    {
+      "json": "{a}",
+      "cap": 10,
+      "result": 2,
+      "tokens": [
+        {
+          "type": 1,
+          "start": 0,
+          "end": 3,
+          "size": 1
+        },
+        {
+          "type": 8,
+          "start": 1,
+          "end": 2,
+          "size": 0
+        }
+      ]
+    },
+    {
+      "json": "",
+      "cap": 5,
+      "result": 0,
+      "tokens": []
+    },
+    {
+      "json": "  {}  ",
+      "cap": 10,
+      "result": 1,
+      "tokens": [
+        {
+          "type": 1,
+          "start": 2,
+          "end": 4,
+          "size": 0
+        }
+      ]
+    },
+    {
+      "json": "-12.5e3",
+      "cap": 5,
+      "result": 1,
+      "tokens": [
+        {
+          "type": 8,
+          "start": 0,
+          "end": 7,
+          "size": 0
+        }
+      ]
+    },
+    {
+      "json": "{\"k\":true,\"n\":null,\"arr\":[\"x\"]}",
+      "cap": 30,
+      "result": 8,
+      "tokens": [
+        {
+          "type": 1,
+          "start": 0,
+          "end": 31,
+          "size": 3
+        },
+        {
+          "type": 4,
+          "start": 2,
+          "end": 3,
+          "size": 1
+        },
+        {
+          "type": 8,
+          "start": 5,
+          "end": 9,
+          "size": 0
+        },
+        {
+          "type": 4,
+          "start": 11,
+          "end": 12,
+          "size": 1
+        },
+        {
+          "type": 8,
+          "start": 14,
+          "end": 18,
+          "size": 0
+        },
+        {
+          "type": 4,
+          "start": 20,
+          "end": 23,
+          "size": 1
+        },
+        {
+          "type": 2,
+          "start": 25,
+          "end": 30,
+          "size": 1
+        },
+        {
+          "type": 4,
+          "start": 27,
+          "end": 28,
+          "size": 0
+        }
+      ]
+    }
+  ]
+}

@@ -33,3 +33,6 @@ target/
 .idea/
 .vscode/
 *.swp
+
+# compiled C golden runner
+examples/jsmn/tests/parse/runner
