@@ -1146,6 +1146,10 @@ class Demo:
     def cm(cls):
         cls.helper()
 
+    @classmethod
+    def cm_cached(cls):
+        cls._instance.helper()
+
     def helper(self):
         pass
 
@@ -1313,6 +1317,14 @@ def runner():
         and "cls.helper" in str(c.get("description", ""))
     ]
     assert cls_calls, "cls.method call missing bridge-resolvable hint"
+
+    chained_cls_calls = [
+        c for c in calls
+        if c.get("source") == "main:Demo.cm_cached"
+        and c.get("resolved_target_hint") == "main:Demo.helper"
+        and "cls._instance.helper" in str(c.get("description", ""))
+    ]
+    assert chained_cls_calls, "chained cls.attr.method call missing bridge-resolvable hint"
 
     d_helper_calls = [
         c for c in calls
@@ -1521,3 +1533,67 @@ def runner():
 
     # Also sanity: imports were parsed
     assert any("physics" in str(imp) for imp in result.get("imports", []))
+
+
+def test_module_level_data_dependencies_reach_context_pack(tmp_path: Path):
+    """Table-driven modules need data deps, not just call-closure.
+
+    This is the Phase 7 ablation regression: sqlparse.split's graph arm had the
+    functions but missed module-level keyword tables. The extractor should model
+    top-level assignments as data entities, emit uses_data edges for imported
+    module constants, and context_pack should surface them explicitly.
+    """
+    import subprocess
+
+    from scripts.byog_graph import publish_byog_snapshot
+
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "tables.py").write_text(
+        "SQL_REGEX = [(r'\\\\s+', 'Whitespace')]\n"
+        "KEYWORDS = {'SELECT': 'Keyword.DML'}\n"
+        "KEYWORDS_COMMON = {'FROM': 'Keyword'}\n"
+    )
+    (pkg / "lexer.py").write_text(
+        "from . import tables\n\n"
+        "def init():\n"
+        "    return tables.SQL_REGEX, tables.KEYWORDS, tables.KEYWORDS_COMMON\n"
+    )
+
+    data = build_byog_for_package(package_dir=pkg)
+    ents = pd.DataFrame(data["entities"])
+    rels = pd.DataFrame(data["relationships"])
+    tus = pd.DataFrame(data["text_units"])
+
+    titles = set(ents["title"].astype(str))
+    assert {"tables:SQL_REGEX", "tables:KEYWORDS", "tables:KEYWORDS_COMMON"} <= titles
+
+    uses = rels[rels["type"].astype(str) == "uses_data"]
+    assert set(uses["source"].astype(str)) == {"lexer:init"}
+    assert {"tables:SQL_REGEX", "tables:KEYWORDS", "tables:KEYWORDS_COMMON"} <= set(
+        uses["target"].astype(str)
+    )
+
+    graph_root = tmp_path / "byog_pkg"
+    publish_byog_snapshot(ents, rels, tus, graph_root, keep_last=2, source_root=pkg)
+
+    out = subprocess.run(
+        [
+            sys.executable,
+            str(Path(__file__).parents[3] / "scripts" / "context_pack.py"),
+            "lexer:init",
+            "--graph",
+            str(graph_root),
+            "--full-text",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    pack = json.loads(out.stdout)
+    deps = {d["title"]: d["text"] for d in pack.get("data_dependencies", [])}
+    assert "tables:SQL_REGEX" in deps
+    assert "tables:KEYWORDS" in deps
+    assert "tables:KEYWORDS_COMMON" in deps
+    assert "SELECT" in deps["tables:KEYWORDS"]

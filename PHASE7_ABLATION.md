@@ -89,6 +89,28 @@ Does **not** establish: that the graph beats raw source in pass-rate (raw won
 capability signal needs v2 on a fresh, larger target where raw-source assembly is
 genuinely costly and the model has no strong prior.
 
+## Post-v1 review fix
+
+The v1 graph arm was under-packed in two related places, both fixed after the
+measurement without rewriting the historical result:
+
+- Python extraction now models module-level assignments as `data` entities and
+  emits `uses_data` edges for functions/methods that read module constants or
+  imported module constants. For `sqlparse`, this surfaces `keywords:SQL_REGEX`
+  and all `keywords:KEYWORDS_*` tables.
+- `context_pack` now emits first-class `data_dependencies`, separate from the
+  generic `text_units` slice, so large tables cannot silently fall out of the
+  first-N snippets.
+- The call closure also catches chained same-class `self/cls` method calls such
+  as `cls._default_instance.default_initialization()`, which makes the split
+  closure include `Lexer.default_initialization`, `set_SQL_REGEX`,
+  `add_keywords`, and their data dependencies.
+
+The corrected `sqlparse.split` graph pack has 15 closure packs and includes the
+10 keyword/regex data tables in `Lexer.default_initialization`'s pack. The next
+step is to rerun v1 with this corrected packer before treating the result as the
+final existing-benchmark ablation.
+
 ## Reproduce
 
 ```bash
@@ -107,7 +129,7 @@ uv run python scripts/ablation.py eval --kit /tmp/ablation/sqlparse/arm_graph \
 
 ## Next
 
-1. Close the packer gap: include data-table dependencies (module-level constants a
-   symbol reads) in context packs, then re-run v1.
+1. Re-run v1 with the corrected data-dependency/context-pack closure and compare
+   the result against the historical 24/25 vs 25/25 measurement.
 2. v2 replication on a fresh, larger multi-file target with no strong model prior,
    reporting the same metrics, to test the capability (not just efficiency) claim.

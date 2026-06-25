@@ -204,6 +204,47 @@ def pack(
             return txt, False
         return txt[:limit], True
 
+    # First-class data dependencies (module-level tables/constants read by the
+    # symbol). These are intentionally separate from the generic text_units slice
+    # so large table-driven ports do not accidentally lose their SQL_REGEX /
+    # KEYWORDS_* equivalents just because they fall after the first N snippets.
+    data_dep_rels = [r for r in neighbors if str(r.get("type", "")) == "uses_data"]
+    if data_dep_rels:
+        symbol_title = str(ent_dict.get("title", ""))
+        symbol_id = str(ent_dict.get("id", ""))
+        dep_refs: list[str] = []
+        for r in data_dep_rels:
+            for endpoint in (str(r.get("source", "")), str(r.get("target", ""))):
+                if endpoint and endpoint not in {symbol_title, symbol_id} and endpoint not in dep_refs:
+                    dep_refs.append(endpoint)
+        if dep_refs:
+            data_mask = (
+                ents["title"].astype(str).isin(dep_refs)
+                | ents["id"].astype(str).isin(dep_refs)
+            )
+            data_rows = ents[data_mask]
+            deps = []
+            for _, dep in data_rows.iterrows():
+                tu_refs = [str(x) for x in _to_list(dep.get("text_unit_ids"))]
+                raw_text = ""
+                if tu_refs and len(tus) > 0:
+                    tmask = tus["id"].astype(str).isin(tu_refs)
+                    if tmask.any():
+                        raw_text = str(tus[tmask].iloc[0].get("text", ""))
+                dep_text, dep_truncated = truncate_text(raw_text, max_text_chars)
+                deps.append({
+                    "title": dep.get("title"),
+                    "type": dep.get("type"),
+                    "source_file": dep.get("source_file"),
+                    "span": dep.get("span"),
+                    "description": dep.get("description"),
+                    "text": dep_text,
+                    "truncated": dep_truncated,
+                })
+            if deps:
+                pack["data_dependencies"] = deps
+                pack["data_dependency_edges"] = [compact_relationship(r) for r in data_dep_rels]
+
     packed_texts = []
     for t in texts[:10]:
         raw = str(t.get("text", ""))

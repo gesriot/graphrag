@@ -4,7 +4,7 @@ a cold porting agent versus raw source alone?
 
 Two arms per target, each a self-contained Cargo *kit* a fresh subagent fills in:
   - arm_graph: only the graph-derived context pack(s) + the API spec + a prompt.
-  - arm_raw:   only the raw C source/header     + the API spec + a prompt.
+  - arm_raw:   only the raw original source      + the API spec + a prompt.
 
 Neither kit contains the golden corpus or the reference Rust port. After the
 subagents finish, `eval` scores each kit against the *hidden* golden by injecting
@@ -38,7 +38,7 @@ app = typer.Typer(add_completion=False)
 PROMPT_TEMPLATE = """\
 # Port task ({arm} arm)
 
-You are porting a small C library function to Rust. Work **only inside this kit
+You are porting a bounded source component/API to Rust. Work **only inside this kit
 directory** ({kit}). Do not read, list, or open any file outside it — that is part
 of the experiment's rules.
 

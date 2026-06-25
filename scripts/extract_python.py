@@ -10,9 +10,11 @@ This is the foundation for turning source into the GraphRAG BYOG parquets
 Current scope (deliberately small):
 - file entity
 - function / class entities (top level)
+- top-level data/constant entities (module-level assignments)
 - contains edges (file -> symbol)
 - import edges (rough)
 - conservative "calls" (name-based resolution inside the same file)
+- conservative "uses_data" edges from functions/methods to module-level data
 
 Does NOT replace semantic analysis (no Jedi, mypy, full control flow yet).
 
@@ -49,6 +51,7 @@ def make_id(kind: str, name: str, source_file: str) -> str:
 
 def extract_from_file(path: Path, use_advanced: bool = False) -> Dict[str, List[Dict[str, Any]]]:
     source = path.read_bytes()
+    source_text = source.decode("utf-8", errors="replace")
     tree = parser.parse(source)
     root = tree.root_node
 
@@ -79,6 +82,16 @@ def extract_from_file(path: Path, use_advanced: bool = False) -> Dict[str, List[
     defined_names: List[str] = []
     defined_kinds: Dict[str, str] = {}
     defined_methods: List[str] = []
+
+    def ast_span(node: ast.AST) -> str:
+        lineno = getattr(node, "lineno", 1)
+        col = getattr(node, "col_offset", 0)
+        end_lineno = getattr(node, "end_lineno", lineno)
+        end_col = getattr(node, "end_col_offset", col)
+        return f"{lineno}:{col}-{end_lineno}:{end_col}"
+
+    def ast_snippet(node: ast.AST) -> str:
+        return ast.get_source_segment(source_text, node) or ""
 
     def emit_class_members(body_node: Node | None, class_qual: str, class_ent_id: str) -> None:
         """Emit method (and nested-class) entities for a class body, recursively.
@@ -216,6 +229,51 @@ def extract_from_file(path: Path, use_advanced: bool = False) -> Dict[str, List[
 
             if kind == "class" and body:
                 emit_class_members(body, name, ent_id)
+
+    # Module-level data/constant entities. These are essential for porting
+    # table-driven code such as sqlparse.keywords.SQL_REGEX / KEYWORDS_*:
+    # call-closure alone finds the functions, but not the data tables they read.
+    module_data_names: List[str] = []
+    try:
+        ast_tree_for_data = ast.parse(source)
+    except Exception:
+        ast_tree_for_data = None
+    if ast_tree_for_data is not None:
+        for stmt in ast_tree_for_data.body:
+            targets: List[ast.AST] = []
+            if isinstance(stmt, ast.Assign):
+                targets = list(stmt.targets)
+            elif isinstance(stmt, ast.AnnAssign):
+                targets = [stmt.target]
+            else:
+                continue
+            for target in targets:
+                if not isinstance(target, ast.Name):
+                    continue
+                name = target.id
+                if name in defined_names:
+                    continue
+                if name.startswith("__") and name.endswith("__"):
+                    continue
+                ent_id = make_id("data", name, source_file)
+                snippet = ast_snippet(stmt)
+                entities.append(
+                    {
+                        "id": ent_id,
+                        "title": name,
+                        "type": "data",
+                        "description": f"module-level data {name} defined in {path.name}",
+                        "snippet": snippet,
+                        "text_unit_ids": [f"tu:file:{path.name}"],
+                        "human_readable_id": len(entities) + 1,
+                        "source_file": source_file,
+                        "span": ast_span(stmt),
+                        "extractor": "python-ast",
+                        "confidence": 1.0,
+                        "is_deterministic": True,
+                    }
+                )
+                module_data_names.append(name)
 
     # Structured imports (for cross-file resolution in bridge)
     imports: List[Dict[str, Any]] = []
@@ -387,6 +445,25 @@ def extract_from_file(path: Path, use_advanced: bool = False) -> Dict[str, List[
         "confidence": 1.0,
         "is_deterministic": True,
     })
+
+    for data_name in module_data_names:
+        relationships.append(
+            {
+                "id": f"rel:contains-data:{path.name}:{data_name}",
+                "source": module_id,
+                "target": make_id("data", data_name, source_file),
+                "type": "contains",
+                "description": f"module {path_stem} defines data {data_name}",
+                "weight": 1.0,
+                "text_unit_ids": [f"tu:file:{path.name}"],
+                "human_readable_id": len(relationships) + 1,
+                "source_file": source_file,
+                "span": "",
+                "extractor": "python-ast",
+                "confidence": 1.0,
+                "is_deterministic": True,
+            }
+        )
 
     _enhance_with_ast(source, path, entities, relationships, defined_names)
 
@@ -653,6 +730,68 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                 if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     class_methods[node.name].add(item.name)
 
+    # Conservative data-dependency edges. These intentionally model reads of
+    # module-level tables/constants separately from call edges so a porting
+    # context pack can include e.g. sqlparse.keywords.SQL_REGEX and KEYWORDS_*
+    # when packing lexer initialization.
+    data_names = {
+        str(e.get("title"))
+        for e in entities
+        if str(e.get("type", "")).lower() == "data"
+    }
+    seen_data_edges: set[tuple[str, str, int]] = set()
+
+    def emit_uses_data(call_node: ast.AST, target: str, description: str) -> None:
+        caller = enclosing_function_name(call_node)
+        if caller == "unknown":
+            return
+        caller_kind = "method" if caller in class_for_method else "fn"
+        source = make_id(caller_kind, caller, str(path))
+        key = (source, target, getattr(call_node, "lineno", 0))
+        if key in seen_data_edges:
+            return
+        seen_data_edges.add(key)
+        relationships.append(
+            {
+                "id": f"rel:uses-data:{caller}:{target}:{getattr(call_node, 'lineno', 0)}:{getattr(call_node, 'col_offset', 0)}",
+                "source": source,
+                "target": target,
+                "type": "uses_data",
+                "description": description,
+                "weight": 0.90,
+                "text_unit_ids": [f"tu:file:{path.name}"],
+                "human_readable_id": len(relationships) + 1,
+                "source_file": str(path),
+                "span": f"{getattr(call_node, 'lineno', 0)}:{getattr(call_node, 'col_offset', 0)}",
+                "extractor": "python-ast",
+                "confidence": 0.90,
+                "is_deterministic": True,
+            }
+        )
+
+    def looks_like_module_constant(name: str) -> bool:
+        return name.isupper() or name.startswith(("KEYWORDS", "SQL_REGEX"))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in data_names:
+            emit_uses_data(
+                node,
+                make_id("data", node.id, str(path)),
+                f"{enclosing_function_name(node)} reads module data {node.id}",
+            )
+        elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
+            dotted = get_dotted_name(node)
+            if not dotted or "." not in dotted or not looks_like_module_constant(node.attr):
+                continue
+            base_expr, attr = dotted.rsplit(".", 1)
+            if imported_module_attr_hint(base_expr, attr):
+                hint, resolved_display = module_attr_hint(base_expr, attr)
+                emit_uses_data(
+                    node,
+                    hint,
+                    f"{enclosing_function_name(node)} reads imported module data {dotted} -> {resolved_display}",
+                )
+
     # Collect assign events with lineno for reassignment guards + ambiguity tiers.
     # Use the *actual enclosing function* (qualified) for the assignment node (via lineno).
     # Multiple distinct constructors for the same var (if branches, rebinds between
@@ -725,32 +864,44 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
             base = node.func.value
-            if isinstance(base, ast.Name) and base.id in ("self", "cls"):
+            base_dotted = get_dotted_name(base) or ""
+            root_base = base_dotted.split(".", 1)[0] if base_dotted else ""
+            if root_base in ("self", "cls"):
                 attr = node.func.attr
                 caller = enclosing_function_name(node)
                 if caller in class_for_method:
                     class_name = class_for_method[caller]
-                    method_bare = caller.split(".")[-1] if "." in caller else caller
-                    source_title = f"{Path(path).stem}:{class_name}.{method_bare}"
-                    hint = f"{Path(path).stem}:{class_name}.{attr}"
-                    relationships.append(
-                        {
-                            "id": f"rel:call:{class_name}.{method_bare}:{base.id}.{attr}:{getattr(node, 'lineno', 0)}",
-                            "source": source_title,
-                            "target": hint,
-                            "type": "calls",
-                            "description": f"{class_name}.{method_bare} calls {base.id}.{attr} (self/cls method in {class_name})",
-                            "weight": 0.80,
-                            "text_unit_ids": [f"tu:file:{path.name}"],
-                            "human_readable_id": len(relationships) + 1,
-                            "source_file": str(path),
-                            "span": f"{getattr(node, 'lineno', 0)}",
-                            "extractor": "tree-sitter-python+ast",
-                            "confidence": 0.80,
-                            "is_deterministic": True,
-                            "resolved_target_hint": hint,
-                        }
-                    )
+                    simple_class = class_name.split(".")[-1]
+                    # Direct self.method()/cls.method() is strong. Chained
+                    # self.foo.method()/cls.foo.method() is still useful for
+                    # singleton/cache patterns (sqlparse's
+                    # cls._default_instance.default_initialization()), but only
+                    # promote it if the called attr is actually a method on the
+                    # same class.
+                    is_direct = base_dotted in ("self", "cls")
+                    is_known_same_class_method = attr in class_methods.get(simple_class, set())
+                    if is_direct or is_known_same_class_method:
+                        method_bare = caller.split(".")[-1] if "." in caller else caller
+                        source_title = f"{Path(path).stem}:{class_name}.{method_bare}"
+                        hint = f"{Path(path).stem}:{class_name}.{attr}"
+                        relationships.append(
+                            {
+                                "id": f"rel:call:{class_name}.{method_bare}:{base_dotted}.{attr}:{getattr(node, 'lineno', 0)}",
+                                "source": source_title,
+                                "target": hint,
+                                "type": "calls",
+                                "description": f"{class_name}.{method_bare} calls {base_dotted}.{attr} (self/cls method in {class_name})",
+                                "weight": 0.80,
+                                "text_unit_ids": [f"tu:file:{path.name}"],
+                                "human_readable_id": len(relationships) + 1,
+                                "source_file": str(path),
+                                "span": f"{getattr(node, 'lineno', 0)}",
+                                "extractor": "tree-sitter-python+ast",
+                                "confidence": 0.80,
+                                "is_deterministic": True,
+                                "resolved_target_hint": hint,
+                            }
+                        )
 
     # Improve existing tree-sitter calls with direct import hints. This keeps row
     # counts stable while giving the bridge better targets for cross-file calls.
@@ -778,7 +929,7 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
             dotted = get_dotted_name(func)
             if isinstance(func, ast.Attribute) and dotted and "." in dotted:
                 base_expr, attr = dotted.rsplit(".", 1)
-                if base_expr in ("self", "cls"):
+                if base_expr.split(".", 1)[0] in ("self", "cls"):
                     continue
                 caller = enclosing_function_name(node)
                 if caller == "unknown":
