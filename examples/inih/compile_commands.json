@@ -1,0 +1,7 @@
+[
+  {
+    "directory": "examples/inih",
+    "command": "cc -c -I. ini.c -o ini.o",
+    "file": "ini.c"
+  }
+]

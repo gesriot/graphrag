@@ -27,6 +27,15 @@ import tree_sitter_c as tsc  # type: ignore
 
 _LANG = Language(tsc.language())
 
+# C reserved words. tree-sitter-c does not evaluate the preprocessor, so a
+# function body fragmented by `#if`/`#endif` (e.g. inih's `else if (cond) {..}`)
+# can be misparsed as a `function_definition` whose "name" is a control keyword.
+# A real C function can never be named a reserved word, so reject these outright.
+_C_KEYWORDS = frozenset({
+    "if", "else", "for", "while", "do", "switch", "case", "default", "return",
+    "break", "continue", "goto", "sizeof", "typedef", "struct", "union", "enum",
+})
+
 
 def _parser() -> Parser:
     return Parser(_LANG)
@@ -67,7 +76,7 @@ def _func_name(fn_def: Node) -> Optional[str]:
     for c in fn_def.children:
         if c.type in ("function_declarator", "pointer_declarator", "parenthesized_declarator"):
             name = _declarator_name(c)
-            if name:
+            if name and name not in _C_KEYWORDS:
                 return name
     return None
 
