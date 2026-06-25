@@ -1,9 +1,9 @@
-# Provenance — vendored `cJSON` (Phase 6 C frontend + ownership-slice golden)
+# Provenance — vendored `cJSON` (Phase 6 C frontend + ownership-slice Rust port)
 
 Third C target for Plan Phase 6 and the first **struct/pointer/ownership-heavy**
 one (~3.2k LOC). This checkpoint includes the graph bootstrap (frontend + audit
-clean) and the golden-before-Rust ownership-slice contract; the bounded C→Rust
-ownership-slice port is the next checkpoint.
+clean), the golden-before-Rust ownership-slice contract, and the bounded C→Rust
+ownership-slice port.
 
 ## Source
 - Package: `cJSON`, an ultralightweight C JSON parser by Dave Gamble and
@@ -39,7 +39,7 @@ The bootstrap captures the facts that matter for ownership analysis:
   `memcpy`/`memset`/`strlen` are weak observations, never core deterministic
   edges, so heap ownership is visible but not silently promoted.
 
-## Verified graph result (`byog_cjson`, snapshot `20260625-121715-cda43480`)
+## Verified graph result (`byog_cjson`, snapshot `20260625-123603-a5400f50`)
 The published graph also contains the co-located golden runner
 (`tests/parse/runner.c`) as package code, the same way `jsmn`/`inih` do:
 - 131 entities, 367 relationships, 131 text units, 125 call observations.
@@ -82,17 +82,44 @@ The published graph also contains the co-located golden runner
   defined without porting printf/double quirks.
 - ASan over the full corpus (all three modes) is leak/double-free clean.
 
+## Rust ownership-slice port (built)
+- Port crate: `examples/cjson_rust`.
+- Scope: `parse -> inspect tree -> print -> drop/delete` over the captured
+  bounded corpus. The Rust side reproduces the C-derived
+  unformatted/inspect/formatted oracles.
+- Representation: structure-preserving `CJson` node with a cJSON-style type tag,
+  `child`/`next` `Box`-owned singly linked list, `valuestring`, `valueint`,
+  `valuedouble`, and object key `string`. It deliberately avoids an idiomatic
+  enum so the milestone exercises C tree ownership rather than hiding it behind
+  a different representation.
+- Ownership: `Drop` mirrors `cJSON_Delete` by iterating the sibling `next` chain
+  while child trees drop recursively. The port uses safe Rust and no raw
+  pointers; parse failures clean up partially built children through ordinary
+  ownership.
+- Getter/inspect surface: `Is*`, `GetArraySize`, `GetArrayItem`,
+  `GetObjectItem`, and `GetStringValue` equivalents are ported for the
+  ownership slice, and the inspect descriptor carries `valueint` plus
+  `valuedouble` IEEE-754 bits exactly like the C runner.
+- `port_eval`: graph pass rate 1.0 (239 calls, 125 observations, 0 anomalies,
+  0 dangling, 0 semantic suspicions), context packs 3/3 for
+  `cJSON_ParseWithLength`, `cJSON_PrintUnformatted`, and `cJSON_Delete`;
+  Rust fmt/check/golden_test/run all ok; 22 golden cases; `manual_fixes=0`;
+  `OVERALL PASS=True`.
+- Deferred: full mutation/builder API, custom hooks/allocators, reference flags,
+  `prev` links, and non-integer float-printing fidelity (`%1.15g`/`%1.17g`,
+  NaN/inf/exponent/precision). The current integer corpus exercises cJSON's
+  exact `%d` print path; malformed-number edge cases that depend on `strtod`
+  partial consumption are also outside this first slice.
+
 ## Vendored whitespace
 - `cJSON.h` and `LICENSE` contain upstream whitespace that fails vanilla
   `git diff --check`. The local `.gitattributes` disables only those vendored
   whitespace checks so provenance-preserving bytes can stay verbatim while
   project-authored files remain checked normally.
 
-## Next port scope (proposed, not yet built)
-First cJSON C→Rust port should target the captured narrow **ownership-bearing
-slice** rather than the full API: `parse -> inspect tree -> print -> delete` over
-the bounded JSON corpus. This first exercises the struct graph, heap ownership,
-and free semantics without spreading into the mutation/builder API. The Rust
-port should reproduce the captured unformatted/inspect/formatted oracles and
-exercise recursive deletion/drop over the parsed tree. The full mutation API,
-custom hooks, and float-printing edge cases are deferred.
+## Next scope
+The ownership-bearing slice is complete. The natural next cJSON sub-stage, if we
+stay inside this target, is a bounded float-printing fidelity suite for the
+`%1.15g`/`%1.17g` paths. Otherwise this checkpoint can stand as the Phase 6
+ownership milestone while the project moves to productization/benchmarking or
+clang-backed C/C++ semantic extraction.
