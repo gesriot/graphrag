@@ -48,6 +48,9 @@ of the experiment's rules.
 ## Required public API (implement exactly this, in `src/lib.rs` and any modules)
 {api}
 
+## Available dependencies
+{deps_note}
+
 ## Rules
 - Derive the behaviour from your source of truth above. Do not search the web or
   rely on a remembered version of this library; port what you are given.
@@ -120,6 +123,7 @@ def prep(
     source: list[Path] = typer.Option(..., "--source", help="raw source file(s)/dir for arm_raw"),
     symbol: list[str] = typer.Option([], "--symbol", help="explicit graph symbols to pack"),
     closure_root: list[str] = typer.Option([], "--closure-root", help="roots; pack their transitive callee closure"),
+    dep: list[str] = typer.Option([], "--dep", help="Cargo dep line(s) pre-provided to BOTH kits, e.g. 'fancy-regex = \"0.13\"'"),
     api: Path = typer.Option(..., "--api", help="markdown file with the required API spec"),
     out: Path = typer.Option(..., "--out", help="output dir; arm_graph/ and arm_raw/ created"),
 ):
@@ -130,18 +134,24 @@ def prep(
     symbols = list(symbol)
     if closure_root:
         symbols = sorted(set(symbols) | set(reachable_functions(graph, list(closure_root))))
+    cargo_toml = CARGO_TOML + ("\n".join(dep) + "\n" if dep else "")
+    deps_note = (
+        "These crates are already in `Cargo.toml` (available offline): "
+        + ", ".join(dep) + ". Use them rather than hand-rolling equivalents."
+        if dep else "Standard library only; no extra crates are provided."
+    )
 
     def write_kit(arm: str, material_dir_setup):
         kit = out / arm
         if kit.exists():
             shutil.rmtree(kit)
         (kit / "src").mkdir(parents=True)
-        (kit / "Cargo.toml").write_text(CARGO_TOML)
+        (kit / "Cargo.toml").write_text(cargo_toml)
         (kit / "src" / "lib.rs").write_text(LIB_STUB)
         (kit / "src" / "main.rs").write_text(MAIN_STUB)
         material = material_dir_setup(kit)
         (kit / "PROMPT.md").write_text(
-            PROMPT_TEMPLATE.format(arm=arm, kit=kit, material=material, api=api_text)
+            PROMPT_TEMPLATE.format(arm=arm, kit=kit, material=material, api=api_text, deps_note=deps_note)
         )
         return kit
 
