@@ -41,13 +41,16 @@ real enclosing `ini_parse_stream` and land within its span. After the fix the
 audit is clean. This change also leaves the `jsmn` graph unchanged (it has no
 `#if`-fragmented function bodies).
 
-Honest limit: tree-sitter-c still counts calls inside *every* `#if INI_*` block
-regardless of whether that option is enabled in a given build. For the **default
-config** (which the port targets) all these blocks are enabled, so the graph is
-accurate for default mode; it is not yet configuration-aware. Config-aware C
-facts are the motivation for the clang/preprocessor layer in Plan §5.
+Honest limit: tree-sitter-c still sees calls inside *every* `#if INI_*` block
+regardless of whether that option is enabled in a given build. For the
+**default config** (which the first port targets), the deterministic internal
+CALLS promoted into the core graph are compatible with the enabled code path,
+but observations still include some disabled-branch calls (for example the
+`!INI_USE_STACK` allocation path). The graph is therefore not yet
+configuration-aware. Config-aware C facts are the motivation for the
+clang/preprocessor layer in Plan Phase 6.
 
-## Verified graph result (`byog_inih`, snapshot `20260625-102840-e341fad2`)
+## Verified graph result (`byog_inih`, snapshot `20260625-104116-403e327d`)
 - 13 entities, 28 relationships, 13 text units, 26 call observations.
 - Entity mix: 10 functions, 2 files, 1 typedef (`ini_parse_string_ctx`).
 - Relationship mix: 17 `calls`, 11 `contains`.
@@ -75,7 +78,9 @@ First inih C→Rust port should target the bounded **string** entry point in
 default config: `ini_parse_string` / `ini_parse_string_length` driving
 `ini_parse_stream` with a recording handler. Golden contract = for each INI input,
 the ordered sequence of `(section, name, value)` handler calls plus the return
-code (0, or first-error line number). File I/O (`ini_parse`/`ini_parse_file`) and
-`INI_HANDLER_LINENO`/other non-default options are explicitly out of the first
-port's scope (measured here, but deferred), mirroring how `jsmn` deferred
+code (0, or first-error line number). The Rust port should stay string-only for
+this checkpoint; the C golden runner may include one file-vs-string parity case
+to measure `ini_parse`/`ini_parse_file` behavior without porting `fopen`/`fgets`.
+`INI_HANDLER_LINENO` and other non-default options are explicitly out of the
+first port's scope (measured here, but deferred), mirroring how `jsmn` deferred
 `JSMN_STRICT`/`JSMN_PARENT_LINKS`.

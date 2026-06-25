@@ -77,11 +77,13 @@ def test_no_phantom_keyword_functions_from_preprocessor_fragmentation():
     """tree-sitter-c misparses #if-split bodies; keyword names must be rejected."""
     data = build_c_byog(ROOT / "examples" / "inih")
     titles = {e["title"] for e in data["entities"]}
-    for kw in ("ini:if", "ini:else", "ini:for", "ini:while", "ini:switch"):
+    for kw in ("ini:if", "ini:else", "ini:for", "ini:while", "ini:switch", "ini:int"):
         assert kw not in titles, f"phantom keyword function leaked: {kw}"
     # and no call edge may originate from a phantom keyword caller
     sources = {r["source"] for r in data["relationships"] if r["type"] == "calls"}
-    assert not any(s.split(":", 1)[-1] in {"if", "else", "for", "while"} for s in sources)
+    assert not any(
+        s.split(":", 1)[-1] in {"if", "else", "for", "while", "int"} for s in sources
+    )
 
 
 def test_func_name_rejects_reserved_words(tmp_path):
