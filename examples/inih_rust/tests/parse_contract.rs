@@ -64,5 +64,5 @@ fn inih_contract_all_cases() {
             total += 1;
         }
     }
-    assert!(total >= 18, "expected >= 18 inih golden cases, got {total}");
+    assert!(total >= 21, "expected >= 21 inih golden cases, got {total}");
 }

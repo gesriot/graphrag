@@ -241,6 +241,18 @@
           "value": "1"
         }
       ]
+    },
+    {
+      "desc": "NUL byte truncates C string line",
+      "ini": "[s]\nname=va\u0000lue\n",
+      "result": 0,
+      "events": [
+        {
+          "section": "s",
+          "name": "name",
+          "value": "va"
+        }
+      ]
     }
   ]
 }

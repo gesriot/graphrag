@@ -75,6 +75,12 @@ fn strncpy0(src: &[u8], size: usize) -> Vec<u8> {
     src[..n].to_vec()
 }
 
+/// C `strlen`: inih stores each line in a NUL-terminated `char` buffer, so all
+/// later string operations ignore bytes after the first `\0` in that line.
+fn c_strlen(s: &[u8]) -> usize {
+    s.iter().position(|&c| c == 0).unwrap_or(s.len())
+}
+
 /// `ini_reader_string`: fgets-style reader over a byte buffer. Fills `line` with
 /// up to `num - 1` bytes, stopping after a `\n`. Returns false at end of input.
 struct StringReader<'a> {
@@ -127,17 +133,19 @@ where
     let mut abyss: Vec<u8> = Vec::new();
 
     while reader.read(&mut line, max_line) {
-        let offset = line.len();
+        let offset = c_strlen(&line);
+        let line_view = &line[..offset];
         lineno += 1;
 
         // If the line filled the buffer without a newline, it was too long:
         // discard input through the end of the line and flag an error.
-        if offset == max_line - 1 && line[offset - 1] != b'\n' {
+        if offset == max_line - 1 && line_view[offset - 1] != b'\n' {
             while reader.read(&mut abyss, 16) {
                 if error == 0 {
                     error = lineno;
                 }
-                if abyss.last() == Some(&b'\n') {
+                let abyss_len = c_strlen(&abyss);
+                if abyss_len > 0 && abyss[abyss_len - 1] == b'\n' {
                     break;
                 }
             }
@@ -145,11 +153,16 @@ where
 
         // Skip a UTF-8 BOM on the first line.
         let mut base = 0;
-        if lineno == 1 && offset >= 3 && line[0] == 0xEF && line[1] == 0xBB && line[2] == 0xBF {
+        if lineno == 1
+            && offset >= 3
+            && line_view[0] == 0xEF
+            && line_view[1] == 0xBB
+            && line_view[2] == 0xBF
+        {
             base = 3;
         }
 
-        let after_bom = &line[base..];
+        let after_bom = &line_view[base..];
         let leading = after_bom.len() - lskip(after_bom).len();
         // `start > line` in C: trimmed start is past the line base (BOM or
         // leading whitespace consumed).

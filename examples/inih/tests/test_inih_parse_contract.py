@@ -35,7 +35,7 @@ def _cc():
 
 def test_golden_present_and_sized():
     cases = json.loads(GOLDEN.read_text())["cases"]
-    assert len(cases) >= 18
+    assert len(cases) >= 21
 
 
 @pytest.mark.skipif(_cc() is None, reason="no C compiler available")
