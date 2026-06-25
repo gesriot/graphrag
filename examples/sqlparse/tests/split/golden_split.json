@@ -149,6 +149,14 @@
     },
     {
       "op": "split",
+      "sql": "select 1\ngo\nselect 2",
+      "strip_semicolon": false,
+      "result": [
+        "select 1\ngo\nselect 2"
+      ]
+    },
+    {
+      "op": "split",
       "sql": "select (1; 2); select 3",
       "strip_semicolon": false,
       "result": [
@@ -173,6 +181,15 @@
       "result": [
         "CREATE PROCEDURE p AS BEGIN SELECT 1; SELECT 2; END;",
         "SELECT 3;"
+      ]
+    },
+    {
+      "op": "split",
+      "sql": "create procedure p as begin select 1; select 2; end; select 3;",
+      "strip_semicolon": false,
+      "result": [
+        "create procedure p as begin select 1; select 2; end;",
+        "select 3;"
       ]
     },
     {

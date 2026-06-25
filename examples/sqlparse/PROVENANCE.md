@@ -44,14 +44,15 @@ semantic-suspicion heuristic. End-to-end scaled porting remains unproven.
 - Golden file: `tests/split/golden_split.json`.
 - Contract test: `tests/test_split_contract.py`.
 - Scope: `sqlparse.split(sql, strip_semicolon=...) -> list[str]`.
-- Coverage: 23 frozen cases covering ordinary semicolon splitting, empty and
+- Coverage: 25 frozen cases covering ordinary semicolon splitting, empty and
   whitespace-only input, semicolons inside strings/comments/parentheses, `GO`
-  and `GO 2`, transaction `BEGIN`, procedural `CREATE ... BEGIN ... END`,
-  `CASE`, unicode strings, repeated semicolons, strip-semicolon mode, and the
-  block-comment-after-semicolon edge behavior.
+  and `GO 2`, case-sensitive `GO` splitting, transaction `BEGIN`, procedural
+  `CREATE ... BEGIN ... END`, `CASE`, unicode strings, repeated semicolons,
+  strip-semicolon mode, and the block-comment-after-semicolon edge behavior.
 
-## Recommended first port scope
-Start with the `sqlparse.split` pipeline rather than the full formatter:
+## Port scope
+The completed scaled port covers the `sqlparse.split` pipeline rather than the
+full formatter:
 `__init__.split` → `FilterStack` → `lexer.tokenize` → `StatementSplitter` →
 optional semicolon stripping → `sql.Statement` stringification. This keeps the
 component cross-module and behavior-heavy while avoiding the whole grouping and
@@ -72,6 +73,16 @@ Rust port status:
    differential cases / 341 tokens. All 8 rules that require lookaround or
    backreferences are covered; 51/53 SQL regex rules are exercised, with the
    two remaining rules shadowed by earlier Python regex order.
-3. **Next:** `StatementSplitter` + minimal `sql.Token` / `Statement` string
-   reconstruction + `FilterStack` split path. Keep the lexer differential gate
-   as the foundation under the split golden contract.
+3. **Stage 3 complete:** `StatementSplitter` state machine, minimal
+   `sql.Token` / `Statement` string reconstruction, `StripTrailingSemicolon`,
+   and the split path of `FilterStack`.
+4. **Stage 4 complete:** `port_eval` passes with graph pass rate 1.0
+   (229 calls, 0 anomalies, 0 dangling, 0 semantic suspicions), 3/3 context
+   packs (`lexer:tokenize`, `engine.filter_stack:FilterStack.run`,
+   `engine.statement_splitter:StatementSplitter.process`), rust
+   fmt/check/golden_test/run all ok, 65 golden cases across lex + split, and
+   `manual_fixes=0`.
+
+Graph caveat: the generic index currently does not expose `__init__.py`'s
+top-level `split` as an entity, so the context-pack evidence uses the concrete
+pipeline symbols above rather than `__init__:split`.

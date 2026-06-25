@@ -48,5 +48,5 @@ fn split_contract_all_cases() {
             total += 1;
         }
     }
-    assert!(total >= 23, "expected >= 23 split cases, got {}", total);
+    assert!(total >= 25, "expected >= 25 split cases, got {}", total);
 }

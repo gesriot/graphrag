@@ -1,6 +1,6 @@
-//! Structure-preserving Rust port of `sqlparse` (staged, Phase 5 scale milestone).
-//! Stage 1: token type tree + keyword tables. Later stages: lexer parity ->
-//! StatementSplitter/filter pipeline -> `split` golden/port_eval.
+//! Structure-preserving Rust port of the `sqlparse.split` pipeline (Phase 5
+//! scale milestone): token tree + keyword tables, lexer parity, StatementSplitter
+//! / split pipeline, and golden/port_eval verification.
 //! See examples/sqlparse/PROVENANCE.md for scope.
 
 pub mod keywords;
