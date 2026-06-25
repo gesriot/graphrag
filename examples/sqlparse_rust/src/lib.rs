@@ -6,6 +6,7 @@
 pub mod keywords;
 pub mod lexer;
 pub mod lexer_rules;
+pub mod split;
 pub mod tokens;
 
 #[cfg(test)]
