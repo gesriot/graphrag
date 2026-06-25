@@ -12,7 +12,8 @@ Scope note (measured on jsmn): tree-sitter-c parses header-only / macro'd C with
 few ERROR nodes (e.g. the JSMN_API macro); per Plan, clang + compile_commands is
 the eventual route for macro/include/type accuracy. This bootstrap stays
 conservative: only calls whose callee is a function defined in the package become
-deterministic CALLS edges; everything else is an observation.
+deterministic CALLS edges. Same-file definitions win when duplicate C function
+names exist; otherwise ambiguous or external calls stay observations.
 """
 
 from __future__ import annotations
@@ -101,7 +102,7 @@ def build_c_byog(package_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
     )
     parser = _parser()
     parsed = []
-    defined_funcs: Dict[str, str] = {}  # name -> "stem:name"
+    defined_funcs: Dict[str, List[str]] = {}  # name -> ["stem:name", ...]
 
     # Pass 1: parse + collect package-wide function definitions.
     for path in files:
@@ -111,7 +112,10 @@ def build_c_byog(package_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
         for fn in _collect_functions(tree.root_node):
             name = _func_name(fn)
             if name:
-                defined_funcs.setdefault(name, f"{stem}:{name}")
+                title = f"{stem}:{name}"
+                defined_funcs.setdefault(name, [])
+                if title not in defined_funcs[name]:
+                    defined_funcs[name].append(title)
         parsed.append((path, src, tree, stem))
 
     entities: List[Dict[str, Any]] = []
@@ -226,12 +230,20 @@ def build_c_byog(package_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
                 if callee_node is None or callee_node.type != "identifier":
                     continue  # function-pointer / member calls: out of bootstrap scope
                 callee = callee_node.text.decode()
-                if callee in defined_funcs:
+                candidates = defined_funcs.get(callee, [])
+                same_file_candidate = f"{stem}:{callee}"
+                resolved_target = None
+                if same_file_candidate in candidates:
+                    resolved_target = same_file_candidate
+                elif len(candidates) == 1:
+                    resolved_target = candidates[0]
+
+                if resolved_target is not None:
                     rid += 1
                     relationships.append({
                         "id": f"rel:call:{caller}:{callee}:{n.start_point[0] + 1}:{n.start_point[1]}",
                         "source": caller_title,
-                        "target": defined_funcs[callee],
+                        "target": resolved_target,
                         "type": "calls",
                         "description": f"{caller} calls {callee} (C call)",
                         "weight": 0.9,
@@ -246,15 +258,19 @@ def build_c_byog(package_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
                         "covariate_ids": [],
                     })
                 else:
+                    reason = "ambiguous C call" if candidates else "external/undefined C call"
+                    description_reason = "ambiguous" if candidates else "external/undefined"
                     observations.append({
                         "source": caller_title,
                         "display_target": callee,
                         "confidence": 0.4,
-                        "reason": "external/undefined C call",
+                        "reason": reason,
                         "source_file": str(path),
                         "span": f"{n.start_point[0] + 1}:{n.start_point[1]}",
                         "extractor": "tree-sitter-c",
-                        "description": f"{caller} calls {callee} (external/undefined)",
+                        "description": (
+                            f"{caller} calls {callee} ({description_reason})"
+                        ),
                     })
 
     return {

@@ -1,7 +1,7 @@
 [
   {
     "directory": "examples/jsmn",
-    "command": "cc -DJSMN_HEADER=0 -I. -c tests.c -o tests.o",
-    "file": "tests.c"
+    "command": "cc -DJSMN_HEADER=0 -I. -x c -fsyntax-only jsmn.h",
+    "file": "jsmn.h"
   }
 ]
