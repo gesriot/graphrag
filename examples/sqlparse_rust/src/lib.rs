@@ -4,6 +4,8 @@
 //! See examples/sqlparse/PROVENANCE.md for scope.
 
 pub mod keywords;
+pub mod lexer;
+pub mod lexer_rules;
 pub mod tokens;
 
 #[cfg(test)]
