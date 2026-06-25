@@ -40,9 +40,25 @@ Interpretation: the first real multi-package graph scale probe is clean. The
 measured bottleneck was not resolver precision but audit noise from a legacy
 semantic-suspicion heuristic. End-to-end scaled porting remains unproven.
 
+## Split behavior contract — gate step 2
+- Golden file: `tests/split/golden_split.json`.
+- Contract test: `tests/test_split_contract.py`.
+- Scope: `sqlparse.split(sql, strip_semicolon=...) -> list[str]`.
+- Coverage: 23 frozen cases covering ordinary semicolon splitting, empty and
+  whitespace-only input, semicolons inside strings/comments/parentheses, `GO`
+  and `GO 2`, transaction `BEGIN`, procedural `CREATE ... BEGIN ... END`,
+  `CASE`, unicode strings, repeated semicolons, strip-semicolon mode, and the
+  block-comment-after-semicolon edge behavior.
+
 ## Recommended first port scope
 Start with the `sqlparse.split` pipeline rather than the full formatter:
 `__init__.split` → `FilterStack` → `lexer.tokenize` → `StatementSplitter` →
 optional semicolon stripping → `sql.Statement` stringification. This keeps the
 component cross-module and behavior-heavy while avoiding the whole grouping and
 formatting surface in the first scaled port.
+
+Rust lexer caveat: `keywords.SQL_REGEX` contains Python-regex features that
+Rust's standard `regex` crate does not support (lookahead/lookbehind and one
+backreference for dollar-quoted strings). Use `fancy-regex` selectively or
+replace those specific patterns with hand-written scanners; do not assume a
+mechanical `re` → `regex` table translation will compile.

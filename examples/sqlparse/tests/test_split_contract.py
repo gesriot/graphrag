@@ -8,6 +8,9 @@ Golden files live in tests/split/. Each case pins:
 (SQL_REGEX) -> StatementSplitter -> optional semicolon stripping -> str(Statement).
 Notably, semicolons inside string literals / line comments / block comments are
 NOT statement separators -- the Rust port must reproduce that exactly.
+The contract also pins sqlparse-specific splitter quirks such as `GO`, `GO 2`,
+transaction `BEGIN`, procedural `CREATE ... BEGIN ... END`, and block comments
+after a consumed semicolon.
 
 Run:
     uv run python -m pytest examples/sqlparse/tests/test_split_contract.py -q
@@ -42,7 +45,7 @@ def _all_cases():
 def test_golden_files_present_and_sized():
     assert GOLDEN_FILES, "no golden_*.json files under tests/split/"
     total = sum(len(json.loads(gf.read_text())["cases"]) for gf in GOLDEN_FILES)
-    assert total >= 12, f"expected >= 12 split golden cases, got {total}"
+    assert total >= 23, f"expected >= 23 split golden cases, got {total}"
 
 
 @pytest.mark.parametrize("case", _all_cases())

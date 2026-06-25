@@ -128,6 +128,78 @@
         ";",
         "select 2"
       ]
+    },
+    {
+      "op": "split",
+      "sql": "select 1\nGO\nselect 2",
+      "strip_semicolon": false,
+      "result": [
+        "select 1\nGO",
+        "select 2"
+      ]
+    },
+    {
+      "op": "split",
+      "sql": "select 1\nGO 2\nselect 2",
+      "strip_semicolon": false,
+      "result": [
+        "select 1\nGO 2",
+        "select 2"
+      ]
+    },
+    {
+      "op": "split",
+      "sql": "select (1; 2); select 3",
+      "strip_semicolon": false,
+      "result": [
+        "select (1; 2);",
+        "select 3"
+      ]
+    },
+    {
+      "op": "split",
+      "sql": "BEGIN TRANSACTION; SELECT 1; COMMIT;",
+      "strip_semicolon": false,
+      "result": [
+        "BEGIN TRANSACTION;",
+        "SELECT 1;",
+        "COMMIT;"
+      ]
+    },
+    {
+      "op": "split",
+      "sql": "CREATE PROCEDURE p AS BEGIN SELECT 1; SELECT 2; END; SELECT 3;",
+      "strip_semicolon": false,
+      "result": [
+        "CREATE PROCEDURE p AS BEGIN SELECT 1; SELECT 2; END;",
+        "SELECT 3;"
+      ]
+    },
+    {
+      "op": "split",
+      "sql": "CREATE PROCEDURE p AS BEGIN CASE WHEN 1 THEN SELECT 1; END CASE; END; SELECT 2;",
+      "strip_semicolon": false,
+      "result": [
+        "CREATE PROCEDURE p AS BEGIN CASE WHEN 1 THEN SELECT 1; END CASE; END; SELECT 2;"
+      ]
+    },
+    {
+      "op": "split",
+      "sql": "select 1; -- keep me\nselect 2;",
+      "strip_semicolon": false,
+      "result": [
+        "select 1; -- keep me",
+        "select 2;"
+      ]
+    },
+    {
+      "op": "split",
+      "sql": "select 1; /* keep ; */",
+      "strip_semicolon": true,
+      "result": [
+        "select 1",
+        "/* keep ; */"
+      ]
     }
   ]
 }
