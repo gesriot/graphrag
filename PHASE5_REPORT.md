@@ -30,9 +30,9 @@ harness drives Python→Rust ports. Two rails separate *means* from *ends*:
 | diff-match-patch | Myers diff + Bitap + patch | 107 | 0 | True |
 | **sqlparse.split** | **scaled, multi-package pipeline** | **65** | **0** | **True** |
 
-Each match is byte-for-byte against the Python reference (incl. Unicode,
-percent-encoding, prerelease/build precedence, fuzzy patch apply, and SQL
-lexer/splitter quirks).
+Each port matches its frozen golden contract exactly against the Python
+reference (incl. Unicode-sensitive SQL token values, percent-encoding,
+prerelease/build precedence, fuzzy patch apply, and splitter quirks).
 
 ## Phase 5 scale metrics (sqlparse 0.5.5, BSD)
 

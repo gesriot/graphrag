@@ -257,14 +257,12 @@ Alternatives to evaluate: pure graph DB + LLM-to-Cypher (as in Graph-Code demos)
 
 ## 6. Immediate Next Actions (Current Frontier)
 
-1. Treat `sqlparse.split` as the first Phase 5 scaled-component baseline: keep graph audit (`1.0`, 0/0/0), lexer differential contract, split golden contract, context-pack list, port_eval report, and manual-fix count together as the reproducible evidence bundle.
-2. Decide the next frontier deliberately:
-   - deepen Python complexity with `sqlparse.parse` + grouping if the next question is recursive tree construction / mutation-heavy token lists;
-   - move to C/C++ input only if the next question is language frontend risk (`compile_commands`, clang facts, macros), accepting that port complexity should stay small at first;
-   - start productization/benchmarks if the next question is usability and comparative evidence rather than another algorithm.
-3. Before any public claim, turn the current staged evidence into a compact benchmark report: target scope, commands, graph metrics, golden counts, manual-fix log, and observed bottlenecks.
-4. Keep `click` as the next Python stress target only if resolver dynamics/decorators become more valuable than deepening `sqlparse`.
-5. In parallel but off the critical path, finish the dated primary-source notes and exact talk transcript/timestamps before making public claims about the Microsoft demo.
+1. Treat `PHASE5_REPORT.md` + `sqlparse.split` as the frozen Phase 5 evidence baseline: graph audit (`1.0`, 0/0/0), lexer differential contract, split golden contract, context-pack list, port_eval report, and manual-fix count stay together as the reproducible proof bundle.
+2. Start Phase 6 with a deliberately small C target and build the frontend before claiming C→Rust capability: vendor/license/test gate → `compile_commands.json` → minimal C indexer (`file`/`func`/`struct`/`typedef` + contains/includes/conservative calls) → C graph audit.
+3. Use the first C target to measure the new unknowns separately from porting: tree-sitter-c coverage, macro/include gaps, function-pointer/callback calls, static functions, typedef/struct naming, and whether `audit_call_edges` needs C-specific semantics.
+4. Only after the C graph is clean/demoted, choose one bounded C component for golden capture and Rust port. Keep ownership/pointer complexity small on the first pass; Phase 6 is first about frontend truth, not maximal C difficulty.
+5. Recommended first C candidate: `jsmn` for the indexer/bootstrap loop. Keep `inih` second for callbacks/file I/O, `cJSON` third for real struct/pointer ownership once the C graph rail exists.
+6. In parallel but off the critical path, finish the dated primary-source notes and exact talk transcript/timestamps before making public claims about the Microsoft demo.
 
 ## 7. References & Further Reading (Key Sources)
 
