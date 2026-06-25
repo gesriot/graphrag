@@ -1,0 +1,11 @@
+[package]
+name = "jsmn_rust"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Pure std: jsmn is a byte-oriented tokenizer with a caller-provided token buffer.
+
+[dev-dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
