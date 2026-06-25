@@ -60,5 +60,5 @@ fn lex_contract_all_cases() {
             total += want.len();
         }
     }
-    assert!(total >= 250, "expected >= 250 lexed tokens, got {}", total);
+    assert!(total >= 340, "expected >= 340 lexed tokens, got {}", total);
 }

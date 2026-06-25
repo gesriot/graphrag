@@ -67,6 +67,11 @@ Rust port status:
 1. **Stage 1 complete:** token type tree + generated keyword dictionaries in
    `examples/sqlparse_rust`, with 811 raw keyword entries and first-match
    behavior matching the Python dictionary add-order.
-2. **Next:** lexer parity. Add a token-by-token differential test against
-   vendored Python before wiring the splitter, so SQL regex translation errors
-   fail at the smallest boundary.
+2. **Stage 2 complete:** lexer parity with the vendored Python implementation.
+   The Rust gate compares `(token_type_path, value)` token-by-token across 40
+   differential cases / 341 tokens. All 8 rules that require lookaround or
+   backreferences are covered; 51/53 SQL regex rules are exercised, with the
+   two remaining rules shadowed by earlier Python regex order.
+3. **Next:** `StatementSplitter` + minimal `sql.Token` / `Statement` string
+   reconstruction + `FilterStack` split path. Keep the lexer differential gate
+   as the foundation under the split golden contract.

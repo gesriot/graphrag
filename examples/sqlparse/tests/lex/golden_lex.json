@@ -2085,6 +2085,405 @@
           "2"
         ]
       ]
+    },
+    {
+      "sql": "--+ hint\n",
+      "tokens": [
+        [
+          [
+            "Comment",
+            "Single",
+            "Hint"
+          ],
+          "--+ hint\n"
+        ]
+      ]
+    },
+    {
+      "sql": "# + hint\n",
+      "tokens": [
+        [
+          [
+            "Comment",
+            "Single",
+            "Hint"
+          ],
+          "# + hint\n"
+        ]
+      ]
+    },
+    {
+      "sql": "a::int",
+      "tokens": [
+        [
+          [
+            "Name"
+          ],
+          "a"
+        ],
+        [
+          [
+            "Punctuation"
+          ],
+          "::"
+        ],
+        [
+          [
+            "Name",
+            "Builtin"
+          ],
+          "int"
+        ]
+      ]
+    },
+    {
+      "sql": "´weird´",
+      "tokens": [
+        [
+          [
+            "Name"
+          ],
+          "´weird´"
+        ]
+      ]
+    },
+    {
+      "sql": "\\connect",
+      "tokens": [
+        [
+          [
+            "Generic",
+            "Command"
+          ],
+          "\\connect"
+        ]
+      ]
+    },
+    {
+      "sql": "@var ##temp #temp",
+      "tokens": [
+        [
+          [
+            "Name"
+          ],
+          "@var"
+        ],
+        [
+          [
+            "Text",
+            "Whitespace"
+          ],
+          " "
+        ],
+        [
+          [
+            "Name"
+          ],
+          "##temp"
+        ],
+        [
+          [
+            "Text",
+            "Whitespace"
+          ],
+          " "
+        ],
+        [
+          [
+            "Name"
+          ],
+          "#temp"
+        ]
+      ]
+    },
+    {
+      "sql": "\"\" \"abc\"",
+      "tokens": [
+        [
+          [
+            "Literal",
+            "String",
+            "Symbol"
+          ],
+          "\"\""
+        ],
+        [
+          [
+            "Text",
+            "Whitespace"
+          ],
+          " "
+        ],
+        [
+          [
+            "Literal",
+            "String",
+            "Symbol"
+          ],
+          "\"abc\""
+        ]
+      ]
+    },
+    {
+      "sql": "[schema name] x[0]",
+      "tokens": [
+        [
+          [
+            "Name"
+          ],
+          "[schema name]"
+        ],
+        [
+          [
+            "Text",
+            "Whitespace"
+          ],
+          " "
+        ],
+        [
+          [
+            "Name"
+          ],
+          "x"
+        ],
+        [
+          [
+            "Punctuation"
+          ],
+          "["
+        ],
+        [
+          [
+            "Literal",
+            "Number",
+            "Integer"
+          ],
+          "0"
+        ],
+        [
+          [
+            "Punctuation"
+          ],
+          "]"
+        ]
+      ]
+    },
+    {
+      "sql": "IF NOT EXISTS NOT NULL",
+      "tokens": [
+        [
+          [
+            "Keyword"
+          ],
+          "IF NOT EXISTS"
+        ],
+        [
+          [
+            "Text",
+            "Whitespace"
+          ],
+          " "
+        ],
+        [
+          [
+            "Keyword"
+          ],
+          "NOT NULL"
+        ]
+      ]
+    },
+    {
+      "sql": "ASC DESC NULLS FIRST NULLS LAST",
+      "tokens": [
+        [
+          [
+            "Keyword",
+            "Order"
+          ],
+          "ASC"
+        ],
+        [
+          [
+            "Text",
+            "Whitespace"
+          ],
+          " "
+        ],
+        [
+          [
+            "Keyword",
+            "Order"
+          ],
+          "DESC NULLS FIRST"
+        ],
+        [
+          [
+            "Text",
+            "Whitespace"
+          ],
+          " "
+        ],
+        [
+          [
+            "Keyword",
+            "Order"
+          ],
+          "NULLS LAST"
+        ]
+      ]
+    },
+    {
+      "sql": "UNION ALL DOUBLE PRECISION PRIMARY KEY HANDLER FOR",
+      "tokens": [
+        [
+          [
+            "Keyword"
+          ],
+          "UNION ALL"
+        ],
+        [
+          [
+            "Text",
+            "Whitespace"
+          ],
+          " "
+        ],
+        [
+          [
+            "Name",
+            "Builtin"
+          ],
+          "DOUBLE PRECISION"
+        ],
+        [
+          [
+            "Text",
+            "Whitespace"
+          ],
+          " "
+        ],
+        [
+          [
+            "Keyword"
+          ],
+          "PRIMARY KEY"
+        ],
+        [
+          [
+            "Text",
+            "Whitespace"
+          ],
+          " "
+        ],
+        [
+          [
+            "Keyword"
+          ],
+          "HANDLER FOR"
+        ]
+      ]
+    },
+    {
+      "sql": "LATERAL VIEW EXPLODE",
+      "tokens": [
+        [
+          [
+            "Keyword"
+          ],
+          "LATERAL VIEW EXPLODE"
+        ]
+      ]
+    },
+    {
+      "sql": "AT TIME ZONE 'UTC' WITH' TIME ZONE 'UTC'",
+      "tokens": [
+        [
+          [
+            "Keyword",
+            "TZCast"
+          ],
+          "AT TIME ZONE 'UTC'"
+        ],
+        [
+          [
+            "Text",
+            "Whitespace"
+          ],
+          " "
+        ],
+        [
+          [
+            "Keyword",
+            "TZCast"
+          ],
+          "WITH' TIME ZONE 'UTC'"
+        ]
+      ]
+    },
+    {
+      "sql": "NOT LIKE ILIKE RLIKE REGEXP BINARY",
+      "tokens": [
+        [
+          [
+            "Operator",
+            "Comparison"
+          ],
+          "NOT LIKE"
+        ],
+        [
+          [
+            "Text",
+            "Whitespace"
+          ],
+          " "
+        ],
+        [
+          [
+            "Operator",
+            "Comparison"
+          ],
+          "ILIKE"
+        ],
+        [
+          [
+            "Text",
+            "Whitespace"
+          ],
+          " "
+        ],
+        [
+          [
+            "Operator",
+            "Comparison"
+          ],
+          "RLIKE"
+        ],
+        [
+          [
+            "Text",
+            "Whitespace"
+          ],
+          " "
+        ],
+        [
+          [
+            "Operator",
+            "Comparison"
+          ],
+          "REGEXP BINARY"
+        ]
+      ]
+    },
+    {
+      "sql": "+/@#%^&|-",
+      "tokens": [
+        [
+          [
+            "Operator"
+          ],
+          "+/@#%^&|-"
+        ]
+      ]
     }
   ]
 }
