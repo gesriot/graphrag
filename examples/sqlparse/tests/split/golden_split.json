@@ -1,0 +1,133 @@
+{
+  "name": "split",
+  "cases": [
+    {
+      "op": "split",
+      "sql": "select 1; select 2",
+      "strip_semicolon": false,
+      "result": [
+        "select 1;",
+        "select 2"
+      ]
+    },
+    {
+      "op": "split",
+      "sql": "select 1;\nselect 2;\n",
+      "strip_semicolon": false,
+      "result": [
+        "select 1;",
+        "select 2;"
+      ]
+    },
+    {
+      "op": "split",
+      "sql": "select 1",
+      "strip_semicolon": false,
+      "result": [
+        "select 1"
+      ]
+    },
+    {
+      "op": "split",
+      "sql": "",
+      "strip_semicolon": false,
+      "result": []
+    },
+    {
+      "op": "split",
+      "sql": "   ",
+      "strip_semicolon": false,
+      "result": []
+    },
+    {
+      "op": "split",
+      "sql": "select ';' ; select 2",
+      "strip_semicolon": false,
+      "result": [
+        "select ';' ;",
+        "select 2"
+      ]
+    },
+    {
+      "op": "split",
+      "sql": "select 1 -- a ; b\n; select 2",
+      "strip_semicolon": false,
+      "result": [
+        "select 1 -- a ; b\n;",
+        "select 2"
+      ]
+    },
+    {
+      "op": "split",
+      "sql": "/* x ; y */ select 1; select 2",
+      "strip_semicolon": false,
+      "result": [
+        "/* x ; y */ select 1;",
+        "select 2"
+      ]
+    },
+    {
+      "op": "split",
+      "sql": "insert into t values (1);\n\nupdate t set a=2;",
+      "strip_semicolon": false,
+      "result": [
+        "insert into t values (1);",
+        "update t set a=2;"
+      ]
+    },
+    {
+      "op": "split",
+      "sql": "select 1;",
+      "strip_semicolon": true,
+      "result": [
+        "select 1"
+      ]
+    },
+    {
+      "op": "split",
+      "sql": "select 1; select 2;",
+      "strip_semicolon": true,
+      "result": [
+        "select 1",
+        "select 2"
+      ]
+    },
+    {
+      "op": "split",
+      "sql": "select 'café'; select 'naïve'",
+      "strip_semicolon": false,
+      "result": [
+        "select 'café';",
+        "select 'naïve'"
+      ]
+    },
+    {
+      "op": "split",
+      "sql": "BEGIN; UPDATE t SET x=1; COMMIT;",
+      "strip_semicolon": false,
+      "result": [
+        "BEGIN;",
+        "UPDATE t SET x=1;",
+        "COMMIT;"
+      ]
+    },
+    {
+      "op": "split",
+      "sql": "select a from t where b = ';'",
+      "strip_semicolon": false,
+      "result": [
+        "select a from t where b = ';'"
+      ]
+    },
+    {
+      "op": "split",
+      "sql": "select 1 ;; select 2",
+      "strip_semicolon": false,
+      "result": [
+        "select 1 ;",
+        ";",
+        "select 2"
+      ]
+    }
+  ]
+}
