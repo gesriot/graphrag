@@ -62,3 +62,11 @@ Rust's standard `regex` crate does not support (lookahead/lookbehind and one
 backreference for dollar-quoted strings). Use `fancy-regex` selectively or
 replace those specific patterns with hand-written scanners; do not assume a
 mechanical `re` → `regex` table translation will compile.
+
+Rust port status:
+1. **Stage 1 complete:** token type tree + generated keyword dictionaries in
+   `examples/sqlparse_rust`, with 811 raw keyword entries and first-match
+   behavior matching the Python dictionary add-order.
+2. **Next:** lexer parity. Add a token-by-token differential test against
+   vendored Python before wiring the splitter, so SQL regex translation errors
+   fail at the smallest boundary.

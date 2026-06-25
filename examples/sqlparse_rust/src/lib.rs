@@ -9,7 +9,7 @@ pub mod tokens;
 #[cfg(test)]
 mod tests {
     use crate::keywords::keyword_token;
-    use crate::tokens::{is_subtype, KEYWORD, KEYWORD_DML, NAME};
+    use crate::tokens::{is_subtype, KEYWORD, KEYWORD_DML, NAME, NAME_BUILTIN};
 
     #[test]
     fn keyword_tree_and_table_basics() {
@@ -21,5 +21,10 @@ mod tests {
         assert_eq!(keyword_token("SELECT"), Some(KEYWORD_DML));
         assert_eq!(keyword_token("FROM"), Some(KEYWORD));
         assert_eq!(keyword_token("DEFINITELY_NOT_A_KEYWORD"), None);
+        // Conflicting duplicate keys across dialect dictionaries must keep the
+        // first Python add-order match.
+        assert_eq!(keyword_token("CHARACTER"), Some(KEYWORD));
+        assert_eq!(keyword_token("MAP"), Some(NAME_BUILTIN));
+        assert_eq!(keyword_token("TIMESTAMP"), Some(NAME_BUILTIN));
     }
 }
