@@ -1,7 +1,7 @@
 //! Golden contract verifier for the Rust jsmn port (first C→Rust port).
 //! Reads examples/jsmn/tests/parse/golden_*.json (ground truth = C jsmn) and
 //! asserts the Rust port reproduces (result, tokens) exactly.
-//! Run with: cargo test --test jsmn_contract
+//! Run with: cargo test --test parse_contract
 
 use std::fs;
 use std::path::PathBuf;
