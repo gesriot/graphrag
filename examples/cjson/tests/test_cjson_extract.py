@@ -62,8 +62,15 @@ def test_parse_chain_and_recursive_ownership_edges():
 
 def test_allocation_primitives_stay_observations():
     data = _graph()
-    targets = {r["target"] for r in data["relationships"] if r["type"] == "calls"}
-    assert all(t.startswith("cJSON:") for t in targets), (
+    # Library purity: every call originating in the cJSON library resolves to a
+    # library function -- malloc/free/etc. must never become core edges. (The
+    # co-located golden runner is also package code; scope this to the library.)
+    lib_targets = {
+        r["target"]
+        for r in data["relationships"]
+        if r["type"] == "calls" and r["source"].startswith("cJSON:")
+    }
+    assert all(t.startswith("cJSON:") for t in lib_targets), (
         "non-library call leaked into cJSON core edges"
     )
     obs_targets = {o["display_target"] for o in data["call_observations"]}

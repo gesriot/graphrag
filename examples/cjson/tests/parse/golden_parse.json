@@ -1,0 +1,514 @@
+{
+  "cases": [
+    {
+      "desc": "empty object",
+      "json": "{}",
+      "unformatted": "{}",
+      "inspect": {
+        "t": "obj",
+        "n": 0,
+        "members": []
+      },
+      "parse_ok": true,
+      "formatted": "{\n}"
+    },
+    {
+      "desc": "empty array",
+      "json": "[]",
+      "unformatted": "[]",
+      "inspect": {
+        "t": "arr",
+        "n": 0,
+        "items": []
+      },
+      "parse_ok": true
+    },
+    {
+      "desc": "simple object",
+      "json": "{\"a\":1,\"b\":2}",
+      "unformatted": "{\"a\":1,\"b\":2}",
+      "inspect": {
+        "t": "obj",
+        "n": 2,
+        "members": [
+          {
+            "k": "a",
+            "v": {
+              "t": "num",
+              "i": 1,
+              "bits": 4607182418800017408
+            }
+          },
+          {
+            "k": "b",
+            "v": {
+              "t": "num",
+              "i": 2,
+              "bits": 4611686018427387904
+            }
+          }
+        ]
+      },
+      "parse_ok": true,
+      "formatted": "{\n\t\"a\":\t1,\n\t\"b\":\t2\n}"
+    },
+    {
+      "desc": "nested object+array",
+      "json": "{\"a\":[1,2,3],\"b\":{\"c\":true}}",
+      "unformatted": "{\"a\":[1,2,3],\"b\":{\"c\":true}}",
+      "inspect": {
+        "t": "obj",
+        "n": 2,
+        "members": [
+          {
+            "k": "a",
+            "v": {
+              "t": "arr",
+              "n": 3,
+              "items": [
+                {
+                  "t": "num",
+                  "i": 1,
+                  "bits": 4607182418800017408
+                },
+                {
+                  "t": "num",
+                  "i": 2,
+                  "bits": 4611686018427387904
+                },
+                {
+                  "t": "num",
+                  "i": 3,
+                  "bits": 4613937818241073152
+                }
+              ]
+            }
+          },
+          {
+            "k": "b",
+            "v": {
+              "t": "obj",
+              "n": 1,
+              "members": [
+                {
+                  "k": "c",
+                  "v": {
+                    "t": "bool",
+                    "v": true
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "parse_ok": true,
+      "formatted": "{\n\t\"a\":\t[1, 2, 3],\n\t\"b\":\t{\n\t\t\"c\":\ttrue\n\t}\n}"
+    },
+    {
+      "desc": "string escapes",
+      "json": "{\"s\":\"l1\\nl2\\ttab\\\"q\\\\b\"}",
+      "unformatted": "{\"s\":\"l1\\nl2\\ttab\\\"q\\\\b\"}",
+      "inspect": {
+        "t": "obj",
+        "n": 1,
+        "members": [
+          {
+            "k": "s",
+            "v": {
+              "t": "str",
+              "v": "l1\nl2\ttab\"q\\b"
+            }
+          }
+        ]
+      },
+      "parse_ok": true
+    },
+    {
+      "desc": "unicode escape -> utf8",
+      "json": "{\"u\":\"\\u00e9\"}",
+      "unformatted": "{\"u\":\"é\"}",
+      "inspect": {
+        "t": "obj",
+        "n": 1,
+        "members": [
+          {
+            "k": "u",
+            "v": {
+              "t": "str",
+              "v": "é"
+            }
+          }
+        ]
+      },
+      "parse_ok": true
+    },
+    {
+      "desc": "booleans and null",
+      "json": "{\"t\":true,\"f\":false,\"n\":null}",
+      "unformatted": "{\"t\":true,\"f\":false,\"n\":null}",
+      "inspect": {
+        "t": "obj",
+        "n": 3,
+        "members": [
+          {
+            "k": "t",
+            "v": {
+              "t": "bool",
+              "v": true
+            }
+          },
+          {
+            "k": "f",
+            "v": {
+              "t": "bool",
+              "v": false
+            }
+          },
+          {
+            "k": "n",
+            "v": {
+              "t": "null"
+            }
+          }
+        ]
+      },
+      "parse_ok": true
+    },
+    {
+      "desc": "mixed array",
+      "json": "[1,\"two\",true,null,{}]",
+      "unformatted": "[1,\"two\",true,null,{}]",
+      "inspect": {
+        "t": "arr",
+        "n": 5,
+        "items": [
+          {
+            "t": "num",
+            "i": 1,
+            "bits": 4607182418800017408
+          },
+          {
+            "t": "str",
+            "v": "two"
+          },
+          {
+            "t": "bool",
+            "v": true
+          },
+          {
+            "t": "null"
+          },
+          {
+            "t": "obj",
+            "n": 0,
+            "members": []
+          }
+        ]
+      },
+      "parse_ok": true
+    },
+    {
+      "desc": "zero/negative/big int",
+      "json": "{\"z\":0,\"neg\":-42,\"big\":1000000}",
+      "unformatted": "{\"z\":0,\"neg\":-42,\"big\":1000000}",
+      "inspect": {
+        "t": "obj",
+        "n": 3,
+        "members": [
+          {
+            "k": "z",
+            "v": {
+              "t": "num",
+              "i": 0,
+              "bits": 0
+            }
+          },
+          {
+            "k": "neg",
+            "v": {
+              "t": "num",
+              "i": -42,
+              "bits": 13854479828675198976
+            }
+          },
+          {
+            "k": "big",
+            "v": {
+              "t": "num",
+              "i": 1000000,
+              "bits": 4696837146684686336
+            }
+          }
+        ]
+      },
+      "parse_ok": true
+    },
+    {
+      "desc": "nested arrays",
+      "json": "[[1],[2,[3,4]]]",
+      "unformatted": "[[1],[2,[3,4]]]",
+      "inspect": {
+        "t": "arr",
+        "n": 2,
+        "items": [
+          {
+            "t": "arr",
+            "n": 1,
+            "items": [
+              {
+                "t": "num",
+                "i": 1,
+                "bits": 4607182418800017408
+              }
+            ]
+          },
+          {
+            "t": "arr",
+            "n": 2,
+            "items": [
+              {
+                "t": "num",
+                "i": 2,
+                "bits": 4611686018427387904
+              },
+              {
+                "t": "arr",
+                "n": 2,
+                "items": [
+                  {
+                    "t": "num",
+                    "i": 3,
+                    "bits": 4613937818241073152
+                  },
+                  {
+                    "t": "num",
+                    "i": 4,
+                    "bits": 4616189618054758400
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "parse_ok": true
+    },
+    {
+      "desc": "empty string value",
+      "json": "{\"e\":\"\"}",
+      "unformatted": "{\"e\":\"\"}",
+      "inspect": {
+        "t": "obj",
+        "n": 1,
+        "members": [
+          {
+            "k": "e",
+            "v": {
+              "t": "str",
+              "v": ""
+            }
+          }
+        ]
+      },
+      "parse_ok": true
+    },
+    {
+      "desc": "top-level number",
+      "json": "5",
+      "unformatted": "5",
+      "inspect": {
+        "t": "num",
+        "i": 5,
+        "bits": 4617315517961601024
+      },
+      "parse_ok": true
+    },
+    {
+      "desc": "top-level string",
+      "json": "\"hi\"",
+      "unformatted": "\"hi\"",
+      "inspect": {
+        "t": "str",
+        "v": "hi"
+      },
+      "parse_ok": true
+    },
+    {
+      "desc": "top-level true",
+      "json": "true",
+      "unformatted": "true",
+      "inspect": {
+        "t": "bool",
+        "v": true
+      },
+      "parse_ok": true
+    },
+    {
+      "desc": "top-level null",
+      "json": "null",
+      "unformatted": "null",
+      "inspect": {
+        "t": "null"
+      },
+      "parse_ok": true
+    },
+    {
+      "desc": "leading/trailing whitespace",
+      "json": "   {  \"a\" : 1 }   ",
+      "unformatted": "{\"a\":1}",
+      "inspect": {
+        "t": "obj",
+        "n": 1,
+        "members": [
+          {
+            "k": "a",
+            "v": {
+              "t": "num",
+              "i": 1,
+              "bits": 4607182418800017408
+            }
+          }
+        ]
+      },
+      "parse_ok": true
+    },
+    {
+      "desc": "array of empty containers",
+      "json": "[{},[]]",
+      "unformatted": "[{},[]]",
+      "inspect": {
+        "t": "arr",
+        "n": 2,
+        "items": [
+          {
+            "t": "obj",
+            "n": 0,
+            "members": []
+          },
+          {
+            "t": "arr",
+            "n": 0,
+            "items": []
+          }
+        ]
+      },
+      "parse_ok": true
+    },
+    {
+      "desc": "duplicate keys",
+      "json": "{\"a\":1,\"a\":2}",
+      "unformatted": "{\"a\":1,\"a\":2}",
+      "inspect": {
+        "t": "obj",
+        "n": 2,
+        "members": [
+          {
+            "k": "a",
+            "v": {
+              "t": "num",
+              "i": 1,
+              "bits": 4607182418800017408
+            }
+          },
+          {
+            "k": "a",
+            "v": {
+              "t": "num",
+              "i": 2,
+              "bits": 4611686018427387904
+            }
+          }
+        ]
+      },
+      "parse_ok": true
+    },
+    {
+      "desc": "max int32",
+      "json": "{\"max\":2147483647}",
+      "unformatted": "{\"max\":2147483647}",
+      "inspect": {
+        "t": "obj",
+        "n": 1,
+        "members": [
+          {
+            "k": "max",
+            "v": {
+              "t": "num",
+              "i": 2147483647,
+              "bits": 4746794007244308480
+            }
+          }
+        ]
+      },
+      "parse_ok": true
+    },
+    {
+      "desc": "incomplete object (error)",
+      "json": "{",
+      "unformatted": "__PARSE_ERROR__",
+      "inspect": null,
+      "parse_ok": false
+    },
+    {
+      "desc": "missing value (error)",
+      "json": "{\"a\":}",
+      "unformatted": "__PARSE_ERROR__",
+      "inspect": null,
+      "parse_ok": false
+    },
+    {
+      "desc": "deep nesting",
+      "json": "{\"a\":{\"b\":{\"c\":{\"d\":[1]}}}}",
+      "unformatted": "{\"a\":{\"b\":{\"c\":{\"d\":[1]}}}}",
+      "inspect": {
+        "t": "obj",
+        "n": 1,
+        "members": [
+          {
+            "k": "a",
+            "v": {
+              "t": "obj",
+              "n": 1,
+              "members": [
+                {
+                  "k": "b",
+                  "v": {
+                    "t": "obj",
+                    "n": 1,
+                    "members": [
+                      {
+                        "k": "c",
+                        "v": {
+                          "t": "obj",
+                          "n": 1,
+                          "members": [
+                            {
+                              "k": "d",
+                              "v": {
+                                "t": "arr",
+                                "n": 1,
+                                "items": [
+                                  {
+                                    "t": "num",
+                                    "i": 1,
+                                    "bits": 4607182418800017408
+                                  }
+                                ]
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "parse_ok": true
+    }
+  ]
+}

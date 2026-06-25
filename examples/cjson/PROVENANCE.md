@@ -38,20 +38,48 @@ The bootstrap captures the facts that matter for ownership analysis:
   `memcpy`/`memset`/`strlen` are weak observations, never core deterministic
   edges, so heap ownership is visible but not silently promoted.
 
-## Verified graph result (`byog_cjson`, snapshot `20260625-120133-fd9ae9b1`)
-- 125 entities, 311 relationships, 125 text units, 112 call observations.
-- Entity mix: 116 functions, 7 typedefs (`cJSON`, `cJSON_Hooks`, `cJSON_bool`,
-  `parse_buffer`, `printbuffer`, `internal_hooks`, `error`), 2 files.
-- Relationship mix: 188 `calls`, 123 `contains`.
-- `audit_call_edges`: 188 calls, structural pass rate 1.0, 0 anomalies,
+## Verified graph result (`byog_cjson`, snapshot `20260625-121102-39f529a6`)
+The published graph also contains the co-located golden runner
+(`tests/parse/runner.c`) as package code, the same way `jsmn`/`inih` do:
+- 131 entities, 367 relationships, 131 text units, 125 call observations.
+- Entity mix: 121 functions (116 library + 5 runner), 7 typedefs (`cJSON`,
+  `cJSON_Hooks`, `cJSON_bool`, `parse_buffer`, `printbuffer`, `internal_hooks`,
+  `error`), 3 files (cJSON.c, cJSON.h, runner.c).
+- Relationship mix: 239 `calls`, 128 `contains`.
+- `audit_call_edges`: 239 calls, structural pass rate 1.0, 0 anomalies,
   0 dangling targets, 0 semantic suspicions.
+- The **library** subgraph (cJSON.c/cJSON.h) is 125 entities and 188
+  deterministic calls; the remaining edges are the runner's own helpers.
 - Resolved entry chains: `cJSON_Parse -> cJSON_ParseWithOpts`,
   `cJSON_ParseWithLength -> cJSON_ParseWithLengthOpts`.
 
 ## Regression
 - `examples/cjson/tests/test_cjson_extract.py` locks the struct graph, the
   ownership-slice API surface, the parse chain, the recursive ownership self-edges
-  (`cJSON_Delete`), and that allocation primitives stay observations.
+  (`cJSON_Delete`), and that allocation primitives stay observations (scoped to
+  the library subgraph, so it is stable against runner changes).
+- `examples/cjson/tests/test_cjson_parse_contract.py` recompiles the C golden
+  runner, re-derives the contract, and — when the toolchain supports it —
+  recompiles under AddressSanitizer to verify the parse+print+delete path is
+  leak/double-free clean (skips and records if ASan is unavailable).
+
+## Golden contract (captured before Rust)
+- Runner: `tests/parse/runner.c`; golden: `tests/parse/golden_parse.json`.
+- 22 cases over a bounded ownership-bearing corpus (objects, arrays, strings with
+  escapes, `\u` unicode → UTF-8, integers incl. zero/negative/max-int32, bool,
+  null, nesting, empty containers, top-level scalars, whitespace, duplicate keys,
+  and two parse-error inputs), each pinning three oracles:
+  - `unformatted`: `cJSON_PrintUnformatted` output (or `__PARSE_ERROR__`),
+  - `inspect`: a canonical descriptor built only from the public getter API
+    (`Is*`, `GetArraySize`/`GetArrayItem`, object key walking, `valuestring`/
+    `valueint`); numbers carry `valueint` + the IEEE-754 bits of `valuedouble`,
+    so number-parse fidelity is checked exactly without depending on float
+    *printing*,
+  - `formatted`: `cJSON_Print` output, for a few cases.
+- Float-printing edge cases (NaN/inf/exponent/precision) are deferred to a later
+  sub-stage; the primary corpus uses integers so the print oracle stays well
+  defined without porting printf/double quirks.
+- ASan over the full corpus (all three modes) is leak/double-free clean.
 
 ## Vendored whitespace
 - `cJSON.h` and `LICENSE` contain upstream whitespace that fails vanilla
