@@ -1,0 +1,246 @@
+{
+  "cases": [
+    {
+      "desc": "basic section + pairs",
+      "ini": "[sec]\na=1\nb=2\n",
+      "result": 0,
+      "events": [
+        {
+          "section": "sec",
+          "name": "a",
+          "value": "1"
+        },
+        {
+          "section": "sec",
+          "name": "b",
+          "value": "2"
+        }
+      ]
+    },
+    {
+      "desc": "no section -> empty section",
+      "ini": "x=1\n",
+      "result": 0,
+      "events": [
+        {
+          "section": "",
+          "name": "x",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "desc": "colon separator",
+      "ini": "x:1\n",
+      "result": 0,
+      "events": [
+        {
+          "section": "",
+          "name": "x",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "desc": "whitespace stripped around name/value",
+      "ini": "  a  =  1  \n",
+      "result": 0,
+      "events": [
+        {
+          "section": "",
+          "name": "a",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "desc": "start-of-line comments ; and #",
+      "ini": "; c\n# d\na=1\n",
+      "result": 0,
+      "events": [
+        {
+          "section": "",
+          "name": "a",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "desc": "inline comment after whitespace stripped",
+      "ini": "a=1 ; cmt\n",
+      "result": 0,
+      "events": [
+        {
+          "section": "",
+          "name": "a",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "desc": "inline ; without leading space is kept",
+      "ini": "a=1;cmt\n",
+      "result": 0,
+      "events": [
+        {
+          "section": "",
+          "name": "a",
+          "value": "1;cmt"
+        }
+      ]
+    },
+    {
+      "desc": "hash is not an inline comment prefix",
+      "ini": "a=1 #x\n",
+      "result": 0,
+      "events": [
+        {
+          "section": "",
+          "name": "a",
+          "value": "1 #x"
+        }
+      ]
+    },
+    {
+      "desc": "multiline continuation (leading ws)",
+      "ini": "a=1\n  more\n",
+      "result": 0,
+      "events": [
+        {
+          "section": "",
+          "name": "a",
+          "value": "1"
+        },
+        {
+          "section": "",
+          "name": "a",
+          "value": "more"
+        }
+      ]
+    },
+    {
+      "desc": "section line with inline comment",
+      "ini": "[sec] ; c\nx=1\n",
+      "result": 0,
+      "events": [
+        {
+          "section": "sec",
+          "name": "x",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "desc": "empty value",
+      "ini": "a=\n",
+      "result": 0,
+      "events": [
+        {
+          "section": "",
+          "name": "a",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "desc": "value with internal spaces",
+      "ini": "k = hello world\n",
+      "result": 0,
+      "events": [
+        {
+          "section": "",
+          "name": "k",
+          "value": "hello world"
+        }
+      ]
+    },
+    {
+      "desc": "UTF-8 BOM stripped on line 1",
+      "ini": "﻿a=1\n",
+      "result": 0,
+      "events": [
+        {
+          "section": "",
+          "name": "a",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "desc": "empty input",
+      "ini": "",
+      "result": 0,
+      "events": []
+    },
+    {
+      "desc": "blank lines ignored",
+      "ini": "\n\n[s]\n\na=1\n",
+      "result": 0,
+      "events": [
+        {
+          "section": "s",
+          "name": "a",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "desc": "malformed: no separator -> error line",
+      "ini": "bad\n",
+      "result": 1,
+      "events": []
+    },
+    {
+      "desc": "malformed: section missing ]",
+      "ini": "[sec\n",
+      "result": 1,
+      "events": []
+    },
+    {
+      "desc": "error mid-file, parsing continues",
+      "ini": "[s]\na=1\nbad\nb=2\n",
+      "result": 3,
+      "events": [
+        {
+          "section": "s",
+          "name": "a",
+          "value": "1"
+        },
+        {
+          "section": "s",
+          "name": "b",
+          "value": "2"
+        }
+      ]
+    },
+    {
+      "desc": "multiple sections",
+      "ini": "[a]\nx=1\n[b]\ny=2\n",
+      "result": 0,
+      "events": [
+        {
+          "section": "a",
+          "name": "x",
+          "value": "1"
+        },
+        {
+          "section": "b",
+          "name": "y",
+          "value": "2"
+        }
+      ]
+    },
+    {
+      "desc": "CRLF line endings",
+      "ini": "[s]\r\na=1\r\n",
+      "result": 0,
+      "events": [
+        {
+          "section": "s",
+          "name": "a",
+          "value": "1"
+        }
+      ]
+    }
+  ]
+}

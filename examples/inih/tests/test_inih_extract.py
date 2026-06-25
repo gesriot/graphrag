@@ -59,11 +59,17 @@ def test_inih_functions_and_call_graph():
     ):
         assert edge in calls, f"missing call edge {edge}"
 
-    # external/undefined C calls (incl. the handler/reader callbacks) must be
-    # weak observations, never core deterministic edges.
-    targets = {r["target"] for r in data["relationships"] if r["type"] == "calls"}
-    assert all(t.startswith("ini:") for t in targets), (
-        "non-package call leaked into core edges"
+    # Library purity: every call originating in the inih library (ini.c/ini.h)
+    # resolves to a library function -- external/libc calls and the
+    # handler/reader callbacks must never become core deterministic edges. (The
+    # co-located golden runner is also package code; scope this to the library.)
+    lib_targets = {
+        r["target"]
+        for r in data["relationships"]
+        if r["type"] == "calls" and r["source"].startswith("ini:")
+    }
+    assert all(t.startswith("ini:") for t in lib_targets), (
+        "non-library call leaked into the inih core edges"
     )
     # The handler callback is invoked via the HANDLER macro and the line reader
     # via the `reader` function pointer. tree-sitter-c does not expand macros, so

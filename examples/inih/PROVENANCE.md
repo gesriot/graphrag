@@ -50,13 +50,19 @@ but observations still include some disabled-branch calls (for example the
 configuration-aware. Config-aware C facts are the motivation for the
 clang/preprocessor layer in Plan Phase 6.
 
-## Verified graph result (`byog_inih`, snapshot `20260625-104116-403e327d`)
-- 13 entities, 28 relationships, 13 text units, 26 call observations.
-- Entity mix: 10 functions, 2 files, 1 typedef (`ini_parse_string_ctx`).
-- Relationship mix: 17 `calls`, 11 `contains`.
-- `audit_call_edges`: 17 calls, structural pass rate 1.0, 0 anomalies,
+## Verified graph result (`byog_inih`, snapshot `20260625-110255-a7f01404`)
+The published graph now also contains the co-located golden runner
+(`tests/parse/runner.c`) as package code, the same way `jsmn` indexes its runner:
+- 19 entities, 54 relationships, 19 text units, 35 call observations.
+- Entity mix: 15 functions (10 library + 5 runner), 3 files, 1 typedef
+  (`ini_parse_string_ctx`).
+- Relationship mix: 38 `calls`, 16 `contains`.
+- `audit_call_edges`: 38 calls, structural pass rate 1.0, 0 anomalies,
   0 dangling targets, 0 semantic suspicions.
-- Resolved intra-package call graph:
+- The **library** subgraph (ini.c/ini.h) is 13 entities and 17 deterministic
+  calls; the remaining edges are the runner's own internal helpers (resolved,
+  same-file).
+- Resolved intra-library call graph:
   - `ini_parse -> ini_parse_file -> ini_parse_stream`
   - `ini_parse_string -> ini_parse_string_length -> ini_parse_stream`
   - `ini_parse_stream -> {ini_rstrip, ini_lskip, ini_find_chars_or_comment,
@@ -68,10 +74,23 @@ clang/preprocessor layer in Plan Phase 6.
   `ini_realloc`.
 
 ## Regression
-- `examples/inih/tests/test_inih_extract.py` locks the function set, the call graph,
-  the callback/libc observations, and — importantly — that no phantom keyword
-  "function" leaks in from preprocessor fragmentation (incl. a focused unit test
-  on a `#if`-split body).
+- `examples/inih/tests/test_inih_extract.py` locks the library function set, the
+  library call graph, the callback/libc observations, and — importantly — that no
+  phantom keyword "function" leaks in from preprocessor fragmentation (incl. a
+  focused unit test on a `#if`-split body).
+- `examples/inih/tests/test_inih_parse_contract.py` recompiles the dedicated C
+  golden runner and re-derives the parse contract, and asserts string<->file
+  input parity (`ini_parse_string_length` vs `ini_parse_file`).
+
+## Golden contract (captured before Rust)
+- Runner: `tests/parse/runner.c`; golden: `tests/parse/golden_parse.json`.
+- 20 cases in default config, each pinning an INI input to inih's return code
+  (0 / first-error line number) plus the ordered `(section, name, value)`
+  callback sequence: sections and the implicit empty section, `=`/`:` separators,
+  whitespace stripping, start-of-line (`;`/`#`) and inline (`;` after space)
+  comments, multiline continuation, UTF-8 BOM, empty/space-bearing values, blank
+  lines, CRLF, malformed lines and section headers, and mid-file error recovery.
+- string<->file input parity holds for every case (measured, not ported).
 
 ## Next port scope (proposed, not yet built)
 First inih C→Rust port should target the bounded **string** entry point in

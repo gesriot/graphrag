@@ -36,3 +36,4 @@ target/
 
 # compiled C golden runner
 examples/jsmn/tests/parse/runner
+examples/inih/tests/parse/runner
