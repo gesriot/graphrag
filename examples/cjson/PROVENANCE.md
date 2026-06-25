@@ -1,8 +1,9 @@
-# Provenance — vendored `cJSON` (Phase 6 C frontend, third C target)
+# Provenance — vendored `cJSON` (Phase 6 C frontend + ownership-slice golden)
 
 Third C target for Plan Phase 6 and the first **struct/pointer/ownership-heavy**
-one (~3.2k LOC). This checkpoint is the graph bootstrap (frontend + audit clean);
-the bounded C→Rust ownership-slice port is the next checkpoint.
+one (~3.2k LOC). This checkpoint includes the graph bootstrap (frontend + audit
+clean) and the golden-before-Rust ownership-slice contract; the bounded C→Rust
+ownership-slice port is the next checkpoint.
 
 ## Source
 - Package: `cJSON`, an ultralightweight C JSON parser by Dave Gamble and
@@ -38,7 +39,7 @@ The bootstrap captures the facts that matter for ownership analysis:
   `memcpy`/`memset`/`strlen` are weak observations, never core deterministic
   edges, so heap ownership is visible but not silently promoted.
 
-## Verified graph result (`byog_cjson`, snapshot `20260625-121102-39f529a6`)
+## Verified graph result (`byog_cjson`, snapshot `20260625-121715-cda43480`)
 The published graph also contains the co-located golden runner
 (`tests/parse/runner.c`) as package code, the same way `jsmn`/`inih` do:
 - 131 entities, 367 relationships, 131 text units, 125 call observations.
@@ -70,11 +71,11 @@ The published graph also contains the co-located golden runner
   null, nesting, empty containers, top-level scalars, whitespace, duplicate keys,
   and two parse-error inputs), each pinning three oracles:
   - `unformatted`: `cJSON_PrintUnformatted` output (or `__PARSE_ERROR__`),
-  - `inspect`: a canonical descriptor built only from the public getter API
-    (`Is*`, `GetArraySize`/`GetArrayItem`, object key walking, `valuestring`/
-    `valueint`); numbers carry `valueint` + the IEEE-754 bits of `valuedouble`,
-    so number-parse fidelity is checked exactly without depending on float
-    *printing*,
+  - `inspect`: a canonical descriptor built from cJSON's public API and public
+    struct fields (`Is*`, `GetArraySize`/`GetArrayItem`, object key walking via
+    `string`, `valuestring`/`valueint`); numbers carry `valueint` + the IEEE-754
+    bits of `valuedouble`, so number-parse fidelity is checked exactly without
+    depending on float *printing*,
   - `formatted`: `cJSON_Print` output, for a few cases.
 - Float-printing edge cases (NaN/inf/exponent/precision) are deferred to a later
   sub-stage; the primary corpus uses integers so the print oracle stays well
@@ -88,10 +89,10 @@ The published graph also contains the co-located golden runner
   project-authored files remain checked normally.
 
 ## Next port scope (proposed, not yet built)
-First cJSON C→Rust port should target a narrow **ownership-bearing slice** rather
-than the full API: `parse -> inspect tree -> print -> delete` over a bounded JSON
-corpus. This first exercises the struct graph, heap ownership, and free semantics
-without spreading into the mutation/builder API. Golden contract = for each JSON
-input, the parsed tree's observable shape (via inspection getters) plus the
-printed output, with allocation/free behavior exercised end-to-end. The full
-mutation API, custom hooks, and printing edge cases are deferred.
+First cJSON C→Rust port should target the captured narrow **ownership-bearing
+slice** rather than the full API: `parse -> inspect tree -> print -> delete` over
+the bounded JSON corpus. This first exercises the struct graph, heap ownership,
+and free semantics without spreading into the mutation/builder API. The Rust
+port should reproduce the captured unformatted/inspect/formatted oracles and
+exercise recursive deletion/drop over the parsed tree. The full mutation API,
+custom hooks, and float-printing edge cases are deferred.

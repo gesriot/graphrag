@@ -4,7 +4,7 @@ Ground truth is cJSON (`cJSON.c`/`cJSON.h`), captured via a dedicated C runner.
 The bounded ownership slice is parse -> inspect -> print -> delete. Each case
 pins, for a JSON input:
 - `unformatted`: `cJSON_PrintUnformatted` output (or `__PARSE_ERROR__`),
-- `inspect`: a canonical tree descriptor built from the public getter API
+- `inspect`: a canonical tree descriptor built from cJSON's public API/fields
   (numbers carry valueint + the IEEE-754 bits of valuedouble, so parse fidelity
   is checked exactly without depending on float *printing*),
 - `formatted`: `cJSON_Print` output, for a few cases.
@@ -59,7 +59,7 @@ def _run(binary: Path, mode: str, js: str) -> str:
 
 def test_golden_present_and_sized():
     cases = json.loads(GOLDEN.read_text())["cases"]
-    assert len(cases) >= 20
+    assert len(cases) >= 22
 
 
 @pytest.mark.skipif(_cc() is None, reason="no C compiler available")
@@ -97,8 +97,6 @@ def test_cjson_ownership_under_asan():
             pytest.skip("AddressSanitizer not supported by this compiler")
         for c in cases:
             for mode in ("unformatted", "inspect", "formatted"):
-                if mode == "formatted" and "formatted" not in c:
-                    continue
                 res = subprocess.run(
                     [str(binary), mode],
                     input=c["json"].encode(),
