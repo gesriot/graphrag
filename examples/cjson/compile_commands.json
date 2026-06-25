@@ -1,0 +1,7 @@
+[
+  {
+    "directory": "examples/cjson",
+    "command": "cc -c -I. cJSON.c -o cJSON.o",
+    "file": "cJSON.c"
+  }
+]
