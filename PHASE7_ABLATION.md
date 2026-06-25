@@ -107,9 +107,41 @@ measurement without rewriting the historical result:
   `add_keywords`, and their data dependencies.
 
 The corrected `sqlparse.split` graph pack has 15 closure packs and includes the
-10 keyword/regex data tables in `Lexer.default_initialization`'s pack. The next
-step is to rerun v1 with this corrected packer before treating the result as the
-final existing-benchmark ablation.
+10 keyword/regex data tables in `Lexer.default_initialization`'s pack.
+
+## Corrected-v1 rerun — invalidated by a spec bug (honest)
+
+Re-running arm_graph on the corrected packs scored **7/25** — far worse than the
+prior 24/25. Diagnosing the surprise (rather than reporting it) showed it was **a
+bug in the ablation's API spec, not a real signal**:
+
+- The new agent confirmed the packs now carried `SQL_REGEX` + all 9 keyword dicts
+  verbatim (the data gap is genuinely closed).
+- But every failure was the same systematic whitespace divergence (`"select 1; "`
+  vs golden `"select 1;"`). The spec said *"preserve the original text/whitespace"*,
+  whereas `sqlparse.split` is `[str(stmt).strip() for stmt in stack.run(...)]` —
+  it **strips each statement**. The corrected agent obeyed the (wrong) spec; the
+  earlier agent had ignored it and stripped, which is the only reason it scored
+  24/25.
+
+Consequences:
+- The corrected-v1 number (7/25) is **void** — it measures spec-compliance, not
+  graph-vs-raw.
+- The **original v1 was also partly confounded**: arm_raw saw the real strip in
+  `__init__.py:split` while arm_graph (no pack for the top-level wrapper) had to
+  guess; it guessed right, but that is luck, not signal.
+
+Fixes applied: the API spec now states the strip/semicolon contract correctly as
+the *definition* of the public API (given equally to both arms). A second lesson:
+a single cold run is high-variance — the two arm_graph runs chose very different
+internal strategies (lean tokenizer vs hand-rolled `SQL_REGEX` with no regex
+crate), so a credible result needs several runs per arm and/or removing avoidable
+variance (e.g. pre-providing a `regex`/`fancy-regex` dependency so agents do not
+hand-roll regex engines).
+
+**Status: no valid existing-benchmark ablation number yet.** Both prior numbers are
+retired as confounded. The harness and packer are now correct; the experiment must
+be re-run under the corrected spec with a variance-aware protocol.
 
 ## Reproduce
 
@@ -129,7 +161,9 @@ uv run python scripts/ablation.py eval --kit /tmp/ablation/sqlparse/arm_graph \
 
 ## Next
 
-1. Re-run v1 with the corrected data-dependency/context-pack closure and compare
-   the result against the historical 24/25 vs 25/25 measurement.
-2. v2 replication on a fresh, larger multi-file target with no strong model prior,
-   reporting the same metrics, to test the capability (not just efficiency) claim.
+1. Re-run the existing-benchmark ablation under the **corrected API spec** (strip
+   contract fixed), with a **variance-aware protocol**: N runs per arm (both arms,
+   since the spec changed) and a pre-provided regex dependency to remove the
+   hand-rolled-regex confound. Report distributions, not single numbers.
+2. Only then v2 replication on a fresh, larger multi-file target with no strong
+   model prior, same metrics, to test the capability (not just efficiency) claim.
