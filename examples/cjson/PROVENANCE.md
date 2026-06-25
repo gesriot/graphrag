@@ -38,7 +38,7 @@ The bootstrap captures the facts that matter for ownership analysis:
   `memcpy`/`memset`/`strlen` are weak observations, never core deterministic
   edges, so heap ownership is visible but not silently promoted.
 
-## Verified graph result (`byog_cjson`, snapshot `20260625-115555-029441e8`)
+## Verified graph result (`byog_cjson`, snapshot `20260625-120133-fd9ae9b1`)
 - 125 entities, 311 relationships, 125 text units, 112 call observations.
 - Entity mix: 116 functions, 7 typedefs (`cJSON`, `cJSON_Hooks`, `cJSON_bool`,
   `parse_buffer`, `printbuffer`, `internal_hooks`, `error`), 2 files.
@@ -52,6 +52,12 @@ The bootstrap captures the facts that matter for ownership analysis:
 - `examples/cjson/tests/test_cjson_extract.py` locks the struct graph, the
   ownership-slice API surface, the parse chain, the recursive ownership self-edges
   (`cJSON_Delete`), and that allocation primitives stay observations.
+
+## Vendored whitespace
+- `cJSON.h` and `LICENSE` contain upstream whitespace that fails vanilla
+  `git diff --check`. The local `.gitattributes` disables only those vendored
+  whitespace checks so provenance-preserving bytes can stay verbatim while
+  project-authored files remain checked normally.
 
 ## Next port scope (proposed, not yet built)
 First cJSON C→Rust port should target a narrow **ownership-bearing slice** rather

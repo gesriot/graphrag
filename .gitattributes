@@ -1,0 +1,3 @@
+examples/cjson/LICENSE whitespace=-blank-at-eof
+examples/cjson/cJSON.c whitespace=-trailing-space
+examples/cjson/cJSON.h whitespace=-trailing-space
