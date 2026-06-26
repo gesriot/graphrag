@@ -139,9 +139,54 @@ crate), so a credible result needs several runs per arm and/or removing avoidabl
 variance (e.g. pre-providing a `regex`/`fancy-regex` dependency so agents do not
 hand-roll regex engines).
 
-**Status: no valid existing-benchmark ablation number yet.** Both prior numbers are
-retired as confounded. The harness and packer are now correct; the experiment must
-be re-run under the corrected spec with a variance-aware protocol.
+Both prior numbers are retired as confounded. The experiment was then re-run under
+the corrected protocol below.
+
+## Corrected-v1 result (N=3/arm, corrected protocol)
+
+Protocol (pre-registered, not changed mid-flight): corrected API spec (strip
+contract stated as the API definition, given to both arms); `fancy-regex`
+pre-provided to both kits (so the variable is graph-vs-raw, not "did the agent
+hand-roll a regex engine"); 3 cold sub-agents per arm; identical hidden golden (25
+split cases); a run is voided only for infrastructure failure (session drop / kit
+not written / dep unresolved), never for a weak agent strategy. All three raw runs
+were re-run once after a session-limit interruption (infra invalidation); the
+graph runs completed first time.
+
+| arm | run scores | median | min–max | build attempts | tool-uses | wall (s) |
+|---|---|---|---|---|---|---|
+| **arm_graph** (15 focused closure packs) | 25, 23, 23 | **23/25** | 23–25 | 1,1,3 | 22–31 | 341–369 |
+| **arm_raw** (whole 21-file package) | 25, 25, 25 | **25/25** | 25–25 | 1,1,2 | 32–49 | 400–408 |
+
+### Reading the result (straight)
+
+- **Raw is consistently perfect (25/25 ×3); graph is near-parity but lower and more
+  variable (median 23/25, range 23–25).** On this familiar benchmark the graph does
+  **not** beat raw on fidelity.
+- **The graph arm reaches near-parity with ~half the material** (15 focused packs
+  vs a 21-file package), fewer tool-uses (median ~29 vs ~33), and ~15% less wall
+  time. The measurable win is **efficiency/focus**, not pass-rate.
+- **The residual graph gap is small, traceable, and points to a concrete packer
+  gap.** Both graph failures are the same `strip_semicolon=true` detail: graph
+  stripped only the *last* statement's `;` where sqlparse strips *per statement*.
+  The `StripTrailingSemicolonFilter` body is not in the closure (it is wired
+  conditionally inside `FilterStack` and was not reached from the 3 roots), so the
+  graph arm implemented strip from the spec wording — graph_1 got it right, graph_2
+  and graph_3 did not. Raw had the filter source and all three were exact. So the
+  gap is partly a still-missing closure element (the filter) and partly within-arm
+  variance, not a fundamental graph weakness.
+
+### Honest conclusion (existing-benchmark)
+
+On a component the model already knows well, with the data/keyword gap closed and
+regex variance removed, **raw source ≥ graph on fidelity (25 vs median 23), and the
+graph's value is efficiency** (much less context, fewer tools, less time) at a
+small, traceable fidelity cost. This is an efficiency result, not a capability
+result. The capability claim — that the graph lets an agent succeed where
+raw-source assembly is genuinely costly — is still **not** demonstrated and needs
+v2 on a fresh, larger, less-familiar target. Two concrete packer follow-ups also
+fell out of v1: include module-level data dependencies (done) and conditionally
+wired pipeline elements like filters (open).
 
 ## Reproduce
 
@@ -161,9 +206,12 @@ uv run python scripts/ablation.py eval --kit /tmp/ablation/sqlparse/arm_graph \
 
 ## Next
 
-1. Re-run the existing-benchmark ablation under the **corrected API spec** (strip
-   contract fixed), with a **variance-aware protocol**: N runs per arm (both arms,
-   since the spec changed) and a pre-provided regex dependency to remove the
-   hand-rolled-regex confound. Report distributions, not single numbers.
-2. Only then v2 replication on a fresh, larger multi-file target with no strong
-   model prior, same metrics, to test the capability (not just efficiency) claim.
+1. **Done:** corrected-protocol existing-benchmark ablation (above) — efficiency
+   win, no capability win on a familiar target.
+2. Optional packer follow-up: also pull conditionally wired pipeline elements
+   (e.g. `StripTrailingSemicolonFilter`) into the closure, which would likely
+   close the residual graph gap on the two `strip_semicolon` cases.
+3. **v2 (the real capability test):** a fresh, larger, less-familiar multi-file
+   target with no strong model prior, same N=3 protocol and metrics. This is where
+   the graph's "find and assemble the right slice" value should — or should not —
+   show up as a pass-rate gap, not just efficiency.

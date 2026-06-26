@@ -39,8 +39,8 @@ PROMPT_TEMPLATE = """\
 # Port task ({arm} arm)
 
 You are porting a bounded source component/API to Rust. Work **only inside this kit
-directory** ({kit}). Do not read, list, or open any file outside it — that is part
-of the experiment's rules.
+directory** (the directory containing this PROMPT.md). Do not read, list, or open
+any file outside it — that is part of the experiment's rules.
 
 ## Your source of truth
 {material}
