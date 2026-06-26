@@ -116,6 +116,77 @@ def reachable_functions(graph: Path, roots: list[str]) -> list[str]:
     return sorted(t for t in seen if t in titles)
 
 
+# Edge types the apply-slice closure follows. NOTE: `contains` is deliberately
+# NOT followed -- class-expansion (pull every member of a reached class) overpacks
+# (reaching JsonPatch would drag in its diff-side from_diff/to_string ->
+# DiffBuilder). The closure must reach *specific methods* via precise edges, which
+# forces the resolver to emit them (constructor/inheritance/property/dispatch).
+CLOSURE_EDGES = ("calls", "uses_data", "references", "imports", "inherits", "property", "dispatch")
+
+
+def closure(graph: Path, roots: list[str], follow=CLOSURE_EDGES) -> set[str]:
+    """Reachable entity set from `roots`, following only the given edge types.
+
+    Edge types that do not exist yet are simply empty, so the same measurement
+    tracks adequacy as resolver edges are added step by step. No blanket class
+    member expansion -- that overpacks; specific members must be reached by edges.
+    """
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from byog_graph import ByogGraph  # type: ignore
+    from collections import defaultdict, deque
+
+    g = ByogGraph(graph.resolve())
+    rels = g.rels
+    etype = rels["type"].astype(str)
+    src = rels["source"].astype(str)
+    tgt = rels["target"].astype(str)
+
+    fwd: dict[str, list[str]] = defaultdict(list)
+    for s, t, e in zip(src, tgt, etype):
+        if e in follow:
+            fwd[s].append(t)
+
+    titles = set(g.ents["title"].astype(str))
+    seen: set[str] = set()
+    q = deque(roots)
+    while q:
+        n = q.popleft()
+        if n in seen:
+            continue
+        seen.add(n)
+        for m in fwd.get(n, []):
+            q.append(m)
+    return {t for t in seen if t in titles}
+
+
+@app.command()
+def adequacy(
+    graph: Path = typer.Option(...),
+    spec: Path = typer.Option(None, "--spec", help="JSON with roots/must_reach/must_exclude"),
+    root: list[str] = typer.Option([], "--root"),
+    must_reach: list[str] = typer.Option([], "--must-reach"),
+    must_exclude: list[str] = typer.Option([], "--must-exclude"),
+):
+    """Measure closure adequacy: must-reach present, must-exclude leaked, size."""
+    if spec is not None:
+        s = json.loads(spec.read_text())
+        root = list(root) + s.get("roots", [])
+        must_reach = list(must_reach) + s.get("must_reach", [])
+        must_exclude = list(must_exclude) + s.get("must_exclude", [])
+    reached = closure(graph, list(root))
+    missing = sorted(m for m in must_reach if m not in reached)
+    leaked = sorted(x for x in must_exclude if x in reached)
+    report = {
+        "roots": list(root),
+        "closure_size": len(reached),
+        "must_reach_total": len(must_reach),
+        "must_reach_missing": missing,
+        "must_exclude_leaked": leaked,
+        "adequate": not missing and not leaked,
+    }
+    print(json.dumps(report, indent=2))
+
+
 @app.command()
 def prep(
     target: str = typer.Option(...),

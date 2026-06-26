@@ -1,0 +1,29 @@
+{
+  "roots": ["jsonpatch:apply_patch"],
+  "must_reach": [
+    "jsonpatch:apply_patch",
+    "jsonpatch:JsonPatch.apply",
+    "jsonpatch:JsonPatch._ops",
+    "jsonpatch:JsonPatch._get_operation",
+    "jsonpatch:PatchOperation.__init__",
+    "jsonpatch:PatchOperation.apply",
+    "jsonpatch:PatchOperation.path",
+    "jsonpatch:PatchOperation.key",
+    "jsonpatch:AddOperation.apply",
+    "jsonpatch:RemoveOperation.apply",
+    "jsonpatch:ReplaceOperation.apply",
+    "jsonpatch:MoveOperation.apply",
+    "jsonpatch:CopyOperation.apply",
+    "jsonpatch:TestOperation.apply",
+    "jsonpointer:JsonPointer",
+    "jsonpointer:JsonPointer.to_last",
+    "jsonpointer:JsonPointer.walk",
+    "jsonpointer:JsonPointer.get_part"
+  ],
+  "must_exclude": [
+    "jsonpatch:DiffBuilder",
+    "jsonpatch:make_patch",
+    "jsonpatch:JsonPatch.from_diff",
+    "jsonpatch:JsonPatch.to_string"
+  ]
+}
