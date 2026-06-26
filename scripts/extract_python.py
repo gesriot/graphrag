@@ -598,8 +598,15 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
     def constructor_type_hint(constructor: str) -> str | None:
         if "." in constructor:
             base_expr, attr = constructor.rsplit(".", 1)
+            # Factory classmethod on a same-file class: Class.from_x(...) -> Class
+            # (only when the classmethod actually returns cls(...)/Class(...)).
+            if (base_expr, attr) in factory_methods:
+                return f"{Path(path).stem}:{base_expr}"
             hint, _ = module_attr_hint(base_expr, attr)
             return hint
+        # Same-file class constructor: LocalClass(...) -> LocalClass.
+        if constructor in local_classes:
+            return f"{Path(path).stem}:{constructor}"
         imported_hint = imported_callable_hint(constructor)
         if imported_hint:
             return imported_hint[0]
@@ -729,6 +736,29 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
             for item in node.body:
                 if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     class_methods[node.name].add(item.name)
+
+    # Local classes and factory classmethods, for resolving constructor types of
+    # same-file class instances (link 1). A factory is a @classmethod whose body
+    # returns `cls(...)` or `Class(...)` -- an alternative constructor that yields
+    # an instance of its own class (e.g. JsonPatch.from_string).
+    local_classes: set[str] = set(class_methods.keys())
+    factory_methods: set[tuple[str, str]] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        for item in node.body:
+            if not isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if not any(
+                isinstance(d, ast.Name) and d.id == "classmethod" for d in item.decorator_list
+            ):
+                continue
+            for sub in ast.walk(item):
+                if isinstance(sub, ast.Return) and isinstance(sub.value, ast.Call):
+                    rfn = sub.value.func
+                    if isinstance(rfn, ast.Name) and rfn.id in ("cls", node.name):
+                        factory_methods.add((node.name, item.name))
+                        break
 
     # Conservative data-dependency edges. These intentionally model reads of
     # module-level tables/constants separately from call edges so a porting
@@ -942,6 +972,7 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                 # - single tracked ctor → 0.80 + specific hint
                 # - else fallback (0.80)
                 has_var_event = False
+                has_none_event = False
                 last_type_for_var: str | None = None
                 distinct_ctors: set[str] = set()
                 events = sorted(assign_events.get(caller, []), key=lambda x: x[0])
@@ -950,9 +981,10 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                     if ev_v == base_expr and ev_l <= call_lineno:
                         has_var_event = True
                         last_type_for_var = ev_t
-                        if (
-                            ev_t is not None
-                            and not str(ev_t).startswith("container:")
+                        if ev_t is None:
+                            has_none_event = True
+                        elif (
+                            not str(ev_t).startswith("container:")
                             and not str(ev_t).startswith("ambiguous:")
                         ):
                             distinct_ctors.add(ev_t)
@@ -988,8 +1020,11 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                     resolved_display = f"{base_expr}.{attr} (ambiguous constructors)"
                     confidence = 0.50
                     deterministic = False
-                elif has_var_event and distinct_ctors:
-                    # single known ctor type → high conf specific hint
+                elif has_var_event and distinct_ctors and not has_none_event:
+                    # single known ctor type → high conf specific hint. Collapse an
+                    # if/else ambiguity (e.g. patch = JsonPatch(p) / from_string(p))
+                    # only when every candidate normalizes to the SAME class and
+                    # there is no None/unresolved candidate (link 1 guard).
                     the_type = next(iter(distinct_ctors))
                     hint = f"{the_type}.{attr}"
                     resolved_display = hint
