@@ -31,12 +31,12 @@ ablation is blocked on a closure-coverage finding (below).**
   test classifies inside the except and asserts outside it.)
 
 ## Graph (gate step 3, captured)
-- `byog_jsonpatch`: 100 entities (16 classes, 71 methods, 9 fns, 4 data, 2 files,
+- `byog_jsonpatch`: 104 entities (16 classes, 71 methods, 9 fns, 4 data, 2 files,
   2 modules), 100 calls / 102 contains / 7 uses_data; `audit_call_edges`
   pass_rate 1.0, 0 anomalies/dangling/suspicions.
 
 ## Closure-coverage finding (gate step 4 — BLOCKER for a fair ablation)
-The calls-closure from `apply_patch` reaches only **4 entities** and never reaches
+The calls-closure from `apply_patch` reaches only **3 entities** and never reaches
 `jsonpointer` or the operation classes. Cause: jsonpatch is a
 registry+polymorphism architecture, which the deterministic *call* graph
 under-captures:
