@@ -20,7 +20,8 @@ needs) and the *same* fixed prompt with an allowed-path rule (read only inside t
 kit). Neither kit contains the golden corpus or the reference Rust port. After the
 agents finish, `ablation.py eval` scores each kit against the **hidden** golden in
 a throwaway copy (the reference contract test is injected with crate name + golden
-path patched), and a per-case scorer reports partial pass-rate.
+path patched). For this v1 benchmark, a target-specific per-case scorer was used
+to report partial pass-rate when a run failed the aggregate contract.
 
 Honest scope: kits share a filesystem, so this is an engineering ablation (prompt
 rule + transcript audit), not a sealed lab. A fully blind run would need separate
@@ -197,6 +198,7 @@ uv run python scripts/ablation.py prep --target sqlparse_split --graph byog_sqlp
   --closure-root lexer:tokenize \
   --closure-root engine.statement_splitter:StatementSplitter.process \
   --closure-root engine.filter_stack:FilterStack.run \
+  --dep 'fancy-regex = "0.13"' \
   --api scripts/ablation_specs/sqlparse_split_api.md --out /tmp/ablation/sqlparse
 # (fill each kit with a cold sub-agent, then:)
 uv run python scripts/ablation.py eval --kit /tmp/ablation/sqlparse/arm_graph \

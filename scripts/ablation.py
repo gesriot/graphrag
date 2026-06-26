@@ -16,7 +16,7 @@ kits share a filesystem, so the prompt forbids reading outside the kit and the
 subagent transcript is the audit trail.
 
 Subcommands:
-  prep  --target T --graph G --source F... --symbol S... --api A --out DIR
+  prep  --target T --graph G --source F... --symbol S... --dep D... --api A --out DIR
   eval  --kit DIR --golden-dir D --contract-test F --crate-name N
 """
 from __future__ import annotations
@@ -201,7 +201,16 @@ def prep(
         for p in kit.rglob("*"):
             if p.is_file() and ("golden" in p.name or "parse_contract" in p.name):
                 leaks.append(str(p))
-    manifest = {"target": target, "arm_graph": str(kg), "arm_raw": str(kr), "leaks": leaks}
+    manifest = {
+        "target": target,
+        "arm_graph": str(kg),
+        "arm_raw": str(kr),
+        "symbols": symbols,
+        "closure_roots": list(closure_root),
+        "deps": list(dep),
+        "sources": [str(s) for s in source],
+        "leaks": leaks,
+    }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2))
     print(json.dumps(manifest, indent=2))
     if leaks:
