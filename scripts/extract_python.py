@@ -743,15 +743,17 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
     # an instance of its own class (e.g. JsonPatch.from_string).
     local_classes: set[str] = set(class_methods.keys())
     factory_methods: set[tuple[str, str]] = set()
+    property_methods: set[tuple[str, str]] = set()  # (Class, name) decorated @property
     for node in ast.walk(tree):
         if not isinstance(node, ast.ClassDef):
             continue
         for item in node.body:
             if not isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
-            if not any(
-                isinstance(d, ast.Name) and d.id == "classmethod" for d in item.decorator_list
-            ):
+            decos = item.decorator_list
+            if any(isinstance(d, ast.Name) and d.id in ("property", "cached_property") for d in decos):
+                property_methods.add((node.name, item.name))
+            if not any(isinstance(d, ast.Name) and d.id == "classmethod" for d in decos):
                 continue
             for sub in ast.walk(item):
                 if isinstance(sub, ast.Return) and isinstance(sub.value, ast.Call):
@@ -932,6 +934,51 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                                 "resolved_target_hint": hint,
                             }
                         )
+
+    # Property bridge: a method reading self.<name>/cls.<name> where <name> is an
+    # @property on the same class is, semantically, a call to the property getter.
+    # Emit a distinct `property` edge (NOT `calls`) so the closure can cross
+    # property reads without inflating call counts or audit precision. Only Load
+    # reads of real @property members of the enclosing class qualify.
+    seen_property_edges: set[tuple[str, str]] = set()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load)):
+            continue
+        base = node.value
+        if not (isinstance(base, ast.Name) and base.id in ("self", "cls")):
+            continue
+        caller = enclosing_function_name(node)
+        if caller not in class_for_method:
+            continue
+        class_name = class_for_method[caller]
+        simple_class = class_name.split(".")[-1]
+        if (simple_class, node.attr) not in property_methods:
+            continue
+        method_bare = caller.split(".")[-1] if "." in caller else caller
+        source_title = f"{Path(path).stem}:{class_name}.{method_bare}"
+        hint = f"{Path(path).stem}:{class_name}.{node.attr}"
+        dedupe = (source_title, hint)
+        if dedupe in seen_property_edges:
+            continue
+        seen_property_edges.add(dedupe)
+        relationships.append(
+            {
+                "id": f"rel:property:{class_name}.{method_bare}:{node.attr}:{getattr(node, 'lineno', 0)}",
+                "source": source_title,
+                "target": hint,
+                "type": "property",
+                "description": f"{class_name}.{method_bare} reads @property {class_name}.{node.attr}",
+                "weight": 0.85,
+                "text_unit_ids": [f"tu:file:{path.name}"],
+                "human_readable_id": len(relationships) + 1,
+                "source_file": str(path),
+                "span": f"{getattr(node, 'lineno', 0)}",
+                "extractor": "tree-sitter-python+ast",
+                "confidence": 0.85,
+                "is_deterministic": True,
+                "resolved_target_hint": hint,
+            }
+        )
 
     # Improve existing tree-sitter calls with direct import hints. This keeps row
     # counts stable while giving the bridge better targets for cross-file calls.
