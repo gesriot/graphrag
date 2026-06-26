@@ -1041,7 +1041,7 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
     # The receiver type is known statically (a class defined in this file with
     # that method), so this is a deterministic call edge the dotted-name detector
     # misses (its receiver is a Call, not a Name chain). Example: jsonpatch's
-    # `JsonPatch(patch).apply(doc)` -> `JsonPatch.apply`.
+    # `AddOperation({...}).apply(obj)` -> `AddOperation.apply`.
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
