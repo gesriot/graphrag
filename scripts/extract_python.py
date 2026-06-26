@@ -1037,6 +1037,48 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                     rel["resolved_target_hint"] = hint
                 relationships.append(rel)
 
+    # Chained-constructor method calls: `Cls(args).method(...)` -> `Cls.method`.
+    # The receiver type is known statically (a class defined in this file with
+    # that method), so this is a deterministic call edge the dotted-name detector
+    # misses (its receiver is a Call, not a Name chain). Example: jsonpatch's
+    # `JsonPatch(patch).apply(doc)` -> `JsonPatch.apply`.
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Call)):
+            continue
+        inner = func.value.func
+        if not isinstance(inner, ast.Name):
+            continue
+        cls_name = inner.id
+        attr = func.attr
+        if cls_name not in class_methods or attr not in class_methods[cls_name]:
+            continue
+        caller = enclosing_function_name(node)
+        if caller == "unknown":
+            continue
+        caller_kind = "method" if caller in class_for_method else "fn"
+        hint = f"{Path(path).stem}:{cls_name}.{attr}"
+        relationships.append(
+            {
+                "id": f"rel:call:{caller}:{attr}:ctorchain:{node.lineno}:{node.col_offset}",
+                "source": make_id(caller_kind, caller, str(path)),
+                "target": make_id("fn", attr, str(path)),
+                "type": "calls",
+                "description": f"{caller} calls {attr} (chained ctor: {cls_name}(...).{attr} -> {hint})",
+                "weight": 0.8,
+                "text_unit_ids": [f"tu:file:{path.name}"],
+                "human_readable_id": len(relationships) + 1,
+                "source_file": str(path),
+                "span": f"{node.lineno}:{node.col_offset}",
+                "extractor": "tree-sitter-python+ast",
+                "confidence": 0.8,
+                "is_deterministic": True,
+                "resolved_target_hint": hint,
+            }
+        )
+
 
 def _try_jedi_adapter(source: bytes, path: Path) -> List[Dict[str, Any]]:
     """Optional future adapter for Jedi-backed reference resolution.
