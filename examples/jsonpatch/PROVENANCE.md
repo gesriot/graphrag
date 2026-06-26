@@ -60,8 +60,37 @@ dynamic-dispatch / static-registry / cross-module architectures**. Closing it
 requires modeling, at minimum, import edges and static data->entity references
 (the registry), then expanding classes to their methods in the closure.
 
-## Next (pending decision)
-Either (a) add import-edge + static-registry-reference extraction and class
-expansion so the closure reaches the operations + jsonpointer, then run v2; or
-(b) run v2 on a more statically-structured target (e.g. `humanize`) and keep this
-as a documented graph limitation + future work.
+## Graph-frontier step-1 outcome (tractable edges added; boundary confirmed)
+Per the agreed plan, the tractable/static-fact resolver edges were added and each
+was measured against `scripts/ablation_specs/jsonpatch_adequacy.json`:
+
+- **1a chained-ctor** (`Cls(args).method()` -> `Cls.method`): correctly captured
+  operation delegation (`MoveOperation.apply` -> `Remove/AddOperation.apply`,
+  `CopyOperation.apply` -> `AddOperation.apply`).
+- **link 1 same-file ctor + factory classmethod resolution** with a collapse
+  guard: `apply_patch`'s `patch = JsonPatch(...)` / `JsonPatch.from_string(...)`
+  both normalize to `JsonPatch`, so `patch.apply(...)` resolves -> closure reaches
+  `JsonPatch.apply`.
+- **link 2 property bridge** (`self.<prop>` read of an `@property`): closure
+  reaches `JsonPatch._ops`.
+
+These are general resolver wins (they help any Python graph), all with audit
+pass_rate 1.0 and the full suite green. But the apply-slice closure then **stalls
+exactly at `_ops -> _get_operation`**, which is `tuple(map(self._get_operation,
+self.patch))` — a method passed by value. Closure size from `apply_patch` is 5;
+it never reaches the operation registry, the operation classes, or `jsonpointer`.
+
+**Boundary conclusion (pre-registered go/no-go):** the remaining links are genuine
+higher-order / dynamic-dispatch / points-to problems, out of scope for the current
+deterministic resolver without dataflow analysis:
+- `map(self._get_operation, …)` — callable passed by value;
+- `cls = self.operations[op]; cls(op)` — dynamic instantiation via a registry value;
+- `operation.apply(obj)` — polymorphic dispatch;
+- `self.pointer.to_last(…)` — cross-module self-attribute type propagation.
+
+So `jsonpatch` is a **boundary case** for the deterministic graph, not a fair
+capability-ablation target (its graph arm would be honestly starved by the
+indirection, not by a packer gap). The capability v2 moves to a more statically
+structured target (`humanize`); `jsonpatch` stands as a documented frontier:
+the call-graph captures static structure well but under-captures dynamic-dispatch
+architectures.
