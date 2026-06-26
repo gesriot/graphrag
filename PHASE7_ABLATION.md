@@ -210,10 +210,19 @@ uv run python scripts/ablation.py eval --kit /tmp/ablation/sqlparse/arm_graph \
 
 1. **Done:** corrected-protocol existing-benchmark ablation (above) — efficiency
    win, no capability win on a familiar target.
-2. Optional packer follow-up: also pull conditionally wired pipeline elements
+2. **Done:** `jsonpatch` mini-gate as the first fresh v2 candidate. It produced a
+   useful boundary finding instead of a fair capability target: after adding the
+   tractable resolver edges (same-file ctor/factory classmethod typing and
+   property reads), the closure still stalls at higher-order/dynamic-dispatch
+   links (`map(self._get_operation)`, registry `cls()`, polymorphic
+   `operation.apply`). Recorded in `examples/jsonpatch/PROVENANCE.md`.
+3. **Pre-registered:** the next v2 target is `humanize`'s number-formatting
+   slice (`PHASE7_HUMANIZE_V2_PREREG.md`), to be run on a fresh weekly budget:
+   vendor/license → golden → graph/audit → adequacy gate → N=3 only if adequate.
+4. Optional packer follow-up: also pull conditionally wired pipeline elements
    (e.g. `StripTrailingSemicolonFilter`) into the closure, which would likely
    close the residual graph gap on the two `strip_semicolon` cases.
-3. **v2 (the real capability test):** a fresh, larger, less-familiar multi-file
+5. **v2 (the real capability test):** a fresh, larger, less-familiar multi-file
    target with no strong model prior, same N=3 protocol and metrics. This is where
    the graph's "find and assemble the right slice" value should — or should not —
    show up as a pass-rate gap, not just efficiency.

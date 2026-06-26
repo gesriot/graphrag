@@ -1,9 +1,9 @@
-# Provenance — vendored `jsonpatch` + `jsonpointer` (Phase 7 ablation v2 target)
+# Provenance — vendored `jsonpatch` + `jsonpointer` (Phase 7 boundary case)
 
-Chosen as the v2 capability-ablation target: a fresh, less-familiar, multi-module
-Python component (`jsonpatch` depends on `jsonpointer`) with an RFC-defined,
-deterministically-testable bounded API. Status: **mini-gate in progress; the
-ablation is blocked on a closure-coverage finding (below).**
+Initially chosen as the v2 capability-ablation target: a fresh, less-familiar,
+multi-module Python component (`jsonpatch` depends on `jsonpointer`) with an
+RFC-defined, deterministically-testable bounded API. Status: **retired as the v2
+target after the mini-gate exposed a real closure boundary** (details below).
 
 ## Source
 - `jsonpatch.py` (RFC 6902) and `jsonpointer.py` (RFC 6901), by Stefan Kögl.
