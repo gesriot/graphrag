@@ -1,3 +1,7 @@
 examples/cjson/LICENSE whitespace=-blank-at-eof
 examples/cjson/cJSON.c whitespace=-trailing-space
 examples/cjson/cJSON.h whitespace=-trailing-space
+examples/jsonpatch/LICENSE_jsonpatch whitespace=-blank-at-eof,-trailing-space
+examples/jsonpatch/LICENSE_jsonpointer whitespace=-blank-at-eof,-trailing-space
+examples/jsonpatch/jsonpatch.py whitespace=-blank-at-eof,-trailing-space
+examples/jsonpatch/jsonpointer.py whitespace=-blank-at-eof,-trailing-space
