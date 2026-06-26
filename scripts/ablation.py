@@ -16,6 +16,7 @@ kits share a filesystem, so the prompt forbids reading outside the kit and the
 subagent transcript is the audit trail.
 
 Subcommands:
+  adequacy --graph G --spec S
   prep  --target T --graph G --source F... --symbol S... --dep D... --api A --out DIR
   eval  --kit DIR --golden-dir D --contract-test F --crate-name N
 """
@@ -85,37 +86,6 @@ fn main() {
 """
 
 
-def reachable_functions(graph: Path, roots: list[str]) -> list[str]:
-    """Transitive closure of `roots` over `calls` edges (functions/methods only).
-
-    A hand-picked symbol list under-packs the graph arm (the jsmn dry-run had to
-    infer a callee that was never packed); the closure gives the arm exactly the
-    reachable subgraph the raw arm would have to assemble itself.
-    """
-    sys.path.insert(0, str(ROOT / "scripts"))
-    from byog_graph import ByogGraph  # type: ignore
-    from collections import defaultdict, deque
-
-    g = ByogGraph(graph.resolve())
-    calls = g.rels[g.rels["type"].astype(str) == "calls"]
-    adj: dict[str, list[str]] = defaultdict(list)
-    for s, t in zip(calls["source"].astype(str), calls["target"].astype(str)):
-        adj[s].append(t)
-    titles = set(g.ents["title"].astype(str))
-    seen: set[str] = set()
-    q = deque(roots)
-    while q:
-        n = q.popleft()
-        if n in seen:
-            continue
-        seen.add(n)
-        for m in adj.get(n, []):
-            if m not in seen:
-                q.append(m)
-    # keep only real entities (drop dangling observation-only targets)
-    return sorted(t for t in seen if t in titles)
-
-
 # Edge types the apply-slice closure follows. NOTE: `contains` is deliberately
 # NOT followed -- class-expansion (pull every member of a reached class) overpacks
 # (reaching JsonPatch would drag in its diff-side from_diff/to_string ->
@@ -159,6 +129,27 @@ def closure(graph: Path, roots: list[str], follow=CLOSURE_EDGES) -> set[str]:
     return {t for t in seen if t in titles}
 
 
+def packable_symbols(graph: Path, symbols: list[str]) -> list[str]:
+    """Symbols safe to materialize as context packs for an ablation kit.
+
+    The adequacy closure deliberately does not follow `contains`, but a generic
+    class/module/file pack can still leak broad source spans through the entity's
+    own text unit. For ablation kits, pack only narrow behavioral/data entities;
+    precise resolver edges should reach individual methods/data, not smuggle an
+    entire class body into the graph arm.
+    """
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from byog_graph import ByogGraph  # type: ignore
+
+    g = ByogGraph(graph.resolve())
+    by_title = {
+        str(row["title"]): str(row.get("type", "")).lower()
+        for _, row in g.ents.iterrows()
+    }
+    broad = {"class", "module", "file"}
+    return [s for s in symbols if by_title.get(s, "") not in broad]
+
+
 @app.command()
 def adequacy(
     graph: Path = typer.Option(...),
@@ -193,7 +184,7 @@ def prep(
     graph: Path = typer.Option(...),
     source: list[Path] = typer.Option(..., "--source", help="raw source file(s)/dir for arm_raw"),
     symbol: list[str] = typer.Option([], "--symbol", help="explicit graph symbols to pack"),
-    closure_root: list[str] = typer.Option([], "--closure-root", help="roots; pack their transitive callee closure"),
+    closure_root: list[str] = typer.Option([], "--closure-root", help="roots; pack their transitive graph closure"),
     dep: list[str] = typer.Option([], "--dep", help="Cargo dep line(s) pre-provided to BOTH kits, e.g. 'fancy-regex = \"0.13\"'"),
     api: Path = typer.Option(..., "--api", help="markdown file with the required API spec"),
     out: Path = typer.Option(..., "--out", help="output dir; arm_graph/ and arm_raw/ created"),
@@ -204,7 +195,8 @@ def prep(
     pack_script = ROOT / "scripts" / "context_pack.py"
     symbols = list(symbol)
     if closure_root:
-        symbols = sorted(set(symbols) | set(reachable_functions(graph, list(closure_root))))
+        symbols = sorted(set(symbols) | closure(graph, list(closure_root)))
+    packed_symbols = packable_symbols(graph, symbols)
     cargo_toml = CARGO_TOML + ("\n".join(dep) + "\n" if dep else "")
     deps_note = (
         "These crates are already in `Cargo.toml` (available offline): "
@@ -230,11 +222,12 @@ def prep(
         ctx = kit / "context"
         ctx.mkdir()
         made = []
-        for sym in symbols:
+        for sym in packed_symbols:
             out_file = ctx / f"pack_{sym.replace(':', '_')}.json"
             res = subprocess.run(
                 [sys.executable, str(pack_script), sym, "--graph", str(graph.resolve()),
-                 "--purpose", "port-to-rust", "--max-text-chars", "0", "--output", str(out_file)],
+                 "--purpose", "port-to-rust", "--max-text-chars", "0", "--no-neighbor-text",
+                 "--output", str(out_file)],
                 cwd=ROOT, capture_output=True, text=True,
             )
             if res.returncode == 0 and out_file.exists():
@@ -277,6 +270,8 @@ def prep(
         "arm_graph": str(kg),
         "arm_raw": str(kr),
         "symbols": symbols,
+        "packed_symbols": packed_symbols,
+        "omitted_broad_symbols": sorted(set(symbols) - set(packed_symbols)),
         "closure_roots": list(closure_root),
         "deps": list(dep),
         "sources": [str(s) for s in source],

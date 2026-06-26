@@ -127,6 +127,11 @@ def pack(
     output: Path | None = typer.Option(None, "--output", "-o", help="Write JSON to this path instead of stdout"),
     max_text_chars: int = typer.Option(300, "--max-text-chars", help="Truncate text units to this many chars (0 or negative = no limit)"),
     full_text: bool = typer.Option(False, "--full-text", help="Equivalent to --max-text-chars 0 (no truncation)"),
+    neighbor_text: bool = typer.Option(
+        True,
+        "--neighbor-text/--no-neighbor-text",
+        help="Include text units attached to neighbor relationships",
+    ),
 ):
     """Assemble and print (or save) a context pack for the given symbol."""
     if full_text:
@@ -150,7 +155,7 @@ def pack(
 
     # Build base pack first
     neighbors = get_neighbors(rels, str(ent_dict.get("id", "")), str(ent_dict.get("title", "")))
-    texts = get_text_units(tus, ent, neighbors)
+    texts = get_text_units(tus, ent, neighbors if neighbor_text else [])
 
     pack: Dict[str, Any] = {
         "symbol": ent_dict.get("title"),
