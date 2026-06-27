@@ -189,6 +189,29 @@ v2 on a fresh, larger, less-familiar target. Two concrete packer follow-ups also
 fell out of v1: include module-level data dependencies (done) and conditionally
 wired pipeline elements like filters (open).
 
+## Post-v1 infrastructure validation: charset-normalizer
+
+After the `sqlparse.split` data-dependency gap was fixed, `charset-normalizer`
+was added as a heavier production-library stress-test for the same mechanism. It
+is not an ablation result, but it validates that the corrected graph/context-pack
+rails can carry large module-level tables and heuristic detector logic into a
+scoped Rust port:
+
+- `api:from_bytes`, `md:mess_ratio`, `cd:*`, `models:*`, and `utils:*` packs were
+  generated with first-class `data_dependencies`.
+- The saved packs live with the Rust port at
+  `examples/charset_normalizer_rust/packs/` instead of a new repository-root
+  `packs/` convention.
+- The local graph artifact `byog_charset_normalizer` is intentionally ignored by
+  Git like other BYOG snapshots, but can be kept locally to rerun `context_pack`
+  and graph queries without reindexing.
+- The scoped port currently passes its handoff gates (`check_port.sh`; 81 Rust
+  tests; full examples pytest expected `440 passed, 4 xfailed`).
+
+This strengthens confidence that the `uses_data` / `data_dependencies` fix is
+useful beyond `sqlparse`, while leaving the actual graph-vs-raw capability claim
+to the pre-registered `humanize` v2 experiment.
+
 ## Reproduce
 
 ```bash

@@ -1,0 +1,64 @@
+{
+  "symbol": "models:CharsetMatches.__getitem__",
+  "purpose": "port-to-rust",
+  "entity": {
+    "id": "ent:method:models:CharsetMatches.__getitem__",
+    "title": "models:CharsetMatches.__getitem__",
+    "type": "method",
+    "description": "method CharsetMatches.__getitem__ defined in models.py",
+    "source_file": "/Users/drt/Documents/graphrag/examples/charset_normalizer/models.py",
+    "span": "266:4-278:22",
+    "extractor": "tree-sitter-python",
+    "confidence": 1.0,
+    "is_deterministic": true
+  },
+  "neighbors": [
+    {
+      "id": "rel:models:504",
+      "source": "models:CharsetMatches",
+      "target": "models:CharsetMatches.__getitem__",
+      "type": "contains",
+      "description": "CharsetMatches contains method __getitem__",
+      "weight": 1.0
+    },
+    {
+      "id": "rel:models:525",
+      "source": "models:CharsetMatches.__getitem__",
+      "target": "utils:iana_name",
+      "type": "calls",
+      "description": "CharsetMatches.__getitem__ may call iana_name (syntax only, imported name match) (ast import hint: utils.iana_name)",
+      "weight": 0.85
+    }
+  ],
+  "text_units": [
+    {
+      "id": "tu:models:CharsetMatches",
+      "text": "class CharsetMatches:\n    \"\"\"\n    Container with every CharsetMatch items ordered by default from most probable to the less one.\n    Act like a list(iterable) but does not implements all related methods.\n    \"\"\"\n\n    def __init__(self, results: list[CharsetMatch] | None = None):\n        self._results: list[CharsetMatch] = sorted(results) if results else []\n\n    def __iter__(self) -> Iterator[CharsetMatch]:\n        yield from self._results\n\n    def __getitem__(self, item: int | str) -> CharsetMatch:\n        \"\"\"\n        Retrieve a single item either by its position or encoding name (alias may be used here).\n        Raise KeyError upon invalid index or encoding not present in results.\n        \"\"\"\n        if isinstance(item, int):\n            return self._results[item]\n        if isinstance(item, str):\n            item = iana_name(item, False)\n            for result in self._results:\n                if item in result.could_be_from_charset:\n                    return result\n        raise KeyError\n\n    def __len__(self) -> int:\n        return len(self._results)\n\n    def __bool__(self) -> bool:\n        return len(self._results) > 0\n\n    def append(self, item: CharsetMatch) -> None:\n        \"\"\"\n        Insert a single match. Will be inserted accordingly to preserve sort.\n        Can be inserted as a submatch.\n        \"\"\"\n        if not isinstance(item, CharsetMatch):\n            raise ValueError(\n                \"Cannot append instance '{}' to CharsetMatches\".format(\n                    str(item.__class__)\n                )\n            )\n        # We should disable the submatch factoring when the input file is too heavy (conserve RAM usage)\n        if len(item.raw) < TOO_BIG_SEQUENCE:\n            for match in self._results:\n                if match.fingerprint == item.fingerprint and match.chaos == item.chaos:\n                    match.add_submatch(item)\n                    return\n        self._results.append(item)\n        self._results = sorted(self._results)\n\n    def best(self) -> CharsetMatch | None:\n        \"\"\"\n        Simply return the first match. Strict equivalent to matches[0].\n        \"\"\"\n        if not self._results:\n            return None\n        return self._results[0]\n\n    def first(self) -> CharsetMatch | None:\n        \"\"\"\n        Redundant method, call the method best(). Kept for BC reasons.\n        \"\"\"\n        return self.best()",
+      "truncated": false
+    },
+    {
+      "id": "tu:models:CharsetMatches.__getitem",
+      "text": "def __getitem__(self, item: int | str) -> CharsetMatch:\n        \"\"\"\n        Retrieve a single item either by its position or encoding name (alias may be used here).\n        Raise KeyError upon invalid index or encoding not present in results.\n        \"\"\"\n        if isinstance(item, int):\n            return self._results[item]\n        if isinstance(item, str):\n            item = iana_name(item, False)\n            for result in self._results:\n                if item in result.could_be_from_charset:\n                    return result\n        raise KeyError",
+      "truncated": false
+    },
+    {
+      "id": "tu:utils:iana_name",
+      "text": "def iana_name(cp_name: str, strict: bool = True) -> str:\n    \"\"\"Returns the Python normalized encoding name (Not the IANA official name).\"\"\"\n    cp_name = cp_name.lower().replace(\"-\", \"_\")\n\n    encoding_alias: str\n    encoding_iana: str\n\n    for encoding_alias, encoding_iana in aliases.items():\n        if cp_name in [encoding_alias, encoding_iana]:\n            return encoding_iana\n\n    if strict:\n        raise ValueError(f\"Unable to retrieve IANA for '{cp_name}'\")\n\n    return cp_name",
+      "truncated": false
+    }
+  ],
+  "provenance": {
+    "source_file": "/Users/drt/Documents/graphrag/examples/charset_normalizer/models.py",
+    "span": "266:4-278:22",
+    "extractor": "tree-sitter-python",
+    "confidence": 1.0,
+    "is_deterministic": true
+  },
+  "golden_contract_note": null,
+  "behavior_contract": null,
+  "usage_hint": "Use this pack + the original source of the listed files when prompting an LLM to port the symbol to Rust while preserving exact observable behavior on the golden inputs.",
+  "truncation": {
+    "max_text_chars": null,
+    "full_text": true
+  }
+}

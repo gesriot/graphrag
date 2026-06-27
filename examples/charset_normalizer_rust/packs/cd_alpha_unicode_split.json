@@ -1,0 +1,115 @@
+{
+  "symbol": "cd:alpha_unicode_split",
+  "purpose": "port-to-rust",
+  "entity": {
+    "id": "ent:fn:cd:alpha_unicode_split",
+    "title": "cd:alpha_unicode_split",
+    "type": "fn",
+    "description": "Given a decoded text sequence, return a list of str. Unicode range / alphabet separation.\n    Ex. a text containing English/Latin with a bit a Hebrew will return two items in the resulting list;\n    One containing the latin letters and the other hebrew.",
+    "source_file": "/Users/drt/Documents/graphrag/examples/charset_normalizer/cd.py",
+    "span": "276:0-347:64",
+    "extractor": "tree-sitter-python",
+    "confidence": 1.0,
+    "is_deterministic": true
+  },
+  "neighbors": [
+    {
+      "id": "rel:cd:211",
+      "source": "cd:cd.py",
+      "target": "cd:alpha_unicode_split",
+      "type": "contains",
+      "description": "cd.py contains fn alpha_unicode_split",
+      "weight": 1.0
+    },
+    {
+      "id": "rel:cd:234",
+      "source": "cd:alpha_unicode_split",
+      "target": "utils:unicode_range",
+      "type": "calls",
+      "description": "alpha_unicode_split may call unicode_range (syntax only, imported name match) (ast import hint: utils.unicode_range)",
+      "weight": 0.85
+    },
+    {
+      "id": "rel:cd:235",
+      "source": "cd:alpha_unicode_split",
+      "target": "md:is_suspiciously_successive_range",
+      "type": "calls",
+      "description": "alpha_unicode_split may call is_suspiciously_successive_range (syntax only, imported name match) (ast import hint: md.is_suspiciously_successive_range)",
+      "weight": 0.85
+    },
+    {
+      "id": "rel:cd:236",
+      "source": "cd:alpha_unicode_split",
+      "target": "md:is_suspiciously_successive_range",
+      "type": "calls",
+      "description": "alpha_unicode_split may call is_suspiciously_successive_range (syntax only, imported name match) (ast import hint: md.is_suspiciously_successive_range)",
+      "weight": 0.85
+    },
+    {
+      "id": "rel:cd:237",
+      "source": "cd:coherence_ratio",
+      "target": "cd:alpha_unicode_split",
+      "type": "calls",
+      "description": "coherence_ratio may call alpha_unicode_split (syntax only, local name match)",
+      "weight": 0.75
+    }
+  ],
+  "text_units": [
+    {
+      "id": "tu:cd:cd.py",
+      "text": "Python source file: /Users/drt/Documents/graphrag/examples/charset_normalizer/cd.py",
+      "truncated": false
+    },
+    {
+      "id": "tu:cd:alpha_unicode_split",
+      "text": "def alpha_unicode_split(decoded_sequence: str) -> list[str]:\n    \"\"\"\n    Given a decoded text sequence, return a list of str. Unicode range / alphabet separation.\n    Ex. a text containing English/Latin with a bit a Hebrew will return two items in the resulting list;\n    One containing the latin letters and the other hebrew.\n    \"\"\"\n    layers: dict[str, list[str]] = {}\n\n    # Fast path: track single-layer key to skip dict iteration for single-script text.\n    single_layer_key: str | None = None\n    multi_layer: bool = False\n\n    # Cache the last character_range and its resolved layer to avoid repeated\n    # is_suspiciously_successive_range calls for consecutive same-range chars.\n    prev_character_range: str | None = None\n    prev_layer_target: str | None = None\n\n    for character in decoded_sequence:\n        if character.isalpha() is False:\n            continue\n\n        # ASCII fast-path: a-z and A-Z are always \"Basic Latin\".\n        # Avoids unicode_range() function call overhead for the most common case.\n        character_ord: int = ord(character)\n        if character_ord < 128:\n            character_range: str | None = \"Basic Latin\"\n        else:\n            character_range = unicode_range(character)\n\n        if character_range is None:\n            continue\n\n        # Fast path: same range as previous character → reuse cached layer target.\n        if character_range == prev_character_range:\n            if prev_layer_target is not None:\n                layers[prev_layer_target].append(character)\n            continue\n\n        layer_target_range: str | None = None\n\n        if multi_layer:\n            for discovered_range in layers:\n                if (\n                    is_suspiciously_successive_range(discovered_range, character_range)\n                    is False\n                ):\n                    layer_target_range = discovered_range\n                    break\n        elif single_layer_key is not None:\n            if (\n                is_suspiciously_successive_range(single_layer_key, character_range)\n                is False\n            ):\n                layer_target_range = single_layer_key\n\n        if layer_target_range is None:\n            layer_target_range = character_range\n\n        if layer_target_range not in layers:\n            layers[layer_target_range] = []\n            if single_layer_key is None:\n                single_layer_key = layer_target_range\n            else:\n                multi_layer = True\n\n        layers[layer_target_range].append(character)\n\n        # Cache for next iteration\n        prev_character_range = character_range\n        prev_layer_target = layer_target_range\n\n    return [\"\".join(chars).lower() for chars in layers.values()]",
+      "truncated": false
+    },
+    {
+      "id": "tu:cd:coherence_ratio",
+      "text": "@lru_cache(maxsize=2048)\ndef coherence_ratio(\n    decoded_sequence: str, threshold: float = 0.1, lg_inclusion: str | None = None\n) -> CoherenceMatches:\n    \"\"\"\n    Detect ANY language that can be identified in given sequence. The sequence will be analysed by layers.\n    A layer = Character extraction by alphabets/ranges.\n    \"\"\"\n\n    results: list[tuple[str, float]] = []\n    ignore_non_latin: bool = False\n\n    sufficient_match_count: int = 0\n\n    lg_inclusion_list = lg_inclusion.split(\",\") if lg_inclusion is not None else []\n    if \"Latin Based\" in lg_inclusion_list:\n        ignore_non_latin = True\n        lg_inclusion_list.remove(\"Latin Based\")\n\n    for layer in alpha_unicode_split(decoded_sequence):\n        sequence_frequencies: TypeCounter[str] = Counter(layer)\n        most_common = sequence_frequencies.most_common()\n\n        character_count: int = len(layer)\n\n        if character_count <= TOO_SMALL_SEQUENCE:\n            continue\n\n        popular_character_ordered: list[str] = [c for c, o in most_common]\n\n        for language in lg_inclusion_list or alphabet_languages(\n            popular_character_ordered, ignore_non_latin\n        ):\n            ratio: float = characters_popularity_compare(\n                language, popular_character_ordered\n            )\n\n            if ratio < threshold:\n                continue\n            elif ratio >= 0.8:\n                sufficient_match_count += 1\n\n            results.append((language, round(ratio, 4)))\n\n            if sufficient_match_count >= 3:\n                break\n\n    return sorted(\n        filter_alt_coherence_matches(results), key=lambda x: x[1], reverse=True\n    )",
+      "truncated": false
+    },
+    {
+      "id": "tu:md:is_suspiciously_successive_range",
+      "text": "@lru_cache(maxsize=1024)\ndef is_suspiciously_successive_range(\n    unicode_range_a: str | None, unicode_range_b: str | None\n) -> bool:\n    \"\"\"\n    Determine if two Unicode range seen next to each other can be considered as suspicious.\n    \"\"\"\n    if unicode_range_a is None or unicode_range_b is None:\n        return True\n\n    if unicode_range_a == unicode_range_b:\n        return False\n\n    if \"Latin\" in unicode_range_a and \"Latin\" in unicode_range_b:\n        return False\n\n    if \"Emoticons\" in unicode_range_a or \"Emoticons\" in unicode_range_b:\n        return False\n\n    # Latin characters can be accompanied with a combining diacritical mark\n    # eg. Vietnamese.\n    if (\"Latin\" in unicode_range_a or \"Latin\" in unicode_range_b) and (\n        \"Combining\" in unicode_range_a or \"Combining\" in unicode_range_b\n    ):\n        return False\n\n    keywords_range_a, keywords_range_b = (\n        unicode_range_a.split(\" \"),\n        unicode_range_b.split(\" \"),\n    )\n\n    for el in keywords_range_a:\n        if el in UNICODE_SECONDARY_RANGE_KEYWORD:\n            continue\n        if el in keywords_range_b:\n            return False\n\n    # Japanese Exception\n    range_a_jp_chars, range_b_jp_chars = (\n        unicode_range_a\n        in (\n            \"Hiragana\",\n            \"Katakana\",\n        ),\n        unicode_range_b in (\"Hiragana\", \"Katakana\"),\n    )\n    if (range_a_jp_chars or range_b_jp_chars) and (\n        \"CJK\" in unicode_range_a or \"CJK\" in unicode_range_b\n    ):\n        return False\n    if range_a_jp_chars and range_b_jp_chars:\n        return False\n\n    if \"Hangul\" in unicode_range_a or \"Hangul\" in unicode_range_b:\n        if \"CJK\" in unicode_range_a or \"CJK\" in unicode_range_b:\n            return False\n        if unicode_range_a == \"Basic Latin\" or unicode_range_b == \"Basic Latin\":\n            return False\n\n    # Chinese/Japanese use dedicated range for punctuation and/or separators.\n    if (\"CJK\" in unicode_range_a or \"CJK\" in unicode_range_b) or (\n        unicode_range_a in [\"Katakana\", \"Hiragana\"]\n        and unicode_range_b in [\"Katakana\", \"Hiragana\"]\n    ):\n        if \"Punctuation\" in unicode_range_a or \"Punctuation\" in unicode_range_b:\n            return False\n        if \"Forms\" in unicode_range_a or \"Forms\" in unicode_range_b:\n            return False\n        if unicode_range_a == \"Basic Latin\" or unicode_range_b == \"Basic Latin\":\n            return False\n\n    return True",
+      "truncated": false
+    },
+    {
+      "id": "tu:utils:unicode_range",
+      "text": "@lru_cache(maxsize=UTF8_MAXIMAL_ALLOCATION)\ndef unicode_range(character: str) -> str | None:\n    \"\"\"\n    Retrieve the Unicode range official name from a single character.\n    \"\"\"\n    character_ord: int = ord(character)\n\n    # Binary search: find the rightmost range whose start <= character_ord\n    idx = bisect_right(_UNICODE_RANGE_STARTS, character_ord) - 1\n    if idx >= 0:\n        start, stop, name = _UNICODE_RANGES_SORTED[idx]\n        if character_ord < stop:\n            return name\n\n    return None",
+      "truncated": false
+    }
+  ],
+  "provenance": {
+    "source_file": "/Users/drt/Documents/graphrag/examples/charset_normalizer/cd.py",
+    "span": "276:0-347:64",
+    "extractor": "tree-sitter-python",
+    "confidence": 1.0,
+    "is_deterministic": true
+  },
+  "golden_contract_note": null,
+  "behavior_contract": null,
+  "usage_hint": "Use this pack + the original source of the listed files when prompting an LLM to port the symbol to Rust while preserving exact observable behavior on the golden inputs.",
+  "truncation": {
+    "max_text_chars": null,
+    "full_text": true
+  },
+  "uncertain_calls": [
+    {
+      "source": "cd:alpha_unicode_split",
+      "display_target": "character.isalpha",
+      "confidence": 0.4,
+      "reason": "unresolved receiver",
+      "provenance": "/Users/drt/Documents/graphrag/examples/charset_normalizer/cd.py:294:11"
+    },
+    {
+      "source": "cd:alpha_unicode_split",
+      "display_target": "layers.values",
+      "confidence": 0.4,
+      "reason": "builtin/container call observation",
+      "provenance": "/Users/drt/Documents/graphrag/examples/charset_normalizer/cd.py:347:48"
+    }
+  ],
+  "analysis_note": "Some call sites were tracked with low confidence or ambiguity (see uncertain_calls). Review during port."
+}

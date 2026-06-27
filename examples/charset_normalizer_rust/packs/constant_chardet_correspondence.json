@@ -1,0 +1,51 @@
+{
+  "symbol": "constant:CHARDET_CORRESPONDENCE",
+  "purpose": "port-to-rust",
+  "entity": {
+    "id": "ent:data:constant:CHARDET_CORRESPONDENCE",
+    "title": "constant:CHARDET_CORRESPONDENCE",
+    "type": "data",
+    "description": "module-level data CHARDET_CORRESPONDENCE defined in constant.py",
+    "source_file": "/Users/drt/Documents/graphrag/examples/charset_normalizer/constant.py",
+    "span": "514:0-547:1",
+    "extractor": "python-ast",
+    "confidence": 1.0,
+    "is_deterministic": true
+  },
+  "neighbors": [
+    {
+      "id": "rel:constant:346",
+      "source": "constant:constant",
+      "target": "constant:CHARDET_CORRESPONDENCE",
+      "type": "contains",
+      "description": "module constant defines data CHARDET_CORRESPONDENCE",
+      "weight": 1.0
+    }
+  ],
+  "text_units": [
+    {
+      "id": "tu:constant:CHARDET_CORRESPONDENCE",
+      "text": "CHARDET_CORRESPONDENCE: dict[str, str] = {\n    \"iso2022_kr\": \"ISO-2022-KR\",\n    \"iso2022_jp\": \"ISO-2022-JP\",\n    \"euc_kr\": \"EUC-KR\",\n    \"tis_620\": \"TIS-620\",\n    \"utf_32\": \"UTF-32\",\n    \"euc_jp\": \"EUC-JP\",\n    \"koi8_r\": \"KOI8-R\",\n    \"iso8859_1\": \"ISO-8859-1\",\n    \"iso8859_2\": \"ISO-8859-2\",\n    \"iso8859_5\": \"ISO-8859-5\",\n    \"iso8859_6\": \"ISO-8859-6\",\n    \"iso8859_7\": \"ISO-8859-7\",\n    \"iso8859_8\": \"ISO-8859-8\",\n    \"utf_16\": \"UTF-16\",\n    \"cp855\": \"IBM855\",\n    \"mac_cyrillic\": \"MacCyrillic\",\n    \"gb2312\": \"GB2312\",\n    \"gb18030\": \"GB18030\",\n    \"cp932\": \"CP932\",\n    \"cp866\": \"IBM866\",\n    \"utf_8\": \"utf-8\",\n    \"utf_8_sig\": \"UTF-8-SIG\",\n    \"shift_jis\": \"SHIFT_JIS\",\n    \"big5\": \"Big5\",\n    \"cp1250\": \"windows-1250\",\n    \"cp1251\": \"windows-1251\",\n    \"cp1252\": \"Windows-1252\",\n    \"cp1253\": \"windows-1253\",\n    \"cp1255\": \"windows-1255\",\n    \"cp1256\": \"windows-1256\",\n    \"cp1254\": \"Windows-1254\",\n    \"cp949\": \"CP949\",\n}",
+      "truncated": false
+    },
+    {
+      "id": "tu:constant:constant",
+      "text": "Python module constant (from constant.py)",
+      "truncated": false
+    }
+  ],
+  "provenance": {
+    "source_file": "/Users/drt/Documents/graphrag/examples/charset_normalizer/constant.py",
+    "span": "514:0-547:1",
+    "extractor": "python-ast",
+    "confidence": 1.0,
+    "is_deterministic": true
+  },
+  "golden_contract_note": null,
+  "behavior_contract": null,
+  "usage_hint": "Use this pack + the original source of the listed files when prompting an LLM to port the symbol to Rust while preserving exact observable behavior on the golden inputs.",
+  "truncation": {
+    "max_text_chars": null,
+    "full_text": true
+  }
+}

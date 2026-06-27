@@ -1,0 +1,217 @@
+{
+  "symbol": "utils:unicode_range",
+  "purpose": "port-to-rust",
+  "entity": {
+    "id": "ent:fn:utils:unicode_range",
+    "title": "utils:unicode_range",
+    "type": "fn",
+    "description": "Retrieve the Unicode range official name from a single character.",
+    "source_file": "/Users/drt/Documents/graphrag/examples/charset_normalizer/utils.py",
+    "span": "98:0-112:15",
+    "extractor": "tree-sitter-python",
+    "confidence": 1.0,
+    "is_deterministic": true
+  },
+  "neighbors": [
+    {
+      "id": "rel:cd:225",
+      "source": "cd:encoding_unicode_range",
+      "target": "utils:unicode_range",
+      "type": "calls",
+      "description": "encoding_unicode_range may call unicode_range (syntax only, imported name match) (ast import hint: utils.unicode_range)",
+      "weight": 0.85
+    },
+    {
+      "id": "rel:cd:227",
+      "source": "cd:unicode_range_languages",
+      "target": "utils:unicode_range",
+      "type": "calls",
+      "description": "unicode_range_languages may call unicode_range (syntax only, imported name match) (ast import hint: utils.unicode_range)",
+      "weight": 0.85
+    },
+    {
+      "id": "rel:cd:234",
+      "source": "cd:alpha_unicode_split",
+      "target": "utils:unicode_range",
+      "type": "calls",
+      "description": "alpha_unicode_split may call unicode_range (syntax only, imported name match) (ast import hint: utils.unicode_range)",
+      "weight": 0.85
+    },
+    {
+      "id": "rel:md:445",
+      "source": "md:SuspiciousRange.feed_info",
+      "target": "utils:unicode_range",
+      "type": "calls",
+      "description": "SuspiciousRange.feed_info may call unicode_range (syntax only, imported name match) (ast import hint: utils.unicode_range)",
+      "weight": 0.85
+    },
+    {
+      "id": "rel:md:446",
+      "source": "md:SuspiciousRange.feed_info",
+      "target": "utils:unicode_range",
+      "type": "calls",
+      "description": "SuspiciousRange.feed_info may call unicode_range (syntax only, imported name match) (ast import hint: utils.unicode_range)",
+      "weight": 0.85
+    },
+    {
+      "id": "rel:models:522",
+      "source": "models:CharsetMatch.alphabets",
+      "target": "utils:unicode_range",
+      "type": "calls",
+      "description": "CharsetMatch.alphabets may call unicode_range (syntax only, imported name match) (ast import hint: utils.unicode_range)",
+      "weight": 0.85
+    },
+    {
+      "id": "rel:utils:559",
+      "source": "utils:utils.py",
+      "target": "utils:unicode_range",
+      "type": "contains",
+      "description": "utils.py contains fn unicode_range",
+      "weight": 1.0
+    },
+    {
+      "id": "rel:utils:599",
+      "source": "utils:is_punctuation",
+      "target": "utils:unicode_range",
+      "type": "calls",
+      "description": "is_punctuation may call unicode_range (syntax only, local name match)",
+      "weight": 0.75
+    },
+    {
+      "id": "rel:utils:600",
+      "source": "utils:is_symbol",
+      "target": "utils:unicode_range",
+      "type": "calls",
+      "description": "is_symbol may call unicode_range (syntax only, local name match)",
+      "weight": 0.75
+    },
+    {
+      "id": "rel:utils:601",
+      "source": "utils:is_emoticon",
+      "target": "utils:unicode_range",
+      "type": "calls",
+      "description": "is_emoticon may call unicode_range (syntax only, local name match)",
+      "weight": 0.75
+    },
+    {
+      "id": "rel:utils:616",
+      "source": "utils:unicode_range",
+      "target": "utils:_UNICODE_RANGE_STARTS",
+      "type": "uses_data",
+      "description": "unicode_range reads module data _UNICODE_RANGE_STARTS",
+      "weight": 0.9
+    },
+    {
+      "id": "rel:utils:617",
+      "source": "utils:unicode_range",
+      "target": "utils:_UNICODE_RANGES_SORTED",
+      "type": "uses_data",
+      "description": "unicode_range reads module data _UNICODE_RANGES_SORTED",
+      "weight": 0.9
+    }
+  ],
+  "data_dependencies": [
+    {
+      "title": "utils:_UNICODE_RANGES_SORTED",
+      "type": "data",
+      "source_file": "/Users/drt/Documents/graphrag/examples/charset_normalizer/utils.py",
+      "span": "91:0-94:1",
+      "description": "module-level data _UNICODE_RANGES_SORTED defined in utils.py",
+      "text": "_UNICODE_RANGES_SORTED: list[tuple[int, int, str]] = sorted(\n    (ord_range.start, ord_range.stop, name)\n    for name, ord_range in UNICODE_RANGES_COMBINED.items()\n)",
+      "truncated": false
+    },
+    {
+      "title": "utils:_UNICODE_RANGE_STARTS",
+      "type": "data",
+      "source_file": "/Users/drt/Documents/graphrag/examples/charset_normalizer/utils.py",
+      "span": "95:0-95:73",
+      "description": "module-level data _UNICODE_RANGE_STARTS defined in utils.py",
+      "text": "_UNICODE_RANGE_STARTS: list[int] = [e[0] for e in _UNICODE_RANGES_SORTED]",
+      "truncated": false
+    }
+  ],
+  "data_dependency_edges": [
+    {
+      "id": "rel:utils:616",
+      "source": "utils:unicode_range",
+      "target": "utils:_UNICODE_RANGE_STARTS",
+      "type": "uses_data",
+      "description": "unicode_range reads module data _UNICODE_RANGE_STARTS",
+      "weight": 0.9
+    },
+    {
+      "id": "rel:utils:617",
+      "source": "utils:unicode_range",
+      "target": "utils:_UNICODE_RANGES_SORTED",
+      "type": "uses_data",
+      "description": "unicode_range reads module data _UNICODE_RANGES_SORTED",
+      "weight": 0.9
+    }
+  ],
+  "text_units": [
+    {
+      "id": "tu:cd:encoding_unicode_range",
+      "text": "def encoding_unicode_range(iana_name: str) -> list[str]:\n    \"\"\"\n    Return associated unicode ranges in a single byte code page.\n    \"\"\"\n    if is_multi_byte_encoding(iana_name):\n        raise OSError(  # Defensive:\n            \"Function not supported on multi-byte code page\"\n        )\n\n    decoder = importlib.import_module(f\"encodings.{iana_name}\").IncrementalDecoder\n\n    p: IncrementalDecoder = decoder(errors=\"ignore\")\n    seen_ranges: dict[str, int] = {}\n    character_count: int = 0\n\n    for i in range(0x40, 0xFF):\n        chunk: str = p.decode(bytes([i]))\n\n        if chunk:\n            character_range: str | None = unicode_range(chunk)\n\n            if character_range is None:\n                continue\n\n            if is_unicode_range_secondary(character_range) is False:\n                if character_range not in seen_ranges:\n                    seen_ranges[character_range] = 0\n                seen_ranges[character_range] += 1\n                character_count += 1\n\n    return sorted(\n        [\n            character_range\n            for character_range in seen_ranges\n            if seen_ranges[character_range] / character_count >= 0.15\n        ]\n    )",
+      "truncated": false
+    },
+    {
+      "id": "tu:cd:unicode_range_languages",
+      "text": "def unicode_range_languages(primary_range: str) -> list[str]:\n    \"\"\"\n    Return inferred languages used with a unicode range.\n    \"\"\"\n    languages: list[str] = []\n\n    for language, characters in FREQUENCIES.items():\n        for character in characters:\n            if unicode_range(character) == primary_range:\n                languages.append(language)\n                break\n\n    return languages",
+      "truncated": false
+    },
+    {
+      "id": "tu:cd:alpha_unicode_split",
+      "text": "def alpha_unicode_split(decoded_sequence: str) -> list[str]:\n    \"\"\"\n    Given a decoded text sequence, return a list of str. Unicode range / alphabet separation.\n    Ex. a text containing English/Latin with a bit a Hebrew will return two items in the resulting list;\n    One containing the latin letters and the other hebrew.\n    \"\"\"\n    layers: dict[str, list[str]] = {}\n\n    # Fast path: track single-layer key to skip dict iteration for single-script text.\n    single_layer_key: str | None = None\n    multi_layer: bool = False\n\n    # Cache the last character_range and its resolved layer to avoid repeated\n    # is_suspiciously_successive_range calls for consecutive same-range chars.\n    prev_character_range: str | None = None\n    prev_layer_target: str | None = None\n\n    for character in decoded_sequence:\n        if character.isalpha() is False:\n            continue\n\n        # ASCII fast-path: a-z and A-Z are always \"Basic Latin\".\n        # Avoids unicode_range() function call overhead for the most common case.\n        character_ord: int = ord(character)\n        if character_ord < 128:\n            character_range: str | None = \"Basic Latin\"\n        else:\n            character_range = unicode_range(character)\n\n        if character_range is None:\n            continue\n\n        # Fast path: same range as previous character → reuse cached layer target.\n        if character_range == prev_character_range:\n            if prev_layer_target is not None:\n                layers[prev_layer_target].append(character)\n            continue\n\n        layer_target_range: str | None = None\n\n        if multi_layer:\n            for discovered_range in layers:\n                if (\n                    is_suspiciously_successive_range(discovered_range, character_range)\n                    is False\n                ):\n                    layer_target_range = discovered_range\n                    break\n        elif single_layer_key is not None:\n            if (\n                is_suspiciously_successive_range(single_layer_key, character_range)\n                is False\n            ):\n                layer_target_range = single_layer_key\n\n        if layer_target_range is None:\n            layer_target_range = character_range\n\n        if layer_target_range not in layers:\n            layers[layer_target_range] = []\n            if single_layer_key is None:\n                single_layer_key = layer_target_range\n            else:\n                multi_layer = True\n\n        layers[layer_target_range].append(character)\n\n        # Cache for next iteration\n        prev_character_range = character_range\n        prev_layer_target = layer_target_range\n\n    return [\"\".join(chars).lower() for chars in layers.values()]",
+      "truncated": false
+    },
+    {
+      "id": "tu:md:SuspiciousRange.feed_info",
+      "text": "def feed_info(self, character: str, info: CharInfo) -> None:\n        \"\"\"Optimized feed using pre-computed character info.\"\"\"\n        self._character_count += 1\n\n        if info.space or info.punct or character in COMMON_SAFE_ASCII_CHARACTERS:\n            self._last_printable_seen = None\n            self._last_printable_range = None\n            return\n\n        if self._last_printable_seen is None:\n            self._last_printable_seen = character\n            self._last_printable_range = unicode_range(character)\n            return\n\n        unicode_range_a: str | None = self._last_printable_range\n        unicode_range_b: str | None = unicode_range(character)\n\n        if is_suspiciously_successive_range(unicode_range_a, unicode_range_b):\n            self._suspicious_successive_range_count += 1\n\n        self._last_printable_seen = character\n        self._last_printable_range = unicode_range_b",
+      "truncated": false
+    },
+    {
+      "id": "tu:models:CharsetMatch.alphabets",
+      "text": "@property\n    def alphabets(self) -> list[str]:\n        if self._unicode_ranges is not None:\n            return self._unicode_ranges\n        # list detected ranges\n        detected_ranges: list[str | None] = [unicode_range(char) for char in str(self)]\n        # filter and sort\n        self._unicode_ranges = sorted(list({r for r in detected_ranges if r}))\n        return self._unicode_ranges",
+      "truncated": false
+    },
+    {
+      "id": "tu:utils:utils.py",
+      "text": "Python source file: /Users/drt/Documents/graphrag/examples/charset_normalizer/utils.py",
+      "truncated": false
+    },
+    {
+      "id": "tu:utils:unicode_range",
+      "text": "@lru_cache(maxsize=UTF8_MAXIMAL_ALLOCATION)\ndef unicode_range(character: str) -> str | None:\n    \"\"\"\n    Retrieve the Unicode range official name from a single character.\n    \"\"\"\n    character_ord: int = ord(character)\n\n    # Binary search: find the rightmost range whose start <= character_ord\n    idx = bisect_right(_UNICODE_RANGE_STARTS, character_ord) - 1\n    if idx >= 0:\n        start, stop, name = _UNICODE_RANGES_SORTED[idx]\n        if character_ord < stop:\n            return name\n\n    return None",
+      "truncated": false
+    },
+    {
+      "id": "tu:utils:is_punctuation",
+      "text": "@lru_cache(maxsize=UTF8_MAXIMAL_ALLOCATION)\ndef is_punctuation(character: str) -> bool:\n    character_category: str = unicodedata.category(character)\n\n    if \"P\" in character_category:\n        return True\n\n    character_range: str | None = unicode_range(character)\n\n    if character_range is None:\n        return False\n\n    return \"Punctuation\" in character_range",
+      "truncated": false
+    },
+    {
+      "id": "tu:utils:is_symbol",
+      "text": "@lru_cache(maxsize=UTF8_MAXIMAL_ALLOCATION)\ndef is_symbol(character: str) -> bool:\n    character_category: str = unicodedata.category(character)\n\n    if \"S\" in character_category or \"N\" in character_category:\n        return True\n\n    character_range: str | None = unicode_range(character)\n\n    if character_range is None:\n        return False\n\n    return \"Forms\" in character_range and character_category != \"Lo\"",
+      "truncated": false
+    },
+    {
+      "id": "tu:utils:is_emoticon",
+      "text": "@lru_cache(maxsize=UTF8_MAXIMAL_ALLOCATION)\ndef is_emoticon(character: str) -> bool:\n    character_range: str | None = unicode_range(character)\n\n    if character_range is None:\n        return False\n\n    return \"Emoticons\" in character_range or \"Pictographs\" in character_range",
+      "truncated": false
+    }
+  ],
+  "provenance": {
+    "source_file": "/Users/drt/Documents/graphrag/examples/charset_normalizer/utils.py",
+    "span": "98:0-112:15",
+    "extractor": "tree-sitter-python",
+    "confidence": 1.0,
+    "is_deterministic": true
+  },
+  "golden_contract_note": null,
+  "behavior_contract": null,
+  "usage_hint": "Use this pack + the original source of the listed files when prompting an LLM to port the symbol to Rust while preserving exact observable behavior on the golden inputs.",
+  "truncation": {
+    "max_text_chars": null,
+    "full_text": true
+  }
+}

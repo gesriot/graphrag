@@ -1,0 +1,368 @@
+{
+  "symbol": "models:CharsetMatch",
+  "purpose": "port-to-rust",
+  "entity": {
+    "id": "ent:class:models:CharsetMatch",
+    "title": "models:CharsetMatch",
+    "type": "class",
+    "description": "class CharsetMatch defined in models.py",
+    "source_file": "/Users/drt/Documents/graphrag/examples/charset_normalizer/models.py",
+    "span": "12:0-251:30",
+    "extractor": "tree-sitter-python",
+    "confidence": 1.0,
+    "is_deterministic": true
+  },
+  "neighbors": [
+    {
+      "id": "rel:api:16",
+      "source": "api:from_bytes",
+      "target": "models:CharsetMatch",
+      "type": "calls",
+      "description": "from_bytes may call CharsetMatch (syntax only, imported name match) (ast import hint: models.CharsetMatch)",
+      "weight": 0.85
+    },
+    {
+      "id": "rel:api:27",
+      "source": "api:from_bytes",
+      "target": "models:CharsetMatch",
+      "type": "calls",
+      "description": "from_bytes may call CharsetMatch (syntax only, imported name match) (ast import hint: models.CharsetMatch)",
+      "weight": 0.85
+    },
+    {
+      "id": "rel:api:30",
+      "source": "api:from_bytes",
+      "target": "models:CharsetMatch",
+      "type": "calls",
+      "description": "from_bytes may call CharsetMatch (syntax only, imported name match) (ast import hint: models.CharsetMatch)",
+      "weight": 0.85
+    },
+    {
+      "id": "rel:api:33",
+      "source": "api:from_bytes",
+      "target": "models:CharsetMatch",
+      "type": "calls",
+      "description": "from_bytes may call CharsetMatch (syntax only, imported name match) (ast import hint: models.CharsetMatch)",
+      "weight": 0.85
+    },
+    {
+      "id": "rel:api:39",
+      "source": "api:from_bytes",
+      "target": "models:CharsetMatch",
+      "type": "calls",
+      "description": "from_bytes may call CharsetMatch (syntax only, imported name match) (ast import hint: models.CharsetMatch)",
+      "weight": 0.85
+    },
+    {
+      "id": "rel:models:476",
+      "source": "models:models.py",
+      "target": "models:CharsetMatch",
+      "type": "contains",
+      "description": "models.py contains class CharsetMatch",
+      "weight": 1.0
+    },
+    {
+      "id": "rel:models:477",
+      "source": "models:CharsetMatch",
+      "target": "models:CharsetMatch.__init__",
+      "type": "contains",
+      "description": "CharsetMatch contains method __init__",
+      "weight": 1.0
+    },
+    {
+      "id": "rel:models:478",
+      "source": "models:CharsetMatch",
+      "target": "models:CharsetMatch.__eq__",
+      "type": "contains",
+      "description": "CharsetMatch contains method __eq__",
+      "weight": 1.0
+    },
+    {
+      "id": "rel:models:479",
+      "source": "models:CharsetMatch",
+      "target": "models:CharsetMatch.__lt__",
+      "type": "contains",
+      "description": "CharsetMatch contains method __lt__",
+      "weight": 1.0
+    },
+    {
+      "id": "rel:models:480",
+      "source": "models:CharsetMatch",
+      "target": "models:CharsetMatch.multi_byte_usage",
+      "type": "contains",
+      "description": "CharsetMatch contains method multi_byte_usage",
+      "weight": 1.0
+    },
+    {
+      "id": "rel:models:481",
+      "source": "models:CharsetMatch",
+      "target": "models:CharsetMatch.__str__",
+      "type": "contains",
+      "description": "CharsetMatch contains method __str__",
+      "weight": 1.0
+    },
+    {
+      "id": "rel:models:482",
+      "source": "models:CharsetMatch",
+      "target": "models:CharsetMatch.__repr__",
+      "type": "contains",
+      "description": "CharsetMatch contains method __repr__",
+      "weight": 1.0
+    },
+    {
+      "id": "rel:models:483",
+      "source": "models:CharsetMatch",
+      "target": "models:CharsetMatch.add_submatch",
+      "type": "contains",
+      "description": "CharsetMatch contains method add_submatch",
+      "weight": 1.0
+    },
+    {
+      "id": "rel:models:484",
+      "source": "models:CharsetMatch",
+      "target": "models:CharsetMatch.encoding",
+      "type": "contains",
+      "description": "CharsetMatch contains method encoding",
+      "weight": 1.0
+    },
+    {
+      "id": "rel:models:485",
+      "source": "models:CharsetMatch",
+      "target": "models:CharsetMatch.encoding_aliases",
+      "type": "contains",
+      "description": "CharsetMatch contains method encoding_aliases",
+      "weight": 1.0
+    },
+    {
+      "id": "rel:models:486",
+      "source": "models:CharsetMatch",
+      "target": "models:CharsetMatch.bom",
+      "type": "contains",
+      "description": "CharsetMatch contains method bom",
+      "weight": 1.0
+    },
+    {
+      "id": "rel:models:487",
+      "source": "models:CharsetMatch",
+      "target": "models:CharsetMatch.byte_order_mark",
+      "type": "contains",
+      "description": "CharsetMatch contains method byte_order_mark",
+      "weight": 1.0
+    },
+    {
+      "id": "rel:models:488",
+      "source": "models:CharsetMatch",
+      "target": "models:CharsetMatch.languages",
+      "type": "contains",
+      "description": "CharsetMatch contains method languages",
+      "weight": 1.0
+    },
+    {
+      "id": "rel:models:489",
+      "source": "models:CharsetMatch",
+      "target": "models:CharsetMatch.language",
+      "type": "contains",
+      "description": "CharsetMatch contains method language",
+      "weight": 1.0
+    },
+    {
+      "id": "rel:models:490",
+      "source": "models:CharsetMatch",
+      "target": "models:CharsetMatch.chaos",
+      "type": "contains",
+      "description": "CharsetMatch contains method chaos",
+      "weight": 1.0
+    },
+    {
+      "id": "rel:models:491",
+      "source": "models:CharsetMatch",
+      "target": "models:CharsetMatch.coherence",
+      "type": "contains",
+      "description": "CharsetMatch contains method coherence",
+      "weight": 1.0
+    },
+    {
+      "id": "rel:models:492",
+      "source": "models:CharsetMatch",
+      "target": "models:CharsetMatch.percent_chaos",
+      "type": "contains",
+      "description": "CharsetMatch contains method percent_chaos",
+      "weight": 1.0
+    },
+    {
+      "id": "rel:models:493",
+      "source": "models:CharsetMatch",
+      "target": "models:CharsetMatch.percent_coherence",
+      "type": "contains",
+      "description": "CharsetMatch contains method percent_coherence",
+      "weight": 1.0
+    },
+    {
+      "id": "rel:models:494",
+      "source": "models:CharsetMatch",
+      "target": "models:CharsetMatch.raw",
+      "type": "contains",
+      "description": "CharsetMatch contains method raw",
+      "weight": 1.0
+    },
+    {
+      "id": "rel:models:495",
+      "source": "models:CharsetMatch",
+      "target": "models:CharsetMatch.submatch",
+      "type": "contains",
+      "description": "CharsetMatch contains method submatch",
+      "weight": 1.0
+    },
+    {
+      "id": "rel:models:496",
+      "source": "models:CharsetMatch",
+      "target": "models:CharsetMatch.has_submatch",
+      "type": "contains",
+      "description": "CharsetMatch contains method has_submatch",
+      "weight": 1.0
+    },
+    {
+      "id": "rel:models:497",
+      "source": "models:CharsetMatch",
+      "target": "models:CharsetMatch.alphabets",
+      "type": "contains",
+      "description": "CharsetMatch contains method alphabets",
+      "weight": 1.0
+    },
+    {
+      "id": "rel:models:498",
+      "source": "models:CharsetMatch",
+      "target": "models:CharsetMatch.could_be_from_charset",
+      "type": "contains",
+      "description": "CharsetMatch contains method could_be_from_charset",
+      "weight": 1.0
+    },
+    {
+      "id": "rel:models:499",
+      "source": "models:CharsetMatch",
+      "target": "models:CharsetMatch.output",
+      "type": "contains",
+      "description": "CharsetMatch contains method output",
+      "weight": 1.0
+    },
+    {
+      "id": "rel:models:500",
+      "source": "models:CharsetMatch",
+      "target": "models:CharsetMatch.fingerprint",
+      "type": "contains",
+      "description": "CharsetMatch contains method fingerprint",
+      "weight": 1.0
+    }
+  ],
+  "text_units": [
+    {
+      "id": "tu:api:from_bytes",
+      "text": "def from_bytes(\n    sequences: bytes | bytearray,\n    steps: int = 5,\n    chunk_size: int = 512,\n    threshold: float = 0.2,\n    cp_isolation: list[str] | None = None,\n    cp_exclusion: list[str] | None = None,\n    preemptive_behaviour: bool = True,\n    explain: bool = False,\n    language_threshold: float = 0.1,\n    enable_fallback: bool = True,\n) -> CharsetMatches:\n    \"\"\"\n    Given a raw bytes sequence, return the best possibles charset usable to render str objects.\n    If there is no results, it is a strong indicator that the source is binary/not text.\n    By default, the process will extract 5 blocks of 512o each to assess the mess and coherence of a given sequence.\n    And will give up a particular code page after 20% of measured mess. Those criteria are customizable at will.\n\n    The preemptive behavior DOES NOT replace the traditional detection workflow, it prioritize a particular code page\n    but never take it for granted. Can improve the performance.\n\n    You may want to focus your attention to some code page or/and not others, use cp_isolation and cp_exclusion for that\n    purpose.\n\n    This function will strip the SIG in the payload/sequence every time except on UTF-16, UTF-32.\n    By default the library does not setup any handler other than the NullHandler, if you choose to set the 'explain'\n    toggle to True it will alter the logger configuration to add a StreamHandler that is suitable for debugging.\n    Custom logging format and handler can be set manually.\n    \"\"\"\n\n    if not isinstance(sequences, (bytearray, bytes)):\n        raise TypeError(\n            \"Expected object of type bytes or bytearray, got: {}\".format(\n                type(sequences)\n            )\n        )\n\n    if explain:\n        previous_logger_level: int = logger.level\n        logger.addHandler(explain_handler)\n        logger.setLevel(TRACE)\n\n    length: int = len(sequences)\n\n    if length == 0:\n        logger.debug(\"Encoding detection on empty bytes, assuming utf_8 intention.\")\n        if explain:  # Defensive: ensure exit path clean handler\n            logger.removeHandler(explain_handler)\n            logger.setLevel(previous_logger_level)\n        return CharsetMatches([CharsetMatch(sequences, \"utf_8\", 0.0, False, [], \"\")])\n\n    if cp_isolation is not None:\n        logger.log(\n            TRACE,\n            \"cp_isolation is set. use this flag for debugging purpose. \"\n            \"limited list of encoding allowed : %s.\",\n            \", \".join(cp_isolation),\n        )\n        cp_isolation = [iana_name(cp, False) for cp in cp_isolation]\n    else:\n        cp_isolation = []\n\n    if cp_exclusion is not None:\n        logger.log(\n            TRACE,\n            \"cp_exclusion is set. use this flag for debugging purpose. \"\n            \"limited list of encoding excluded : %s.\",\n            \", \".join(cp_exclusion),\n        )\n        cp_exclusion = [iana_name(cp, False) for cp in cp_exclusion]\n    else:\n        cp_exclusion = []\n\n    if length <= (chunk_size * steps):\n        logger.log(\n            TRACE,\n            \"override steps (%i) and chunk_size (%i) as content does not fit (%i byte(s) given) parameters.\",\n            steps,\n            chunk_size,\n            length,\n        )\n        steps = 1\n        chunk_size = length\n\n    if steps > 1 and length / steps < chunk_size:\n        chunk_size = int(length / steps)\n\n    is_too_small_sequence: bool = len(sequences) < TOO_SMALL_SEQUENCE\n    is_too_large_sequence: bool = len(sequences) >= TOO_BIG_SEQUENCE\n\n    if is_too_small_sequence:\n        logger.log(\n            TRACE,\n            \"Trying to detect encoding from a tiny portion of ({}) byte(s).\".format(\n                length\n            ),\n        )\n    elif is_too_large_sequence:\n        logger.log(\n            TRACE,\n            \"Using lazy str decoding because the payload is quite large, ({}) byte(s).\".format(\n                length\n            ),\n        )\n\n    prioritized_encodings: list[str] = []\n\n    specified_encoding: str | None = (\n        any_specified_encoding(sequences) if preemptive_behaviour else None\n    )\n\n    if specified_encoding is not None:\n        prioritized_encodings.append(specified_encoding)\n        logger.log(\n            TRACE,\n            \"Detected declarative mark in sequence. Priority +1 given for %s.\",\n            specified_encoding,\n        )\n\n    tested: set[str] = set()\n    tested_but_hard_failure: list[str] = []\n    tested_but_soft_failure: list[str] = []\n    soft_failure_skip: set[str] = set()\n    success_fast_tracked: set[str] = set()\n\n    # Cache for decoded payload deduplication: hash(decoded_payload) -> (mean_mess_ratio, cd_ratios_merged, passed)\n    # When multiple encodings decode to the exact same string, we can skip the expensive\n    # mess_ratio and coherence_ratio analysis and reuse the results from the first encoding.\n    payload_result_cache: dict[int, tuple[float, list[tuple[str, float]], bool]] = {}\n\n    # When a definitive result (chaos=0.0 and good coherence) is found after testing\n    # the prioritized encodings (ascii, utf_8), we can significantly reduce the remaining\n    # work. Encodings that target completely different language families (e.g., Cyrillic\n    # when the definitive match is Latin) are skipped entirely.\n    # Additionally, for same-family encodings that pass chaos probing, we reuse the\n    # definitive match's coherence ratios instead of recomputing them — a major savings\n    # since coherence_ratio accounts for ~30% of total time on slow Latin files.\n    definitive_match_found: bool = False\n    definitive_target_languages: set[str] = set()\n    # After the definitive match fires, we cap the number of additional same-family\n    # single-byte encodings that pass chaos probing. Once we've accumulated enough\n    # good candidates (N), further same-family SB encodings are unlikely to produce\n    # a better best() result and just waste mess_ratio + coherence_ratio time.\n    # The first encoding to trigger the definitive match is NOT counted (it's already in).\n    post_definitive_sb_success_count: int = 0\n    POST_DEFINITIVE_SB_CAP: int = 7\n\n    # When a non-UTF multibyte encoding passes chaos probing with significant multibyte\n    # content (decoded length < 98% of raw length), skip all remaining single-byte encodings.\n    # Rationale: multi-byte decoders (CJK) have strict byte-sequence validation — if they\n    # decode without error AND pass chaos probing with substantial multibyte content, the\n    # data is genuinely multibyte encoded. Single-byte encodings will always decode (every\n    # byte maps to something) but waste time on mess_ratio before failing.\n    # The 98% threshold prevents false triggers on files that happen to have a few valid\n    # multibyte pairs (e.g., cp424/_ude_1.txt where big5 decodes with 99% ratio).\n    mb_definitive_match_found: bool = False\n\n    fallback_ascii: CharsetMatch | None = None\n    fallback_u8: CharsetMatch | None = None\n    fallback_specified: CharsetMatch | None = None\n\n    results: CharsetMatches = CharsetMatches()\n\n    early_stop_results: CharsetMatches = CharsetMatches()\n\n    sig_encoding, sig_payload = identify_sig_or_bom(sequences)\n\n    if sig_encoding is not None:\n        prioritized_encodings.append(sig_encoding)\n        logger.log(\n            TRACE,\n            \"Detected a SIG or BOM mark on first %i byte(s). Priority +1 given for %s.\",\n            len(sig_payload),\n            sig_encoding,\n        )\n\n    prioritized_encodings.append(\"ascii\")\n\n    if \"utf_8\" not in prioritized_encodings:\n        prioritized_encodings.append(\"utf_8\")\n\n    for encoding_iana in prioritized_encodings + IANA_SUPPORTED_MB_FIRST:\n        if cp_isolation and encoding_iana not in cp_isolation:\n            continue\n\n        if cp_exclusion and encoding_iana in cp_exclusion:\n            continue\n\n        if encoding_iana in tested:\n            continue\n\n        tested.add(encoding_iana)\n\n        decoded_payload: str | None = None\n        bom_or_sig_available: bool = sig_encoding == encoding_iana\n        strip_sig_or_bom: bool = bom_or_sig_available and should_strip_sig_or_bom(\n            encoding_iana\n        )\n\n        if encoding_iana in {\"utf_16\", \"utf_32\"} and not bom_or_sig_available:\n            logger.log(\n                TRACE,\n                \"Encoding %s won't be tested as-is because it require a BOM. Will try some sub-encoder LE/BE.\",\n                encoding_iana,\n            )\n            continue\n        if encoding_iana in {\"utf_7\"} and not bom_or_sig_available:\n            logger.log(\n                TRACE,\n                \"Encoding %s won't be tested as-is because detection is unreliable without BOM/SIG.\",\n                encoding_iana,\n            )\n            continue\n\n        # Skip encodings similar to ones that already soft-failed (high mess ratio).\n        # Checked BEFORE the expensive decode attempt.\n        if encoding_iana in soft_failure_skip:\n            logger.log(\n                TRACE,\n                \"%s is deemed too similar to a code page that was already considered unsuited. Continuing!\",\n                encoding_iana,\n            )\n            continue\n\n        # Skip encodings that were already fast-tracked from a similar successful encoding.\n        if encoding_iana in success_fast_tracked:\n            logger.log(\n                TRACE,\n                \"Skipping %s: already fast-tracked from a similar successful encoding.\",\n                encoding_iana,\n            )\n            continue\n\n        try:\n            is_multi_byte_decoder: bool = is_multi_byte_encoding(encoding_iana)\n        except (ModuleNotFoundError, ImportError):  # Defensive:\n            logger.log(\n                TRACE,\n                \"Encoding %s does not provide an IncrementalDecoder\",\n                encoding_iana,\n            )\n            continue\n\n        # When we've already found a definitive match (chaos=0.0 with good coherence)\n        # after testing the prioritized encodings, skip encodings that target\n        # completely different language families. This avoids running expensive\n        # mess_ratio + coherence_ratio on clearly unrelated candidates (e.g., Cyrillic\n        # when the definitive match is Latin-based).\n        if definitive_match_found:\n            if not is_multi_byte_decoder:\n                enc_languages = set(encoding_languages(encoding_iana))\n            else:\n                enc_languages = set(mb_encoding_languages(encoding_iana))\n            if not enc_languages.intersection(definitive_target_languages):\n                logger.log(\n                    TRACE,\n                    \"Skipping %s: definitive match already found, this encoding targets different languages (%s vs %s).\",\n                    encoding_iana,\n                    enc_languages,\n                    definitive_target_languages,\n                )\n                continue\n\n        # After the definitive match, cap the number of additional same-family\n        # single-byte encodings that pass chaos probing. This avoids testing the\n        # tail of rare, low-value same-family encodings (mac_iceland, cp860, etc.)\n        # that almost never change best() but each cost ~1-2ms of mess_ratio + coherence.\n        if (\n            definitive_match_found\n            and not is_multi_byte_decoder\n            and post_definitive_sb_success_count >= POST_DEFINITIVE_SB_CAP\n        ):\n            logger.log(\n                TRACE,\n                \"Skipping %s: already accumulated %d same-family results after definitive match (cap=%d).\",\n                encoding_iana,\n                post_definitive_sb_success_count,\n                POST_DEFINITIVE_SB_CAP,\n            )\n            continue\n\n        # When a multibyte encoding with significant multibyte content has already\n        # passed chaos probing, skip all single-byte encodings. They will either fail\n        # chaos probing (wasting mess_ratio time) or produce inferior results.\n        if mb_definitive_match_found and not is_multi_byte_decoder:\n            logger.log(\n                TRACE,\n                \"Skipping single-byte %s: multi-byte definitive match already found.\",\n                encoding_iana,\n            )\n            continue\n\n        try:\n            if is_too_large_sequence and is_multi_byte_decoder is False:\n                str(\n                    (\n                        sequences[: int(50e4)]\n                        if strip_sig_or_bom is False\n                        else sequences[len(sig_payload) : int(50e4)]\n                    ),\n                    encoding=encoding_iana,\n                )\n            else:\n                # UTF-7 BOM is encoded in modified Base64 whose byte boundary\n                # can overlap with the next character. Stripping raw SIG bytes\n                # before decoding may leave stray bytes that decode as garbage.\n                # Decode the full sequence and remove the leading BOM char instead.\n                # see https://github.com/jawah/charset_normalizer/issues/718\n                # and https://github.com/jawah/charset_normalizer/issues/716\n                if encoding_iana == \"utf_7\" and bom_or_sig_available:\n                    decoded_payload = str(\n                        sequences,\n                        encoding=encoding_iana,\n                    )\n                    if decoded_payload and decoded_payload[0] == \"\\ufeff\":\n                        decoded_payload = decoded_payload[1:]\n                else:\n                    decoded_payload = str(\n                        (\n                            sequences\n                            if strip_sig_or_bom is False\n                            else sequences[len(sig_payload) :]\n                        ),\n                        encoding=encoding_iana,\n                    )\n        except (UnicodeDecodeError, LookupError) as e:\n            if not isinstance(e, LookupError):\n                logger.log(\n                    TRACE,\n                    \"Code page %s does not fit given bytes sequence at ALL. %s\",\n                    encoding_iana,\n                    str(e),\n                )\n            tested_but_hard_failure.append(encoding_iana)\n            continue\n\n        r_ = range(\n            0 if not bom_or_sig_available else len(sig_payload),\n            length,\n            int(length / steps),\n        )\n\n        multi_byte_bonus: bool = (\n            is_multi_byte_decoder\n            and decoded_payload is not None\n            and len(decoded_payload) < length\n        )\n\n        if multi_byte_bonus:\n            logger.log(\n                TRACE,\n                \"Code page %s is a multi byte encoding table and it appear that at least one character \"\n                \"was encoded using n-bytes.\",\n                encoding_iana,\n            )\n\n        # Payload-hash deduplication: if another encoding already decoded to the\n        # exact same string, reuse its mess_ratio and coherence results entirely.\n        # This is strictly more general than the old IANA_SUPPORTED_SIMILAR approach\n        # because it catches ALL identical decoding, not just pre-mapped ones.\n        if decoded_payload is not None and not is_multi_byte_decoder:\n            payload_hash: int = hash(decoded_payload)\n            cached = payload_result_cache.get(payload_hash)\n            if cached is not None:\n                cached_mess, cached_cd, cached_passed = cached\n                if cached_passed:\n                    # The previous encoding with identical output passed chaos probing.\n                    fast_match = CharsetMatch(\n                        sequences,\n                        encoding_iana,\n                        cached_mess,\n                        bom_or_sig_available,\n                        cached_cd,\n                        (\n                            decoded_payload\n                            if (\n                                is_too_large_sequence is False\n                                or encoding_iana\n                                in [specified_encoding, \"ascii\", \"utf_8\"]\n                            )\n                            else None\n                        ),\n                        preemptive_declaration=specified_encoding,\n                    )\n                    results.append(fast_match)\n                    success_fast_tracked.add(encoding_iana)\n                    logger.log(\n                        TRACE,\n                        \"%s fast-tracked (identical decoded payload to a prior encoding, chaos=%f %%).\",\n                        encoding_iana,\n                        round(cached_mess * 100, ndigits=3),\n                    )\n\n                    if (\n                        encoding_iana in [specified_encoding, \"ascii\", \"utf_8\"]\n                        and cached_mess < 0.1\n                    ):\n                        if cached_mess == 0.0:\n                            logger.debug(\n                                \"Encoding detection: %s is most likely the one.\",\n                                fast_match.encoding,\n                            )\n                            if explain:\n                                logger.removeHandler(explain_handler)\n                                logger.setLevel(previous_logger_level)\n                            return CharsetMatches([fast_match])\n                        early_stop_results.append(fast_match)\n\n                    if (\n                        len(early_stop_results)\n                        and (specified_encoding is None or specified_encoding in tested)\n                        and \"ascii\" in tested\n                        and \"utf_8\" in tested\n                    ):\n                        probable_result: CharsetMatch = early_stop_results.best()  # type: ignore[assignment]\n                        logger.debug(\n                            \"Encoding detection: %s is most likely the one.\",\n                            probable_result.encoding,\n                        )\n                        if explain:\n                            logger.removeHandler(explain_handler)\n                            logger.setLevel(previous_logger_level)\n                        return CharsetMatches([probable_result])\n\n                    continue\n                else:\n                    # The previous encoding with identical output failed chaos probing.\n                    tested_but_soft_failure.append(encoding_iana)\n                    logger.log(\n                        TRACE,\n                        \"%s fast-skipped (identical decoded payload to a prior encoding that failed chaos probing).\",\n                        encoding_iana,\n                    )\n                    # Prepare fallbacks for special encodings even when skipped.\n                    if enable_fallback and encoding_iana in [\n                        \"ascii\",\n                        \"utf_8\",\n                        specified_encoding,\n                        \"utf_16\",\n                        \"utf_32\",\n                    ]:\n                        fallback_entry = CharsetMatch(\n                            sequences,\n                            encoding_iana,\n                            threshold,\n                            bom_or_sig_available,\n                            [],\n                            decoded_payload,\n                            preemptive_declaration=specified_encoding,\n                        )\n                        if encoding_iana == specified_encoding:\n                            fallback_specified = fallback_entry\n                        elif encoding_iana == \"ascii\":\n                            fallback_ascii = fallback_entry\n                        else:\n                            fallback_u8 = fallback_entry\n                    continue\n\n        max_chunk_gave_up: int = int(len(r_) / 4)\n\n        max_chunk_gave_up = max(max_chunk_gave_up, 2)\n        early_stop_count: int = 0\n        lazy_str_hard_failure = False\n\n        md_chunks: list[str] = []\n        md_ratios = []\n\n        try:\n            for chunk in cut_sequence_chunks(\n                sequences,\n                encoding_iana,\n                r_,\n                chunk_size,\n                bom_or_sig_available,\n                strip_sig_or_bom,\n                sig_payload,\n                is_multi_byte_decoder,\n                decoded_payload,\n            ):\n                md_chunks.append(chunk)\n\n                md_ratios.append(\n                    mess_ratio(\n                        chunk,\n                        threshold,\n                        explain is True and 1 <= len(cp_isolation) <= 2,\n                    )\n                )\n\n                if md_ratios[-1] >= threshold:\n                    early_stop_count += 1\n\n                if (early_stop_count >= max_chunk_gave_up) or (\n                    bom_or_sig_available and strip_sig_or_bom is False\n                ):\n                    break\n        except (\n            UnicodeDecodeError\n        ) as e:  # Lazy str loading may have missed something there\n            logger.log(\n                TRACE,\n                \"LazyStr Loading: After MD chunk decode, code page %s does not fit given bytes sequence at ALL. %s\",\n                encoding_iana,\n                str(e),\n            )\n            early_stop_count = max_chunk_gave_up\n            lazy_str_hard_failure = True\n\n        # We might want to check the sequence again with the whole content\n        # Only if initial MD tests passes\n        if (\n            not lazy_str_hard_failure\n            and is_too_large_sequence\n            and not is_multi_byte_decoder\n        ):\n            try:\n                sequences[int(50e3) :].decode(encoding_iana, errors=\"strict\")\n            except UnicodeDecodeError as e:\n                logger.log(\n                    TRACE,\n                    \"LazyStr Loading: After final lookup, code page %s does not fit given bytes sequence at ALL. %s\",\n                    encoding_iana,\n                    str(e),\n                )\n                tested_but_hard_failure.append(encoding_iana)\n                continue\n\n        mean_mess_ratio: float = sum(md_ratios) / len(md_ratios) if md_ratios else 0.0\n        if mean_mess_ratio >= threshold or early_stop_count >= max_chunk_gave_up:\n            tested_but_soft_failure.append(encoding_iana)\n            if encoding_iana in IANA_SUPPORTED_SIMILAR:\n                soft_failure_skip.update(IANA_SUPPORTED_SIMILAR[encoding_iana])\n            # Cache this soft-failure so identical decoding from other encodings\n            # can be skipped immediately.\n            if decoded_payload is not None and not is_multi_byte_decoder:\n                payload_result_cache.setdefault(\n                    hash(decoded_payload), (mean_mess_ratio, [], False)\n                )\n            logger.log(\n                TRACE,\n                \"%s was excluded because of initial chaos probing. Gave up %i time(s). \"\n                \"Computed mean chaos is %f %%.\",\n                encoding_iana,\n                early_stop_count,\n                round(mean_mess_ratio * 100, ndigits=3),\n            )\n            # Preparing those fallbacks in case we got nothing.\n            if (\n                enable_fallback\n                and encoding_iana\n                in [\"ascii\", \"utf_8\", specified_encoding, \"utf_16\", \"utf_32\"]\n                and not lazy_str_hard_failure\n            ):\n                fallback_entry = CharsetMatch(\n                    sequences,\n                    encoding_iana,\n                    threshold,\n                    bom_or_sig_available,\n                    [],\n                    decoded_payload,\n                    preemptive_declaration=specified_encoding,\n                )\n                if encoding_iana == specified_encoding:\n                    fallback_specified = fallback_entry\n                elif encoding_iana == \"ascii\":\n                    fallback_ascii = fallback_entry\n                else:\n                    fallback_u8 = fallback_entry\n            continue\n\n        logger.log(\n            TRACE,\n            \"%s passed initial chaos probing. Mean measured chaos is %f %%\",\n            encoding_iana,\n            round(mean_mess_ratio * 100, ndigits=3),\n        )\n\n        if not is_multi_byte_decoder:\n            target_languages: list[str] = encoding_languages(encoding_iana)\n        else:\n            target_languages = mb_encoding_languages(encoding_iana)\n\n        if target_languages:\n            logger.log(\n                TRACE,\n                \"{} should target any language(s) of {}\".format(\n                    encoding_iana, str(target_languages)\n                ),\n            )\n\n        cd_ratios = []\n\n        # Run coherence detection on all chunks. We previously tried limiting to\n        # 1-2 chunks for post-definitive encodings to save time, but this caused\n        # coverage regressions by producing unrepresentative coherence scores.\n        # The SB cap and language-family skip optimizations provide sufficient\n        # speedup without sacrificing coherence accuracy.\n        if encoding_iana != \"ascii\":\n            # We shall skip the CD when its about ASCII\n            # Most of the time its not relevant to run \"language-detection\" on it.\n            for chunk in md_chunks:\n                chunk_languages = coherence_ratio(\n                    chunk,\n                    language_threshold,\n                    \",\".join(target_languages) if target_languages else None,\n                )\n\n                cd_ratios.append(chunk_languages)\n            cd_ratios_merged = merge_coherence_ratios(cd_ratios)\n        else:\n            cd_ratios_merged = merge_coherence_ratios(cd_ratios)\n\n        if cd_ratios_merged:\n            logger.log(\n                TRACE,\n                \"We detected language {} using {}\".format(\n                    cd_ratios_merged, encoding_iana\n                ),\n            )\n\n        current_match = CharsetMatch(\n            sequences,\n            encoding_iana,\n            mean_mess_ratio,\n            bom_or_sig_available,\n            cd_ratios_merged,\n            (\n                decoded_payload\n                if (\n                    is_too_large_sequence is False\n                    or encoding_iana in [specified_encoding, \"ascii\", \"utf_8\"]\n                )\n                else None\n            ),\n            preemptive_declaration=specified_encoding,\n        )\n\n        results.append(current_match)\n\n        # Cache the successful result for payload-hash deduplication.\n        if decoded_payload is not None and not is_multi_byte_decoder:\n            payload_result_cache.setdefault(\n                hash(decoded_payload),\n                (mean_mess_ratio, cd_ratios_merged, True),\n            )\n\n        # Count post-definitive same-family SB successes for the early termination cap.\n        # Only count low-mess encodings (< 2%) toward the cap. High-mess encodings are\n        # marginal results that shouldn't prevent better-quality candidates from being\n        # tested. For example, iso8859_4 (mess=0%) should not be skipped just because\n        # 7 high-mess Latin encodings (cp1252 at 8%, etc.) were tried first.\n        if (\n            definitive_match_found\n            and not is_multi_byte_decoder\n            and mean_mess_ratio < 0.02\n        ):\n            post_definitive_sb_success_count += 1\n\n        if (\n            encoding_iana in [specified_encoding, \"ascii\", \"utf_8\"]\n            and mean_mess_ratio < 0.1\n        ):\n            # If md says nothing to worry about, then... stop immediately!\n            if mean_mess_ratio == 0.0:\n                logger.debug(\n                    \"Encoding detection: %s is most likely the one.\",\n                    current_match.encoding,\n                )\n                if explain:  # Defensive: ensure exit path clean handler\n                    logger.removeHandler(explain_handler)\n                    logger.setLevel(previous_logger_level)\n                return CharsetMatches([current_match])\n\n            early_stop_results.append(current_match)\n\n        if (\n            len(early_stop_results)\n            and (specified_encoding is None or specified_encoding in tested)\n            and \"ascii\" in tested\n            and \"utf_8\" in tested\n        ):\n            probable_result = early_stop_results.best()  # type: ignore[assignment]\n            logger.debug(\n                \"Encoding detection: %s is most likely the one.\",\n                probable_result.encoding,  # type: ignore[union-attr]\n            )\n            if explain:  # Defensive: ensure exit path clean handler\n                logger.removeHandler(explain_handler)\n                logger.setLevel(previous_logger_level)\n\n            return CharsetMatches([probable_result])\n\n        # Once we find a result with good coherence (>= 0.5) after testing the\n        # prioritized encodings (ascii, utf_8), activate \"definitive mode\": skip\n        # encodings that target completely different language families. This avoids\n        # running expensive mess_ratio + coherence_ratio on clearly unrelated\n        # candidates (e.g., Cyrillic encodings when the match is Latin-based).\n        # We require coherence >= 0.5 to avoid false positives (e.g., cp1251 decoding\n        # Hebrew text with 0.0 chaos but wrong language detection at coherence 0.33).\n        if not definitive_match_found and not is_multi_byte_decoder:\n            best_coherence = (\n                max((v for _, v in cd_ratios_merged), default=0.0)\n                if cd_ratios_merged\n                else 0.0\n            )\n            if best_coherence >= 0.5 and \"ascii\" in tested and \"utf_8\" in tested:\n                definitive_match_found = True\n                definitive_target_languages.update(target_languages)\n                logger.log(\n                    TRACE,\n                    \"Definitive match found: %s (chaos=%.3f, coherence=%.2f). Encodings targeting different language families will be skipped.\",\n                    encoding_iana,\n                    mean_mess_ratio,\n                    best_coherence,\n                )\n\n        # When a non-UTF multibyte encoding passes chaos probing with significant\n        # multibyte content (decoded < 98% of raw), activate mb_definitive_match.\n        # This skips all remaining single-byte encodings which would either soft-fail\n        # (running expensive mess_ratio for nothing) or produce inferior results.\n        if (\n            not mb_definitive_match_found\n            and is_multi_byte_decoder\n            and multi_byte_bonus\n            and decoded_payload is not None\n            and len(decoded_payload) < length * 0.98\n            and encoding_iana\n            not in {\n                \"utf_8\",\n                \"utf_8_sig\",\n                \"utf_16\",\n                \"utf_16_be\",\n                \"utf_16_le\",\n                \"utf_32\",\n                \"utf_32_be\",\n                \"utf_32_le\",\n                \"utf_7\",\n            }\n            and \"ascii\" in tested\n            and \"utf_8\" in tested\n        ):\n            mb_definitive_match_found = True\n            logger.log(\n                TRACE,\n                \"Multi-byte definitive match: %s (chaos=%.3f, decoded=%d/%d=%.1f%%). Single-byte encodings will be skipped.\",\n                encoding_iana,\n                mean_mess_ratio,\n                len(decoded_payload),\n                length,\n                len(decoded_payload) / length * 100,\n            )\n\n        if encoding_iana == sig_encoding:\n            logger.debug(\n                \"Encoding detection: %s is most likely the one as we detected a BOM or SIG within \"\n                \"the beginning of the sequence.\",\n                encoding_iana,\n            )\n            if explain:  # Defensive: ensure exit path clean handler\n                logger.removeHandler(explain_handler)\n                logger.setLevel(previous_logger_level)\n            return CharsetMatches([results[encoding_iana]])\n\n    if len(results) == 0:\n        if fallback_u8 or fallback_ascii or fallback_specified:\n            logger.log(\n                TRACE,\n                \"Nothing got out of the detection process. Using ASCII/UTF-8/Specified fallback.\",\n            )\n\n        if fallback_specified:\n            logger.debug(\n                \"Encoding detection: %s will be used as a fallback match\",\n                fallback_specified.encoding,\n            )\n            results.append(fallback_specified)\n        elif (\n            (fallback_u8 and fallback_ascii is None)\n            or (\n                fallback_u8\n                and fallback_ascii\n                and fallback_u8.fingerprint != fallback_ascii.fingerprint\n            )\n            or (fallback_u8 is not None)\n        ):\n            logger.debug(\"Encoding detection: utf_8 will be used as a fallback match\")\n            results.append(fallback_u8)\n        elif fallback_ascii:\n            logger.debug(\"Encoding detection: ascii will be used as a fallback match\")\n            results.append(fallback_ascii)\n\n    if results:\n        logger.debug(\n            \"Encoding detection: Found %s as plausible (best-candidate) for content. With %i alternatives.\",\n            results.best().encoding,  # type: ignore\n            len(results) - 1,\n        )\n    else:\n        logger.debug(\"Encoding detection: Unable to determine any suitable charset.\")\n\n    if explain:\n        logger.removeHandler(explain_handler)\n        logger.setLevel(previous_logger_level)\n\n    return results",
+      "truncated": false
+    },
+    {
+      "id": "tu:models:models.py",
+      "text": "Python source file: /Users/drt/Documents/graphrag/examples/charset_normalizer/models.py",
+      "truncated": false
+    },
+    {
+      "id": "tu:models:CharsetMatch",
+      "text": "class CharsetMatch:\n    def __init__(\n        self,\n        payload: bytes | bytearray,\n        guessed_encoding: str,\n        mean_mess_ratio: float,\n        has_sig_or_bom: bool,\n        languages: CoherenceMatches,\n        decoded_payload: str | None = None,\n        preemptive_declaration: str | None = None,\n    ):\n        self._payload: bytes | bytearray = payload\n\n        self._encoding: str = guessed_encoding\n        self._mean_mess_ratio: float = mean_mess_ratio\n        self._languages: CoherenceMatches = languages\n        self._has_sig_or_bom: bool = has_sig_or_bom\n        self._unicode_ranges: list[str] | None = None\n\n        self._leaves: list[CharsetMatch] = []\n        self._mean_coherence_ratio: float = 0.0\n\n        self._output_payload: bytes | None = None\n        self._output_encoding: str | None = None\n\n        self._string: str | None = decoded_payload\n\n        self._preemptive_declaration: str | None = preemptive_declaration\n\n    def __eq__(self, other: object) -> bool:\n        if not isinstance(other, CharsetMatch):\n            if isinstance(other, str):\n                return iana_name(other) == self.encoding\n            return False\n        return self.encoding == other.encoding and self.fingerprint == other.fingerprint\n\n    def __lt__(self, other: object) -> bool:\n        \"\"\"\n        Implemented to make sorted available upon CharsetMatches items.\n        \"\"\"\n        if not isinstance(other, CharsetMatch):\n            raise ValueError\n\n        chaos_difference: float = abs(self.chaos - other.chaos)\n        coherence_difference: float = abs(self.coherence - other.coherence)\n\n        # Below 0.5% difference --> Use Coherence\n        if chaos_difference < 0.005 and coherence_difference > 0.02:\n            return self.coherence > other.coherence\n        elif chaos_difference < 0.005 and coherence_difference <= 0.02:\n            # When having a difficult decision, use the result that decoded as many multi-byte as possible.\n            # preserve RAM usage!\n            if len(self._payload) >= TOO_BIG_SEQUENCE:\n                return self.chaos < other.chaos\n            return self.multi_byte_usage > other.multi_byte_usage\n\n        return self.chaos < other.chaos\n\n    @property\n    def multi_byte_usage(self) -> float:\n        return 1.0 - (len(str(self)) / len(self.raw))\n\n    def __str__(self) -> str:\n        # Lazy Str Loading\n        if self._string is None:\n            self._string = str(self._payload, self._encoding, \"strict\")\n            # UTF-7 BOM is encoded in modified Base64 whose byte boundary\n            # can overlap with the next character, so raw-byte stripping\n            # is unreliable. Strip the decoded BOM character instead.\n            if (\n                self._has_sig_or_bom\n                and self._encoding == \"utf_7\"\n                and self._string\n                and self._string[0] == \"\\ufeff\"\n            ):\n                self._string = self._string[1:]\n        return self._string\n\n    def __repr__(self) -> str:\n        return f\"<CharsetMatch '{self.encoding}' fp({self.fingerprint})>\"\n\n    def add_submatch(self, other: CharsetMatch) -> None:\n        if not isinstance(other, CharsetMatch) or other == self:\n            raise ValueError(\n                \"Unable to add instance <{}> as a submatch of a CharsetMatch\".format(\n                    other.__class__\n                )\n            )\n\n        other._string = None  # Unload RAM usage; dirty trick.\n        self._leaves.append(other)\n\n    @property\n    def encoding(self) -> str:\n        return self._encoding\n\n    @property\n    def encoding_aliases(self) -> list[str]:\n        \"\"\"\n        Encoding name are known by many name, using this could help when searching for IBM855 when it's listed as CP855.\n        \"\"\"\n        also_known_as: list[str] = []\n        for u, p in aliases.items():\n            if self.encoding == u:\n                also_known_as.append(p)\n            elif self.encoding == p:\n                also_known_as.append(u)\n        return also_known_as\n\n    @property\n    def bom(self) -> bool:\n        return self._has_sig_or_bom\n\n    @property\n    def byte_order_mark(self) -> bool:\n        return self._has_sig_or_bom\n\n    @property\n    def languages(self) -> list[str]:\n        \"\"\"\n        Return the complete list of possible languages found in decoded sequence.\n        Usually not really useful. Returned list may be empty even if 'language' property return something != 'Unknown'.\n        \"\"\"\n        return [e[0] for e in self._languages]\n\n    @property\n    def language(self) -> str:\n        \"\"\"\n        Most probable language found in decoded sequence. If none were detected or inferred, the property will return\n        \"Unknown\".\n        \"\"\"\n        if not self._languages:\n            # Trying to infer the language based on the given encoding\n            # Its either English or we should not pronounce ourselves in certain cases.\n            if \"ascii\" in self.could_be_from_charset:\n                return \"English\"\n\n            # doing it there to avoid circular import\n            from charset_normalizer.cd import encoding_languages, mb_encoding_languages\n\n            languages = (\n                mb_encoding_languages(self.encoding)\n                if is_multi_byte_encoding(self.encoding)\n                else encoding_languages(self.encoding)\n            )\n\n            if len(languages) == 0 or \"Latin Based\" in languages:\n                return \"Unknown\"\n\n            return languages[0]\n\n        return self._languages[0][0]\n\n    @property\n    def chaos(self) -> float:\n        return self._mean_mess_ratio\n\n    @property\n    def coherence(self) -> float:\n        if not self._languages:\n            return 0.0\n        return self._languages[0][1]\n\n    @property\n    def percent_chaos(self) -> float:\n        return round(self.chaos * 100, ndigits=3)\n\n    @property\n    def percent_coherence(self) -> float:\n        return round(self.coherence * 100, ndigits=3)\n\n    @property\n    def raw(self) -> bytes | bytearray:\n        \"\"\"\n        Original untouched bytes.\n        \"\"\"\n        return self._payload\n\n    @property\n    def submatch(self) -> list[CharsetMatch]:\n        return self._leaves\n\n    @property\n    def has_submatch(self) -> bool:\n        return len(self._leaves) > 0\n\n    @property\n    def alphabets(self) -> list[str]:\n        if self._unicode_ranges is not None:\n            return self._unicode_ranges\n        # list detected ranges\n        detected_ranges: list[str | None] = [unicode_range(char) for char in str(self)]\n        # filter and sort\n        self._unicode_ranges = sorted(list({r for r in detected_ranges if r}))\n        return self._unicode_ranges\n\n    @property\n    def could_be_from_charset(self) -> list[str]:\n        \"\"\"\n        The complete list of encoding that output the exact SAME str result and therefore could be the originating\n        encoding.\n        This list does include the encoding available in property 'encoding'.\n        \"\"\"\n        return [self._encoding] + [m.encoding for m in self._leaves]\n\n    def output(self, encoding: str = \"utf_8\") -> bytes:\n        \"\"\"\n        Method to get re-encoded bytes payload using given target encoding. Default to UTF-8.\n        Any errors will be simply ignored by the encoder NOT replaced.\n        \"\"\"\n        if self._output_encoding is None or self._output_encoding != encoding:\n            self._output_encoding = encoding\n            decoded_string = str(self)\n            if (\n                self._preemptive_declaration is not None\n                and self._preemptive_declaration.lower()\n                not in [\"utf-8\", \"utf8\", \"utf_8\"]\n            ):\n                patched_header = sub(\n                    RE_POSSIBLE_ENCODING_INDICATION,\n                    lambda m: m.string[m.span()[0] : m.span()[1]].replace(\n                        m.groups()[0],\n                        iana_name(self._output_encoding).replace(\"_\", \"-\"),  # type: ignore[arg-type]\n                    ),\n                    decoded_string[:8192],\n                    count=1,\n                )\n\n                decoded_string = patched_header + decoded_string[8192:]\n\n            self._output_payload = decoded_string.encode(encoding, \"replace\")\n\n        return self._output_payload  # type: ignore\n\n    @property\n    def fingerprint(self) -> int:\n        \"\"\"\n        Retrieve a hash fingerprint of the decoded payload, used for deduplication.\n        \"\"\"\n        return hash(str(self))",
+      "truncated": false
+    },
+    {
+      "id": "tu:models:CharsetMatch.__init",
+      "text": "def __init__(\n        self,\n        payload: bytes | bytearray,\n        guessed_encoding: str,\n        mean_mess_ratio: float,\n        has_sig_or_bom: bool,\n        languages: CoherenceMatches,\n        decoded_payload: str | None = None,\n        preemptive_declaration: str | None = None,\n    ):\n        self._payload: bytes | bytearray = payload\n\n        self._encoding: str = guessed_encoding\n        self._mean_mess_ratio: float = mean_mess_ratio\n        self._languages: CoherenceMatches = languages\n        self._has_sig_or_bom: bool = has_sig_or_bom\n        self._unicode_ranges: list[str] | None = None\n\n        self._leaves: list[CharsetMatch] = []\n        self._mean_coherence_ratio: float = 0.0\n\n        self._output_payload: bytes | None = None\n        self._output_encoding: str | None = None\n\n        self._string: str | None = decoded_payload\n\n        self._preemptive_declaration: str | None = preemptive_declaration",
+      "truncated": false
+    },
+    {
+      "id": "tu:models:CharsetMatch.__eq",
+      "text": "def __eq__(self, other: object) -> bool:\n        if not isinstance(other, CharsetMatch):\n            if isinstance(other, str):\n                return iana_name(other) == self.encoding\n            return False\n        return self.encoding == other.encoding and self.fingerprint == other.fingerprint",
+      "truncated": false
+    },
+    {
+      "id": "tu:models:CharsetMatch.__lt",
+      "text": "def __lt__(self, other: object) -> bool:\n        \"\"\"\n        Implemented to make sorted available upon CharsetMatches items.\n        \"\"\"\n        if not isinstance(other, CharsetMatch):\n            raise ValueError\n\n        chaos_difference: float = abs(self.chaos - other.chaos)\n        coherence_difference: float = abs(self.coherence - other.coherence)\n\n        # Below 0.5% difference --> Use Coherence\n        if chaos_difference < 0.005 and coherence_difference > 0.02:\n            return self.coherence > other.coherence\n        elif chaos_difference < 0.005 and coherence_difference <= 0.02:\n            # When having a difficult decision, use the result that decoded as many multi-byte as possible.\n            # preserve RAM usage!\n            if len(self._payload) >= TOO_BIG_SEQUENCE:\n                return self.chaos < other.chaos\n            return self.multi_byte_usage > other.multi_byte_usage\n\n        return self.chaos < other.chaos",
+      "truncated": false
+    },
+    {
+      "id": "tu:models:CharsetMatch.multi_byte_usage",
+      "text": "@property\n    def multi_byte_usage(self) -> float:\n        return 1.0 - (len(str(self)) / len(self.raw))",
+      "truncated": false
+    },
+    {
+      "id": "tu:models:CharsetMatch.__str",
+      "text": "def __str__(self) -> str:\n        # Lazy Str Loading\n        if self._string is None:\n            self._string = str(self._payload, self._encoding, \"strict\")\n            # UTF-7 BOM is encoded in modified Base64 whose byte boundary\n            # can overlap with the next character, so raw-byte stripping\n            # is unreliable. Strip the decoded BOM character instead.\n            if (\n                self._has_sig_or_bom\n                and self._encoding == \"utf_7\"\n                and self._string\n                and self._string[0] == \"\\ufeff\"\n            ):\n                self._string = self._string[1:]\n        return self._string",
+      "truncated": false
+    },
+    {
+      "id": "tu:models:CharsetMatch.__repr",
+      "text": "def __repr__(self) -> str:\n        return f\"<CharsetMatch '{self.encoding}' fp({self.fingerprint})>\"",
+      "truncated": false
+    },
+    {
+      "id": "tu:models:CharsetMatch.add_submatch",
+      "text": "def add_submatch(self, other: CharsetMatch) -> None:\n        if not isinstance(other, CharsetMatch) or other == self:\n            raise ValueError(\n                \"Unable to add instance <{}> as a submatch of a CharsetMatch\".format(\n                    other.__class__\n                )\n            )\n\n        other._string = None  # Unload RAM usage; dirty trick.\n        self._leaves.append(other)",
+      "truncated": false
+    }
+  ],
+  "provenance": {
+    "source_file": "/Users/drt/Documents/graphrag/examples/charset_normalizer/models.py",
+    "span": "12:0-251:30",
+    "extractor": "tree-sitter-python",
+    "confidence": 1.0,
+    "is_deterministic": true
+  },
+  "golden_contract_note": null,
+  "behavior_contract": null,
+  "usage_hint": "Use this pack + the original source of the listed files when prompting an LLM to port the symbol to Rust while preserving exact observable behavior on the golden inputs.",
+  "truncation": {
+    "max_text_chars": null,
+    "full_text": true
+  },
+  "uncertain_calls": [
+    {
+      "source": "models:CharsetMatch.output",
+      "display_target": "decoded_string.encode",
+      "confidence": 0.4,
+      "reason": "guarded by reassignment",
+      "provenance": "/Users/drt/Documents/graphrag/examples/charset_normalizer/models.py:242:35"
+    },
+    {
+      "source": "models:CharsetMatch.encoding_aliases",
+      "display_target": "also_known_as.append",
+      "confidence": 0.4,
+      "reason": "builtin/container call observation",
+      "provenance": "/Users/drt/Documents/graphrag/examples/charset_normalizer/models.py:116:16"
+    },
+    {
+      "source": "models:CharsetMatch.encoding_aliases",
+      "display_target": "also_known_as.append",
+      "confidence": 0.4,
+      "reason": "builtin/container call observation",
+      "provenance": "/Users/drt/Documents/graphrag/examples/charset_normalizer/models.py:118:16"
+    },
+    {
+      "source": "models:CharsetMatch.output",
+      "display_target": "m.groups",
+      "confidence": 0.4,
+      "reason": "unresolved receiver",
+      "provenance": "/Users/drt/Documents/graphrag/examples/charset_normalizer/models.py:233:24"
+    },
+    {
+      "source": "models:CharsetMatch.output",
+      "display_target": "m.span",
+      "confidence": 0.4,
+      "reason": "unresolved receiver",
+      "provenance": "/Users/drt/Documents/graphrag/examples/charset_normalizer/models.py:232:39"
+    },
+    {
+      "source": "models:CharsetMatch.output",
+      "display_target": "m.span",
+      "confidence": 0.4,
+      "reason": "unresolved receiver",
+      "provenance": "/Users/drt/Documents/graphrag/examples/charset_normalizer/models.py:232:53"
+    }
+  ],
+  "analysis_note": "Some call sites were tracked with low confidence or ambiguity (see uncertain_calls). Review during port."
+}
