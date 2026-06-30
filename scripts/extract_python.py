@@ -500,6 +500,7 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
         return
 
     import_map: Dict[str, str] = {}  # local_name -> module (e.g. "update_player" -> "physics")
+    import_orig: Dict[str, str] = {}  # local/alias name -> original imported symbol
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             for alias in node.names:
@@ -510,6 +511,10 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                     # from . import foo   or from . import foo as bar
                     mod = ('.' * node.level + alias.name) if node.level else alias.name
                 import_map[local] = mod.lstrip(".")
+                # Aliased imports (e.g. `_gettext as _`): resolve calls to the
+                # alias back to the original symbol so the hint names a real
+                # entity (i18n:_gettext, not i18n:_).
+                import_orig[local] = alias.name
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 local = alias.asname or alias.name.split(".")[0]
@@ -564,7 +569,8 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
     def imported_callable_hint(name: str) -> tuple[str, str] | None:
         module = import_map.get(name)
         if module:
-            return f"{module_title(module)}:{name}", f"{module}.{name}"
+            orig = import_orig.get(name, name)
+            return f"{module_title(module)}:{orig}", f"{module}.{orig}"
         if name in defined_names:
             return f"{Path(path).stem}:{name}", name
         return None
@@ -772,6 +778,60 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
         if str(e.get("type", "")).lower() == "data"
     }
     seen_data_edges: set[tuple[str, str, int]] = set()
+
+    # `references` edges: a module-level data table whose RHS names other entities
+    # (other data, defined functions/classes, or imported symbols incl. aliases)
+    # depends on them, e.g. humanize's `human_powers = (NS_("thousand", ...), ...)`
+    # references `i18n:_ngettext_noop`, and `_SUPERSCRIPT_TRANS = maketrans(
+    # _SUPERSCRIPT_MAP)` references `_SUPERSCRIPT_MAP`. The closure follows these so
+    # a data table's own dependencies are packed, not just the table.
+    def _ref_title(nm: str) -> str | None:
+        if nm in data_names or nm in set(defined_names):
+            return f"{Path(path).stem}:{nm}"
+        if nm in import_map:
+            return f"{module_title(import_map[nm])}:{import_orig.get(nm, nm)}"
+        return None
+
+    seen_ref_edges: set[tuple[str, str]] = set()
+    for stmt in getattr(tree, "body", []):
+        targets = (
+            stmt.targets if isinstance(stmt, ast.Assign)
+            else [stmt.target] if isinstance(stmt, ast.AnnAssign) else []
+        )
+        dnames = [t.id for t in targets if isinstance(t, ast.Name) and t.id in data_names]
+        if not dnames or getattr(stmt, "value", None) is None:
+            continue
+        ref_titles: set[str] = set()
+        for sub in ast.walk(stmt.value):
+            nm = sub.id if isinstance(sub, ast.Name) else None
+            if nm:
+                rt = _ref_title(nm)
+                if rt:
+                    ref_titles.add(rt)
+        for dname in dnames:
+            src = make_id("data", dname, str(path))
+            for rt in sorted(ref_titles):
+                if rt == f"{Path(path).stem}:{dname}" or (src, rt) in seen_ref_edges:
+                    continue
+                seen_ref_edges.add((src, rt))
+                relationships.append(
+                    {
+                        "id": f"rel:references:{dname}:{rt}",
+                        "source": src,
+                        "target": rt,
+                        "type": "references",
+                        "description": f"data {dname} references {rt}",
+                        "weight": 0.90,
+                        "text_unit_ids": [f"tu:file:{path.name}"],
+                        "human_readable_id": len(relationships) + 1,
+                        "source_file": str(path),
+                        "span": f"{getattr(stmt, 'lineno', 0)}",
+                        "extractor": "python-ast",
+                        "confidence": 0.90,
+                        "is_deterministic": True,
+                        "resolved_target_hint": rt,
+                    }
+                )
 
     def emit_uses_data(call_node: ast.AST, target: str, description: str) -> None:
         caller = enclosing_function_name(call_node)
@@ -990,8 +1050,9 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
         module = import_map.get(bare)
         if module:
             module_stem = module.split(".")[-1]
-            rel["resolved_target_hint"] = f"{module_stem}:{bare}"
-            rel["description"] = f"{rel.get('description', '')} (ast import hint: {module}.{bare})"
+            orig = import_orig.get(bare, bare)
+            rel["resolved_target_hint"] = f"{module_stem}:{orig}"
+            rel["description"] = f"{rel.get('description', '')} (ast import hint: {module}.{orig})"
             rel["confidence"] = max(float(rel.get("confidence", 0.0) or 0.0), 0.85)
             rel["weight"] = max(float(rel.get("weight", 0.0) or 0.0), 0.85)
             rel["extractor"] = "tree-sitter-python+ast"
