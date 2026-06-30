@@ -58,3 +58,18 @@ Per the pre-registered go/no-go, N=3 is **not** run through this dirty closure.
 Both boundaries are principled static facts (aliased import resolution; data->data
 reference edges), fixed in the resolver before re-measuring — distinct from the
 jsonpatch boundary, which was genuinely dynamic (higher-order/points-to).
+
+### Resolution (both boundaries fixed; adequacy now clean)
+`scripts/extract_python.py` gained two general resolver edges (commit after the
+mini-gate):
+- **aliased-import resolution** (`import_orig`): a call to `_`/`P_`/`NS_` resolves
+  to `i18n:_gettext`/`_pgettext`/`_ngettext_noop`;
+- **data->reference edges**: a module-level data table's RHS that names other
+  entities emits `references` edges (`human_powers` -> `i18n:_ngettext_noop`,
+  `_SUPERSCRIPT_TRANS` -> `_SUPERSCRIPT_MAP`).
+
+Re-measured: **adequacy clean** — closure size 24, all 19 must-reach present, 0
+must-exclude leaked; `byog_humanize` audit pass_rate 1.0 (calls 56->80 are
+previously-dropped aliased/imported calls that now resolve), full suite green.
+Both fixes are general wins (any data-heavy Python graph, e.g. charset-normalizer).
+N=3 is now unblocked, pending the dry-prep manual audit of graph-arm material.
