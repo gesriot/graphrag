@@ -1,0 +1,429 @@
+{
+  "cases": [
+    {
+      "func": "intcomma",
+      "args": [
+        0
+      ],
+      "result": "0"
+    },
+    {
+      "func": "intcomma",
+      "args": [
+        100
+      ],
+      "result": "100"
+    },
+    {
+      "func": "intcomma",
+      "args": [
+        1000
+      ],
+      "result": "1,000"
+    },
+    {
+      "func": "intcomma",
+      "args": [
+        1234567
+      ],
+      "result": "1,234,567"
+    },
+    {
+      "func": "intcomma",
+      "args": [
+        -1234567
+      ],
+      "result": "-1,234,567"
+    },
+    {
+      "func": "intcomma",
+      "args": [
+        1234.5667
+      ],
+      "result": "1,234.5667"
+    },
+    {
+      "func": "intcomma",
+      "args": [
+        1234.5667,
+        2
+      ],
+      "result": "1,234.57"
+    },
+    {
+      "func": "intcomma",
+      "args": [
+        1000000,
+        null
+      ],
+      "result": "1,000,000"
+    },
+    {
+      "func": "intcomma",
+      "args": [
+        "1234567"
+      ],
+      "result": "1,234,567"
+    },
+    {
+      "func": "intword",
+      "args": [
+        100
+      ],
+      "result": "100"
+    },
+    {
+      "func": "intword",
+      "args": [
+        1000
+      ],
+      "result": "1.0 thousand"
+    },
+    {
+      "func": "intword",
+      "args": [
+        999999
+      ],
+      "result": "1.0 million"
+    },
+    {
+      "func": "intword",
+      "args": [
+        1000000
+      ],
+      "result": "1.0 million"
+    },
+    {
+      "func": "intword",
+      "args": [
+        1200000
+      ],
+      "result": "1.2 million"
+    },
+    {
+      "func": "intword",
+      "args": [
+        8500000
+      ],
+      "result": "8.5 million"
+    },
+    {
+      "func": "intword",
+      "args": [
+        1340000000
+      ],
+      "result": "1.3 billion"
+    },
+    {
+      "func": "intword",
+      "args": [
+        1000000000000
+      ],
+      "result": "1.0 trillion"
+    },
+    {
+      "func": "intword",
+      "args": [
+        1000000000000000
+      ],
+      "result": "1.0 quadrillion"
+    },
+    {
+      "func": "intword",
+      "args": [
+        1000000000000000000
+      ],
+      "result": "1.0 quintillion"
+    },
+    {
+      "func": "intword",
+      "args": [
+        1000000000000000000000000000000000
+      ],
+      "result": "1.0 decillion"
+    },
+    {
+      "func": "intword",
+      "args": [
+        10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      ],
+      "result": "1.0 googol"
+    },
+    {
+      "func": "intword",
+      "args": [
+        -1500000
+      ],
+      "result": "-1.5 million"
+    },
+    {
+      "func": "intword",
+      "args": [
+        0
+      ],
+      "result": "0"
+    },
+    {
+      "func": "intword",
+      "args": [
+        1200000,
+        "%.2f"
+      ],
+      "result": "1.20 million"
+    },
+    {
+      "func": "apnumber",
+      "args": [
+        0
+      ],
+      "result": "zero"
+    },
+    {
+      "func": "apnumber",
+      "args": [
+        1
+      ],
+      "result": "one"
+    },
+    {
+      "func": "apnumber",
+      "args": [
+        5
+      ],
+      "result": "five"
+    },
+    {
+      "func": "apnumber",
+      "args": [
+        9
+      ],
+      "result": "nine"
+    },
+    {
+      "func": "apnumber",
+      "args": [
+        10
+      ],
+      "result": "10"
+    },
+    {
+      "func": "apnumber",
+      "args": [
+        11
+      ],
+      "result": "11"
+    },
+    {
+      "func": "apnumber",
+      "args": [
+        42
+      ],
+      "result": "42"
+    },
+    {
+      "func": "apnumber",
+      "args": [
+        -3
+      ],
+      "result": "-3"
+    },
+    {
+      "func": "ordinal",
+      "args": [
+        0
+      ],
+      "result": "0th"
+    },
+    {
+      "func": "ordinal",
+      "args": [
+        1
+      ],
+      "result": "1st"
+    },
+    {
+      "func": "ordinal",
+      "args": [
+        2
+      ],
+      "result": "2nd"
+    },
+    {
+      "func": "ordinal",
+      "args": [
+        3
+      ],
+      "result": "3rd"
+    },
+    {
+      "func": "ordinal",
+      "args": [
+        4
+      ],
+      "result": "4th"
+    },
+    {
+      "func": "ordinal",
+      "args": [
+        11
+      ],
+      "result": "11th"
+    },
+    {
+      "func": "ordinal",
+      "args": [
+        12
+      ],
+      "result": "12th"
+    },
+    {
+      "func": "ordinal",
+      "args": [
+        13
+      ],
+      "result": "13th"
+    },
+    {
+      "func": "ordinal",
+      "args": [
+        21
+      ],
+      "result": "21st"
+    },
+    {
+      "func": "ordinal",
+      "args": [
+        22
+      ],
+      "result": "22nd"
+    },
+    {
+      "func": "ordinal",
+      "args": [
+        23
+      ],
+      "result": "23rd"
+    },
+    {
+      "func": "ordinal",
+      "args": [
+        100
+      ],
+      "result": "100th"
+    },
+    {
+      "func": "ordinal",
+      "args": [
+        101
+      ],
+      "result": "101st"
+    },
+    {
+      "func": "ordinal",
+      "args": [
+        111
+      ],
+      "result": "111th"
+    },
+    {
+      "func": "ordinal",
+      "args": [
+        113
+      ],
+      "result": "113th"
+    },
+    {
+      "func": "fractional",
+      "args": [
+        0.5
+      ],
+      "result": "1/2"
+    },
+    {
+      "func": "fractional",
+      "args": [
+        0.3333333
+      ],
+      "result": "1/3"
+    },
+    {
+      "func": "fractional",
+      "args": [
+        1.0
+      ],
+      "result": "1"
+    },
+    {
+      "func": "fractional",
+      "args": [
+        1.25
+      ],
+      "result": "1 1/4"
+    },
+    {
+      "func": "fractional",
+      "args": [
+        0.25
+      ],
+      "result": "1/4"
+    },
+    {
+      "func": "fractional",
+      "args": [
+        3
+      ],
+      "result": "3"
+    },
+    {
+      "func": "fractional",
+      "args": [
+        2.5
+      ],
+      "result": "2 1/2"
+    },
+    {
+      "func": "scientific",
+      "args": [
+        1234.5
+      ],
+      "result": "1.23 x 10³"
+    },
+    {
+      "func": "scientific",
+      "args": [
+        0.00012
+      ],
+      "result": "1.20 x 10⁻⁴"
+    },
+    {
+      "func": "scientific",
+      "args": [
+        1000000
+      ],
+      "result": "1.00 x 10⁶"
+    },
+    {
+      "func": "scientific",
+      "args": [
+        1234.5,
+        0
+      ],
+      "result": "1 x 10³"
+    },
+    {
+      "func": "scientific",
+      "args": [
+        1234.5,
+        4
+      ],
+      "result": "1.2345 x 10³"
+    },
+    {
+      "func": "scientific",
+      "args": [
+        0
+      ],
+      "result": "0.00 x 10⁰"
+    }
+  ]
+}

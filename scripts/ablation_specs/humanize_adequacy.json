@@ -1,0 +1,39 @@
+{
+  "roots": [
+    "number:intcomma",
+    "number:intword",
+    "number:apnumber",
+    "number:ordinal",
+    "number:fractional",
+    "number:scientific"
+  ],
+  "must_reach": [
+    "number:intcomma",
+    "number:intword",
+    "number:apnumber",
+    "number:ordinal",
+    "number:fractional",
+    "number:scientific",
+    "number:_format_not_finite",
+    "number:powers",
+    "number:human_powers",
+    "number:_ORDINAL_SUFFIXES",
+    "number:_APNUMBER_WORDS",
+    "number:_SUPERSCRIPT_MAP",
+    "number:_SUPERSCRIPT_TRANS",
+    "i18n:_gettext",
+    "i18n:_pgettext",
+    "i18n:_ngettext",
+    "i18n:_ngettext_noop",
+    "i18n:decimal_separator",
+    "i18n:thousands_separator"
+  ],
+  "must_exclude": [
+    "time:naturaltime",
+    "time:naturaldelta",
+    "filesize:naturalsize",
+    "lists:natural_list",
+    "number:clamp",
+    "number:metric"
+  ]
+}
