@@ -221,6 +221,7 @@ def prep(
     def graph_material(kit: Path) -> str:
         ctx = kit / "context"
         ctx.mkdir()
+        packed_set = set(packed_symbols)
         made = []
         for sym in packed_symbols:
             out_file = ctx / f"pack_{sym.replace(':', '_')}.json"
@@ -231,6 +232,20 @@ def prep(
                 cwd=ROOT, capture_output=True, text=True,
             )
             if res.returncode == 0 and out_file.exists():
+                # Scope edge lists to the packed closure: a shared helper's full
+                # neighbor list would otherwise leak the existence of out-of-scope
+                # callers (e.g. i18n:_gettext is called by time/filesize), giving
+                # the graph arm structure the closure deliberately excludes.
+                pack = json.loads(out_file.read_text())
+                for key in ("neighbors", "data_dependency_edges"):
+                    edges = pack.get(key)
+                    if isinstance(edges, list):
+                        pack[key] = [
+                            e for e in edges
+                            if str(e.get("source", "")) in packed_set
+                            and str(e.get("target", "")) in packed_set
+                        ]
+                out_file.write_text(json.dumps(pack, indent=2, ensure_ascii=False))
                 made.append(out_file.name)
         return (
             "Graph-derived **context packs** in `context/` (" + ", ".join(made) + "). "
