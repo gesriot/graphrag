@@ -245,6 +245,12 @@ def prep(
                             if str(e.get("source", "")) in packed_set
                             and str(e.get("target", "")) in packed_set
                         ]
+                deps = pack.get("data_dependencies")
+                if isinstance(deps, list):
+                    pack["data_dependencies"] = [
+                        d for d in deps
+                        if str(d.get("title", "")) in packed_set
+                    ]
                 out_file.write_text(json.dumps(pack, indent=2, ensure_ascii=False))
                 made.append(out_file.name)
         return (

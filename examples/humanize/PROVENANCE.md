@@ -27,7 +27,7 @@ adequate — unlike the `jsonpatch` boundary case (dynamic dispatch).
   `time/filesize/lists` are out of scope.
 
 ## Golden (gate step 2, captured)
-- `tests/number/golden_number.json`: 60 cases derived from the Python oracle
+- `tests/number/golden_number.json`: 59 cases derived from the Python oracle
   (intword power boundaries, intcomma grouping incl. negative/ndigits, ordinal
   teens 11/12/13 + 21/22/23, apnumber <10 / >=10, fractional, scientific incl.
   precision variants). `tests/test_humanize_number_contract.py` re-derives to keep
