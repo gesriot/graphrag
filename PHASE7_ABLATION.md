@@ -229,23 +229,64 @@ uv run python scripts/ablation.py eval --kit /tmp/ablation/sqlparse/arm_graph \
   --contract-test examples/sqlparse_rust/tests/split_contract.rs --crate-name sqlparse_rust
 ```
 
+## v2 result (humanize number slice, N=3 per arm)
+
+Target `humanize.number` (default locale), 6 formatters, 59-case hidden golden
+from the Python oracle. Pre-registered in `PHASE7_HUMANIZE_V2_PREREG.md`; run only
+after the adequacy gate was clean (closure 24, 19/19 must-reach, 0 must-exclude
+leaked) and a manual dry-prep audit. The mini-gate itself was a real result: it
+surfaced two *tractable* closure boundaries, fixed as **general resolver wins** —
+aliased-import resolution (`_`/`P_`/`NS_` -> `i18n:_gettext`/`_pgettext`/
+`_ngettext_noop`) and data->reference edges (`human_powers` -> `i18n:_ngettext_noop`,
+`_SUPERSCRIPT_TRANS` -> `_SUPERSCRIPT_MAP`). All fixes kept every existing graph
+audit at pass 1.0 and the full suite green (442 passed, 4 xfailed).
+
+| arm | scores | median | build attempts | tool-uses | wall (s) |
+|---|---|---|---|---|---|
+| **arm_graph** (24 closure packs) | 59, 58, 59 | **59/59** | 2,1,1 | 22–30 (med 25) | 163–235 (med 177) |
+| **arm_raw** (whole 6-module package) | 58, 58, 59 | **58/59** | 1,1,1 | 13–20 (med 19) | 148–227 (med 187) |
+
+### Reading the result (straight)
+
+- **Near-parity, no capability gap.** Both arms reproduce the slice at very high
+  fidelity (graph median 59/59, raw median 58/59). The graph does not win on
+  pass-rate here.
+- **The one recurring miss is a shared f64 edge, not a graph-vs-raw signal.**
+  `intword(1e100)` ("1.0 googol") failed in 3 of 6 runs (graph_2, raw_1, raw_2)
+  and passed in the other 3, across *both* arms: the frozen `f64` value type cannot
+  hold Python's bignum `10**100`, so the googol threshold is stochastic. It affects
+  both arms equally.
+- **No efficiency win either — honestly, the opposite.** Raw used slightly *fewer*
+  tools (median 19 vs 25). Every raw agent reported the slice was "well-contained"
+  (`number.py` + `i18n.py`, obvious among only 6 modules), so the raw-assembly
+  burden was low and the graph's focus advantage (seen in v1's 21-module
+  `sqlparse`) did not manifest. **humanize's number slice is a weak capability
+  discriminator** — easy enough for raw that the graph adds no measurable edge.
+
+### Honest conclusion across v1 / jsonpatch / v2
+
+The capability claim — that the deterministic graph lets a cold agent succeed
+where raw-source assembly is genuinely costly — remains **undemonstrated**:
+- v1 (`sqlparse.split`, familiar, 21 modules): efficiency signal only.
+- `jsonpatch`: documented dynamic-dispatch boundary (call graph under-captures).
+- v2 (`humanize.number`, fresh, but ~2 relevant modules): near-parity, no
+  advantage, because raw assembly was easy.
+
+What *is* solidly demonstrated: the adequacy-gated methodology is sound and drove
+real, general resolver/packer improvements (data-dependency packing from
+`sqlparse`; aliased-import + data-reference edges from `humanize`; closure-scoped,
+leak-audited graph-arm material). The missing ingredient for a capability win is a
+target that is simultaneously (a) genuinely high raw-assembly cost — a slice buried
+across many interdependent modules, not one obvious file — and (b) statically
+structured enough to be adequacy-clean (not a jsonpatch-style dynamic boundary).
+
 ## Next
 
-1. **Done:** corrected-protocol existing-benchmark ablation (above) — efficiency
-   win, no capability win on a familiar target.
-2. **Done:** `jsonpatch` mini-gate as the first fresh v2 candidate. It produced a
-   useful boundary finding instead of a fair capability target: after adding the
-   tractable resolver edges (same-file ctor/factory classmethod typing and
-   property reads), the closure still stalls at higher-order/dynamic-dispatch
-   links (`map(self._get_operation)`, registry `cls()`, polymorphic
-   `operation.apply`). Recorded in `examples/jsonpatch/PROVENANCE.md`.
-3. **Pre-registered:** the next v2 target is `humanize`'s number-formatting
-   slice (`PHASE7_HUMANIZE_V2_PREREG.md`), to be run on a fresh weekly budget:
-   vendor/license → golden → graph/audit → adequacy gate → N=3 only if adequate.
-4. Optional packer follow-up: also pull conditionally wired pipeline elements
-   (e.g. `StripTrailingSemicolonFilter`) into the closure, which would likely
-   close the residual graph gap on the two `strip_semicolon` cases.
-5. **v2 (the real capability test):** a fresh, larger, less-familiar multi-file
-   target with no strong model prior, same N=3 protocol and metrics. This is where
-   the graph's "find and assemble the right slice" value should — or should not —
-   show up as a pass-rate gap, not just efficiency.
+1. **v3 target selection (the crux):** high raw-assembly cost + statically
+   structured + weak model prior. Candidate shape: one bounded entry point of a
+   medium library whose implementation is spread across many small interdependent
+   modules, so raw must locate/assemble while the graph closure hands over exactly
+   the slice.
+2. Optional: widen the golden value type beyond `f64` (int/float/bignum) for a
+   future numeric target — the cause of the shared `intword(1e100)` miss, not a
+   porting failure.

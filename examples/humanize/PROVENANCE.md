@@ -72,4 +72,12 @@ Re-measured: **adequacy clean** — closure size 24, all 19 must-reach present, 
 must-exclude leaked; `byog_humanize` audit pass_rate 1.0 (calls 56->80 are
 previously-dropped aliased/imported calls that now resolve), full suite green.
 Both fixes are general wins (any data-heavy Python graph, e.g. charset-normalizer).
-N=3 is now unblocked, pending the dry-prep manual audit of graph-arm material.
+
+### N=3 outcome (see PHASE7_ABLATION.md for the full table)
+Ran N=3 per arm after a clean dry-prep audit. Result: **near-parity, no capability
+gap** — arm_graph median 59/59, arm_raw median 58/59; the only recurring miss is
+the shared f64 `intword(1e100)` googol edge. Raw agents found the slice
+"well-contained" (`number.py`+`i18n.py` among 6 modules), so raw-assembly was easy
+and the graph showed no advantage. humanize's number slice is a weak capability
+discriminator; the capability claim remains undemonstrated (needs a target with
+high raw-assembly cost that is still adequacy-clean).
