@@ -206,7 +206,8 @@ scoped Rust port:
   Git like other BYOG snapshots, but can be kept locally to rerun `context_pack`
   and graph queries without reindexing.
 - The scoped port currently passes its handoff gates (`check_port.sh`; 81 Rust
-  tests; full examples pytest expected `440 passed, 4 xfailed`).
+  tests; full examples pytest expected `442 passed, 4 xfailed` after adding
+  humanize-v2's Python contract tests).
 
 This strengthens confidence that the `uses_data` / `data_dependencies` fix is
 useful beyond `sqlparse`, while leaving the actual graph-vs-raw capability claim
