@@ -12,3 +12,5 @@ examples/humanize/i18n.py whitespace=-blank-at-eof,-trailing-space
 examples/humanize/filesize.py whitespace=-blank-at-eof,-trailing-space
 examples/humanize/time.py whitespace=-blank-at-eof,-trailing-space
 examples/humanize/lists.py whitespace=-blank-at-eof,-trailing-space
+examples/isodate/LICENSE whitespace=-blank-at-eof,-trailing-space
+examples/isodate/*.py whitespace=-blank-at-eof,-trailing-space
