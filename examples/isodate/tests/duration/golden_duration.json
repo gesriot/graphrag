@@ -1,0 +1,220 @@
+{
+  "cases": [
+    {
+      "input": "P2W",
+      "kind": "timedelta",
+      "years": 0.0,
+      "months": 0.0,
+      "days": 14,
+      "seconds": 0,
+      "microseconds": 0,
+      "total_seconds": 1209600.0
+    },
+    {
+      "input": "PT1H30M",
+      "kind": "timedelta",
+      "years": 0.0,
+      "months": 0.0,
+      "days": 0,
+      "seconds": 5400,
+      "microseconds": 0,
+      "total_seconds": 5400.0
+    },
+    {
+      "input": "P4D",
+      "kind": "timedelta",
+      "years": 0.0,
+      "months": 0.0,
+      "days": 4,
+      "seconds": 0,
+      "microseconds": 0,
+      "total_seconds": 345600.0
+    },
+    {
+      "input": "P4DT12H30M5S",
+      "kind": "timedelta",
+      "years": 0.0,
+      "months": 0.0,
+      "days": 4,
+      "seconds": 45005,
+      "microseconds": 0,
+      "total_seconds": 390605.0
+    },
+    {
+      "input": "PT0.5S",
+      "kind": "timedelta",
+      "years": 0.0,
+      "months": 0.0,
+      "days": 0,
+      "seconds": 0,
+      "microseconds": 500000,
+      "total_seconds": 0.5
+    },
+    {
+      "input": "PT0,5S",
+      "kind": "timedelta",
+      "years": 0.0,
+      "months": 0.0,
+      "days": 0,
+      "seconds": 0,
+      "microseconds": 500000,
+      "total_seconds": 0.5
+    },
+    {
+      "input": "P1Y",
+      "kind": "duration",
+      "years": 1.0,
+      "months": 0.0,
+      "days": 0,
+      "seconds": 0,
+      "microseconds": 0,
+      "total_seconds": null
+    },
+    {
+      "input": "P6M",
+      "kind": "duration",
+      "years": 0.0,
+      "months": 6.0,
+      "days": 0,
+      "seconds": 0,
+      "microseconds": 0,
+      "total_seconds": null
+    },
+    {
+      "input": "P1Y2M",
+      "kind": "duration",
+      "years": 1.0,
+      "months": 2.0,
+      "days": 0,
+      "seconds": 0,
+      "microseconds": 0,
+      "total_seconds": null
+    },
+    {
+      "input": "P3Y6M4DT12H30M5S",
+      "kind": "duration",
+      "years": 3.0,
+      "months": 6.0,
+      "days": 4,
+      "seconds": 45005,
+      "microseconds": 0,
+      "total_seconds": null
+    },
+    {
+      "input": "P0.5Y",
+      "kind": "duration",
+      "years": 0.5,
+      "months": 0.0,
+      "days": 0,
+      "seconds": 0,
+      "microseconds": 0,
+      "total_seconds": null
+    },
+    {
+      "input": "-P1Y",
+      "kind": "duration",
+      "years": -1.0,
+      "months": 0.0,
+      "days": 0,
+      "seconds": 0,
+      "microseconds": 0,
+      "total_seconds": null
+    },
+    {
+      "input": "-PT1H",
+      "kind": "timedelta",
+      "years": 0.0,
+      "months": 0.0,
+      "days": -1,
+      "seconds": 82800,
+      "microseconds": 0,
+      "total_seconds": -3600.0
+    },
+    {
+      "input": "-P1DT1H",
+      "kind": "timedelta",
+      "years": 0.0,
+      "months": 0.0,
+      "days": -2,
+      "seconds": 82800,
+      "microseconds": 0,
+      "total_seconds": -90000.0
+    },
+    {
+      "input": "-P3Y6M4DT12H30M5S",
+      "kind": "duration",
+      "years": -3.0,
+      "months": -6.0,
+      "days": -5,
+      "seconds": 41395,
+      "microseconds": 0,
+      "total_seconds": null
+    },
+    {
+      "input": "P0003-06-04T12:30:05",
+      "kind": "duration",
+      "years": 3.0,
+      "months": 6.0,
+      "days": 4,
+      "seconds": 45005,
+      "microseconds": 0,
+      "total_seconds": null
+    },
+    {
+      "input": "PT0S",
+      "kind": "timedelta",
+      "years": 0.0,
+      "months": 0.0,
+      "days": 0,
+      "seconds": 0,
+      "microseconds": 0,
+      "total_seconds": 0.0
+    },
+    {
+      "input": "P0D",
+      "kind": "timedelta",
+      "years": 0.0,
+      "months": 0.0,
+      "days": 0,
+      "seconds": 0,
+      "microseconds": 0,
+      "total_seconds": 0.0
+    },
+    {
+      "input": "P1M",
+      "kind": "duration",
+      "years": 0.0,
+      "months": 1.0,
+      "days": 0,
+      "seconds": 0,
+      "microseconds": 0,
+      "total_seconds": null
+    },
+    {
+      "input": "P",
+      "kind": "error"
+    },
+    {
+      "input": "1Y",
+      "kind": "error"
+    },
+    {
+      "input": "PT",
+      "kind": "timedelta",
+      "years": 0.0,
+      "months": 0.0,
+      "days": 0,
+      "seconds": 0,
+      "microseconds": 0,
+      "total_seconds": 0.0
+    },
+    {
+      "input": "banana",
+      "kind": "error"
+    },
+    {
+      "input": "",
+      "kind": "error"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "roots": ["isoduration:parse_duration", "isoduration:duration_isoformat"],
+  "must_reach": [
+    "isoduration:parse_duration",
+    "isoduration:duration_isoformat",
+    "isoduration:ISO8601_PERIOD_REGEX",
+    "isodatetime:parse_datetime",
+    "isodates:parse_date",
+    "isodates:DATE_REGEX_CACHE",
+    "isodates:build_date_regexps",
+    "isotime:parse_time",
+    "isotime:TIME_REGEX_CACHE",
+    "isotime:build_time_regexps",
+    "isoerror:ISO8601Error",
+    "isostrf:strftime",
+    "isostrf:_strfduration",
+    "duration:Duration",
+    "duration:Duration.__init__",
+    "duration:Duration.__sub__"
+  ],
+  "must_exclude": [
+    "duration:Duration.__mul__",
+    "isodates:date_isoformat",
+    "isodatetime:datetime_isoformat",
+    "version:version"
+  ]
+}

@@ -1222,6 +1222,82 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
             }
         )
 
+    # Constructor -> __init__ and operator -> dunder edges for same-file classes.
+    # `Cls(...)` invokes `Cls.__init__`, and `Cls(...) - x` / `-Cls(...)` invokes
+    # `Cls.__sub__` / `Cls.__neg__`. The closure otherwise reaches only the class
+    # entity (pack-excluded as a broad span), so a porter never sees the fields or
+    # operator semantics it needs. These are precise member edges, not a class pack.
+    _binop_dunder = {
+        ast.Add: "__add__", ast.Sub: "__sub__", ast.Mult: "__mul__",
+        ast.Div: "__truediv__", ast.FloorDiv: "__floordiv__", ast.Mod: "__mod__",
+        ast.Pow: "__pow__",
+    }
+    _unaryop_dunder = {ast.USub: "__neg__", ast.UAdd: "__pos__"}
+
+    def _class_member_hint(cls_name: str, member: str) -> str | None:
+        """Resolve `Cls.member` to an entity title for a same-file OR imported
+        class. Same-file is verified against class_methods; an imported class is
+        resolved optimistically via import_map (the bridge drops the edge if the
+        target entity does not exist, so no dangling)."""
+        if cls_name in local_classes:
+            if member in class_methods.get(cls_name, set()):
+                return f"{Path(path).stem}:{cls_name}.{member}"
+            return None
+        if cls_name in import_map:
+            orig = import_orig.get(cls_name, cls_name)
+            return f"{module_title(import_map[cls_name])}:{orig}.{member}"
+        return None
+
+    def _emit_member_edge(node: ast.AST, cls_name: str, member: str, tag: str) -> None:
+        hint = _class_member_hint(cls_name, member)
+        if hint is None:
+            return
+        caller = enclosing_function_name(node)
+        if caller == "unknown":
+            return
+        caller_kind = "method" if caller in class_for_method else "fn"
+        relationships.append(
+            {
+                "id": f"rel:call:{caller}:{cls_name}.{member}:{tag}:{getattr(node,'lineno',0)}:{getattr(node,'col_offset',0)}",
+                "source": make_id(caller_kind, caller, str(path)),
+                "target": hint,
+                "type": "calls",
+                "description": f"{caller} uses {cls_name}.{member} ({tag})",
+                "weight": 0.8,
+                "text_unit_ids": [f"tu:file:{path.name}"],
+                "human_readable_id": len(relationships) + 1,
+                "source_file": str(path),
+                "span": f"{getattr(node,'lineno',0)}:{getattr(node,'col_offset',0)}",
+                "extractor": "tree-sitter-python+ast",
+                "confidence": 0.8,
+                "is_deterministic": True,
+                "resolved_target_hint": hint,
+            }
+        )
+
+    def _ctor_class(expr: ast.AST) -> str | None:
+        if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Name):
+            name = expr.func.id
+            return name if (name in local_classes or name in import_map) else None
+        return None
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id in local_classes or node.func.id in import_map:
+                _emit_member_edge(node, node.func.id, "__init__", "ctor")
+        elif isinstance(node, ast.BinOp):
+            dunder = _binop_dunder.get(type(node.op))
+            if dunder:
+                cls = _ctor_class(node.left)
+                if cls:
+                    _emit_member_edge(node, cls, dunder, "binop")
+        elif isinstance(node, ast.UnaryOp):
+            dunder = _unaryop_dunder.get(type(node.op))
+            if dunder:
+                cls = _ctor_class(node.operand)
+                if cls:
+                    _emit_member_edge(node, cls, dunder, "unaryop")
+
 
 def _try_jedi_adapter(source: bytes, path: Path) -> List[Dict[str, Any]]:
     """Optional future adapter for Jedi-backed reference resolution.
