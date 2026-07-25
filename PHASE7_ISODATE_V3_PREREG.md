@@ -132,6 +132,24 @@ result is retrofitted; the frozen decisions above are unchanged.
    normalization invariant is now stated in the API spec, given identically to
    both arms, exactly as the strip contract was after v1.
 
+## Agent family (recorded 2026-07-25, before any run)
+v1/v2 arms were filled by cold Claude sub-agents. **v3's six arms are filled by
+OpenAI GPT-5.6 instead.** Recorded here before the runs so it cannot be read as a
+post-hoc explanation of whatever v3 shows.
+
+- **The within-v3 comparison is unaffected.** Both arms use the same model, so
+  graph-vs-raw remains the only manipulated variable — the pre-registration never
+  fixed a model family, only N, batching, hidden golden and infra-only
+  invalidation.
+- **Upside:** if the graph advantage appears under a different model family, the
+  "shown for one model only" objection to v1/v2 goes away.
+- **Cost, stated plainly:** cross-version comparability weakens. v3's tool-use and
+  wall numbers come from a different harness and are **not** comparable to v1/v2's;
+  they may only be compared *between v3's own arms*. Scores remain comparable in
+  kind (same golden, same scorer) but not in agent prior.
+- **Binding condition:** all six runs use the same model. A split (graph on one
+  model, raw on another) destroys the experiment and voids the result.
+
 ## Reproduce (pinned — use these exact commands for all six runs)
 `fancy-regex` is pinned to `0.13` (the version the earlier `sqlparse` arms were
 given) so the pre-provided-dependency variable is identical across v1 and v3.
@@ -154,6 +172,12 @@ uv run python scripts/ablation.py eval --kit /tmp/ablation/isodate/arm_graph \
 `eval` reports `cases_passed`/`cases_total` per run (the `X/24` the result table
 needs) plus the failing case ids. A case whose port panics costs one case and is
 reported as `"<input> (panic)"`, never the whole score.
+
+Each of the six runs gets its **own pristine kit pair** (`prep` run three times
+into `run1/`–`run3/`; the pairs are byte-identical, verified). After each fill,
+`verify-fill --kit K --prep-out D` archives the isolation evidence next to the
+run artifact, and `eval --record` stores the score; `report --runs D` renders the
+final table.
 
 ## Backup
 `packaging.SpecifierSet.contains` (20 modules, static, high spread) — strong, but
