@@ -19,6 +19,7 @@ Subcommands:
   adequacy --graph G --spec S
   prep  --target T --graph G --source F... --symbol S... --dep D... --api A --out DIR
   audit --out DIR --graph G --spec S
+  verify-fill --kit DIR --prep-out DIR
   eval  --kit DIR --golden-dir D --contract-test F --crate-name N
         [--record DIR --arm A --run N --target T]
         [--self-build-attempts N --self-tool-uses N --self-wall-s S]
@@ -26,6 +27,7 @@ Subcommands:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -308,6 +310,19 @@ def prep(
     kg = write_kit("arm_graph", graph_material)
     kr = write_kit("arm_raw", raw_material)
     leaks = _scan_kit_leaks(kg) + _scan_kit_leaks(kr)
+    # File-hash snapshot lives *next to* the kits, never inside them: kit contents
+    # are the experimental material, and a stray file would change what the agent
+    # sees and break audit's packed==closure / leak checks.
+    kit_file_manifest = {
+        "target": target,
+        "arms": {
+            "arm_graph": {"files": _kit_file_hashes(kg)},
+            "arm_raw": {"files": _kit_file_hashes(kr)},
+        },
+    }
+    (out / "kit_file_manifest.json").write_text(
+        json.dumps(kit_file_manifest, indent=2) + "\n"
+    )
     manifest = {
         "target": target,
         "arm_graph": str(kg),
@@ -319,11 +334,52 @@ def prep(
         "deps": list(dep),
         "sources": [str(s) for s in source],
         "leaks": leaks,
+        "kit_file_manifest": str(out / "kit_file_manifest.json"),
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2))
     print(json.dumps(manifest, indent=2))
     if leaks:
         raise SystemExit("LEAK: golden/reference found in a kit")
+
+
+# Directories created by cargo / tooling after fill — not isolation signal.
+_VERIFY_SKIP_DIR_NAMES = frozenset({"target", ".git", "__pycache__", ".cargo"})
+# Build output, not agent-authored content: `cargo build` writes Cargo.lock on
+# every run, so counting it would make `only_src_touched` false for every honest
+# fill and bury the signal it exists to carry. A dependency change would still
+# show up as a modified Cargo.toml.
+_VERIFY_SKIP_FILE_NAMES = frozenset({"Cargo.lock"})
+# Substantial-line threshold for foreign-material matching (short tokens collide).
+_FOREIGN_MIN_LINE_LEN = 40
+_KIT_FILE_MANIFEST_NAME = "kit_file_manifest.json"
+
+
+def _file_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _iter_kit_files(kit: Path, *, skip_tooling: bool = False):
+    """Yield regular files under kit; optionally skip cargo/tooling dirs."""
+    for p in kit.rglob("*"):
+        if not p.is_file():
+            continue
+        rel_path = p.relative_to(kit)
+        if skip_tooling and (
+            any(part in _VERIFY_SKIP_DIR_NAMES for part in rel_path.parts)
+            or rel_path.name in _VERIFY_SKIP_FILE_NAMES
+        ):
+            continue
+        # Relative path uses forward slashes for stable manifest keys.
+        yield rel_path.as_posix(), p
+
+
+def _kit_file_hashes(kit: Path) -> dict[str, str]:
+    """Map kit-relative path -> sha256 hex for every file in the kit."""
+    return {rel: _file_sha256(p) for rel, p in sorted(_iter_kit_files(kit))}
 
 
 def _scan_kit_leaks(kit: Path) -> list[str]:
@@ -529,6 +585,350 @@ def audit(
     print(json.dumps(report, indent=2))
     if not overall:
         raise SystemExit(1)
+
+
+def _infer_arm_name(kit: Path) -> str:
+    name = kit.resolve().name
+    if name in ("arm_graph", "arm_raw"):
+        return name
+    raise SystemExit(
+        f"verify-fill: cannot infer arm from kit dirname {name!r}; "
+        "expected arm_graph or arm_raw (or pass --arm)"
+    )
+
+
+def _collect_source_files(sources: list[str | Path]) -> list[Path]:
+    """Expand prep --source entries to concrete source files (tests excluded)."""
+    files: list[Path] = []
+    for s in sources:
+        p = Path(s)
+        if not p.is_absolute():
+            cand = Path(s)
+            p = cand.resolve() if cand.exists() else (ROOT / s).resolve()
+        else:
+            p = p.resolve()
+        if p.is_dir():
+            for f in sorted(p.rglob("*")):
+                if not f.is_file():
+                    continue
+                rel_parts = f.relative_to(p).parts
+                if any(part in ("tests", "target", "__pycache__", ".git") for part in rel_parts):
+                    continue
+                if f.name == "PROVENANCE.md" or f.suffix == ".pyc":
+                    continue
+                files.append(f)
+        elif p.is_file():
+            files.append(p)
+    return files
+
+
+def _substantial_lines(text: str, min_len: int = _FOREIGN_MIN_LINE_LEN) -> list[tuple[int, str]]:
+    """(1-based line no, stripped text) for lines long enough to match usefully."""
+    out: list[tuple[int, str]] = []
+    for i, line in enumerate(text.splitlines(), 1):
+        s = line.strip()
+        if len(s) >= min_len:
+            out.append((i, s))
+    return out
+
+
+def _read_text_or_none(path: Path) -> str | None:
+    try:
+        return path.read_text()
+    except (UnicodeDecodeError, OSError):
+        return None
+
+
+def _display_path(path: Path) -> str:
+    """Prefer repo-relative paths in reports when the file lives under ROOT."""
+    try:
+        return path.resolve().relative_to(ROOT).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _json_embedded_lines(text: str, min_len: int) -> list[str]:
+    """Substantial lines carried *inside* JSON string values.
+
+    Context packs store source snippets as JSON strings with escaped newlines, so
+    the snippet's own lines never appear as lines of the pack file. Without
+    decoding them, source the graph arm genuinely *was* given reads as material it
+    was never given — a false accusation, which is worse here than a missed flag.
+    """
+    try:
+        doc = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+    out: list[str] = []
+    stack = [doc]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, str):
+            out.extend(s for _, s in _substantial_lines(node, min_len=min_len))
+        elif isinstance(node, dict):
+            stack.extend(node.values())
+        elif isinstance(node, list):
+            stack.extend(node)
+    return out
+
+
+def _given_material_lines(
+    kit: Path, original_hashes: dict[str, str], min_len: int = _FOREIGN_MIN_LINE_LEN
+) -> set[str]:
+    """Substantial lines from kit files that still match the prep-time hash.
+
+    These are the material the arm was given and has not altered — matching them
+    in agent output is not evidence of reading outside the kit.
+    """
+    lines: set[str] = set()
+    for rel, expected in original_hashes.items():
+        path = kit / rel
+        if not path.is_file():
+            continue
+        if _file_sha256(path) != expected:
+            continue
+        text = _read_text_or_none(path)
+        if text is None:
+            continue
+        for _, s in _substantial_lines(text, min_len=min_len):
+            lines.add(s)
+        if path.suffix == ".json":
+            lines.update(_json_embedded_lines(text, min_len=min_len))
+    return lines
+
+
+def _closure_source_basenames(kit: Path) -> set[str]:
+    """Basenames of source files referenced by still-present context packs."""
+    names: set[str] = set()
+    ctx = kit / "context"
+    if not ctx.is_dir():
+        return names
+    for pack_path in ctx.glob("pack_*.json"):
+        text = _read_text_or_none(pack_path)
+        if text is None:
+            continue
+        try:
+            pack = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        for key in ("entity", "provenance"):
+            block = pack.get(key)
+            if isinstance(block, dict):
+                sf = block.get("source_file")
+                if sf:
+                    names.add(Path(str(sf)).name)
+        for tu in pack.get("text_units") or []:
+            if isinstance(tu, dict) and tu.get("source_file"):
+                names.add(Path(str(tu["source_file"])).name)
+        for dep in pack.get("data_dependencies") or []:
+            if isinstance(dep, dict) and dep.get("source_file"):
+                names.add(Path(str(dep["source_file"])).name)
+    return names
+
+
+@app.command("verify-fill")
+def verify_fill(
+    kit: Path = typer.Option(..., "--kit", help="filled kit directory (arm_graph or arm_raw)"),
+    prep_out: Path = typer.Option(
+        ..., "--prep-out", help="prep --out directory holding kit_file_manifest.json + manifest.json"
+    ),
+    arm: str | None = typer.Option(
+        None, "--arm", help="arm_graph|arm_raw (default: infer from kit dirname)"
+    ),
+    min_line_len: int = typer.Option(
+        _FOREIGN_MIN_LINE_LEN,
+        "--min-line-len",
+        help="minimum stripped line length for foreign-material matching",
+    ),
+):
+    """Compare a filled kit to the prep-time file-hash manifest + foreign-material scan.
+
+    Reports evidence only (added/modified/deleted files, writes outside src/,
+    verbatim source lines the arm was never given). A match is a flag for human
+    review — not proof of a protocol breach. Cannot prove an agent never read
+    outside its kit; only the artifacts of doing so are detectable.
+    """
+    kit = kit.resolve()
+    prep_out = prep_out.resolve()
+    if not kit.is_dir():
+        raise SystemExit(f"verify-fill: kit is not a directory: {kit}")
+    arm_name = arm or _infer_arm_name(kit)
+
+    hash_path = prep_out / _KIT_FILE_MANIFEST_NAME
+    if not hash_path.is_file():
+        raise SystemExit(f"verify-fill: missing {hash_path} (re-run prep)")
+    try:
+        hash_doc = json.loads(hash_path.read_text())
+    except json.JSONDecodeError as e:
+        raise SystemExit(f"verify-fill: bad kit_file_manifest: {e}") from e
+    arm_block = (hash_doc.get("arms") or {}).get(arm_name)
+    if not isinstance(arm_block, dict) or "files" not in arm_block:
+        raise SystemExit(f"verify-fill: no file hashes for arm {arm_name!r} in {hash_path}")
+    original_hashes: dict[str, str] = {str(k): str(v) for k, v in arm_block["files"].items()}
+
+    prep_manifest_path = prep_out / "manifest.json"
+    sources: list[str] = []
+    if prep_manifest_path.is_file():
+        try:
+            prep_manifest = json.loads(prep_manifest_path.read_text())
+            sources = list(prep_manifest.get("sources") or [])
+        except json.JSONDecodeError:
+            prep_manifest = {}
+    else:
+        prep_manifest = {}
+
+    # --- file inventory diff (skip cargo tooling noise) ---
+    current: dict[str, str] = {}
+    for rel, p in _iter_kit_files(kit, skip_tooling=True):
+        current[rel] = _file_sha256(p)
+
+    original_set = set(original_hashes)
+    current_set = set(current)
+    added = sorted(current_set - original_set)
+    deleted = sorted(original_set - current_set)
+    modified = sorted(
+        rel for rel in (original_set & current_set) if current[rel] != original_hashes[rel]
+    )
+
+    # Writes outside src/ among added+modified (prompt: implement in src/).
+    outside_src = sorted(
+        rel for rel in (added + modified) if not rel.startswith("src/")
+    )
+
+    # --- foreign material: agent-written text vs raw package / out-of-closure ---
+    given_lines = _given_material_lines(kit, original_hashes, min_len=min_line_len)
+    agent_files: list[tuple[str, str]] = []
+    for rel in added + modified:
+        text = _read_text_or_none(kit / rel)
+        if text is not None:
+            agent_files.append((rel, text))
+
+    # Index agent-written substantial lines -> list of (file, line_no)
+    agent_index: dict[str, list[dict]] = {}
+    for rel, text in agent_files:
+        for lineno, s in _substantial_lines(text, min_len=min_line_len):
+            agent_index.setdefault(s, []).append({"file": rel, "line": lineno})
+
+    foreign_flags: list[dict] = []
+    source_files = _collect_source_files(sources) if sources else []
+
+    # arm_graph: verbatim raw-package lines not already in given material.
+    # arm_raw was given the raw package, so that check does not apply.
+    if arm_name == "arm_graph" and source_files and agent_index:
+        for src in source_files:
+            text = _read_text_or_none(src)
+            if text is None:
+                continue
+            for src_line, s in _substantial_lines(text, min_len=min_line_len):
+                if s in given_lines:
+                    continue
+                hits = agent_index.get(s)
+                if not hits:
+                    continue
+                for hit in hits:
+                    foreign_flags.append({
+                        "kind": "raw_package_line_not_in_given_material",
+                        "filled_file": hit["file"],
+                        "filled_line": hit["line"],
+                        "source_file": _display_path(src),
+                        "source_line": src_line,
+                        "text": s[:240],
+                        "note": (
+                            "Verbatim line from the raw package appears in agent-written "
+                            "kit content but not in unchanged given material. Flag for "
+                            "review — not proof of a protocol breach "
+                            "(training prior / coincidence possible)."
+                        ),
+                    })
+
+    # Lines unique to source files outside the graph-arm closure (basename set
+    # from packs). Only meaningful for arm_graph.
+    if arm_name == "arm_graph" and source_files and agent_index:
+        closure_basenames = _closure_source_basenames(kit)
+        # Partition source files by whether their basename is in the pack set.
+        in_closure_lines: set[str] = set()
+        out_closure: list[tuple[Path, list[tuple[int, str]]]] = []
+        for src in source_files:
+            text = _read_text_or_none(src)
+            if text is None:
+                continue
+            lines = _substantial_lines(text, min_len=min_line_len)
+            if src.name in closure_basenames:
+                for _, s in lines:
+                    in_closure_lines.add(s)
+            else:
+                out_closure.append((src, lines))
+        for src, lines in out_closure:
+            for src_line, s in lines:
+                if s in in_closure_lines or s in given_lines:
+                    continue
+                hits = agent_index.get(s)
+                if not hits:
+                    continue
+                for hit in hits:
+                    foreign_flags.append({
+                        "kind": "out_of_closure_unique_line",
+                        "filled_file": hit["file"],
+                        "filled_line": hit["line"],
+                        "source_file": _display_path(src),
+                        "source_line": src_line,
+                        "text": s[:240],
+                        "note": (
+                            "Line unique to a source file outside this arm's packed "
+                            "closure appears in agent-written content. Flag for review "
+                            "— not proof of a protocol breach."
+                        ),
+                    })
+
+    # Cap huge dumps so the report stays pasteable; full counts still reported.
+    max_flags = 50
+    flags_truncated = len(foreign_flags) > max_flags
+    foreign_out = foreign_flags[:max_flags]
+
+    result = {
+        "kit": str(kit),
+        "prep_out": str(prep_out),
+        "arm": arm_name,
+        "target": hash_doc.get("target") or prep_manifest.get("target"),
+        "disclaimer": (
+            "Evidence only — not a verdict. This check cannot prove an agent never "
+            "read outside its kit; it only surfaces file changes and content that "
+            "matches material the arm was never given. Matches are flags for human "
+            "review, not proof of a protocol breach."
+        ),
+        "file_diff": {
+            "added": added,
+            "modified": modified,
+            "deleted": deleted,
+            "n_added": len(added),
+            "n_modified": len(modified),
+            "n_deleted": len(deleted),
+        },
+        "writes_outside_src": {
+            "paths": outside_src,
+            "n": len(outside_src),
+            "note": (
+                "Prompt asks the agent to implement in src/lib.rs (+ modules). "
+                "Paths here are worth surfacing; cargo.lock / extra docs are common "
+                "and not by themselves a protocol breach."
+            ),
+        },
+        "foreign_material": {
+            "min_line_len": min_line_len,
+            "n_flags": len(foreign_flags),
+            "flags_truncated": flags_truncated,
+            "flags": foreign_out,
+        },
+        "summary": {
+            "only_src_touched": (
+                not deleted
+                and not outside_src
+                and all(rel.startswith("src/") for rel in (added + modified))
+            ),
+            "n_foreign_flags": len(foreign_flags),
+        },
+    }
+    print(json.dumps(result, indent=2))
 
 
 def _eval_kit(
