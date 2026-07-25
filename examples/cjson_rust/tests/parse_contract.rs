@@ -68,8 +68,9 @@ fn cjson_contract_all_cases() {
             total += 1;
         }
     }
+    // 22 ownership-slice cases + bounded float-printing fidelity corpus.
     assert!(
-        total >= 22,
-        "expected >= 22 cjson golden cases, got {total}"
+        total >= 50,
+        "expected >= 50 cjson golden cases (ownership + float print), got {total}"
     );
 }

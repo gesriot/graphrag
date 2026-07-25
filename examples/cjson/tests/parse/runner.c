@@ -15,7 +15,8 @@
  *
  * Number fidelity note: the inspect descriptor emits each number as its integer
  * value plus the raw IEEE-754 bits of valuedouble, so parse fidelity is checked
- * exactly without depending on float *printing* (deferred to a later sub-stage).
+ * independently of print. Non-integer *printing* (`%1.15g`/`%1.17g`) is covered
+ * by the separate `golden_float_print.json` corpus (same runner modes).
  *
  * Build: cc -I <cjson dir> -o runner runner.c cJSON.c
  */

@@ -12,9 +12,9 @@
 //!   sibling list does not recurse) while each node's `child` drops recursively.
 //!
 //! Scope: parse + the public getter API + unformatted/formatted printing over a
-//! bounded corpus (objects/arrays/strings/escapes/integers/bool/null/nesting).
-//! Number *printing* fidelity for non-integers (the `%g` paths) is a deferred
-//! sub-stage; the corpus uses integers, which take cJSON's exact `%d` path.
+//! bounded corpus (objects/arrays/strings/escapes/integers/bool/null/nesting)
+//! plus a float-printing fidelity suite matching cJSON's `%1.15g`/`%1.17g`
+//! number printer (see `print_number` and `golden_float_print.json`).
 
 // jsmn-style bit-flag type tags (cJSON.h).
 pub const CJSON_INVALID: i32 = 0;
@@ -520,18 +520,104 @@ pub fn parse(input: &[u8]) -> Option<Box<CJson>> {
 
 /* ---------- print ---------- */
 
+/// Relative comparison matching cJSON's `compare_double` (used to decide the
+/// `%1.15g` → `%1.17g` fallback).
+fn compare_double(a: f64, b: f64) -> bool {
+    let max_val = a.abs().max(b.abs());
+    (a - b).abs() <= max_val * f64::EPSILON
+}
+
+/// Format `d` with libc `snprintf` using a C printf conversion (`%1.15g` or
+/// `%1.17g`). Returns the number of bytes written into `buf` (excluding NUL),
+/// or `None` if snprintf failed / truncated past the cJSON 26-byte temp buffer.
+///
+/// Why libc rather than `format!("{d}")` or a pure-Rust dtoa: cJSON's oracle is
+/// the platform C library's printf. Rust's `Display` for `f64` is a different
+/// algorithm and produces different bytes (e.g. pi, 1/3, min-normal). Calling
+/// the same snprintf the C code calls is the faithful match, not a divergence.
+fn c_sprintf_g(d: f64, precision: u8, buf: &mut [u8; 26]) -> Option<usize> {
+    use std::os::raw::{c_char, c_double, c_int};
+
+    extern "C" {
+        fn snprintf(s: *mut c_char, n: usize, format: *const c_char, ...) -> c_int;
+    }
+
+    // Formats are compile-time constants with a trailing NUL for C.
+    let fmt: &[u8] = match precision {
+        15 => b"%1.15g\0",
+        17 => b"%1.17g\0",
+        _ => return None,
+    };
+    // Zero the buffer so a failed write cannot leave stale non-NUL bytes.
+    *buf = [0u8; 26];
+    let n = unsafe {
+        snprintf(
+            buf.as_mut_ptr() as *mut c_char,
+            buf.len(),
+            fmt.as_ptr() as *const c_char,
+            d as c_double,
+        )
+    };
+    if n < 0 || (n as usize) > buf.len() - 1 {
+        return None;
+    }
+    Some(n as usize)
+}
+
+/// Re-parse a C-printed number buffer with libc `sscanf("%lg")`, matching
+/// cJSON's recovery check before it decides to fall back to 17 digits.
+fn c_sscanf_lg(buf: &[u8]) -> Option<f64> {
+    use std::os::raw::{c_char, c_double, c_int};
+
+    extern "C" {
+        fn sscanf(s: *const c_char, format: *const c_char, ...) -> c_int;
+    }
+
+    // buf is a snprintf result: digits and a trailing NUL within 26 bytes.
+    let mut test: c_double = 0.0;
+    let scanned = unsafe {
+        sscanf(
+            buf.as_ptr() as *const c_char,
+            b"%lg\0".as_ptr() as *const c_char,
+            &mut test as *mut c_double,
+        )
+    };
+    if scanned != 1 {
+        return None;
+    }
+    Some(test as f64)
+}
+
 fn print_number(item: &CJson, out: &mut Vec<u8>) {
     let d = item.valuedouble;
+    // NaN / Inf → JSON null (cJSON print_number).
     if d.is_nan() || d.is_infinite() {
         out.extend_from_slice(b"null");
-    } else if d == item.valueint as f64 {
-        out.extend_from_slice(item.valueint.to_string().as_bytes());
-    } else {
-        // Non-integer doubles take cJSON's %1.15g/%1.17g path; matching its byte
-        // output is a deferred float-fidelity sub-stage. The bounded corpus is
-        // integers, so this branch is not exercised by the golden contract.
-        out.extend_from_slice(format!("{d}").as_bytes());
+        return;
     }
+    // Exact integer values take the `%d` path (incl. -0.0, since -0.0 == 0.0).
+    if d == item.valueint as f64 {
+        out.extend_from_slice(item.valueint.to_string().as_bytes());
+        return;
+    }
+
+    // Non-integer: try 15 significant digits, fall back to 17 if the original
+    // double cannot be recovered — the same two-step path as cJSON.c.
+    // 26 bytes is the buffer cJSON.c itself uses; %1.17g of a finite double never
+    // fills it. A failure here is a bug in this file, not a runtime condition --
+    // returning silently would emit a number-less, invalid JSON document.
+    let mut number_buffer = [0u8; 26];
+    let mut length = c_sprintf_g(d, 15, &mut number_buffer)
+        .expect("26-byte buffer holds %1.15g of a finite double, as in cJSON.c");
+    let recovered = c_sscanf_lg(&number_buffer).filter(|&t| compare_double(t, d));
+    if recovered.is_none() {
+        length = c_sprintf_g(d, 17, &mut number_buffer)
+            .expect("26-byte buffer holds %1.17g of a finite double, as in cJSON.c");
+    }
+
+    // cJSON replaces a locale decimal point with '.'; default build has no
+    // ENABLE_LOCALES, so snprintf already emits '.'. Copy bytes as-is.
+    out.extend_from_slice(&number_buffer[..length]);
 }
 
 fn print_string_ptr(s: Option<&[u8]>, out: &mut Vec<u8>) {

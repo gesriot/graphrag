@@ -9,13 +9,15 @@ pins, for a JSON input:
   is checked exactly without depending on float *printing*),
 - `formatted`: `cJSON_Print` output, for a few cases.
 
-Scope: bounded corpus (objects/arrays/strings/escapes/integers/bool/null/
-nesting/empty). Float-printing edge cases are deferred to a later sub-stage.
+Corpora under `tests/parse/golden_*.json`:
+- `golden_parse.json` — ownership-bearing shapes (objects/arrays/strings/integers/…).
+- `golden_float_print.json` — non-integer float-printing fidelity (`%1.15g` /
+  `%1.17g`, exponents, precision boundaries, -0.0, overflow→inf→null).
 
-This test recompiles the C runner and re-derives the contract to keep the golden
-in sync, and (when the compiler supports it) recompiles under AddressSanitizer to
-verify the parse+print+delete path is free of leaks/double-frees. Skipped if no C
-compiler is available.
+This test recompiles the C runner and re-derives every golden file to keep the
+contract in sync, and (when the compiler supports it) recompiles under
+AddressSanitizer to verify the parse+print+delete path is free of
+leaks/double-frees. Skipped if no C compiler is available.
 
 Run: uv run python -m pytest examples/cjson/tests/test_cjson_parse_contract.py -q
 """
@@ -32,7 +34,8 @@ import pytest
 HERE = Path(__file__).parent
 CJSON = HERE.parent
 PARSE_DIR = HERE / "parse"
-GOLDEN = PARSE_DIR / "golden_parse.json"
+GOLDEN_PARSE = PARSE_DIR / "golden_parse.json"
+GOLDEN_FLOAT = PARSE_DIR / "golden_float_print.json"
 
 
 def _cc():
@@ -57,15 +60,30 @@ def _run(binary: Path, mode: str, js: str) -> str:
     ).stdout.decode().rstrip("\n")
 
 
+def _all_golden_files() -> list[Path]:
+    return sorted(PARSE_DIR.glob("golden_*.json"))
+
+
+def _all_cases() -> list[dict]:
+    cases: list[dict] = []
+    for path in _all_golden_files():
+        cases.extend(json.loads(path.read_text())["cases"])
+    return cases
+
+
 def test_golden_present_and_sized():
-    cases = json.loads(GOLDEN.read_text())["cases"]
-    assert len(cases) >= 22
+    parse_cases = json.loads(GOLDEN_PARSE.read_text())["cases"]
+    assert len(parse_cases) >= 22
+    float_cases = json.loads(GOLDEN_FLOAT.read_text())["cases"]
+    assert len(float_cases) >= 20
+    # Combined floor used by the Rust contract test as well.
+    assert len(_all_cases()) >= 50
 
 
 @pytest.mark.skipif(_cc() is None, reason="no C compiler available")
 def test_cjson_golden_matches_reference():
     cc = _cc()
-    cases = json.loads(GOLDEN.read_text())["cases"]
+    cases = _all_cases()
     with tempfile.TemporaryDirectory() as td:
         binary = Path(td) / "runner"
         assert _compile(cc, binary, []), "plain runner must compile"
@@ -90,7 +108,7 @@ def test_cjson_ownership_under_asan():
     missing sanitizer never silently passes the ownership check.
     """
     cc = _cc()
-    cases = json.loads(GOLDEN.read_text())["cases"]
+    cases = _all_cases()
     with tempfile.TemporaryDirectory() as td:
         binary = Path(td) / "runner_asan"
         if not _compile(cc, binary, ["-fsanitize=address", "-g"]):

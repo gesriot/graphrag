@@ -65,11 +65,11 @@ The published graph also contains the co-located golden runner
   leak/double-free clean (skips and records if ASan is unavailable).
 
 ## Golden contract (captured before Rust)
-- Runner: `tests/parse/runner.c`; golden: `tests/parse/golden_parse.json`.
-- 22 cases over a bounded ownership-bearing corpus (objects, arrays, strings with
-  escapes, `\u` unicode → UTF-8, integers incl. zero/negative/max-int32, bool,
-  null, nesting, empty containers, top-level scalars, whitespace, duplicate keys,
-  and two parse-error inputs), each pinning three oracles:
+- Runner: `tests/parse/runner.c`; goldens under `tests/parse/golden_*.json`.
+- **Ownership slice** (`golden_parse.json`, 22 cases): objects, arrays, strings
+  with escapes, `\u` unicode → UTF-8, integers incl. zero/negative/max-int32,
+  bool, null, nesting, empty containers, top-level scalars, whitespace, duplicate
+  keys, and two parse-error inputs. Each case pins:
   - `unformatted`: `cJSON_PrintUnformatted` output (or `__PARSE_ERROR__`),
   - `inspect`: a canonical descriptor built from cJSON's public API and public
     struct fields (`Is*`, `GetArraySize`/`GetArrayItem`, object key walking via
@@ -77,10 +77,24 @@ The published graph also contains the co-located golden runner
     bits of `valuedouble`, so number-parse fidelity is checked exactly without
     depending on float *printing*,
   - `formatted`: `cJSON_Print` output, for a few cases.
-- Float-printing edge cases (NaN/inf/exponent/precision) are deferred to a later
-  sub-stage; the primary corpus uses integers so the print oracle stays well
-  defined without porting printf/double quirks.
-- ASan over the full corpus (all three modes) is leak/double-free clean.
+- **Float-printing fidelity** (`golden_float_print.json`, 30 cases): non-integer
+  doubles via the same parse→print path. Covers the `%1.15g` path, the `%1.17g`
+  round-trip fallback (e.g. π, 1/3, min-normal, DBL_EPSILON), exponent forms,
+  precision boundaries that round under 15 digits, negative zero (prints `0`),
+  very large/small magnitudes, and overflow→±inf→`null` (`1e400` / `-1e400`).
+  Deliberately omitted: `ENABLE_LOCALES` decimal-point variants (default build
+  has locales off); bare JSON `NaN` tokens (parser rejects them — overflow
+  exponents cover the print-null path); malformed-number partial `strtod`
+  consumption.
+- **Platform coupling (honest scope):** both the C oracle and the Rust port call
+  the *platform* libc for `%1.15g`/`%1.17g`, so byte-parity between them holds on
+  any single machine by construction. The committed golden, however, is a capture
+  from one platform (macOS/Darwin). A libc whose `%g` rounding differs would make
+  the checked-in expectations fail rather than silently diverge — the Python
+  contract re-derives every case from the C runner, so such a platform shows up
+  as a test failure and the golden would need regeneration there. Cross-libc
+  invariance is **not** claimed or tested.
+- ASan over the full combined corpus (all three modes) is leak/double-free clean.
 
 ## Rust ownership-slice port (built)
 - Port crate: `examples/cjson_rust`.
@@ -100,16 +114,19 @@ The published graph also contains the co-located golden runner
   `GetObjectItem`, and `GetStringValue` equivalents are ported for the
   ownership slice, and the inspect descriptor carries `valueint` plus
   `valuedouble` IEEE-754 bits exactly like the C runner.
+- Float printing: `print_number` matches cJSON's two-step `%1.15g` then
+  `%1.17g` (with the same relative `compare_double` recovery check) by calling
+  libc `snprintf`/`sscanf` — Rust's `Display` for `f64` is a different algorithm
+  and does not agree byte-for-byte with the C oracle. Default build (no
+  `ENABLE_LOCALES`) keeps the decimal point as `'.'`.
 - `port_eval`: graph pass rate 1.0 (239 calls, 125 observations, 0 anomalies,
   0 dangling, 0 semantic suspicions), context packs 3/3 for
   `cJSON_ParseWithLength`, `cJSON_PrintUnformatted`, and `cJSON_Delete`;
-  Rust fmt/check/golden_test/run all ok; 22 golden cases; `manual_fixes=0`;
-  `OVERALL PASS=True`.
+  Rust fmt/check/golden_test/run all ok; 52 golden cases (22 ownership + 30
+  float-print); `manual_fixes=0`; `OVERALL PASS=True`.
 - Deferred: full mutation/builder API, custom hooks/allocators, reference flags,
-  `prev` links, and non-integer float-printing fidelity (`%1.15g`/`%1.17g`,
-  NaN/inf/exponent/precision). The current integer corpus exercises cJSON's
-  exact `%d` print path; malformed-number edge cases that depend on `strtod`
-  partial consumption are also outside this first slice.
+  `prev` links, `ENABLE_LOCALES` decimal-point printing, and malformed-number
+  edge cases that depend on `strtod` partial consumption.
 
 ## Vendored whitespace
 - `cJSON.h` and `LICENSE` contain upstream whitespace that fails vanilla
@@ -118,8 +135,8 @@ The published graph also contains the co-located golden runner
   project-authored files remain checked normally.
 
 ## Next scope
-The ownership-bearing slice is complete. The natural next cJSON sub-stage, if we
-stay inside this target, is a bounded float-printing fidelity suite for the
-`%1.15g`/`%1.17g` paths. Otherwise this checkpoint can stand as the Phase 6
-ownership milestone while the project moves to productization/benchmarking or
-clang-backed C/C++ semantic extraction.
+The ownership-bearing slice and the bounded float-printing fidelity suite are
+complete. Remaining cJSON depth (mutation/builder API, custom hooks, locale
+decimal points, partial-strtod malformation) is optional; the Phase 6 ownership
++ print-fidelity checkpoint can stand while the project moves to
+productization/benchmarking or clang-backed C/C++ semantic extraction.

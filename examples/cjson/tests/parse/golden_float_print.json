@@ -1,0 +1,383 @@
+{
+  "_comment": "Float-printing fidelity corpus for cJSON parse->print. Ground truth = vendored cJSON.c via tests/parse/runner.c. Covers %1.15g, %1.17g round-trip fallback, exponents, precision boundaries, -0.0, large/small magnitudes, overflow\u2192inf\u2192null. Omitted: ENABLE_LOCALES decimal-point variants; bare NaN JSON tokens (not accepted by the parser \u2014 overflow exponents cover inf\u2192null); malformed-number partial strtod consumption.",
+  "cases": [
+    {
+      "desc": "half",
+      "json": "0.5",
+      "parse_ok": true,
+      "unformatted": "0.5",
+      "inspect": {
+        "t": "num",
+        "i": 0,
+        "bits": 4602678819172646912
+      }
+    },
+    {
+      "desc": "one-tenth (15g path)",
+      "json": "0.1",
+      "parse_ok": true,
+      "unformatted": "0.1",
+      "inspect": {
+        "t": "num",
+        "i": 0,
+        "bits": 4591870180066957722
+      }
+    },
+    {
+      "desc": "one-point-one",
+      "json": "1.1",
+      "parse_ok": true,
+      "unformatted": "1.1",
+      "inspect": {
+        "t": "num",
+        "i": 1,
+        "bits": 4607632778762754458
+      }
+    },
+    {
+      "desc": "negative fractions",
+      "json": "-0.1",
+      "parse_ok": true,
+      "unformatted": "-0.1",
+      "inspect": {
+        "t": "num",
+        "i": 0,
+        "bits": 13815242216921733530
+      }
+    },
+    {
+      "desc": "negative one-point-one",
+      "json": "-1.1",
+      "parse_ok": true,
+      "unformatted": "-1.1",
+      "inspect": {
+        "t": "num",
+        "i": -1,
+        "bits": 13831004815617530266
+      }
+    },
+    {
+      "desc": "small decimal -> fixed",
+      "json": "1.23e-4",
+      "parse_ok": true,
+      "unformatted": "0.000123",
+      "inspect": {
+        "t": "num",
+        "i": 0,
+        "bits": 4548669923058963014
+      }
+    },
+    {
+      "desc": "large exponent form",
+      "json": "1.23e+20",
+      "parse_ok": true,
+      "unformatted": "1.23e+20",
+      "inspect": {
+        "t": "num",
+        "i": 2147483647,
+        "bits": 4907423718797849648
+      }
+    },
+    {
+      "desc": "1e-20",
+      "json": "1e-20",
+      "parse_ok": true,
+      "unformatted": "1e-20",
+      "inspect": {
+        "t": "num",
+        "i": 0,
+        "bits": 4307583784117748259
+      }
+    },
+    {
+      "desc": "1e+20",
+      "json": "1e+20",
+      "parse_ok": true,
+      "unformatted": "1e+20",
+      "inspect": {
+        "t": "num",
+        "i": 2147483647,
+        "bits": 4906019910204099648
+      }
+    },
+    {
+      "desc": "pi (17g fallback)",
+      "json": "3.141592653589793",
+      "parse_ok": true,
+      "unformatted": "3.1415926535897931",
+      "inspect": {
+        "t": "num",
+        "i": 3,
+        "bits": 4614256656552045848
+      }
+    },
+    {
+      "desc": "one-third (17g fallback)",
+      "json": "0.3333333333333333",
+      "parse_ok": true,
+      "unformatted": "0.33333333333333331",
+      "inspect": {
+        "t": "num",
+        "i": 0,
+        "bits": 4599676419421066581
+      }
+    },
+    {
+      "desc": "DBL_MAX",
+      "json": "1.7976931348623157e+308",
+      "parse_ok": true,
+      "unformatted": "1.79769313486232e+308",
+      "inspect": {
+        "t": "num",
+        "i": 2147483647,
+        "bits": 9218868437227405311
+      }
+    },
+    {
+      "desc": "min normal (17g fallback)",
+      "json": "2.2250738585072014e-308",
+      "parse_ok": true,
+      "unformatted": "2.2250738585072014e-308",
+      "inspect": {
+        "t": "num",
+        "i": 0,
+        "bits": 4503599627370496
+      }
+    },
+    {
+      "desc": "subnormal 1e-320",
+      "json": "1e-320",
+      "parse_ok": true,
+      "unformatted": "9.99988867182683e-321",
+      "inspect": {
+        "t": "num",
+        "i": 0,
+        "bits": 2024
+      }
+    },
+    {
+      "desc": "1+eps rounds to 1 under 15g",
+      "json": "1.0000000000000002",
+      "parse_ok": true,
+      "unformatted": "1",
+      "inspect": {
+        "t": "num",
+        "i": 1,
+        "bits": 4607182418800017409
+      }
+    },
+    {
+      "desc": "near-int rounds under 15g",
+      "json": "999999.9999999999",
+      "parse_ok": true,
+      "unformatted": "1000000",
+      "inspect": {
+        "t": "num",
+        "i": 999999,
+        "bits": 4696837146684686335
+      }
+    },
+    {
+      "desc": "overflow to +inf prints null",
+      "json": "1e400",
+      "parse_ok": true,
+      "unformatted": "null",
+      "inspect": {
+        "t": "num",
+        "i": 2147483647,
+        "bits": 9218868437227405312
+      }
+    },
+    {
+      "desc": "overflow to -inf prints null",
+      "json": "-1e400",
+      "parse_ok": true,
+      "unformatted": "null",
+      "inspect": {
+        "t": "num",
+        "i": -2147483648,
+        "bits": 18442240474082181120
+      }
+    },
+    {
+      "desc": "negative zero prints 0",
+      "json": "-0.0",
+      "parse_ok": true,
+      "unformatted": "0",
+      "inspect": {
+        "t": "num",
+        "i": 0,
+        "bits": 9223372036854775808
+      }
+    },
+    {
+      "desc": "DBL_EPSILON (17g fallback)",
+      "json": "2.220446049250313e-16",
+      "parse_ok": true,
+      "unformatted": "2.2204460492503131e-16",
+      "inspect": {
+        "t": "num",
+        "i": 0,
+        "bits": 4372995238176751616
+      }
+    },
+    {
+      "desc": "tiny scientific 17g",
+      "json": "1.2345678901234567e-100",
+      "parse_ok": true,
+      "unformatted": "1.2345678901234567e-100",
+      "inspect": {
+        "t": "num",
+        "i": 0,
+        "bits": 3112348188051293650
+      }
+    },
+    {
+      "desc": "mixed fixed",
+      "json": "1234567.89012345",
+      "parse_ok": true,
+      "unformatted": "1234567.89012345",
+      "inspect": {
+        "t": "num",
+        "i": 1234567,
+        "bits": 4698053240432828771
+      }
+    },
+    {
+      "desc": "large sci 15g",
+      "json": "1.23456789012345e100",
+      "parse_ok": true,
+      "unformatted": "1.23456789012345e+100",
+      "inspect": {
+        "t": "num",
+        "i": 2147483647,
+        "bits": 6104228904772170081
+      }
+    },
+    {
+      "desc": "near 2^53",
+      "json": "9.007199254740992e+15",
+      "parse_ok": true,
+      "unformatted": "9.00719925474099e+15",
+      "inspect": {
+        "t": "num",
+        "i": 2147483647,
+        "bits": 4845873199050653696
+      }
+    },
+    {
+      "desc": "array of floats",
+      "json": "[0.1,1.5,-2.5,1e-10]",
+      "parse_ok": true,
+      "unformatted": "[0.1,1.5,-2.5,1e-10]",
+      "inspect": {
+        "t": "arr",
+        "n": 4,
+        "items": [
+          {
+            "t": "num",
+            "i": 0,
+            "bits": 4591870180066957722
+          },
+          {
+            "t": "num",
+            "i": 1,
+            "bits": 4609434218613702656
+          },
+          {
+            "t": "num",
+            "i": -2,
+            "bits": 13836183955189006336
+          },
+          {
+            "t": "num",
+            "i": 0,
+            "bits": 4457293557087583675
+          }
+        ]
+      },
+      "formatted": "[0.1, 1.5, -2.5, 1e-10]"
+    },
+    {
+      "desc": "object with floats and -0.0",
+      "json": "{\"x\":0.1,\"y\":1e20,\"z\":-0.0}",
+      "parse_ok": true,
+      "unformatted": "{\"x\":0.1,\"y\":1e+20,\"z\":0}",
+      "inspect": {
+        "t": "obj",
+        "n": 3,
+        "members": [
+          {
+            "k": "x",
+            "v": {
+              "t": "num",
+              "i": 0,
+              "bits": 4591870180066957722
+            }
+          },
+          {
+            "k": "y",
+            "v": {
+              "t": "num",
+              "i": 2147483647,
+              "bits": 4906019910204099648
+            }
+          },
+          {
+            "k": "z",
+            "v": {
+              "t": "num",
+              "i": 0,
+              "bits": 9223372036854775808
+            }
+          }
+        ]
+      },
+      "formatted": "{\n\t\"x\":\t0.1,\n\t\"y\":\t1e+20,\n\t\"z\":\t0\n}"
+    },
+    {
+      "desc": "negative large exponent",
+      "json": "-1.23e+20",
+      "parse_ok": true,
+      "unformatted": "-1.23e+20",
+      "inspect": {
+        "t": "num",
+        "i": -2147483648,
+        "bits": 14130795755652625456
+      }
+    },
+    {
+      "desc": "zero-point-zero",
+      "json": "0.0",
+      "parse_ok": true,
+      "unformatted": "0",
+      "inspect": {
+        "t": "num",
+        "i": 0,
+        "bits": 0
+      }
+    },
+    {
+      "desc": "scientific negative exp",
+      "json": "6.02214076e+23",
+      "parse_ok": true,
+      "unformatted": "6.02214076e+23",
+      "inspect": {
+        "t": "num",
+        "i": 2147483647,
+        "bits": 4962933279127225623
+      }
+    },
+    {
+      "desc": "mid precision",
+      "json": "1.23456789012345",
+      "parse_ok": true,
+      "unformatted": "1.23456789012345",
+      "inspect": {
+        "t": "num",
+        "i": 1,
+        "bits": 4608238818662570461
+      }
+    }
+  ]
+}
