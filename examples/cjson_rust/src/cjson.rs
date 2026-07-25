@@ -149,6 +149,16 @@ pub fn get_string_value(item: &CJson) -> Option<&[u8]> {
     }
 }
 
+/// `cJSON_GetNumberValue`: returns the stored number, or NaN for a node that is
+/// not a number.
+pub fn get_number_value(item: &CJson) -> f64 {
+    if is_number(item) {
+        item.valuedouble
+    } else {
+        f64::NAN
+    }
+}
+
 /* ---------- owned builder / mutation API ---------- */
 
 fn new_with_type(type_: i32) -> Box<CJson> {
@@ -247,6 +257,31 @@ pub fn add_item_to_array(array: &mut CJson, item: Box<CJson>) {
 pub fn add_item_to_object(object: &mut CJson, key: impl AsRef<[u8]>, mut item: Box<CJson>) {
     item.string = Some(key.as_ref().to_vec());
     append_child(object, item);
+}
+
+/// `cJSON_InsertItemInArray`.
+///
+/// `newitem` is consumed on success. As captured by the C oracle, an index at
+/// or past the current end appends; a negative index fails and returns the box
+/// to the caller.
+pub fn insert_item_in_array(
+    array: &mut CJson,
+    index: i32,
+    mut newitem: Box<CJson>,
+) -> Result<(), Box<CJson>> {
+    if index < 0 {
+        return Err(newitem);
+    }
+    let mut link = &mut array.child;
+    for _ in 0..index {
+        let Some(node) = link else {
+            break;
+        };
+        link = &mut node.next;
+    }
+    newitem.next = link.take();
+    *link = Some(newitem);
+    Ok(())
 }
 
 fn child_slot_at(parent: &mut CJson, index: i32) -> Option<&mut Option<Box<CJson>>> {
@@ -385,6 +420,138 @@ pub fn replace_item_in_object_case_sensitive(
     newitem: Box<CJson>,
 ) -> Result<(), Box<CJson>> {
     replace_item_in_object_impl(object, key.as_ref(), newitem, true)
+}
+
+fn duplicate_child_chain(first: Option<&CJson>) -> Option<Box<CJson>> {
+    let mut copy = None;
+    let mut tail = &mut copy;
+    let mut current = first;
+    while let Some(item) = current {
+        *tail = Some(duplicate_item(item, true));
+        if let Some(inserted) = tail {
+            tail = &mut inserted.next;
+        }
+        current = item.next.as_deref();
+    }
+    copy
+}
+
+fn duplicate_item(item: &CJson, recurse: bool) -> Box<CJson> {
+    Box::new(CJson {
+        child: if recurse {
+            duplicate_child_chain(item.child.as_deref())
+        } else {
+            None
+        },
+        // cJSON_Duplicate always returns an unlinked root, even when the source
+        // happens to be a member of a sibling chain.
+        next: None,
+        type_: item.type_,
+        valuestring: item.valuestring.clone(),
+        valueint: item.valueint,
+        valuedouble: item.valuedouble,
+        string: item.string.clone(),
+    })
+}
+
+/// `cJSON_Duplicate`.
+///
+/// The returned tree owns cloned fields and children. With `recurse == false`,
+/// it copies only the supplied node (never that node's sibling chain).
+pub fn duplicate(item: &CJson, recurse: bool) -> Box<CJson> {
+    duplicate_item(item, recurse)
+}
+
+fn object_item_by_key<'a>(
+    object: &'a CJson,
+    key: &[u8],
+    case_sensitive: bool,
+) -> Option<&'a CJson> {
+    let mut current = object.child.as_deref();
+    while let Some(item) = current {
+        if let Some(candidate) = item.string.as_deref() {
+            let matches = if case_sensitive {
+                candidate == key
+            } else {
+                candidate.eq_ignore_ascii_case(key)
+            };
+            if matches {
+                return Some(item);
+            }
+        }
+        current = item.next.as_deref();
+    }
+    None
+}
+
+fn compare_sibling_chains(
+    mut left: Option<&CJson>,
+    mut right: Option<&CJson>,
+    case_sensitive: bool,
+) -> bool {
+    loop {
+        match (left, right) {
+            (None, None) => return true,
+            (Some(a), Some(b)) if compare(a, b, case_sensitive) => {
+                left = a.next.as_deref();
+                right = b.next.as_deref();
+            }
+            _ => return false,
+        }
+    }
+}
+
+fn compare_objects(left: &CJson, right: &CJson, case_sensitive: bool) -> bool {
+    let mut current = left.child.as_deref();
+    while let Some(item) = current {
+        let Some(key) = item.string.as_deref() else {
+            return false;
+        };
+        let Some(other) = object_item_by_key(right, key, case_sensitive) else {
+            return false;
+        };
+        if !compare(item, other, case_sensitive) {
+            return false;
+        }
+        current = item.next.as_deref();
+    }
+
+    // cJSON compares both directions, so a right-hand extra key cannot match
+    // merely because every left-hand key was found.
+    current = right.child.as_deref();
+    while let Some(item) = current {
+        let Some(key) = item.string.as_deref() else {
+            return false;
+        };
+        if object_item_by_key(left, key, case_sensitive).is_none() {
+            return false;
+        }
+        current = item.next.as_deref();
+    }
+    true
+}
+
+/// `cJSON_Compare` for non-null Rust nodes.
+///
+/// Arrays compare in order. Objects compare by key, independently of member
+/// order; `case_sensitive` controls ASCII key matching as in cJSON.
+pub fn compare(left: &CJson, right: &CJson, case_sensitive: bool) -> bool {
+    let left_type = left.type_ & 0xff;
+    if left_type != (right.type_ & 0xff) {
+        return false;
+    }
+    match left_type {
+        CJSON_FALSE | CJSON_TRUE | CJSON_NULL => true,
+        CJSON_NUMBER => compare_double(left.valuedouble, right.valuedouble),
+        CJSON_STRING | CJSON_RAW => left.valuestring == right.valuestring,
+        CJSON_ARRAY => compare_sibling_chains(
+            left.child.as_deref(),
+            right.child.as_deref(),
+            case_sensitive,
+        ),
+        CJSON_OBJECT => compare_objects(left, right, case_sensitive),
+        _ => false,
+    }
 }
 
 /// `cJSON_CreateIntArray`.
@@ -805,9 +972,9 @@ pub fn parse(input: &[u8]) -> Option<Box<CJson>> {
 
 /* ---------- print ---------- */
 
-/// Relative comparison matching cJSON's `compare_double` (used to decide the
-/// `%1.15g` → `%1.17g` fallback). Only needed on the libc print path.
-#[cfg(not(miri))]
+/// Relative comparison matching cJSON's `compare_double`. It is used by both
+/// the libc print fallback and the public structural comparison API, so it must
+/// remain available under Miri as well.
 fn compare_double(a: f64, b: f64) -> bool {
     let max_val = a.abs().max(b.abs());
     (a - b).abs() <= max_val * f64::EPSILON

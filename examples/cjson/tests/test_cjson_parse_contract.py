@@ -89,9 +89,9 @@ def test_golden_present_and_sized():
     float_cases = json.loads(GOLDEN_FLOAT.read_text())["cases"]
     assert len(float_cases) >= 20
     mutation_cases = _mutation_cases()
-    assert len(mutation_cases) >= 4
+    assert len(mutation_cases) >= 7
     # Combined floor used by the Rust contract test as well.
-    assert len(_all_parse_cases()) + len(mutation_cases) >= 54
+    assert len(_all_parse_cases()) + len(mutation_cases) >= 59
 
 
 @pytest.mark.skipif(_cc() is None, reason="no C compiler available")

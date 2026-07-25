@@ -8,13 +8,13 @@ use std::fs;
 use std::path::PathBuf;
 
 use cjson_rust::{
-    add_item_to_array, add_item_to_object, create_array, create_bool, create_double_array,
+    add_item_to_array, add_item_to_object, compare, create_array, create_bool, create_double_array,
     create_false, create_float_array, create_int_array, create_null, create_number, create_object,
     create_raw, create_string, create_string_array, create_true, delete_item_from_array,
     delete_item_from_object, delete_item_from_object_case_sensitive, detach_item_from_array,
-    detach_item_from_object, detach_item_from_object_case_sensitive, inspect, parse,
-    print_formatted, print_unformatted, replace_item_in_array, replace_item_in_object,
-    replace_item_in_object_case_sensitive, CJson,
+    detach_item_from_object, detach_item_from_object_case_sensitive, duplicate, get_number_value,
+    get_string_value, insert_item_in_array, inspect, parse, print_formatted, print_unformatted,
+    replace_item_in_array, replace_item_in_object, replace_item_in_object_case_sensitive, CJson,
 };
 use serde_json::{json, Value};
 
@@ -31,6 +31,30 @@ fn trace_step(steps: &mut Vec<Value>, step: &str, tree: &CJson) {
     let tree: Value = serde_json::from_slice(&inspect(tree))
         .unwrap_or_else(|err| panic!("inspect trace must be JSON: {err}"));
     steps.push(json!({"step": step, "tree": tree}));
+}
+
+fn trace_result_step(steps: &mut Vec<Value>, step: &str, ok: bool, tree: &CJson) {
+    let tree: Value = serde_json::from_slice(&inspect(tree))
+        .unwrap_or_else(|err| panic!("inspect trace must be JSON: {err}"));
+    steps.push(json!({"step": step, "ok": ok, "tree": tree}));
+}
+
+fn trace_compare_step(steps: &mut Vec<Value>, step: &str, equal: bool) {
+    steps.push(json!({"step": step, "equal": equal}));
+}
+
+fn trace_accessor_step(steps: &mut Vec<Value>, step: &str, item: &CJson) {
+    let number = get_number_value(item);
+    let string = get_string_value(item).map(|value| {
+        std::str::from_utf8(value)
+            .unwrap_or_else(|err| panic!("accessor trace string must be UTF-8: {err}"))
+    });
+    steps.push(json!({
+        "step": step,
+        "number": if number.is_nan() { None } else { Some(number) },
+        "number_is_nan": number.is_nan(),
+        "string": string,
+    }));
 }
 
 /// Rust counterpart to the fixed C runner scenarios in `golden_mutation.json`.
@@ -143,6 +167,102 @@ fn mutation_trace(scenario: &str) -> Value {
             add_item_to_array(&mut root, create_string_array(["red", "blue"]));
             trace_step(&mut steps, "create_string_array", &root);
         }
+        "insert_positions" => {
+            let mut root = create_array();
+            add_item_to_array(&mut root, create_number(1.0));
+            add_item_to_array(&mut root, create_number(3.0));
+            trace_step(&mut steps, "initial", &root);
+
+            let inserted = insert_item_in_array(&mut root, 0, create_number(0.0)).is_ok();
+            trace_result_step(&mut steps, "insert_at_0", inserted, &root);
+            let inserted = insert_item_in_array(&mut root, 2, create_number(2.0)).is_ok();
+            trace_result_step(&mut steps, "insert_in_middle", inserted, &root);
+            let inserted = insert_item_in_array(&mut root, 4, create_number(4.0)).is_ok();
+            trace_result_step(&mut steps, "insert_at_end", inserted, &root);
+            let inserted = insert_item_in_array(&mut root, 99, create_number(99.0)).is_ok();
+            trace_result_step(&mut steps, "insert_past_end", inserted, &root);
+            let inserted = insert_item_in_array(&mut root, -1, create_number(-1.0)).is_ok();
+            trace_result_step(&mut steps, "insert_negative_index", inserted, &root);
+        }
+        "duplicate_compare" => {
+            let mut source = create_object();
+            let mut items = create_array();
+            add_item_to_object(&mut source, "Name", create_string("source"));
+            add_item_to_array(&mut items, create_number(1.0));
+            add_item_to_array(&mut items, create_string("two"));
+            add_item_to_object(&mut source, "Items", items);
+
+            trace_step(&mut steps, "source", &source);
+            let shallow = duplicate(&source, false);
+            trace_step(&mut steps, "duplicate_non_recursive", &shallow);
+            let deep = duplicate(&source, true);
+            trace_step(&mut steps, "duplicate_recursive", &deep);
+            trace_compare_step(
+                &mut steps,
+                "deep_equals_source_case_sensitive",
+                compare(&source, &deep, true),
+            );
+
+            assert!(replace_item_in_object_case_sensitive(
+                &mut source,
+                "Name",
+                create_string("changed")
+            )
+            .is_ok());
+            trace_step(&mut steps, "source_after_replace", &source);
+            trace_step(&mut steps, "deep_after_source_replace", &deep);
+            trace_compare_step(
+                &mut steps,
+                "deep_differs_after_source_replace",
+                compare(&source, &deep, true),
+            );
+
+            let mut left = create_object();
+            let mut right = create_object();
+            add_item_to_object(&mut left, "Key", create_number(7.0));
+            add_item_to_object(&mut right, "key", create_number(7.0));
+            trace_step(&mut steps, "case_left", &left);
+            trace_step(&mut steps, "case_right", &right);
+            trace_compare_step(
+                &mut steps,
+                "keys_equal_case_insensitive",
+                compare(&left, &right, false),
+            );
+            trace_compare_step(
+                &mut steps,
+                "keys_differ_case_sensitive",
+                compare(&left, &right, true),
+            );
+
+            let mut ordered_left = create_object();
+            let mut ordered_right = create_object();
+            add_item_to_object(&mut ordered_left, "one", create_number(1.0));
+            add_item_to_object(&mut ordered_left, "two", create_number(2.0));
+            add_item_to_object(&mut ordered_right, "two", create_number(2.0));
+            add_item_to_object(&mut ordered_right, "one", create_number(1.0));
+            trace_step(&mut steps, "ordered_left", &ordered_left);
+            trace_step(&mut steps, "ordered_right", &ordered_right);
+            trace_compare_step(
+                &mut steps,
+                "object_member_order_ignored",
+                compare(&ordered_left, &ordered_right, true),
+            );
+
+            drop(source);
+            trace_step(&mut steps, "deep_after_source_delete", &deep);
+            drop(shallow);
+            drop(deep);
+            drop(left);
+            drop(right);
+            drop(ordered_left);
+            drop(ordered_right);
+        }
+        "value_accessors" => {
+            let number = create_number(-12.5);
+            let string = create_string("text");
+            trace_accessor_step(&mut steps, "number_item", &number);
+            trace_accessor_step(&mut steps, "string_item", &string);
+        }
         unknown => panic!("unknown C mutation scenario {unknown:?}"),
     }
     json!({"scenario": scenario, "steps": steps})
@@ -215,7 +335,7 @@ fn cjson_contract_all_cases() {
     }
     // 22 ownership-slice cases + bounded float printing + mutation traces.
     assert!(
-        total >= 54,
-        "expected >= 54 cjson golden cases (ownership + float print + mutation), got {total}"
+        total >= 59,
+        "expected >= 59 cjson golden cases (ownership + float print + mutation), got {total}"
     );
 }
