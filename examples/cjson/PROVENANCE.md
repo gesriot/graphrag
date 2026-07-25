@@ -124,6 +124,28 @@ The published graph also contains the co-located golden runner
   `cJSON_ParseWithLength`, `cJSON_PrintUnformatted`, and `cJSON_Delete`;
   Rust fmt/check/golden_test/run all ok; 52 golden cases (22 ownership + 30
   float-print); `manual_fixes=0`; `OVERALL PASS=True`.
+- **Rust hardening (Miri + properties):**
+  - **Miri:** `cargo +nightly miri test --test ownership_props` — 8 property
+    tests, all pass. Covers parse → walk → print → drop of randomly shaped
+    trees, wide sibling lists, deep-nesting rejection, and garbage inputs under
+    Miri's aliasing/UB model. **Not covered by Miri:** the libc
+    `snprintf`/`sscanf` float-print path. That code is compiled only under
+    `cfg(not(miri))`; under Miri a pure-Rust `Display` stand-in is used so
+    ownership tests can print numbers without foreign calls. The stand-in is
+    **not** golden-faithful and is never linked into a normal build — float
+    byte-parity remains a non-Miri, libc check (`parse_contract` is
+    `#[ignore]` under Miri for that reason). No ownership UB was found.
+  - **Property tests:** `tests/ownership_props.rs` with `proptest` (32 cases
+    per randomised property on normal builds, 16 under Miri; seed printed by
+    proptest on failure). Invariants are labelled in-file as Phase 5 requires:
+    - *deterministic* — public type tags, `Is*` partition, array-size vs
+      sibling chain, parse+print+drop no-panic, garbage no-panic
+    - *inferred* — printed output is UTF-8 and re-parsable (not byte-identical
+      to the input); wide-array drop is iterative-safe
+    - *human-approved* — nesting past the default limit (1000) is rejected
+  - **Still untested:** custom allocators/hooks, concurrent use, full mutation
+    API, Miri over the FFI float path, fuzzing against adversarial multi-MB
+    inputs, and cross-libc float golden invariance.
 - Deferred: full mutation/builder API, custom hooks/allocators, reference flags,
   `prev` links, `ENABLE_LOCALES` decimal-point printing, and malformed-number
   edge cases that depend on `strtod` partial consumption.

@@ -521,7 +521,8 @@ pub fn parse(input: &[u8]) -> Option<Box<CJson>> {
 /* ---------- print ---------- */
 
 /// Relative comparison matching cJSON's `compare_double` (used to decide the
-/// `%1.15g` → `%1.17g` fallback).
+/// `%1.15g` → `%1.17g` fallback). Only needed on the libc print path.
+#[cfg(not(miri))]
 fn compare_double(a: f64, b: f64) -> bool {
     let max_val = a.abs().max(b.abs());
     (a - b).abs() <= max_val * f64::EPSILON
@@ -535,6 +536,11 @@ fn compare_double(a: f64, b: f64) -> bool {
 /// the platform C library's printf. Rust's `Display` for `f64` is a different
 /// algorithm and produces different bytes (e.g. pi, 1/3, min-normal). Calling
 /// the same snprintf the C code calls is the faithful match, not a divergence.
+///
+/// Under Miri (`cfg(miri)`) this is not compiled: Miri cannot execute foreign
+/// `snprintf`/`sscanf`. The non-Miri build is unchanged — no feature flag, no
+/// runtime branch — so the 52 golden cases stay byte-identical to the C oracle.
+#[cfg(not(miri))]
 fn c_sprintf_g(d: f64, precision: u8, buf: &mut [u8; 26]) -> Option<usize> {
     use std::os::raw::{c_char, c_double, c_int};
 
@@ -566,6 +572,7 @@ fn c_sprintf_g(d: f64, precision: u8, buf: &mut [u8; 26]) -> Option<usize> {
 
 /// Re-parse a C-printed number buffer with libc `sscanf("%lg")`, matching
 /// cJSON's recovery check before it decides to fall back to 17 digits.
+#[cfg(not(miri))]
 fn c_sscanf_lg(buf: &[u8]) -> Option<f64> {
     use std::os::raw::{c_char, c_double, c_int};
 
@@ -601,8 +608,14 @@ fn print_number(item: &CJson, out: &mut Vec<u8>) {
         return;
     }
 
-    // Non-integer: try 15 significant digits, fall back to 17 if the original
-    // double cannot be recovered — the same two-step path as cJSON.c.
+    // Non-integer path: platform libc under normal builds; pure-Rust Display
+    // under Miri only (see cfg below). Normal builds keep C byte-parity.
+    print_number_non_integer(d, out);
+}
+
+/// cJSON's two-step `%1.15g` → `%1.17g` printer via libc (golden-faithful).
+#[cfg(not(miri))]
+fn print_number_non_integer(d: f64, out: &mut Vec<u8>) {
     // 26 bytes is the buffer cJSON.c itself uses; %1.17g of a finite double never
     // fills it. A failure here is a bug in this file, not a runtime condition --
     // returning silently would emit a number-less, invalid JSON document.
@@ -618,6 +631,15 @@ fn print_number(item: &CJson, out: &mut Vec<u8>) {
     // cJSON replaces a locale decimal point with '.'; default build has no
     // ENABLE_LOCALES, so snprintf already emits '.'. Copy bytes as-is.
     out.extend_from_slice(&number_buffer[..length]);
+}
+
+/// Miri-only stand-in for the non-integer branch. Miri cannot execute libc
+/// `snprintf`/`sscanf`, so we use Rust `Display` solely so ownership tests can
+/// run under Miri. This path is **not** golden-faithful and is never compiled
+/// into the normal (non-Miri) binary — float-print fidelity remains a libc check.
+#[cfg(miri)]
+fn print_number_non_integer(d: f64, out: &mut Vec<u8>) {
+    out.extend_from_slice(format!("{d}").as_bytes());
 }
 
 fn print_string_ptr(s: Option<&[u8]>, out: &mut Vec<u8>) {

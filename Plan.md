@@ -264,8 +264,8 @@ Alternatives to evaluate: pure graph DB + LLM-to-Cypher (as in Graph-Code demos)
 2. Keep C-specific scope explicit: default macro/build configuration from `compile_commands.json`, no claim yet for clang-accurate macro/type facts, include relationships, full function-pointer resolution, multiple build configurations, full C ABI preservation, custom allocators/hooks, or full cJSON mutation API coverage.
 3. Decide the next frontier:
    - finish any remaining scoped `charset-normalizer` hardening (broader fuzz/differential matrix, scale harness runs, or additional upstream API compatibility) if the goal is to turn the stress-test port into a stronger product artifact;
-   - remaining cJSON depth (mutation/builder API, custom hooks, locale decimal points) if the goal is fuller API coverage beyond the ownership + float-print checkpoint;
-   - a cheap Rust-side hardening pass such as Miri/fuzz/property tests if the goal is stronger ownership evidence;
+   - remaining cJSON depth (mutation/builder API, custom hooks, locale decimal points) if the goal is fuller API coverage beyond the ownership + float-print + Miri/props checkpoint;
+   - broader fuzz/Miri coverage of the libc float-print path (currently `cfg(not(miri))`) if the goal is stronger print-path evidence;
    - Phase 7 productization/benchmarks (single CLI/MCP, baseline comparisons, ablations, docs) if the goal is to turn the proven pipeline into a reusable tool.
 4. If expanding C/C++ semantics, add clang-backed facts incrementally against the existing tree-sitter-c graph rather than replacing the proven audit/port rails.
 5. In parallel but off the critical path, finish the dated primary-source notes and exact talk transcript/timestamps before making public claims about the Microsoft demo.

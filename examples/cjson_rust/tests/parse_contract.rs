@@ -19,7 +19,14 @@ fn golden_dir() -> PathBuf {
     p
 }
 
+// Under Miri the float-print golden cannot match: libc snprintf is cfg'd out and
+// the Display stand-in is not C-byte-faithful. Ownership is covered by
+// `ownership_props` under Miri instead.
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "float-print golden needs libc; run ownership_props under Miri"
+)]
 fn cjson_contract_all_cases() {
     let mut files: Vec<PathBuf> = fs::read_dir(golden_dir())
         .unwrap()
