@@ -1,0 +1,32 @@
+{
+  "kit": "/private/tmp/ablation/isodate_v3/run2/arm_graph",
+  "prep_out": "/private/tmp/ablation/isodate_v3/run2",
+  "arm": "arm_graph",
+  "target": "isodate_duration",
+  "disclaimer": "Evidence only \u2014 not a verdict. This check cannot prove an agent never read outside its kit; it only surfaces file changes and content that matches material the arm was never given. Matches are flags for human review, not proof of a protocol breach.",
+  "file_diff": {
+    "added": [],
+    "modified": [
+      "src/lib.rs"
+    ],
+    "deleted": [],
+    "n_added": 0,
+    "n_modified": 1,
+    "n_deleted": 0
+  },
+  "writes_outside_src": {
+    "paths": [],
+    "n": 0,
+    "note": "Prompt asks the agent to implement in src/lib.rs (+ modules). Paths here are worth surfacing; cargo.lock / extra docs are common and not by themselves a protocol breach."
+  },
+  "foreign_material": {
+    "min_line_len": 40,
+    "n_flags": 0,
+    "flags_truncated": false,
+    "flags": []
+  },
+  "summary": {
+    "only_src_touched": true,
+    "n_foreign_flags": 0
+  }
+}

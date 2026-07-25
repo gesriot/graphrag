@@ -1,0 +1,35 @@
+{
+  "target": "isodate_duration",
+  "arm": "arm_graph",
+  "run": 2,
+  "recorded_at": "2026-07-25T20:42:58Z",
+  "provenance": {
+    "kit": "/private/tmp/ablation/isodate_v3/run2/arm_graph",
+    "golden_dir": "/Users/drt/Downloads/graphrag/examples/isodate/tests/duration",
+    "contract_test": "/Users/drt/Downloads/graphrag/examples/isodate/tests/duration_contract.rs",
+    "crate_name": "arm"
+  },
+  "eval": {
+    "kit": "/private/tmp/ablation/isodate_v3/run2/arm_graph",
+    "builds": true,
+    "golden_pass": false,
+    "tests_passed": 0,
+    "build_tail": [],
+    "test_tail": [
+      "thread 'isodate_duration_contract' (64983522) panicked at tests/parse_contract.rs:114:5:",
+      "contract failed 1/24 cases: [\"P0003-06-04T12:30:05\"]",
+      "note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace",
+      "error: test failed, to rerun pass `--test parse_contract`"
+    ],
+    "cases_passed": 23,
+    "cases_total": 24,
+    "cases_failed": [
+      "P0003-06-04T12:30:05"
+    ]
+  },
+  "self_reported": {
+    "build_attempts": 3,
+    "tool_uses": 13,
+    "wall_s": null
+  }
+}
