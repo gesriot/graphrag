@@ -14,7 +14,11 @@
 //! Scope: parse + the public getter API + unformatted/formatted printing over a
 //! bounded corpus (objects/arrays/strings/escapes/integers/bool/null/nesting)
 //! plus a float-printing fidelity suite matching cJSON's `%1.15g`/`%1.17g`
-//! number printer (see `print_number` and `golden_float_print.json`).
+//! number printer (see `print_number` and `golden_float_print.json`). The
+//! owned builder/mutation subset is also ported: constructors, typed arrays,
+//! add, detach, delete, and replace. Reference constructors and pointer-identity
+//! mutation calls are deliberately outside this `Box`-only representation; see
+//! `examples/cjson/PROVENANCE.md` for the explicit boundary.
 
 // jsmn-style bit-flag type tags (cJSON.h).
 pub const CJSON_INVALID: i32 = 0;
@@ -91,6 +95,9 @@ pub fn is_array(item: &CJson) -> bool {
 pub fn is_object(item: &CJson) -> bool {
     (item.type_ & 0xff) == CJSON_OBJECT
 }
+pub fn is_raw(item: &CJson) -> bool {
+    (item.type_ & 0xff) == CJSON_RAW
+}
 
 /// `cJSON_GetArraySize`: number of children (works for arrays and objects).
 pub fn get_array_size(item: &CJson) -> i32 {
@@ -140,6 +147,284 @@ pub fn get_string_value(item: &CJson) -> Option<&[u8]> {
     } else {
         None
     }
+}
+
+/* ---------- owned builder / mutation API ---------- */
+
+fn new_with_type(type_: i32) -> Box<CJson> {
+    let mut item = CJson::new();
+    item.type_ = type_;
+    Box::new(item)
+}
+
+fn set_number(item: &mut CJson, number: f64) {
+    item.type_ = CJSON_NUMBER;
+    item.valuedouble = number;
+    item.valueint = if number >= i32::MAX as f64 {
+        i32::MAX
+    } else if number <= i32::MIN as f64 {
+        i32::MIN
+    } else {
+        number as i32
+    };
+}
+
+/// `cJSON_CreateNull`.
+pub fn create_null() -> Box<CJson> {
+    new_with_type(CJSON_NULL)
+}
+
+/// `cJSON_CreateTrue`.
+pub fn create_true() -> Box<CJson> {
+    new_with_type(CJSON_TRUE)
+}
+
+/// `cJSON_CreateFalse`.
+pub fn create_false() -> Box<CJson> {
+    new_with_type(CJSON_FALSE)
+}
+
+/// `cJSON_CreateBool`.
+pub fn create_bool(value: bool) -> Box<CJson> {
+    if value {
+        create_true()
+    } else {
+        create_false()
+    }
+}
+
+/// `cJSON_CreateNumber`.
+pub fn create_number(number: f64) -> Box<CJson> {
+    let mut item = CJson::new();
+    set_number(&mut item, number);
+    Box::new(item)
+}
+
+/// `cJSON_CreateString`. The bytes are copied into the returned, owned node.
+pub fn create_string(value: impl AsRef<[u8]>) -> Box<CJson> {
+    let mut item = new_with_type(CJSON_STRING);
+    item.valuestring = Some(value.as_ref().to_vec());
+    item
+}
+
+/// `cJSON_CreateRaw`. The bytes are copied into the returned, owned node.
+pub fn create_raw(value: impl AsRef<[u8]>) -> Box<CJson> {
+    let mut item = new_with_type(CJSON_RAW);
+    item.valuestring = Some(value.as_ref().to_vec());
+    item
+}
+
+/// `cJSON_CreateArray`.
+pub fn create_array() -> Box<CJson> {
+    new_with_type(CJSON_ARRAY)
+}
+
+/// `cJSON_CreateObject`.
+pub fn create_object() -> Box<CJson> {
+    new_with_type(CJSON_OBJECT)
+}
+
+fn append_child(parent: &mut CJson, item: Box<CJson>) {
+    let mut link = &mut parent.child;
+    while let Some(node) = link {
+        link = &mut node.next;
+    }
+    *link = Some(item);
+}
+
+/// `cJSON_AddItemToArray`.
+///
+/// `item` is consumed: its `Box` now belongs to `array` and will be dropped
+/// with that tree unless a later detach transfers it back to the caller.
+pub fn add_item_to_array(array: &mut CJson, item: Box<CJson>) {
+    append_child(array, item);
+}
+
+/// `cJSON_AddItemToObject`.
+///
+/// The key is copied, as cJSON duplicates `string`; `item` is consumed by the
+/// object on return.
+pub fn add_item_to_object(object: &mut CJson, key: impl AsRef<[u8]>, mut item: Box<CJson>) {
+    item.string = Some(key.as_ref().to_vec());
+    append_child(object, item);
+}
+
+fn child_slot_at(parent: &mut CJson, index: i32) -> Option<&mut Option<Box<CJson>>> {
+    if index < 0 {
+        return None;
+    }
+    let mut link = &mut parent.child;
+    for _ in 0..index {
+        link = &mut link.as_mut()?.next;
+    }
+    if link.is_some() {
+        Some(link)
+    } else {
+        None
+    }
+}
+
+fn object_child_slot<'a>(
+    object: &'a mut CJson,
+    key: &[u8],
+    case_sensitive: bool,
+) -> Option<&'a mut Option<Box<CJson>>> {
+    let mut link = &mut object.child;
+    loop {
+        let matches = link
+            .as_ref()
+            .and_then(|node| node.string.as_deref())
+            .is_some_and(|candidate| {
+                if case_sensitive {
+                    candidate == key
+                } else {
+                    candidate.eq_ignore_ascii_case(key)
+                }
+            });
+        if matches {
+            return Some(link);
+        }
+        link = &mut link.as_mut()?.next;
+    }
+}
+
+fn detach_from_slot(slot: &mut Option<Box<CJson>>) -> Option<Box<CJson>> {
+    let mut detached = slot.take()?;
+    *slot = detached.next.take();
+    Some(detached)
+}
+
+/// `cJSON_DetachItemFromArray`. The returned box is caller-owned again.
+pub fn detach_item_from_array(array: &mut CJson, index: i32) -> Option<Box<CJson>> {
+    detach_from_slot(child_slot_at(array, index)?)
+}
+
+/// `cJSON_DetachItemFromObject` (ASCII case-insensitive key matching). The
+/// returned box is caller-owned again.
+pub fn detach_item_from_object(object: &mut CJson, key: impl AsRef<[u8]>) -> Option<Box<CJson>> {
+    detach_from_slot(object_child_slot(object, key.as_ref(), false)?)
+}
+
+/// `cJSON_DetachItemFromObjectCaseSensitive`. The returned box is caller-owned
+/// again.
+pub fn detach_item_from_object_case_sensitive(
+    object: &mut CJson,
+    key: impl AsRef<[u8]>,
+) -> Option<Box<CJson>> {
+    detach_from_slot(object_child_slot(object, key.as_ref(), true)?)
+}
+
+/// `cJSON_DeleteItemFromArray`. A successful detach is immediately dropped.
+pub fn delete_item_from_array(array: &mut CJson, index: i32) -> bool {
+    detach_item_from_array(array, index).is_some()
+}
+
+/// `cJSON_DeleteItemFromObject` (ASCII case-insensitive key matching).
+pub fn delete_item_from_object(object: &mut CJson, key: impl AsRef<[u8]>) -> bool {
+    detach_item_from_object(object, key).is_some()
+}
+
+/// `cJSON_DeleteItemFromObjectCaseSensitive`.
+pub fn delete_item_from_object_case_sensitive(object: &mut CJson, key: impl AsRef<[u8]>) -> bool {
+    detach_item_from_object_case_sensitive(object, key).is_some()
+}
+
+fn replace_at_slot(slot: &mut Option<Box<CJson>>, mut replacement: Box<CJson>) {
+    let mut old = slot
+        .take()
+        .expect("replace slot was checked to contain an item");
+    replacement.next = old.next.take();
+    *slot = Some(replacement);
+    // `old` drops here, mirroring cJSON_ReplaceItemViaPointer's cJSON_Delete.
+}
+
+/// `cJSON_ReplaceItemInArray`.
+///
+/// A C `false` result leaves `newitem` caller-owned. Rust makes that ownership
+/// explicit: the `Err` value is the untouched replacement box.
+pub fn replace_item_in_array(
+    array: &mut CJson,
+    index: i32,
+    newitem: Box<CJson>,
+) -> Result<(), Box<CJson>> {
+    let Some(slot) = child_slot_at(array, index) else {
+        return Err(newitem);
+    };
+    replace_at_slot(slot, newitem);
+    Ok(())
+}
+
+fn replace_item_in_object_impl(
+    object: &mut CJson,
+    key: &[u8],
+    mut newitem: Box<CJson>,
+    case_sensitive: bool,
+) -> Result<(), Box<CJson>> {
+    let Some(slot) = object_child_slot(object, key, case_sensitive) else {
+        return Err(newitem);
+    };
+    // cJSON copies the supplied lookup key into the replacement before linking.
+    newitem.string = Some(key.to_vec());
+    replace_at_slot(slot, newitem);
+    Ok(())
+}
+
+/// `cJSON_ReplaceItemInObject` (ASCII case-insensitive key matching).
+pub fn replace_item_in_object(
+    object: &mut CJson,
+    key: impl AsRef<[u8]>,
+    newitem: Box<CJson>,
+) -> Result<(), Box<CJson>> {
+    replace_item_in_object_impl(object, key.as_ref(), newitem, false)
+}
+
+/// `cJSON_ReplaceItemInObjectCaseSensitive`.
+pub fn replace_item_in_object_case_sensitive(
+    object: &mut CJson,
+    key: impl AsRef<[u8]>,
+    newitem: Box<CJson>,
+) -> Result<(), Box<CJson>> {
+    replace_item_in_object_impl(object, key.as_ref(), newitem, true)
+}
+
+/// `cJSON_CreateIntArray`.
+pub fn create_int_array(numbers: &[i32]) -> Box<CJson> {
+    let mut array = create_array();
+    for &number in numbers {
+        add_item_to_array(&mut array, create_number(number as f64));
+    }
+    array
+}
+
+/// `cJSON_CreateFloatArray`.
+pub fn create_float_array(numbers: &[f32]) -> Box<CJson> {
+    let mut array = create_array();
+    for &number in numbers {
+        add_item_to_array(&mut array, create_number(number as f64));
+    }
+    array
+}
+
+/// `cJSON_CreateDoubleArray`.
+pub fn create_double_array(numbers: &[f64]) -> Box<CJson> {
+    let mut array = create_array();
+    for &number in numbers {
+        add_item_to_array(&mut array, create_number(number));
+    }
+    array
+}
+
+/// `cJSON_CreateStringArray`.
+pub fn create_string_array<I, S>(strings: I) -> Box<CJson>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<[u8]>,
+{
+    let mut array = create_array();
+    for string in strings {
+        add_item_to_array(&mut array, create_string(string));
+    }
+    array
 }
 
 /* ---------- parse ---------- */
@@ -791,6 +1076,10 @@ fn describe(item: &CJson, out: &mut Vec<u8>) {
     } else if is_string(item) {
         out.extend_from_slice(b"{\"t\":\"str\",\"v\":");
         json_escape(get_string_value(item).unwrap_or(b""), out);
+        out.push(b'}');
+    } else if is_raw(item) {
+        out.extend_from_slice(b"{\"t\":\"raw\",\"v\":");
+        json_escape(item.valuestring.as_deref().unwrap_or(b""), out);
         out.push(b'}');
     } else if is_array(item) {
         let n = get_array_size(item);

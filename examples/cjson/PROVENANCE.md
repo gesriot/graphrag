@@ -2,8 +2,8 @@
 
 Third C target for Plan Phase 6 and the first **struct/pointer/ownership-heavy**
 one (~3.2k LOC). This checkpoint includes the graph bootstrap (frontend + audit
-clean), the golden-before-Rust ownership-slice contract, and the bounded C→Rust
-ownership-slice port.
+clean), the golden-before-Rust ownership/mutation contract, and the bounded
+C→Rust ownership + owned-builder port.
 
 ## Source
 - Package: `cJSON`, an ultralightweight C JSON parser by Dave Gamble and
@@ -61,8 +61,9 @@ The published graph also contains the co-located golden runner
   the library subgraph, so it is stable against runner changes).
 - `examples/cjson/tests/test_cjson_parse_contract.py` recompiles the C golden
   runner, re-derives the contract, and — when the toolchain supports it —
-  recompiles under AddressSanitizer to verify the parse+print+delete path is
-  leak/double-free clean (skips and records if ASan is unavailable).
+  recompiles under AddressSanitizer to verify the parse+print+delete and
+  mutation ownership paths are leak/double-free clean (skips and records if
+  ASan is unavailable).
 
 ## Golden contract (captured before Rust)
 - Runner: `tests/parse/runner.c`; goldens under `tests/parse/golden_*.json`.
@@ -86,6 +87,19 @@ The published graph also contains the co-located golden runner
   has locales off); bare JSON `NaN` tokens (parser rejects them — overflow
   exponents cover the print-null path); malformed-number partial `strtod`
   consumption.
+- **Owned builder/mutation API** (`golden_mutation.json`, 4 fixed scenarios):
+  the runner's `mutation` mode reads a *named scenario*, not JSON. This avoids
+  adding a second, unverified script parser to the oracle: each operation
+  sequence is compiled into `runner.c`, runs directly against vendored cJSON,
+  and has a C-derived canonical trace of every intermediate tree. The scenarios
+  cover owned scalar/container constructors (`Null`, `True`, `False`, `Bool`,
+  `Number`, `String`, `Raw`, `Array`, `Object`), typed `Int`/`Float`/`Double`/
+  `String` arrays, `AddItemToArray`/`AddItemToObject`, array and object
+  detach/delete/replace, and case-sensitive versus ASCII-case-insensitive object
+  lookup. The detach traces record the returned caller-owned item *and* the
+  parent after detachment; the scenario explicitly deletes the returned item.
+  Thus the oracle exercises the claims that add transfers ownership in, detach
+  transfers it back, delete frees in place, and replace frees the old item.
 - **Platform coupling (honest scope):** both the C oracle and the Rust port call
   the *platform* libc for `%1.15g`/`%1.17g`, so byte-parity between them holds on
   any single machine by construction. The committed golden, however, is a capture
@@ -94,13 +108,15 @@ The published graph also contains the co-located golden runner
   contract re-derives every case from the C runner, so such a platform shows up
   as a test failure and the golden would need regeneration there. Cross-libc
   invariance is **not** claimed or tested.
-- ASan over the full combined corpus (all three modes) is leak/double-free clean.
+- ASan over the 52 parse/print cases (all three modes) and all 4 mutation
+  scenarios is leak/double-free clean.
 
-## Rust ownership-slice port (built)
+## Rust ownership + owned-builder port (built)
 - Port crate: `examples/cjson_rust`.
-- Scope: `parse -> inspect tree -> print -> drop/delete` over the captured
-  bounded corpus. The Rust side reproduces the C-derived
-  unformatted/inspect/formatted oracles.
+- Scope: `parse -> inspect tree -> print -> drop/delete` plus the captured
+  owned builders, typed arrays, add/detach/delete/replace operations. The Rust
+  side reproduces the C-derived unformatted/inspect/formatted and mutation-trace
+  oracles (56 golden cases: 22 ownership + 30 float-print + 4 mutation).
 - Representation: structure-preserving `CJson` node with a cJSON-style type tag,
   `child`/`next` `Box`-owned singly linked list, `valuestring`, `valueint`,
   `valuedouble`, and object key `string`. It deliberately avoids an idiomatic
@@ -109,7 +125,10 @@ The published graph also contains the co-located golden runner
 - Ownership: `Drop` mirrors `cJSON_Delete` by iterating the sibling `next` chain
   while child trees drop recursively. The port uses safe Rust and no raw
   pointers; parse failures clean up partially built children through ordinary
-  ownership.
+  ownership. Builders return `Box<CJson>`; add consumes that box, detach returns
+  it to the caller with `next` cleared, delete drops it, and replace drops the
+  old item. A failed Rust replace returns its incoming box in `Err`, preserving
+  the C rule that a failed replacement leaves it caller-owned.
 - Getter/inspect surface: `Is*`, `GetArraySize`, `GetArrayItem`,
   `GetObjectItem`, and `GetStringValue` equivalents are ported for the
   ownership slice, and the inspect descriptor carries `valueint` plus
@@ -121,14 +140,15 @@ The published graph also contains the co-located golden runner
   `ENABLE_LOCALES`) keeps the decimal point as `'.'`.
 - `port_eval`: graph pass rate 1.0 (239 calls, 125 observations, 0 anomalies,
   0 dangling, 0 semantic suspicions), context packs 3/3 for
-  `cJSON_ParseWithLength`, `cJSON_PrintUnformatted`, and `cJSON_Delete`;
-  Rust fmt/check/golden_test/run all ok; 52 golden cases (22 ownership + 30
-  float-print); `manual_fixes=0`; `OVERALL PASS=True`.
+  `cJSON_Delete`, runner `emit_raw`, and `cJSON_New_Item`;
+  Rust fmt/check/golden_test/run all ok; 56 golden cases (22 ownership + 30
+  float-print + 4 mutation); `manual_fixes=0`; `OVERALL PASS=True`.
 - **Rust hardening (Miri + properties):**
-  - **Miri:** `cargo +nightly miri test --test ownership_props` — 8 property
+  - **Miri:** `cargo +nightly miri test --test ownership_props` — 9 property
     tests, all pass. Covers parse → walk → print → drop of randomly shaped
-    trees, wide sibling lists, deep-nesting rejection, and garbage inputs under
-    Miri's aliasing/UB model. **Not covered by Miri:** the libc
+    trees, wide sibling lists, deep-nesting rejection, garbage inputs, and
+    add → detach → delete → replace ownership transfer under Miri's aliasing/UB
+    model. **Not covered by Miri:** the libc
     `snprintf`/`sscanf` float-print path. That code is compiled only under
     `cfg(not(miri))`; under Miri a pure-Rust `Display` stand-in is used so
     ownership tests can print numbers without foreign calls. The stand-in is
@@ -139,16 +159,27 @@ The published graph also contains the co-located golden runner
     per randomised property on normal builds, 16 under Miri; seed printed by
     proptest on failure). Invariants are labelled in-file as Phase 5 requires:
     - *deterministic* — public type tags, `Is*` partition, array-size vs
-      sibling chain, parse+print+drop no-panic, garbage no-panic
+      sibling chain, parse+print+drop no-panic, garbage no-panic, and mutation
+      add/detach/delete/replace ownership transfer
     - *inferred* — printed output is UTF-8 and re-parsable (not byte-identical
       to the input); wide-array drop is iterative-safe
     - *human-approved* — nesting past the default limit (1000) is rejected
-  - **Still untested:** custom allocators/hooks, concurrent use, full mutation
-    API, Miri over the FFI float path, fuzzing against adversarial multi-MB
-    inputs, and cross-libc float golden invariance.
-- Deferred: full mutation/builder API, custom hooks/allocators, reference flags,
-  `prev` links, `ENABLE_LOCALES` decimal-point printing, and malformed-number
-  edge cases that depend on `strtod` partial consumption.
+  - **Still untested:** custom allocators/hooks, concurrent use, Miri over the
+    FFI float path, fuzzing against adversarial multi-MB inputs, and cross-libc
+    float golden invariance.
+- **Explicitly excluded aliasing/pointer APIs:** `CreateStringReference`,
+  `CreateObjectReference`, `CreateArrayReference`, `AddItemReferenceToArray`,
+  `AddItemReferenceToObject`, `DetachItemViaPointer`, and
+  `ReplaceItemViaPointer` are not ported. The reference constructors and add
+  calls deliberately create non-owning aliases in C; object/array aliases would
+  require shared or borrowed children rather than this milestone's exclusive
+  `Box` tree ownership. The `ViaPointer` calls use raw node identity while
+  mutating the same parent, which has no equivalent safe signature over an
+  exclusively borrowed `Box` list. `AddItemToObjectCS` and `StringIsConst` are
+  also excluded because the Rust port stores every object key as owned bytes;
+  `InsertItemInArray`, duplicate/compare, custom hooks/allocators, `prev` links,
+  `ENABLE_LOCALES` decimal-point printing, and malformed-number edge cases that
+  depend on `strtod` partial consumption remain deferred.
 
 ## Vendored whitespace
 - `cJSON.h` and `LICENSE` contain upstream whitespace that fails vanilla
@@ -157,8 +188,9 @@ The published graph also contains the co-located golden runner
   project-authored files remain checked normally.
 
 ## Next scope
-The ownership-bearing slice and the bounded float-printing fidelity suite are
-complete. Remaining cJSON depth (mutation/builder API, custom hooks, locale
-decimal points, partial-strtod malformation) is optional; the Phase 6 ownership
-+ print-fidelity checkpoint can stand while the project moves to
-productization/benchmarking or clang-backed C/C++ semantic extraction.
+The ownership-bearing slice, owned builder/mutation API, and bounded
+float-printing fidelity suite are complete. Remaining cJSON depth is the
+reference/alias and pointer-identity API, custom hooks, locale decimal points,
+and partial-`strtod` malformation; the Phase 6 checkpoint can stand while the
+project moves to productization/benchmarking or clang-backed C/C++ semantic
+extraction.

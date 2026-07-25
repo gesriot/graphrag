@@ -363,12 +363,46 @@ material audits drove real, general improvements (data-dependency packing from
 constructor/operator edges from `isodate`), and each gate caught real defects
 before they could contaminate a published number.
 
+## Series closed (decided 2026-07-25)
+
+**The ablation series ends here, with the negative result as the finding.** No v4.
+
+> Ablations did not demonstrate that deterministic graph context improves
+> cold-agent porting accuracy over raw source for bounded, clean benchmark
+> slices. The graph remains valuable as an auditability, provenance,
+> adequacy-gating, and context-assembly discipline — not as a measured accuracy
+> multiplier.
+
+The reasoning for stopping rather than continuing: four attempts have already
+answered the question as posed. v1 gave an efficiency signal, `jsonpatch`
+documented a boundary, v2 reached near-parity, and v3 was chosen *specifically*
+for high raw-assembly cost and still saw raw take parity. Continuing to search
+for a v4 "where the graph finally wins" would stop being research and become
+hunting for a positive result. The strength of this project is that it can halt a
+hypothesis honestly, and the negative result is a real finding, not a failure.
+
+**Why a v4 would be a different experiment, not a continuation.** The reframing
+above — that raw material must exceed the arm's context budget — is not a target
+swap; it needs a different protocol: a hard material budget, a tool-call budget,
+a wall-clock budget, and isolation strict enough that an arm cannot incrementally
+pull in the repository. Without those, a raw agent simply assembles context
+through tool calls across iterations, and the experiment measures *"the model can
+search"* rather than *"the context did not fit"* — which is not the claim under
+test. Designing that protocol properly is a separate undertaking, to be
+pre-registered on its own terms if it is ever run.
+
+**`charset-normalizer` is deliberately not drafted into it.** It is already a
+strong stress-test artifact; turning it into a large ablation would require
+constraining both arms so artificially that the result would be arguable either
+way. Its role stays what it is — the data-heavy validation target — and it feeds
+Phase 3/7 productization instead.
+
 ## Next
 
-1. **Decide whether a v4 is worth it** on the reframed premise above (raw exceeds
-   context, not merely spread across files). If not, stop the series and record
-   the negative result as the finding — four pre-registered attempts is enough to
-   report honestly rather than keep searching for a favourable target.
-2. Optional: widen the golden value type beyond `f64` (int/float/bignum) for a
+1. Phase 3 / product surface: one CLI over index / audit / adequacy /
+   context-pack / `port_eval` (done — `scripts/graphrag_code.py`).
+2. A write-up: what worked, what did not, and why the graph is still useful —
+   stated at the altitude the evidence supports.
+3. Optional: widen the golden value type beyond `f64` (int/float/bignum) for a
    future numeric target — the cause of the shared `intword(1e100)` miss, not a
    porting failure.

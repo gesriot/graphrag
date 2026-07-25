@@ -12,9 +12,10 @@
 //!   `cargo +nightly miri test --test ownership_props`
 
 use cjson_rust::{
+    add_item_to_array, create_number, delete_item_from_array, detach_item_from_array,
     get_array_size, is_array, is_bool, is_null, is_number, is_object, is_string, is_true, parse,
-    print_unformatted, CJson, CJSON_ARRAY, CJSON_FALSE, CJSON_NULL, CJSON_NUMBER, CJSON_OBJECT,
-    CJSON_STRING, CJSON_TRUE,
+    print_unformatted, replace_item_in_array, CJson, CJSON_ARRAY, CJSON_FALSE, CJSON_NULL,
+    CJSON_NUMBER, CJSON_OBJECT, CJSON_STRING, CJSON_TRUE,
 };
 use proptest::prelude::*;
 use proptest::test_runner::{Config, TestRunner};
@@ -215,6 +216,38 @@ fn prop_parse_print_drop_no_panic() {
             let _printed = print_unformatted(&root);
             drop(root);
         }
+        Ok(())
+    })
+    .unwrap();
+}
+
+/// **deterministic** — add transfers each incoming `Box` into the sibling
+/// chain; detach removes exactly one node and returns it with no sibling; delete
+/// drops in place; and replace drops the old node while preserving the rest of
+/// the chain. This is the safe-Rust ownership counterpart to the mutation C
+/// oracle, and Miri checks it without raw pointers.
+#[test]
+fn prop_mutation_transfers_and_releases_ownership() {
+    let mut r = runner();
+    r.run(&prop::collection::vec(-1000i32..1000, 3..20), |numbers| {
+        let mut root = cjson_rust::create_array();
+        for &number in &numbers {
+            add_item_to_array(&mut root, create_number(number as f64));
+        }
+        prop_assert_eq!(get_array_size(&root), numbers.len() as i32);
+
+        let index = (numbers.len() / 2) as i32;
+        let detached = detach_item_from_array(&mut root, index)
+            .ok_or_else(|| TestCaseError::fail("index selected from array must detach"))?;
+        prop_assert!(detached.next.is_none(), "detached node retained a sibling");
+        prop_assert_eq!(get_array_size(&root), numbers.len() as i32 - 1);
+        drop(detached);
+
+        prop_assert!(delete_item_from_array(&mut root, 0));
+        prop_assert_eq!(get_array_size(&root), numbers.len() as i32 - 2);
+        prop_assert!(replace_item_in_array(&mut root, 0, create_number(42.0)).is_ok());
+        prop_assert_eq!(get_array_size(&root), numbers.len() as i32 - 2);
+        drop(root);
         Ok(())
     })
     .unwrap();
