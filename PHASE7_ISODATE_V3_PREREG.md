@@ -100,6 +100,38 @@ mini-gate after checking the ISO regexes for lookbehind/backrefs.
    discipline, hidden golden, infra-only invalidation; report all six + medians
    (golden / build attempts / tools / wall), straight reading.
 
+## Pre-run corrections (2026-07-25, before any N=3 run)
+Found by review of the mini-gate artifacts + the pre-registered dry-prep material
+audit. All four are protocol/spec fixes made **before** any arm was run, so no
+result is retrofitted; the frozen decisions above are unchanged.
+
+1. **Adequacy scope now matches the scored run.** `isodate_adequacy.json` gated
+   the *union* closure (`parse_duration` + `duration_isoformat`, 20 entities)
+   while the frozen API spec scopes this run to the parser. The spec is now
+   parser-only: closure **16**, **13/13 must-reach**, 0 must-exclude leaked,
+   adequate — and the formatter entities (`isostrf:strftime`/`_strfduration`,
+   `duration_isoformat`) moved to must-exclude, since packing them would hand the
+   graph arm material the scored task does not need. Re-gating the formatter
+   separately is only required if the secondary check is ever run.
+2. **`arm_raw` was contaminated.** `prep` copied `examples/isodate/PROVENANCE.md`
+   into the raw kit — our own experiment note, which names the slice under test
+   and spells out the exact `timedelta`-vs-`Duration` type nuance the golden
+   measures. Now excluded from the copy and flagged by the leak check.
+3. **Kit isolation in the graph arm.** Every pack embedded the absolute path of
+   the original source (`/…/examples/isodate/isodates.py`) and a `usage_hint`
+   telling the agent to consult "the original source of the listed files" —
+   jointly an invitation to break the kit-isolation rule the protocol relies on.
+   Packs now carry the bare module name as provenance and no `usage_hint`; the
+   leak check fails any kit file containing an absolute repo path.
+4. **Underspecified interface (the v1 strip-contract lesson).** The result shape
+   did not define `days`/`seconds`/`microseconds` normalization, but the golden
+   pins Python's `timedelta` carry (`-PT1H` → `days=-1, seconds=82800`, from
+   `timedelta(0) - ret`). That rule lives in the CPython stdlib, so it is
+   invisible to **both** arms in their material — 3 of 24 cases would have scored
+   a shared guess about `datetime` internals rather than graph-vs-raw. The
+   normalization invariant is now stated in the API spec, given identically to
+   both arms, exactly as the strip contract was after v1.
+
 ## Backup
 `packaging.SpecifierSet.contains` (20 modules, static, high spread) — strong, but
 its version domain overlaps the earlier `semantic_version` port; kept as backup.

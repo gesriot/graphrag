@@ -1,8 +1,8 @@
 {
-  "roots": ["isoduration:parse_duration", "isoduration:duration_isoformat"],
+  "_comment": "Parser-only, matching the scored run (isodate_duration_api.md scopes v3 to parse_duration; duration_isoformat is out of scope). Adding the formatter root would gate a closure the graph arm is never given: it pulls isostrf:strftime/_strfduration/_strfdt + duration_isoformat (union = 20 entities vs 16 here).",
+  "roots": ["isoduration:parse_duration"],
   "must_reach": [
     "isoduration:parse_duration",
-    "isoduration:duration_isoformat",
     "isoduration:ISO8601_PERIOD_REGEX",
     "isodatetime:parse_datetime",
     "isodates:parse_date",
@@ -12,8 +12,6 @@
     "isotime:TIME_REGEX_CACHE",
     "isotime:build_time_regexps",
     "isoerror:ISO8601Error",
-    "isostrf:strftime",
-    "isostrf:_strfduration",
     "duration:Duration",
     "duration:Duration.__init__",
     "duration:Duration.__sub__"
@@ -22,6 +20,9 @@
     "duration:Duration.__mul__",
     "isodates:date_isoformat",
     "isodatetime:datetime_isoformat",
+    "isoduration:duration_isoformat",
+    "isostrf:strftime",
+    "isostrf:_strfduration",
     "version:version"
   ]
 }

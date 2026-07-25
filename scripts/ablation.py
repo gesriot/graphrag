@@ -129,6 +129,15 @@ def closure(graph: Path, roots: list[str], follow=CLOSURE_EDGES) -> set[str]:
     return {t for t in seen if t in titles}
 
 
+def _strip_kit_paths(text: str) -> str:
+    """Reduce absolute in-repo source paths to bare file names.
+
+    Provenance in a kit should say *which module* a snippet came from, not where
+    the original tree is on disk.
+    """
+    return re.sub(re.escape(str(ROOT)) + r"[\w./-]*/([\w.-]+)", r"\1", text)
+
+
 def packable_symbols(graph: Path, symbols: list[str]) -> list[str]:
     """Symbols safe to materialize as context packs for an ablation kit.
 
@@ -251,7 +260,15 @@ def prep(
                         d for d in deps
                         if str(d.get("title", "")) in packed_set
                     ]
-                out_file.write_text(json.dumps(pack, indent=2, ensure_ascii=False))
+                # The generic pack is written for in-repo use, where pointing at
+                # the original file is the point. Inside a kit it is the opposite:
+                # absolute source paths tell the graph arm exactly where the raw
+                # source lives, and `usage_hint` explicitly invites reading it,
+                # both of which contradict the kit-isolation rule in PROMPT.md.
+                # Keep the module identity (basename), drop the filesystem path.
+                pack.pop("usage_hint", None)
+                out_file.write_text(_strip_kit_paths(
+                    json.dumps(pack, indent=2, ensure_ascii=False)))
                 made.append(out_file.name)
         return (
             "Graph-derived **context packs** in `context/` (" + ", ".join(made) + "). "
@@ -266,8 +283,11 @@ def prep(
         names = []
         for f in source:
             if f.is_dir():
+                # PROVENANCE.md is *our* vendoring/experiment note, not upstream
+                # source: it names the slice under test and its known nuances, so
+                # copying it would hand arm_raw the answer key.
                 shutil.copytree(f, srcdir / f.name, ignore=shutil.ignore_patterns(
-                    "tests", "target", "__pycache__", "*.pyc", ".git"))
+                    "tests", "target", "__pycache__", "*.pyc", ".git", "PROVENANCE.md"))
                 names.append(f.name + "/ (whole package, tests excluded)")
             else:
                 shutil.copy(f, srcdir / f.name)
@@ -280,12 +300,24 @@ def prep(
 
     kg = write_kit("arm_graph", graph_material)
     kr = write_kit("arm_raw", raw_material)
-    # leak check: no golden / reference port anywhere in the kits
+    # Leak check. Names catch the golden/reference port; the content scan catches
+    # the two subtler leaks: our own provenance/experiment notes vendored next to
+    # the source, and absolute paths pointing back out of the kit.
     leaks = []
     for kit in (kg, kr):
         for p in kit.rglob("*"):
-            if p.is_file() and ("golden" in p.name or "parse_contract" in p.name):
+            if not p.is_file():
+                continue
+            if "golden" in p.name or "parse_contract" in p.name or p.name == "PROVENANCE.md":
                 leaks.append(str(p))
+                continue
+            if p.name == "PROMPT.md":
+                continue  # states the arm/protocol by design, identically per arm
+            try:
+                if str(ROOT) in p.read_text():
+                    leaks.append(f"{p} (absolute repo path)")
+            except (UnicodeDecodeError, OSError):
+                pass
     manifest = {
         "target": target,
         "arm_graph": str(kg),

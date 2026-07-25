@@ -22,5 +22,15 @@ pub enum Parsed {
 pub fn parse_duration(s: &str) -> Result<Parsed, ()>;
 ```
 
+**Field normalization (part of the result shape, not a behavioural hint).** The
+`days`/`seconds`/`microseconds` triple is always carried in normalized form:
+`0 <= microseconds < 1_000_000` and `0 <= seconds < 86_400`, with `days` holding
+the sign and any whole-day carry. A negative fixed duration is therefore
+represented with a negative `days` and non-negative `seconds`/`microseconds`
+(e.g. minus one hour is `days: -1, seconds: 82_800, microseconds: 0`), never as
+`days: 0, seconds: -3_600`. The same normalization applies to the
+`days`/`seconds`/`microseconds` of the `Duration` variant; its `years`/`months`
+carry their own sign independently.
+
 A regex crate (`fancy-regex`) is pre-provided in `Cargo.toml` (the ISO regexes use
 lookahead); use it rather than hand-rolling a regex engine. Do not add other deps.

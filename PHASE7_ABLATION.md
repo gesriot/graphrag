@@ -206,7 +206,7 @@ scoped Rust port:
   Git like other BYOG snapshots, but can be kept locally to rerun `context_pack`
   and graph queries without reindexing.
 - The scoped port currently passes its handoff gates (`check_port.sh`; 81 Rust
-  tests; full examples pytest expected `442 passed, 4 xfailed` after adding
+  tests; full examples pytest expected `444 passed, 4 xfailed` after adding
   humanize-v2's Python contract tests).
 
 This strengthens confidence that the `uses_data` / `data_dependencies` fix is
@@ -240,7 +240,8 @@ surfaced two *tractable* closure boundaries, fixed as **general resolver wins** 
 aliased-import resolution (`_`/`P_`/`NS_` -> `i18n:_gettext`/`_pgettext`/
 `_ngettext_noop`) and data->reference edges (`human_powers` -> `i18n:_ngettext_noop`,
 `_SUPERSCRIPT_TRANS` -> `_SUPERSCRIPT_MAP`). All fixes kept every existing graph
-audit at pass 1.0 and the full suite green (442 passed, 4 xfailed).
+audit at pass 1.0 and the full suite green (442 passed, 4 xfailed; 444 after
+the isodate v3 contract tests).
 
 | arm | scores | median | build attempts | tool-uses | wall (s) |
 |---|---|---|---|---|---|

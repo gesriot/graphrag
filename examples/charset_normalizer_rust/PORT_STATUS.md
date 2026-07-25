@@ -57,7 +57,7 @@ cargo test --quiet   # expects 81 passing tests (see breakdown above)
 From repo root:
 ```bash
 PYTHONPATH=. uv run pytest examples -q --tb=no
-# expected current summary: 442 passed, 4 xfailed
+# expected current summary: 444 passed, 4 xfailed
 # xfails are documented adversarial detector (bom8_badcont, short_high) + codec-policy (utf7 policy-vs-raw, euc_jis_2004) cases
 # (short_20 xfail burned down via narrow is_printable fix matching Python source)
 # MB codec note: single-byte codecs exact; most MB via encoding_rs/custom Korean/HZ/UTF special handling; rare MB table variants documented.
