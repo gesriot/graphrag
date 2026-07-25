@@ -230,6 +230,19 @@ Output: Rust crate(s) mirroring (or improving) original structure + updated grap
 - Reproduce the spirit of the original demo as a canonical example.
 - Benchmarks vs. baselines (raw-code local-agent/manual prompting, vector RAG over code if available, other code-graph tools, optional cloud LLM baselines).
 - Ablation: value of hierarchical summaries vs. flat graph vs. AST-only.
+  - **Result so far (2026-07-25), recorded honestly:** four pre-registered
+    graph-vs-raw ablations (`PHASE7_ABLATION.md`) — v1 `sqlparse.split`,
+    `jsonpatch`, v2 `humanize.number`, v3 `isodate.parse_duration`, the last
+    across a second model family (GPT-5.6) — **do not demonstrate a capability
+    win for the graph.** v1 showed a focus/efficiency advantage on the largest
+    target; the rest reached parity because raw source was equally sufficient.
+    The structural reason is a property of the experiment: any slice small enough
+    to be a clean benchmark is also small enough for the whole raw package to fit
+    in context, so the graph's advantage was never actually put under test. A
+    meaningful v4 needs a target whose raw material exceeds the arm's context
+    budget. Until then the supported claim is that the deterministic graph is a
+    verification and context-assembly discipline, not a measured accuracy
+    multiplier.
 - Open issues: legal/attribution for ports, exact behavioral equivalence (incl. original bugs vs. fixes), handling of build systems / platform specifics.
 - Contribution model: treat this as a research/engineering project; welcome tree-sitter grammar extensions, new query types, better verifiers.
 

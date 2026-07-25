@@ -282,13 +282,93 @@ target that is simultaneously (a) genuinely high raw-assembly cost — a slice b
 across many interdependent modules, not one obvious file — and (b) statically
 structured enough to be adequacy-clean (not a jsonpatch-style dynamic boundary).
 
+## v3 result (isodate `parse_duration`, N=3 per arm)
+
+Pre-registered in `PHASE7_ISODATE_V3_PREREG.md` and run only after the mini-gate
+was clean (parser-only closure 16, 13/13 must-reach, 0 must-exclude leaked; graph
+audit pass 1.0, 0/0/0) and the dry-prep material audit passed. Target chosen to
+satisfy the ingredient v1/v2 lacked: `parse_duration`'s implementation is spread
+across **8 interdependent modules**, so the raw arm must locate and assemble the
+slice out of a 10-file package, while the graph arm receives 13 closure packs.
+
+Arms were filled by **GPT-5.6 (Terra, High)** — a different model family from
+v1/v2's Claude sub-agents, recorded in the pre-registration before any run. Both
+arms used the same model at the same setting; only the material differed. Scores
+are harness-measured against the hidden 24-case golden; efficiency columns are
+agent self-reports and are **not** comparable to v1/v2's (different harness).
+
+| arm | scores | median | min–max | build attempts (self-reported) | tool-uses (self-reported) |
+|---|---|---|---|---|---|
+| **arm_graph** (13 closure packs) | 24, 23, 24 | **24/24** | 23–24 | 3,3,2 | 8–13 (med 13) |
+| **arm_raw** (whole 10-file package) | 24, 24, 24 | **24/24** | 24–24 | 2,3,4 | 8–18 (med 15) |
+
+Isolation evidence (`verify-fill`) is clean on all six: only `src/lib.rs`
+modified, nothing written outside `src/`, zero foreign-material flags. Run
+artifacts and evidence are archived in `examples/isodate/ablation_v3/`.
+
+### Reading the result (straight)
+
+- **No capability win, again.** Both arms reproduce the slice at median 24/24.
+  Raw was perfect in all three runs; graph missed one case in one run. On the
+  target designed specifically to make raw assembly expensive, raw was not merely
+  competitive — it was marginally more consistent.
+- **No efficiency win either.** Graph's median tool-uses (13) versus raw's (15)
+  is well inside the noise of three runs of self-reported "roughly N", and build
+  attempts (3,3,2 vs 2,3,4) show no direction. v1's clear focus advantage did not
+  reappear.
+- **The single graph miss is within-arm variance, not missing material.** Graph
+  run 2 failed `P0003-06-04T12:30:05`, the alternative datetime form reached
+  through the deepest part of the closure. The packs for `parse_datetime`,
+  `parse_date` and `parse_time` were all present in that kit — the other two
+  graph runs got the case right from the same material. So it is not a packer
+  gap of the kind v1 surfaced.
+- **The design premise held; the prediction did not.** Raw genuinely had to
+  assemble across 10 files, and it did so in 8–18 tool calls without difficulty.
+  High raw-assembly cost, at this scale, simply is not a barrier for a capable
+  model.
+- **Confound worth naming:** the prereg claimed a weak model prior. That is true
+  of *isodate the library*, whose specific quirks the golden pins (`PT` → zero
+  timedelta, `P` → error, the alternative form), but ISO 8601 durations are a
+  published standard the model knows well. The prior was weaker than for
+  `sqlparse` but not absent.
+
+### Honest conclusion across v1 / jsonpatch / v2 / v3
+
+Four attempts, three of them adequacy-gated and pre-registered, one across a
+second model family: **the capability claim is not demonstrated, and the
+accumulated evidence now argues against it for this class of target.** On
+bounded, statically structured, single-entry-point library slices, a capable
+model ports as well from raw source as from a graph closure. The graph's
+measurable value in this series has been focus/efficiency on the largest target
+(v1's 21-module `sqlparse`) and nothing on the smaller ones.
+
+The structural reason is now visible, and it is a property of the experiment, not
+of the graph: **any slice small enough to be a clean benchmark is also small
+enough for the raw package to fit in the model's context.** Every target tried is
+under ~4k LOC with one obvious entry point, so "raw-assembly cost" was only ever
+locating code, never being unable to see it. The condition under which a code
+graph should matter — the condition the original demo implies at 1M LOC — is when
+raw *cannot* be handed over at all and must be triaged.
+
+That reframes what a v4 would have to be, if one is run: a target whose raw
+material genuinely exceeds the arm's context budget, so `arm_raw` must choose
+what to read while `arm_graph` receives exactly the closure. Until such a design
+exists, the honest project claim is the one the evidence supports — the
+deterministic graph is a verification and context-assembly discipline that makes
+ports auditable and repeatable, not a demonstrated accuracy multiplier.
+
+What remains solidly demonstrated is the methodology: adequacy gating and the
+material audits drove real, general improvements (data-dependency packing from
+`sqlparse`; aliased-import and data-reference edges from `humanize`;
+constructor/operator edges from `isodate`), and each gate caught real defects
+before they could contaminate a published number.
+
 ## Next
 
-1. **v3 target selection (the crux):** high raw-assembly cost + statically
-   structured + weak model prior. Candidate shape: one bounded entry point of a
-   medium library whose implementation is spread across many small interdependent
-   modules, so raw must locate/assemble while the graph closure hands over exactly
-   the slice.
+1. **Decide whether a v4 is worth it** on the reframed premise above (raw exceeds
+   context, not merely spread across files). If not, stop the series and record
+   the negative result as the finding — four pre-registered attempts is enough to
+   report honestly rather than keep searching for a favourable target.
 2. Optional: widen the golden value type beyond `f64` (int/float/bignum) for a
    future numeric target — the cause of the shared `intword(1e100)` miss, not a
    porting failure.

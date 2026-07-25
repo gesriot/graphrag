@@ -1,0 +1,28 @@
+{
+  "target": "isodate_duration",
+  "arm": "arm_raw",
+  "run": 2,
+  "recorded_at": "2026-07-25T21:28:00Z",
+  "provenance": {
+    "kit": "/private/tmp/ablation/isodate_v3/run2/arm_raw",
+    "golden_dir": "/Users/drt/Downloads/graphrag/examples/isodate/tests/duration",
+    "contract_test": "/Users/drt/Downloads/graphrag/examples/isodate/tests/duration_contract.rs",
+    "crate_name": "arm"
+  },
+  "eval": {
+    "kit": "/private/tmp/ablation/isodate_v3/run2/arm_raw",
+    "builds": true,
+    "golden_pass": true,
+    "tests_passed": 1,
+    "build_tail": [],
+    "test_tail": [],
+    "cases_passed": 24,
+    "cases_total": 24,
+    "cases_failed": []
+  },
+  "self_reported": {
+    "build_attempts": 3,
+    "tool_uses": 18,
+    "wall_s": null
+  }
+}
