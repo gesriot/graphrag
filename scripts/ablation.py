@@ -18,6 +18,7 @@ subagent transcript is the audit trail.
 Subcommands:
   adequacy --graph G --spec S
   prep  --target T --graph G --source F... --symbol S... --dep D... --api A --out DIR
+  audit --out DIR --graph G --spec S
   eval  --kit DIR --golden-dir D --contract-test F --crate-name N
 """
 from __future__ import annotations
@@ -300,24 +301,7 @@ def prep(
 
     kg = write_kit("arm_graph", graph_material)
     kr = write_kit("arm_raw", raw_material)
-    # Leak check. Names catch the golden/reference port; the content scan catches
-    # the two subtler leaks: our own provenance/experiment notes vendored next to
-    # the source, and absolute paths pointing back out of the kit.
-    leaks = []
-    for kit in (kg, kr):
-        for p in kit.rglob("*"):
-            if not p.is_file():
-                continue
-            if "golden" in p.name or "parse_contract" in p.name or p.name == "PROVENANCE.md":
-                leaks.append(str(p))
-                continue
-            if p.name == "PROMPT.md":
-                continue  # states the arm/protocol by design, identically per arm
-            try:
-                if str(ROOT) in p.read_text():
-                    leaks.append(f"{p} (absolute repo path)")
-            except (UnicodeDecodeError, OSError):
-                pass
+    leaks = _scan_kit_leaks(kg) + _scan_kit_leaks(kr)
     manifest = {
         "target": target,
         "arm_graph": str(kg),
@@ -336,8 +320,209 @@ def prep(
         raise SystemExit("LEAK: golden/reference found in a kit")
 
 
+def _scan_kit_leaks(kit: Path) -> list[str]:
+    """Leak check shared by prep and audit.
+
+    Names catch the golden/reference port; the content scan catches the two
+    subtler leaks: our own provenance/experiment notes vendored next to the
+    source, and absolute paths pointing back out of the kit.
+    """
+    leaks: list[str] = []
+    for p in kit.rglob("*"):
+        if not p.is_file():
+            continue
+        if "golden" in p.name or "parse_contract" in p.name or p.name == "PROVENANCE.md":
+            leaks.append(str(p))
+            continue
+        if p.name == "PROMPT.md":
+            continue  # states the arm/protocol by design, identically per arm
+        try:
+            if str(ROOT) in p.read_text():
+                leaks.append(f"{p} (absolute repo path)")
+        except (UnicodeDecodeError, OSError):
+            pass
+    return leaks
+
+
+def _prompt_api_section(prompt: str) -> str:
+    """API-spec body between the Required public API and Available dependencies headings."""
+    lines = prompt.splitlines(keepends=True)
+    start = end = None
+    for i, line in enumerate(lines):
+        if start is None and line.startswith("## Required public API"):
+            start = i + 1
+            continue
+        if start is not None and line.startswith("## Available dependencies"):
+            end = i
+            break
+    if start is None:
+        return ""
+    return "".join(lines[start:end] if end is not None else lines[start:])
+
+
+def _cargo_dep_block(cargo_toml: str) -> str:
+    """Text of the [dependencies] table (excluding dev-dependencies)."""
+    m = re.search(r"^\[dependencies\]\s*\n(.*?)(?=^\[|\Z)", cargo_toml, flags=re.S | re.M)
+    return (m.group(1) if m else "").strip()
+
+
+def _pack_filename(symbol: str) -> str:
+    return f"pack_{symbol.replace(':', '_')}.json"
+
+
+# One-line summary printed by per-case contract tests (see duration_contract.rs).
+ABLATION_SCORE_RE = re.compile(r"^ABLATION_SCORE\s+(\{.*\})\s*$", re.M)
+
+
+def _parse_ablation_score(output: str) -> dict | None:
+    """Parse `ABLATION_SCORE {...}` from cargo test stdout; None if absent/malformed."""
+    m = ABLATION_SCORE_RE.search(output)
+    if not m:
+        return None
+    try:
+        data = json.loads(m.group(1))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
 def _run(cmd, cwd):
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+
+
+@app.command()
+def audit(
+    out: Path = typer.Option(..., "--out", help="prepped output dir (prep --out)"),
+    graph: Path = typer.Option(..., "--graph"),
+    spec: Path = typer.Option(..., "--spec", help="adequacy JSON with roots/must_reach/must_exclude"),
+):
+    """Dry-prep material audit against an already-prepped output dir.
+
+    Checks: must-reach packs present; packed == closure minus broad spans;
+    no must-exclude in the graph kit; kit leak scan (same as prep); both arms
+    carry byte-identical API-spec text and identical Cargo dependency lists.
+    Prints a JSON report; exits non-zero on any failed check.
+    """
+    out = out.resolve()
+    adeq = json.loads(spec.read_text())
+    roots = list(adeq.get("roots", []))
+    must_reach = list(adeq.get("must_reach", []))
+    must_exclude = list(adeq.get("must_exclude", []))
+
+    arm_graph = out / "arm_graph"
+    arm_raw = out / "arm_raw"
+    checks: dict = {}
+    overall = True
+
+    # --- packed == closure minus broad spans; must-reach packs present ---
+    reached = closure(graph, roots)
+    expected_packed = packable_symbols(graph, sorted(reached))
+    expected_packed_set = set(expected_packed)
+    omitted_broad = sorted(reached - expected_packed_set)
+
+    ctx = arm_graph / "context"
+    actual_pack_files = sorted(p.name for p in ctx.glob("pack_*.json")) if ctx.is_dir() else []
+    expected_pack_names = sorted(_pack_filename(sym) for sym in expected_packed)
+    missing_packs = sorted(set(expected_pack_names) - set(actual_pack_files))
+    extra_packs = sorted(set(actual_pack_files) - set(expected_pack_names))
+    packed_eq = not missing_packs and not extra_packs
+
+    # Every must_reach is either a pack on disk or an intentional broad omission.
+    must_reach_missing: list[str] = []
+    for m in must_reach:
+        if _pack_filename(m) in actual_pack_files:
+            continue
+        if m in omitted_broad:
+            continue
+        must_reach_missing.append(m)
+    must_reach_ok = not must_reach_missing
+
+    checks["must_reach_packs"] = {
+        "pass": must_reach_ok,
+        "missing": must_reach_missing,
+        "must_reach_total": len(must_reach),
+    }
+    checks["packed_equals_closure_minus_broad"] = {
+        "pass": packed_eq,
+        "closure_size": len(reached),
+        "expected_packed": sorted(expected_packed_set),
+        "actual_pack_files": actual_pack_files,
+        "missing_packs": missing_packs,
+        "extra_packs": extra_packs,
+        "omitted_broad_spans": omitted_broad,
+    }
+    overall = overall and must_reach_ok and packed_eq
+
+    # --- no must_exclude symbol appears anywhere in the graph kit ---
+    exclude_hits: list[dict] = []
+    if arm_graph.is_dir():
+        for p in arm_graph.rglob("*"):
+            if not p.is_file():
+                continue
+            try:
+                text = p.read_text()
+            except (UnicodeDecodeError, OSError):
+                continue
+            for ex in must_exclude:
+                if ex in text:
+                    exclude_hits.append({"symbol": ex, "file": str(p.relative_to(arm_graph))})
+    checks["must_exclude_absent"] = {
+        "pass": not exclude_hits,
+        "hits": exclude_hits,
+    }
+    overall = overall and not exclude_hits
+
+    # --- kit leaks (reuse prep's scanner) ---
+    leaks: list[str] = []
+    if arm_graph.is_dir():
+        leaks.extend(_scan_kit_leaks(arm_graph))
+    else:
+        leaks.append(f"missing kit: {arm_graph}")
+    if arm_raw.is_dir():
+        leaks.extend(_scan_kit_leaks(arm_raw))
+    else:
+        leaks.append(f"missing kit: {arm_raw}")
+    checks["kit_leaks"] = {"pass": not leaks, "leaks": leaks}
+    overall = overall and not leaks
+
+    # --- byte-identical API-spec text; identical dependency lists ---
+    api_graph = api_raw = None
+    if (arm_graph / "PROMPT.md").is_file() and (arm_raw / "PROMPT.md").is_file():
+        api_graph = _prompt_api_section((arm_graph / "PROMPT.md").read_text())
+        api_raw = _prompt_api_section((arm_raw / "PROMPT.md").read_text())
+    api_ok = api_graph is not None and api_raw is not None and api_graph == api_raw and api_graph != ""
+    checks["api_spec_identical"] = {
+        "pass": bool(api_ok),
+        "graph_len": len(api_graph or ""),
+        "raw_len": len(api_raw or ""),
+    }
+    overall = overall and bool(api_ok)
+
+    deps_graph = deps_raw = None
+    if (arm_graph / "Cargo.toml").is_file() and (arm_raw / "Cargo.toml").is_file():
+        deps_graph = _cargo_dep_block((arm_graph / "Cargo.toml").read_text())
+        deps_raw = _cargo_dep_block((arm_raw / "Cargo.toml").read_text())
+    deps_ok = deps_graph is not None and deps_raw is not None and deps_graph == deps_raw
+    checks["deps_identical"] = {
+        "pass": bool(deps_ok),
+        "graph_deps": deps_graph,
+        "raw_deps": deps_raw,
+    }
+    overall = overall and bool(deps_ok)
+
+    report = {
+        "out": str(out),
+        "graph": str(graph),
+        "spec": str(spec),
+        "roots": roots,
+        "checks": checks,
+        "pass": overall,
+    }
+    print(json.dumps(report, indent=2))
+    if not overall:
+        raise SystemExit(1)
 
 
 @app.command()
@@ -372,17 +557,34 @@ def eval(
             (work / "Cargo.toml").write_text(cargo)
 
         build = _run(["cargo", "build"], work)
-        test = _run(["cargo", "test", "--test", "parse_contract", "--", "--quiet"], work)
+        # --nocapture so ABLATION_SCORE lines from per-case contract tests reach us.
+        test = _run(
+            ["cargo", "test", "--test", "parse_contract", "--", "--nocapture"],
+            work,
+        )
         passed = test.returncode == 0
-        m = re.search(r"(\d+) passed", test.stdout)
+        combined = test.stdout + test.stderr
+        m = re.search(r"(\d+) passed", test.stdout) or re.search(r"(\d+) passed", combined)
         result = {
             "kit": str(kit),
             "builds": build.returncode == 0,
             "golden_pass": passed,
             "tests_passed": int(m.group(1)) if m else 0,
             "build_tail": build.stderr.strip().splitlines()[-3:] if build.returncode else [],
-            "test_tail": (test.stdout + test.stderr).strip().splitlines()[-4:] if not passed else [],
+            "test_tail": combined.strip().splitlines()[-4:] if not passed else [],
         }
+        score = _parse_ablation_score(combined)
+        if score is not None:
+            result["cases_passed"] = int(score.get("passed", 0))
+            result["cases_total"] = int(score.get("total", 0))
+            failed = score.get("failed", [])
+            result["cases_failed"] = list(failed) if isinstance(failed, list) else []
+        elif build.returncode != 0 or not passed:
+            # Build failed, or panic/abort before the summary line — sane zero score.
+            result["cases_passed"] = 0
+            result["cases_total"] = 0
+            result["cases_failed"] = []
+        # else: older contract test that fully passed — binary fields only.
         print(json.dumps(result, indent=2))
 
 

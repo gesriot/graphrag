@@ -132,6 +132,29 @@ result is retrofitted; the frozen decisions above are unchanged.
    normalization invariant is now stated in the API spec, given identically to
    both arms, exactly as the strip contract was after v1.
 
+## Reproduce (pinned — use these exact commands for all six runs)
+`fancy-regex` is pinned to `0.13` (the version the earlier `sqlparse` arms were
+given) so the pre-provided-dependency variable is identical across v1 and v3.
+
+```bash
+uv run python scripts/ablation.py adequacy --graph byog_isodate \
+  --spec scripts/ablation_specs/isodate_adequacy.json          # adequate: true, closure 16
+uv run python scripts/ablation.py prep --target isodate_duration --graph byog_isodate \
+  --source examples/isodate --closure-root isoduration:parse_duration \
+  --dep 'fancy-regex = "0.13"' \
+  --api scripts/ablation_specs/isodate_duration_api.md --out /tmp/ablation/isodate
+uv run python scripts/ablation.py audit --out /tmp/ablation/isodate --graph byog_isodate \
+  --spec scripts/ablation_specs/isodate_adequacy.json          # all six checks, exit 0
+# (fill each kit with a cold sub-agent, then score each filled kit:)
+uv run python scripts/ablation.py eval --kit /tmp/ablation/isodate/arm_graph \
+  --golden-dir examples/isodate/tests/duration \
+  --contract-test examples/isodate/tests/duration_contract.rs --crate-name arm
+```
+
+`eval` reports `cases_passed`/`cases_total` per run (the `X/24` the result table
+needs) plus the failing case ids. A case whose port panics costs one case and is
+reported as `"<input> (panic)"`, never the whole score.
+
 ## Backup
 `packaging.SpecifierSet.contains` (20 modules, static, high spread) — strong, but
 its version domain overlaps the earlier `semantic_version` port; kept as backup.
