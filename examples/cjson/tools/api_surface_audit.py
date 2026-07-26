@@ -106,6 +106,127 @@ OWNERSHIP_BLOCKED = {
     ),
 }
 
+# A C trace establishes that cJSON exhibits the behavior. These minimal,
+# intentionally failing Rust programs establish the different fact needed for
+# this port: the smallest safe-borrow implementation cannot reproduce that
+# trace. The pytest audit compiles every file and checks this exact diagnostic,
+# so a comment or a stale source file cannot be mistaken for evidence.
+BACKTICK = "`"
+
+COMPILER_REJECTIONS = {
+    "cJSON_CreateStringReference": {
+        "snippet": "examples/cjson_rust/compiler_rejections/create_string_reference.rs",
+        "diagnostic": (
+            f"error[E0502]: cannot borrow {BACKTICK}source{BACKTICK} as mutable because "
+            "it is also borrowed as immutable"
+        ),
+        "attempt": (
+            "Change valuestring from owned bytes to Cow with a borrowed source. "
+            "Construction type-checks; the C-trace mutation is the rejected line."
+        ),
+        "closure": (
+            "Use shared mutable string storage such as Rc<RefCell<Vec<u8>>>, or make this "
+            "behavior explicitly unsafe. That changes every string parser, printer, "
+            "getter, setter, duplicate, and comparison path from owned bytes to shared "
+            "borrows/runtime checks. A lifetime-only Cow rewrite would also alter every "
+            "CJson signature yet still cannot run the C trace."
+        ),
+    },
+    "cJSON_CreateObjectReference": {
+        "snippet": "examples/cjson_rust/compiler_rejections/create_object_reference.rs",
+        "diagnostic": (
+            f"error[E0502]: cannot borrow {BACKTICK}source{BACKTICK} as mutable because "
+            "it is also borrowed as immutable"
+        ),
+        "attempt": (
+            "Replace the owned child link for this node with a borrowed CJson child and "
+            "return a reference object. Construction type-checks; mutating the source "
+            "child as the C trace does is rejected."
+        ),
+        "closure": (
+            "Use Rc<RefCell<CJson>> nodes, or an arena plus runtime borrow discipline, "
+            "for child/sibling links. Every getter, iterator, mutation API, parser, "
+            "printer, duplicate/compare path, and the iterative Drop strategy would move "
+            "from Box traversal to shared handles and runtime borrow/error handling."
+        ),
+    },
+    "cJSON_CreateArrayReference": {
+        "snippet": "examples/cjson_rust/compiler_rejections/create_array_reference.rs",
+        "diagnostic": (
+            f"error[E0502]: cannot borrow {BACKTICK}source{BACKTICK} as mutable because "
+            "it is also borrowed as immutable"
+        ),
+        "attempt": (
+            "Replace the owned child link for this node with a borrowed CJson child and "
+            "return a reference array. Construction type-checks; mutating the source "
+            "child as the C trace does is rejected."
+        ),
+        "closure": (
+            "Use Rc<RefCell<CJson>> nodes, or an arena plus runtime borrow discipline, "
+            "for child/sibling links. Every getter, iterator, mutation API, parser, "
+            "printer, duplicate/compare path, and the iterative Drop strategy would move "
+            "from Box traversal to shared handles and runtime borrow/error handling."
+        ),
+    },
+    "cJSON_AddItemToObjectCS": {
+        "snippet": "examples/cjson_rust/compiler_rejections/add_item_to_object_cs.rs",
+        "diagnostic": (
+            f"error[E0502]: cannot borrow {BACKTICK}key{BACKTICK} as mutable because it "
+            "is also borrowed as immutable"
+        ),
+        "attempt": (
+            "Change the object key to Cow with a borrowed key. Insertion type-checks; "
+            "the C-trace overwrite of the caller key is rejected."
+        ),
+        "closure": (
+            "Use shared mutable key storage such as Rc<RefCell<Vec<u8>>>, or an "
+            "explicitly unsafe borrowed-key API. "
+            "That changes parsing, printing, key lookup, duplicate/compare, and every "
+            "object builder from owned bytes to shared borrows/runtime checks. A "
+            "lifetime/Cow conversion changes all existing signatures but still cannot "
+            "reproduce caller-side mutation."
+        ),
+    },
+    "cJSON_AddItemReferenceToArray": {
+        "snippet": "examples/cjson_rust/compiler_rejections/add_item_reference_to_array.rs",
+        "diagnostic": (
+            f"error[E0502]: cannot borrow {BACKTICK}source{BACKTICK} as mutable because "
+            "it is also borrowed as immutable"
+        ),
+        "attempt": (
+            "Extend the current child slot to an owned or borrowed alternative. Adding "
+            "the borrowed item type-checks; the C-trace source mutation is rejected "
+            "while the destination keeps that borrow."
+        ),
+        "closure": (
+            "Use Rc<RefCell<CJson>> child nodes or an arena/handle graph. Because one "
+            "child chain can "
+            "then be reached from multiple parents, all existing Box-transfer signatures, "
+            "traversal, mutation, parse/print, and the custom recursive/iterative Drop "
+            "ownership model must be redesigned."
+        ),
+    },
+    "cJSON_AddItemReferenceToObject": {
+        "snippet": "examples/cjson_rust/compiler_rejections/add_item_reference_to_object.rs",
+        "diagnostic": (
+            f"error[E0502]: cannot borrow {BACKTICK}source{BACKTICK} as mutable because "
+            "it is also borrowed as immutable"
+        ),
+        "attempt": (
+            "Keep an owned/copied object key but make the member item a borrowed CJson. "
+            "Adding the member type-checks; the C-trace source mutation is rejected while "
+            "the object keeps that borrow."
+        ),
+        "closure": (
+            "Use Rc<RefCell<CJson>> child nodes or an arena/handle graph. Because one "
+            "child chain can "
+            "then be reached from multiple parents, all existing Box-transfer signatures, "
+            "traversal, mutation, parse/print, and the custom recursive/iterative Drop "
+            "ownership model must be redesigned."
+        ),
+    },
+}
+
 GLOBAL_STATE_EXCLUDED = {
     "cJSON_InitHooks": (
         "C installs process-global malloc/free callbacks. Closing it needs an allocator "
@@ -264,6 +385,24 @@ def validate_manifest(functions: list[str], data: list[str]) -> None:
             "data manifest no longer matches cJSON.h; "
             f"unclassified={missing or '-'} stale={stale or '-'}"
         )
+    rejected = frozenset(COMPILER_REJECTIONS)
+    blocked = frozenset(OWNERSHIP_BLOCKED)
+    if rejected != blocked:
+        missing = sorted(blocked - rejected)
+        stale = sorted(rejected - blocked)
+        raise ValueError(
+            "compiler-rejection manifest no longer matches ownership exclusions; "
+            f"missing={missing or '-'} stale={stale or '-'}"
+        )
+    for function, proof in COMPILER_REJECTIONS.items():
+        snippet = ROOT / proof["snippet"]
+        if not snippet.is_file():
+            raise ValueError(f"compiler-rejection snippet missing for {function}: {snippet}")
+        if proof["diagnostic"] not in snippet.read_text():
+            raise ValueError(
+                f"compiler-rejection snippet does not record the expected diagnostic for "
+                f"{function}"
+            )
 
 
 def render(header: Path) -> str:
@@ -273,7 +412,13 @@ def render(header: Path) -> str:
     for name in functions:
         if name in OWNERSHIP_BLOCKED:
             reason, scenario = OWNERSHIP_BLOCKED[name]
-            status = f"C refusal trace: `{scenario}`. {reason}"
+            proof = COMPILER_REJECTIONS[name]
+            status = (
+                f"C refusal trace: {BACKTICK}{scenario}{BACKTICK}. {reason} "
+                f"Compiler attempt: {BACKTICK}{proof['snippet']}{BACKTICK}; rustc "
+                f"rejects it with {BACKTICK}{proof['diagnostic']}{BACKTICK}. "
+                f"{proof['closure']}"
+            )
             category = "Deliberately excluded — ownership blocked"
         elif name in GLOBAL_STATE_EXCLUDED:
             reason, scenario = GLOBAL_STATE_EXCLUDED[name]
@@ -288,6 +433,15 @@ def render(header: Path) -> str:
     for name in data:
         category, status = DATA_MANIFEST[name]
         data_rows.append(f"| `{name}` | {status} | {category} |")
+
+    compiler_rows = []
+    for name in OWNERSHIP_BLOCKED:
+        proof = COMPILER_REJECTIONS[name]
+        compiler_rows.append(
+            f"| {BACKTICK}{name}{BACKTICK} | {BACKTICK}{proof['snippet']}{BACKTICK} — "
+            f"{proof['attempt']} | {BACKTICK}{proof['diagnostic']}{BACKTICK} | "
+            f"{proof['closure']} |"
+        )
 
     return "\n".join(
         [
@@ -332,6 +486,20 @@ def render(header: Path) -> str:
             "| --- | --- | --- |",
             *function_rows,
             "",
+            "## Compiler-backed ownership attempts",
+            "",
+            "For each remaining ownership exclusion, the checked-in candidate below is",
+            "compiled directly with rustc --edition=2021 --crate-type=lib. The cJSON",
+            "pytest audit asserts every source still fails and contains the exact error",
+            "shown here. Each candidate reaches the same later source mutation that the",
+            "named C oracle refusal trace observes; construction itself type-checks.",
+            "These are proofs about safe shared borrows over the current owned-tree API,",
+            "not claims that no Rust representation could express the operation.",
+            "",
+            "| Header entry | attempted safe representation | actual compiler diagnostic | representation that would close the C behavior and cost |",
+            "| --- | --- | --- | --- |",
+            *compiler_rows,
+            "",
             "## Public constants, macros, limits, and types",
             "",
             "The generator intentionally excludes ABI-configuration macros such as",
@@ -347,10 +515,13 @@ def render(header: Path) -> str:
             "",
             "The safe owned-tree port covers every header function that does not require",
             "a non-owning alias or mutable process-global allocation/error state. The",
-            f"{len(OWNERSHIP_BLOCKED)} ownership-blocked function entries have executable C",
-            "counterexamples: reference nodes observe source mutation without owning it,",
-            "and constant keys retain caller storage. A faithful closure would change the",
-            "representation to a shared/borrowed graph; it is not an omitted `Box` helper.",
+            f"{len(OWNERSHIP_BLOCKED)} remaining ownership entries have executable C",
+            "counterexamples and checked-in compiler attempts. Their ordinary borrowed",
+            "storage candidates construct successfully but reject the C trace's later",
+            "source mutation with E0502. This proves the boundary of safe borrows over",
+            "the present owned tree; it does not assert that a shared-node/shared-byte",
+            "representation is impossible. The table above names the concrete replacement",
+            "and the signatures, traversal, parser/printer, and Drop work it would cost.",
             f"The {len(GLOBAL_STATE_EXCLUDED)} global-state entries need an allocator/error",
             "policy redesign instead. No other public function remains merely unimplemented.",
             "",

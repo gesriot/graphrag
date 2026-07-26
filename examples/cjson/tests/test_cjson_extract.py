@@ -15,6 +15,9 @@ Run: uv run python -m pytest examples/cjson/tests/test_cjson_extract.py -q
 """
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -54,6 +57,68 @@ def test_struct_graph_and_slice_functions():
     import api_surface_audit  # type: ignore
 
     assert api_surface_audit.main(["--check"]) == 0
+    assert set(api_surface_audit.COMPILER_REJECTIONS) == set(
+        api_surface_audit.OWNERSHIP_BLOCKED
+    )
+    rustc = shutil.which("rustc")
+    assert rustc is not None, "cJSON Rust-port audit requires rustc"
+    with tempfile.TemporaryDirectory() as td:
+        output = Path(td) / "rejection.rlib"
+        for operation, proof in api_surface_audit.COMPILER_REJECTIONS.items():
+            snippet = ROOT / proof["snippet"]
+            text = snippet.read_text()
+            assert f"cJSON API: {operation}" in text
+            assert f"expected-error: {proof['diagnostic']}" in text
+            assert "fn c_oracle_mutation_trace()" in text
+            result = subprocess.run(
+                [
+                    rustc,
+                    "--edition=2021",
+                    "--crate-type=lib",
+                    "--error-format=json",
+                    str(snippet),
+                    "-o",
+                    str(output),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode != 0, (
+                f"{operation} candidate unexpectedly compiled; it must either be ported "
+                "or reclassified"
+            )
+            rendered = "".join(
+                json.loads(line).get("rendered") or ""
+                for line in result.stderr.splitlines()
+                if line.startswith("{")
+            )
+            assert proof["diagnostic"] in rendered, (
+                f"{operation} failed for a different reason:\n{rendered}"
+            )
+            # The rejection must land on the C-trace mutation itself. Without
+            # this the proof passes on a snippet whose trace was deleted and
+            # whose error comes from an unrelated helper — verified by planting
+            # exactly that.
+            code = proof["diagnostic"].split(":", 1)[0].removeprefix("error")
+            lines = text.splitlines()
+            trace_start = next(
+                i for i, ln in enumerate(lines, 1) if "fn c_oracle_mutation_trace()" in ln
+            )
+            primary_lines = [
+                span["line_start"]
+                for line in result.stderr.splitlines()
+                if line.startswith("{")
+                for diag in [json.loads(line)]
+                if (diag.get("code") or {}).get("code") == code.strip("[]")
+                for span in diag.get("spans", [])
+                if span.get("is_primary")
+            ]
+            assert primary_lines, f"{operation}: no primary span for {code}"
+            assert any(ln > trace_start for ln in primary_lines), (
+                f"{operation}: {code} is reported at line(s) {primary_lines}, outside "
+                f"c_oracle_mutation_trace (starts at {trace_start}) — the proof must "
+                "reject the traced mutation, not incidental code"
+            )
     header = ROOT / "examples" / "cjson" / "cJSON.h"
     with tempfile.TemporaryDirectory() as td:
         altered = Path(td) / "cJSON.h"

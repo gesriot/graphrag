@@ -82,6 +82,28 @@ The published current graph co-indexes `tests/parse/runner.c` the same way `jsmn
   because the `#define` it guards had already been scraped. Liveness also
   propagates: a branch inside a dead region is dead, and inside an undecidable
   region it is undecidable however evaluable its own condition is.
+- Checked against the real compiler (`scripts/c_preprocessor.py --vs-compiler`,
+  test `examples/cjson/tests/test_c_liveness_vs_compiler.py`). The oracle is
+  `clang -E` with the `compile_commands.json` flags — line survival via the
+  `# linenum "file"` markers, plus `-E -dM` for directive-only regions, whose
+  `#define` leaves no output line to count. **0 disagreements** on all three
+  compile-database packages, but the count that matters is how much is actually
+  checked:
+
+  | package | regions | scored (line / macro) | vacuous | unknown |
+  |---|---:|---:|---:|---:|
+  | `cjson` | 34 | 7 (5 / 2) | 8 | 19 (55.9%) |
+  | `inih` | 52 | 39 (23 / 16) | 4 | 9 (17.3%) |
+  | `jsmn` | 20 | 18 (16 / 2) | 0 | 2 (10.0%) |
+
+  *Vacuous* is a separate column on purpose. Directive-only regions that define
+  nothing attributable — function-like macros, and names several exclusive
+  branches define to the same replacement (`INI_API`, the `CJSON_PUBLIC` arms) —
+  cannot be judged in either direction, and counting them as agreements made
+  cJSON read 15/15 when 7 regions were really checked. *Unknown* is the honest
+  ceiling of `-D` + header defaults without the toolchain's macro environment;
+  on cJSON it is dominated by `_MSC_VER`, `__GNUC__`, `_WIN32`, `__WINDOWS__`,
+  `__clang__` and `__cplusplus`.
 
 **History of this reindex (2026-07-26):** preprocessor labels were first stamped
 in place on the 131/239 snapshot so a provenance commit would not fold runner
@@ -194,7 +216,7 @@ diffs).
   Rust fmt/check/golden_test/run all ok; 59 golden cases (22 ownership + 30
   float-print + 7 mutation); `manual_fixes=0`; `OVERALL PASS=True`.
 - **Rust hardening (Miri + properties):**
-  - **Miri:** `cargo +nightly miri test --test ownership_props` — 10 property
+  - **Miri:** `cargo +nightly miri test --test ownership_props` — 11 property
     tests, all pass. Covers parse → walk → print → drop of randomly shaped
     trees, wide sibling lists, deep-nesting rejection, garbage inputs, and
     add → insert → detach → delete → replace ownership transfer plus independent
@@ -243,8 +265,18 @@ functions. The six ownership-blocked entries are
 `CreateStringReference`, `CreateObjectReference`, `CreateArrayReference`,
 `AddItemToObjectCS`, `AddItemReferenceToArray`, and `AddItemReferenceToObject`.
 Their C traces prove, respectively, observing caller string/key mutation or
-aliasing a child chain. Faithfully closing them needs borrowed/shared storage,
-not another helper over the current `Box` tree.
+aliasing a child chain. That is only the C half of the boundary. Each entry now
+has a minimal candidate in `examples/cjson_rust/compiler_rejections/` that
+first stores the ordinary borrowed/Cow form successfully, then reproduces the
+same later source mutation. `rustc --edition=2021 --crate-type=lib` rejects
+that mutation with the recorded `E0502` error; the pytest audit compiles every
+candidate and checks the exact diagnostic. This proves safe shared borrows do
+not close these C traces over the present owned tree — not that another Rust
+representation is impossible. The generated audit names the concrete closure
+and cost for each: shared mutable bytes for string/key aliases, and shared
+nodes or a handle arena for child aliases; each changes existing signatures,
+traversal, parsing/printing, mutations, and/or `Drop` rather than adding an
+afternoon-scale helper.
 
 **Correction (2026-07-26, same day):** `DetachItemViaPointer` and
 `ReplaceItemViaPointer` were first classified ownership-blocked on the reasoning

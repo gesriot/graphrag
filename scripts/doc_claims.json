@@ -6,7 +6,7 @@
       "kind": "current",
       "description": "Full examples pytest summary: passed + xfailed.",
       "expect": {
-        "passed": 465,
+        "passed": 474,
         "xfailed": 2
       },
       "source": {
@@ -18,12 +18,12 @@
       "docs": [
         {
           "path": "Plan.md",
-          "must_contain": "465 passed, 2 xfailed",
+          "must_contain": "474 passed, 2 xfailed",
           "role": "current"
         },
         {
           "path": "PHASE7_WRITEUP.md",
-          "must_contain": "465 passed, 2 xfailed",
+          "must_contain": "474 passed, 2 xfailed",
           "role": "current"
         }
       ]
@@ -118,7 +118,7 @@
         },
         {
           "path": "Plan.md",
-          "must_contain": "78 functions plus 23 public constants/macros/limits/types; 68 functions are covered, 6 require shared/borrowed storage (reference constructors/adds and the const-key alias), and 4 require a process-global allocator/error-state policy",
+          "must_contain": "78 functions plus 23 public constants/macros/limits/types;\n68 functions are covered, 6 require shared/borrowed storage (reference\nconstructors/adds and the const-key alias), and 4 require a process-global\nallocator/error-state policy",
           "role": "current"
         }
       ]
@@ -363,6 +363,32 @@
           "must_contain": "port_eval` with 52 golden cases (22 ownership + 30 float-print)",
           "role": "historical",
           "require_near": "Bootstrap/port status (2026-06-25)"
+        }
+      ]
+    },
+    {
+      "id": "cjson_miri_ownership_property_count",
+      "kind": "traced",
+      "description": "cJSON ownership property-test count, including the Miri identity property.",
+      "expect": {
+        "ownership_properties": 11
+      },
+      "source": {
+        "type": "cargo_test",
+        "mode": "traced",
+        "command": "cd examples/cjson_rust && cargo +nightly miri test --test ownership_props",
+        "note": "The Miri command is the execution gate; this claim keeps the two current cJSON documents synchronized with its test count."
+      },
+      "docs": [
+        {
+          "path": "Plan.md",
+          "must_contain": "11 labelled ownership properties",
+          "role": "current"
+        },
+        {
+          "path": "examples/cjson/PROVENANCE.md",
+          "must_contain": "11 property\n    tests, all pass",
+          "role": "current"
         }
       ]
     },

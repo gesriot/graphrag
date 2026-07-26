@@ -16,9 +16,12 @@
 //! plus a float-printing fidelity suite matching cJSON's `%1.15g`/`%1.17g`
 //! number printer (see `print_number` and `golden_float_print.json`). The
 //! owned builder/mutation subset is also ported: constructors, typed arrays,
-//! add, detach, delete, and replace. Reference constructors and pointer-identity
-//! mutation calls are deliberately outside this `Box`-only representation; see
-//! `examples/cjson/PROVENANCE.md` for the explicit boundary.
+//! add, detach, delete, replace, and node-address identity mutation. Reference
+//! constructors/reference adds and the const-key alias remain outside this
+//! `Box`-owned representation: checked compiler candidates prove that a safe
+//! borrow cannot reproduce cJSON's later-source-mutation trace. See
+//! `examples/cjson/API_SURFACE_AUDIT.md` for the exact candidates and the
+//! representation changes that would close them.
 
 // jsmn-style bit-flag type tags (cJSON.h).
 pub const CJSON_INVALID: i32 = 0;

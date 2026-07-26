@@ -1010,6 +1010,498 @@ def _load_published_byog(graph_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Compiler oracle: compare liveness labels to real `clang -E` / `cc -E` survival
+# ---------------------------------------------------------------------------
+
+
+def find_c_compiler() -> Optional[str]:
+    """Return a C compiler path, or None if none is available."""
+    import shutil
+
+    return shutil.which("clang") or shutil.which("cc") or shutil.which("gcc")
+
+
+def _load_compile_command_entries(package_dir: Path) -> List[Dict[str, Any]]:
+    cc_path = package_dir / "compile_commands.json"
+    if not cc_path.is_file():
+        return []
+    try:
+        entries = json.loads(cc_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    return entries if isinstance(entries, list) else []
+
+
+def preprocess_command_from_entry(
+    entry: Dict[str, Any], *, compiler: str, package_dir: Path
+) -> Tuple[Path, List[str], Path]:
+    """Build a ``compiler -E …`` argv from one compile_commands entry.
+
+    Returns (cwd, argv, primary_source).
+    """
+    directory = entry.get("directory") or str(package_dir)
+    cwd_raw = Path(directory)
+    if cwd_raw.is_absolute() and cwd_raw.exists():
+        cwd = cwd_raw.resolve()
+    elif cwd_raw.exists():
+        cwd = cwd_raw.resolve()
+    else:
+        # compile_commands in this repo use repo-relative dirs; callers pass
+        # package_dir as the package root — fall back to it.
+        cwd = package_dir.resolve()
+
+    raw_cmd = entry.get("command") or ""
+    if not raw_cmd and entry.get("arguments"):
+        args = [str(a) for a in entry["arguments"]]
+    else:
+        import shlex
+
+        args = shlex.split(raw_cmd)
+
+    # Drop the original compiler token; rebuild with -E.
+    if args and not args[0].startswith("-"):
+        args = args[1:]
+
+    cleaned: List[str] = []
+    drop_flags = {"-c", "-fsyntax-only"}
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in drop_flags:
+            i += 1
+            continue
+        if a == "-o":
+            i += 2  # skip -o and its argument
+            continue
+        if a.startswith("-o") and a != "-o":
+            i += 1
+            continue
+        cleaned.append(a)
+        i += 1
+
+    src = entry.get("file") or ""
+    src_path = Path(src)
+    if not src_path.is_absolute():
+        cand = (cwd / src_path).resolve()
+        if not cand.exists():
+            cand = (package_dir / Path(src).name).resolve()
+        src_path = cand
+
+    argv = [compiler, "-E", *cleaned]
+    # Ensure the source path is present (some entries only list it as "file").
+    joined = " ".join(cleaned)
+    if src_path.name not in joined and str(src_path) not in cleaned:
+        if (cwd / src_path.name).exists():
+            argv.append(src_path.name)
+        else:
+            argv.append(str(src_path))
+
+    return cwd, argv, src_path
+
+
+def final_macro_state(
+    *, compiler: str, package_dir: Path, entry: Dict[str, Any]
+) -> Dict[str, str]:
+    """Return the compiler's final macro table for one translation unit.
+
+    ``-E -dM`` dumps every macro that survives preprocessing. This is what makes
+    directive-only regions scoreable: a region whose body is just
+    ``#define NAME value`` leaves no output line, so line survival cannot judge
+    it, but the macro table says directly whether that ``#define`` ran.
+    """
+    import subprocess
+
+    cwd, argv, _primary = preprocess_command_from_entry(
+        entry, compiler=compiler, package_dir=package_dir
+    )
+    argv = [*argv[:2], "-dM", *argv[2:]]
+    proc = subprocess.run(
+        argv, cwd=str(cwd), capture_output=True, text=True, errors="replace"
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"preprocessor -dM failed ({proc.returncode}): {' '.join(argv)}\n"
+            f"{proc.stderr[:800]}"
+        )
+    macros: Dict[str, str] = {}
+    for line in proc.stdout.splitlines():
+        m = re.match(r"^#define\s+([A-Za-z_]\w*)(?:\([^)]*\))?\s*(.*)$", line)
+        if m:
+            macros[m.group(1)] = m.group(2).strip()
+    return macros
+
+
+def _normalize_macro_body(text: str) -> str:
+    """Collapse whitespace so source text compares to ``-dM`` output."""
+    return " ".join(str(text).split())
+
+
+def _region_defined_macros(
+    src_lines: List[str], reg: ConditionalRegion
+) -> List[Tuple[str, str]]:
+    """``(name, replacement)`` for object-like macros defined directly in ``reg``.
+
+    Nested conditionals are excluded: a ``#define`` one level down runs only if
+    *that* region is live, which is a different question from this region's.
+    """
+    macros: List[Tuple[str, str]] = []
+    depth = 0
+    for lineno in range(reg.start_line + 1, reg.end_line + 1):
+        if lineno > len(src_lines):
+            break
+        m = _DIR_RE.match(src_lines[lineno - 1])
+        if not m:
+            continue
+        directive, rest = m.group(1), (m.group(2) or "").strip()
+        if directive in ("if", "ifdef", "ifndef"):
+            depth += 1
+        elif directive == "endif":
+            depth -= 1
+        elif directive == "define" and depth == 0:
+            om = _DEFINE_OBJ_RE.match(rest)
+            if om and not _DEFINE_FUNC_RE.match(rest):
+                name = om.group(1)
+                macros.append((name, _normalize_macro_body(rest[len(name) :])))
+    return macros
+
+
+def surviving_source_lines(
+    *,
+    compiler: str,
+    package_dir: Path,
+    entry: Dict[str, Any],
+    package_files: Optional[Set[str]] = None,
+) -> Dict[str, Set[int]]:
+    """Return basename -> set of original source line numbers that survive -E.
+
+    Uses the preprocessor's ``# linenum "file"`` markers — not a second
+    implementation of our liveness rules. Only files under ``package_dir``
+    (or listed in ``package_files`` basenames) are retained.
+    """
+    import subprocess
+
+    cwd, argv, _primary = preprocess_command_from_entry(
+        entry, compiler=compiler, package_dir=package_dir
+    )
+    proc = subprocess.run(
+        argv,
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        errors="replace",
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"preprocessor failed ({proc.returncode}): {' '.join(argv)}\n"
+            f"{proc.stderr[:800]}"
+        )
+
+    pkg_resolved = package_dir.resolve()
+    if package_files is None:
+        package_files = {
+            p.name
+            for p in pkg_resolved.rglob("*")
+            if p.suffix in {".c", ".h"} and p.is_file()
+        }
+
+    survived: Dict[str, Set[int]] = defaultdict(set)
+    cur_file: Optional[str] = None
+    cur_line = 0
+    in_package = False
+
+    for line in proc.stdout.splitlines():
+        m = re.match(r'^#\s+(\d+)\s+"([^"]*)"', line)
+        if m:
+            cur_line = int(m.group(1))
+            cur_file = m.group(2)
+            # package file?
+            name = Path(cur_file).name
+            # absolute path under package, or basename match for local includes
+            try:
+                cpath = Path(cur_file)
+                if cpath.is_absolute():
+                    in_package = (
+                        pkg_resolved in cpath.resolve().parents
+                        or cpath.resolve() == pkg_resolved
+                        or name in package_files
+                    )
+                else:
+                    in_package = name in package_files
+            except Exception:
+                in_package = name in package_files
+            continue
+
+        if not in_package or cur_file is None:
+            continue
+
+        name = Path(cur_file).name
+        # Every retained output line (including blanks) advances the line
+        # counter; only non-empty lines count as "surviving content".
+        if line.strip():
+            survived[name].add(cur_line)
+        cur_line += 1
+
+    return dict(survived)
+
+
+def _region_body_content_lines(source_lines: List[str], reg: ConditionalRegion) -> List[int]:
+    """Non-directive, non-empty source lines inside a region's closed span."""
+    body: List[int] = []
+    # start_line is the opening directive; body begins on the next line.
+    for ln in range(reg.start_line + 1, reg.end_line + 1):
+        if ln < 1 or ln > len(source_lines):
+            continue
+        text = source_lines[ln - 1]
+        if _DIR_RE.match(text):
+            continue
+        if not text.strip():
+            continue
+        body.append(ln)
+    return body
+
+
+def _unknown_macro_families(reg: ConditionalRegion) -> List[str]:
+    """Token families mentioned in a region condition (for unknown-rate reporting)."""
+    text = f"{reg.condition} {reg.chain_condition}"
+    tokens = re.findall(r"[A-Za-z_]\w*", text)
+    families: List[str] = []
+    for t in tokens:
+        if t in _PLATFORM_MACROS or t.startswith("__") or t.startswith("_"):
+            families.append(f"platform:{t}")
+        elif t.startswith("INI_"):
+            families.append("INI_*")
+        elif t.startswith("CJSON_") or t.startswith("cJSON_"):
+            families.append("CJSON_*")
+        elif t.startswith("JSMN_"):
+            families.append("JSMN_*")
+        elif t in {"defined", "if", "ifdef", "ifndef", "else", "elif", "endif"}:
+            continue
+        else:
+            families.append(t)
+    # unique preserve order
+    seen: Set[str] = set()
+    out: List[str] = []
+    for f in families:
+        if f not in seen:
+            seen.add(f)
+            out.append(f)
+    return out
+
+
+def compare_liveness_to_compiler(
+    package_dir: Path,
+    *,
+    compiler: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Compare diagnostic live/dead labels to real preprocessor line survival.
+
+    * ``live`` regions with non-directive body lines must have ≥1 survivor.
+    * ``dead`` regions must have 0 survivors among body lines.
+    * ``unknown`` is **not** scored as agreement or error — only reported.
+
+    Returns a machine-readable report. Raises RuntimeError if the compiler
+    invocation fails.
+    """
+    package_dir = package_dir.resolve()
+    compiler = compiler or find_c_compiler()
+    if not compiler:
+        raise FileNotFoundError("no C compiler (clang/cc/gcc) on PATH")
+
+    entries = _load_compile_command_entries(package_dir)
+    if not entries:
+        raise FileNotFoundError(f"no compile_commands.json under {package_dir}")
+
+    pa = analyze_package(package_dir)
+
+    # Union survival maps across all compile_commands entries.
+    package_names = {
+        p.name
+        for p in package_dir.rglob("*")
+        if p.suffix in {".c", ".h"} and p.is_file()
+    }
+    survived: Dict[str, Set[int]] = defaultdict(set)
+    macro_state: Dict[str, str] = {}
+    preprocess_cmds: List[str] = []
+    files_in_tu: Set[str] = set()
+    for ent in entries:
+        if not isinstance(ent, dict):
+            continue
+        primary = Path(str(ent.get("file") or "")).name
+        if primary:
+            files_in_tu.add(primary)
+        part = surviving_source_lines(
+            compiler=compiler,
+            package_dir=package_dir,
+            entry=ent,
+            package_files=package_names,
+        )
+        for name, lines in part.items():
+            survived[name].update(lines)
+            files_in_tu.add(name)
+        macro_state.update(
+            final_macro_state(compiler=compiler, package_dir=package_dir, entry=ent)
+        )
+        _cwd, argv, _ = preprocess_command_from_entry(
+            ent, compiler=compiler, package_dir=package_dir
+        )
+        preprocess_cmds.append(" ".join(argv))
+
+    # Source text cache
+    source_cache: Dict[str, List[str]] = {}
+
+    def source_lines_for(path: Path) -> List[str]:
+        key = str(path.resolve())
+        if key not in source_cache:
+            source_cache[key] = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        return source_cache[key]
+
+    agreements: List[Dict[str, Any]] = []
+    disagreements: List[Dict[str, Any]] = []
+    unknowns: List[Dict[str, Any]] = []
+    vacuous: List[Dict[str, Any]] = []
+    skipped_not_in_tu = 0
+    empty_bodies = 0
+    family_counter: Dict[str, int] = defaultdict(int)
+
+    seen_fa: Set[int] = set()
+    for fa in pa.files.values():
+        if id(fa) in seen_fa:
+            continue
+        seen_fa.add(id(fa))
+        path = Path(fa.path)
+        if not path.exists():
+            continue
+        basename = path.name
+        # Only score files that participate in a compile_commands translation
+        # unit (primary source or #include'd package headers). Otherwise a
+        # live label on tests.c would "fail" because we never preprocessed it.
+        if basename not in files_in_tu and basename not in survived:
+            skipped_not_in_tu += sum(1 for r in fa.regions if not r.is_include_guard)
+            continue
+        src_lines = source_lines_for(path)
+        file_surv = survived.get(basename, set())
+        # Every replacement text each object-like macro gets in this file, so a
+        # region can tell whether its own value identifies it uniquely.
+        file_macro_values: Dict[str, List[str]] = defaultdict(list)
+        for other in fa.regions:
+            if other.is_include_guard:
+                continue
+            for name, value in _region_defined_macros(src_lines, other):
+                file_macro_values[name].append(value)
+
+        for reg in fa.regions:
+            if reg.is_include_guard:
+                continue
+            live, basis = region_liveness(pa, fa, reg)
+            body = _region_body_content_lines(src_lines, reg)
+            survivors = [ln for ln in body if ln in file_surv]
+            rec = {
+                "file": basename,
+                "kind": reg.kind,
+                "condition": (reg.condition or reg.chain_condition or "")[:80],
+                "start_line": reg.start_line,
+                "end_line": reg.end_line,
+                "label": live,
+                "basis": basis,
+                "body_lines": body,
+                "surviving_body_lines": survivors,
+            }
+            if live == "unknown":
+                fams = _unknown_macro_families(reg)
+                rec["macro_families"] = fams
+                for f in fams:
+                    family_counter[f] += 1
+                unknowns.append(rec)
+                continue
+
+            if not body:
+                # Line survival cannot judge a directive-only region: a
+                # `#define` emits nothing either way. Ask the macro table
+                # instead — that scores the `#ifndef X`/`#define X v` idiom,
+                # which is most of the config surface in these packages.
+                defined_here = _region_defined_macros(src_lines, reg)
+                # A name defined by several mutually exclusive branches (INI_API,
+                # JSMN_API) cannot be attributed by presence — only the *value*
+                # says which branch ran, and only when this region's value is
+                # unique among its siblings.
+                usable = [
+                    (name, value)
+                    for name, value in defined_here
+                    if sum(
+                        1
+                        for other_value in file_macro_values.get(name, ())
+                        if other_value == value
+                    )
+                    == 1
+                ]
+                if usable and macro_state:
+                    rec["macro_evidence"] = {
+                        name: {"expected": value, "final": macro_state.get(name)}
+                        for name, value in usable
+                    }
+                    matched = [
+                        name in macro_state
+                        and _normalize_macro_body(macro_state[name]) == value
+                        for name, value in usable
+                    ]
+                    ok = all(matched) if live == "live" else not any(matched)
+                    rec["note"] = "macro_state"
+                    (agreements if ok else disagreements).append(rec)
+                    continue
+                # Genuinely unscoreable: nothing observable either way. Counted
+                # separately — folding these into agreements would have made
+                # cJSON read 15/15 when only 5 regions were really checked.
+                empty_bodies += 1
+                vacuous.append({**rec, "note": "empty_body_unscoreable"})
+                continue
+
+            if live == "live":
+                ok = len(survivors) >= 1
+            else:  # dead
+                ok = len(survivors) == 0
+
+            if ok:
+                agreements.append(rec)
+            else:
+                disagreements.append(rec)
+
+    n_scored = len(agreements) + len(disagreements)
+    n_unknown = len(unknowns)
+    n_vacuous = len(vacuous)
+    n_total = n_scored + n_unknown + n_vacuous
+    by_evidence: Dict[str, int] = defaultdict(int)
+    for rec in agreements:
+        by_evidence[str(rec.get("note") or "line_survival")] += 1
+    report = {
+        "package": str(package_dir),
+        "compiler": compiler,
+        "preprocess_commands": preprocess_cmds,
+        "files_in_translation_units": sorted(files_in_tu),
+        "regions_total": n_total,
+        "regions_scored": n_scored,
+        "regions_unknown": n_unknown,
+        "regions_skipped_not_in_tu": skipped_not_in_tu,
+        "unknown_rate": (n_unknown / n_total) if n_total else 0.0,
+        "agreements": len(agreements),
+        "disagreements": len(disagreements),
+        # Regions nothing can judge: directive-only bodies that define no macro.
+        # Kept out of `regions_scored` so the agreement rate means what it says.
+        "regions_vacuous": n_vacuous,
+        "empty_body_regions": empty_bodies,
+        "agreement_evidence": dict(by_evidence),
+        "agreement_rate_scored": (len(agreements) / n_scored) if n_scored else 1.0,
+        "unknown_macro_families": dict(
+            sorted(family_counter.items(), key=lambda kv: (-kv[1], kv[0]))
+        ),
+        "disagreement_details": disagreements[:40],
+        "unknown_samples": unknowns[:20],
+        "vacuous_samples": vacuous[:20],
+        "ok": len(disagreements) == 0,
+    }
+    return report
+
+
 def main(argv: Optional[Sequence[str]] = None) -> None:
     import argparse
 
@@ -1023,11 +1515,47 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         "use this to make claims about the graph the ports were actually built on",
     )
     ap.add_argument("--json", action="store_true")
+    ap.add_argument(
+        "--vs-compiler",
+        action="store_true",
+        help="compare liveness labels to real clang/cc -E line survival "
+        "(requires a C compiler; does not modify graphs)",
+    )
     args = ap.parse_args(argv)
+
+    pkg = args.package.resolve()
+
+    if args.vs_compiler:
+        report = compare_liveness_to_compiler(pkg)
+        if args.json:
+            print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+        else:
+            print(f"compiler oracle: {report['package']}")
+            print(f"  compiler              : {report['compiler']}")
+            print(f"  regions total         : {report['regions_total']}")
+            print(f"  scored (live/dead)    : {report['regions_scored']}")
+            print(f"  unknown (unscored)    : {report['regions_unknown']} "
+                  f"({100.0 * report['unknown_rate']:.1f}%)")
+            print(f"  vacuous (unscoreable) : {report['regions_vacuous']}")
+            print(f"  agreements            : {report['agreements']} "
+                  f"{report['agreement_evidence']}")
+            print(f"  disagreements         : {report['disagreements']}")
+            print(f"  agreement rate (scored): {100.0 * report['agreement_rate_scored']:.1f}%")
+            print(f"  unknown macro families: {report['unknown_macro_families']}")
+            if report["disagreement_details"]:
+                print("  disagreements (sample):")
+                for d in report["disagreement_details"][:15]:
+                    print(
+                        f"    {d['file']}:{d['start_line']}-{d['end_line']} "
+                        f"{d['kind']} label={d['label']} "
+                        f"survivors={d['surviving_body_lines']} "
+                        f"cond={d['condition']!r}"
+                    )
+            print(f"  ok                    : {report['ok']}")
+        raise SystemExit(0 if report["ok"] else 1)
 
     from extract_c import build_c_byog  # type: ignore
 
-    pkg = args.package.resolve()
     # Prefer --graph when making claims about the ports: a published snapshot
     # and a fresh extraction can diverge when the package (e.g. golden runner)
     # grows. Name the source in the output so reports are not mis-attributed.
