@@ -219,6 +219,7 @@ def pack(
             "extractor", "confidence", "is_deterministic",
             # C frontend honesty: tree-sitter cannot resolve the preprocessor.
             "preprocessor_dependent", "preprocessor_reasons", "preprocessor_branches",
+            "preprocessor_eval_mode",
             # Python frontend honesty: syntax/AST cannot follow dynamic dispatch.
             "dynamic_dependent", "dynamic_reasons",
         )
@@ -301,10 +302,11 @@ def pack(
             f"{b.get('kind')}({str(b.get('condition'))[:30]})"
             for b in entity_branches if b.get("liveness") == "dead"
         ][:6]
+        _eval_mode = _json_safe(ent_dict.get("preprocessor_eval_mode"))
         pack["preprocessor_warning"] = (
             "PREPROCESSOR-DEPENDENT (tree-sitter C frontend): this symbol and/or "
             "its call edges sit inside #if/#ifdef regions or involve function-like "
-            "macros. Branch liveness under compile_commands -D + header defaults "
+            f"macros. Branch liveness (eval_mode={_eval_mode or 'no_compiler'}) "
             f"is reported as weak provenance (live={live_n}, dead={dead_n}, "
             f"unknown={unk_n}"
             + (f"; live_regions={live_bits}" if live_bits else "")
@@ -324,10 +326,17 @@ def pack(
             # Parallel to dynamic.dispatch_candidates: names the work (which
             # branches are live/dead under the recorded build), still weak.
             "branch_liveness": entity_branches,
+            "eval_mode": _json_safe(ent_dict.get("preprocessor_eval_mode"))
+            or (
+                (entity_branches[0].get("eval_mode") if entity_branches else None)
+            ),
             "note": (
-                "Detection + weak liveness under compile_commands -D and simple "
-                "header #ifndef/#define defaults (scripts/c_preprocessor.py). "
-                "Not full clang expansion; platform macros stay unknown."
+                "Detection + weak liveness under compile_commands -D, header "
+                "defaults, and optionally toolchain builtins from "
+                "`compiler -E -dM` (scripts/c_preprocessor.py). "
+                "eval_mode=no_compiler keeps platform macros unknown; "
+                "compiler_builtins seeds them with basis=builtin:NAME=… . "
+                "Not full clang expansion of arbitrary expressions."
             ),
         }
 

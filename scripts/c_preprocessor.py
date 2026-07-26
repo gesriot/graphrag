@@ -112,6 +112,18 @@ class PackageAnalysis:
     compile_defines: Dict[str, Optional[str]] = field(default_factory=dict)
     # Header build defaults: name -> (value, defining file, defining line).
     header_defaults: Dict[str, Tuple[str, str, int]] = field(default_factory=dict)
+    # Toolchain built-ins from ``compiler -E -dM`` (empty TU), when available.
+    # Name -> replacement text. Seeded only when eval_mode is compiler_builtins.
+    compiler_builtins: Dict[str, str] = field(default_factory=dict)
+    # How liveness was evaluated for this analysis.
+    # "compiler_builtins" | "no_compiler"
+    eval_mode: str = "no_compiler"
+    compiler_path: Optional[str] = None
+    # Names the real translation unit ends up with that no package `#define`
+    # can account for — i.e. they came from an `#include`. Empty-TU builtins
+    # cannot see these, so without them `#ifndef NAN` reads "undefined" when
+    # math.h has in fact defined it. Name -> replacement text.
+    include_macros: Dict[str, str] = field(default_factory=dict)
 
 
 def parse_compile_commands(package_dir: Path) -> Dict[str, Dict[str, Optional[str]]]:
@@ -347,13 +359,92 @@ def _collect_header_defaults(
     return defaults
 
 
-def analyze_package(package_dir: Path) -> PackageAnalysis:
+def fetch_compiler_builtins(
+    compiler: Optional[str] = None,
+    *,
+    extra_flags: Optional[Sequence[str]] = None,
+) -> Dict[str, str]:
+    """Return object-like macros from ``compiler -E -dM`` on an empty TU.
+
+    This is the toolchain's built-in table (``__GNUC__``, ``__APPLE__``, …),
+    not our own rules. Returns {} if no compiler is available or the probe fails.
+    """
+    import subprocess
+
+    compiler = compiler or find_c_compiler()
+    if not compiler:
+        return {}
+    # Empty translation unit: stdin as C source.
+    argv = [compiler, "-E", "-dM", "-x", "c", *(extra_flags or ()), "-"]
+    try:
+        proc = subprocess.run(
+            argv,
+            input="",
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    if proc.returncode != 0:
+        return {}
+    out: Dict[str, str] = {}
+    for line in proc.stdout.splitlines():
+        # #define NAME replacement
+        m = re.match(r"^\s*#\s*define\s+([A-Za-z_]\w*)(\([^\)]*\))?\s*(.*)$", line)
+        if not m:
+            continue
+        name, params, body = m.group(1), m.group(2), (m.group(3) or "").strip()
+        if params:
+            # function-like builtin — skip; our evaluator is object-like only
+            continue
+        out[name] = body
+    return out
+
+
+def analyze_package(
+    package_dir: Path,
+    *,
+    use_compiler_builtins: Optional[bool] = None,
+    compiler: Optional[str] = None,
+) -> PackageAnalysis:
+    """Analyse a C package for preprocessor structure and weak liveness.
+
+    ``use_compiler_builtins``:
+      * ``True`` — require/use ``compiler -E -dM`` builtins (eval_mode
+        ``compiler_builtins`` when the probe succeeds).
+      * ``False`` — never query the compiler (eval_mode ``no_compiler``);
+        platform macros stay ``unknown``.
+      * ``None`` (default) — use builtins when a compiler is available,
+        otherwise ``no_compiler``. The chosen mode is recorded on the analysis
+        and stamped into artifacts so a builtins stamp is never silent.
+    """
     package_dir = Path(package_dir).resolve()
     cc = parse_compile_commands(package_dir)
     package_defines = cc.get("*", {})
+
+    compiler = compiler or find_c_compiler()
+    builtins: Dict[str, str] = {}
+    if use_compiler_builtins is False:
+        eval_mode = "no_compiler"
+    else:
+        if compiler:
+            builtins = fetch_compiler_builtins(compiler)
+            eval_mode = "compiler_builtins" if builtins else "no_compiler"
+        else:
+            eval_mode = "no_compiler"
+        if use_compiler_builtins is True and eval_mode != "compiler_builtins":
+            # Explicit request but probe failed — stay honest.
+            eval_mode = "no_compiler"
+            builtins = {}
+
     pa = PackageAnalysis(
         package_dir=package_dir,
         compile_defines=dict(package_defines),
+        compiler_builtins=dict(builtins),
+        eval_mode=eval_mode,
+        compiler_path=compiler if eval_mode == "compiler_builtins" else None,
     )
     files = sorted(
         p for p in package_dir.rglob("*") if p.suffix in (".c", ".h") and p.is_file()
@@ -380,7 +471,60 @@ def analyze_package(package_dir: Path) -> PackageAnalysis:
                 pa.all_object_macros.add(mac.name)
     # Defaults need the parsed regions, so collect them after the files are read.
     pa.header_defaults = _collect_header_defaults(pa.files)
+    if eval_mode == "compiler_builtins" and compiler:
+        pa.include_macros = _collect_include_macros(pa, cc, compiler=compiler)
     return pa
+
+
+def _collect_include_macros(
+    pa: PackageAnalysis,
+    cc: Dict[str, Dict[str, Optional[str]]],
+    *,
+    compiler: str,
+) -> Dict[str, str]:
+    """Macros the real translation units get from ``#include``, not from us.
+
+    Empty-TU builtins miss everything the headers pull in, so a name like
+    ``NAN`` reads "undefined" and its ``#ifndef`` block reads live even though
+    ``math.h`` defined it first. Running ``-E -dM`` on the actual compile
+    command sees those, but its output also contains our own ``#define``\\ s —
+    so a name is only attributed to an include when **no** package definition
+    of it matches the final replacement text. That keeps the inference
+    non-circular: our own macros can never make themselves look external.
+    """
+    package_defs: Dict[str, Set[str]] = defaultdict(set)
+    for key, fa in pa.files.items():
+        if not key.endswith((".c", ".h")):
+            continue
+        for mac in fa.macros:
+            body = mac.body_preview[len(mac.name) :]
+            if mac.function_like:
+                body = re.sub(r"^\([^)]*\)", "", body)
+            package_defs[mac.name].add(_normalize_macro_body(body))
+
+    entries = _load_compile_command_entries(pa.package_dir)
+    final: Dict[str, str] = {}
+    for ent in entries:
+        if not isinstance(ent, dict):
+            continue
+        try:
+            final.update(
+                final_macro_state(
+                    compiler=compiler, package_dir=pa.package_dir, entry=ent
+                )
+            )
+        except (RuntimeError, OSError):
+            continue  # a TU we cannot preprocess simply contributes nothing
+
+    external: Dict[str, str] = {}
+    for name, value in final.items():
+        if name in pa.compiler_builtins:
+            continue  # already modelled as a toolchain builtin
+        normalized = _normalize_macro_body(value)
+        if normalized in package_defs.get(name, ()):
+            continue  # could be ours; refuse to guess
+        external[name] = value
+    return external
 
 
 def _defined_env(
@@ -389,10 +533,12 @@ def _defined_env(
     *,
     before_line: Optional[int] = None,
 ) -> Dict[str, Optional[str]]:
-    """Merge header defaults, compile -D, and file-local object defines.
+    """Merge builtins, header defaults, compile -D, and file-local object defines.
 
-    Precedence (highest last): header_defaults < package -D < file -D <
-    in-file ``#define`` that appear *before* ``before_line`` (if given).
+    Precedence (highest last):
+      compiler_builtins < header_defaults < package -D < file -D <
+      in-file ``#define`` that appear *before* ``before_line`` (if given).
+
     Using only prior in-file defines avoids treating a later ``#define true``
     as already visible to an earlier ``#ifdef true``.
 
@@ -401,6 +547,9 @@ def _defined_env(
     being falsified by the ``#define X`` it guards.
     """
     env: Dict[str, Optional[str]] = {}
+    # Toolchain builtins first (overridden by -D and source).
+    for k, v in (pa.compiler_builtins or {}).items():
+        env[k] = v
     same_file = {str(getattr(fa, "path", "")), Path(str(getattr(fa, "path", ""))).name}
     for k, (value, def_file, def_line) in (pa.header_defaults or {}).items():
         if (
@@ -428,6 +577,38 @@ def _defined_env(
     return env
 
 
+def _define_provenance(
+    pa: PackageAnalysis,
+    fa: Optional[FileAnalysis],
+    name: str,
+    *,
+    before_line: Optional[int] = None,
+) -> Optional[str]:
+    """Where ``name`` is currently visible from, for basis strings."""
+    # Highest precedence first (mirror _defined_env overrides).
+    if fa is not None:
+        for line, n, val in reversed(fa.object_defines_at or []):
+            if n != name:
+                continue
+            if before_line is not None and line >= before_line:
+                continue
+            if _enclosing_regions(fa, line):
+                continue
+            return f"source:{name}={val!r}@{line}"
+        if name in (fa.compile_defines or {}):
+            v = fa.compile_defines[name]
+            return f"compile_d:{name}={v!r}"
+    if name in (pa.compile_defines or {}):
+        v = pa.compile_defines[name]
+        return f"compile_d:{name}={v!r}"
+    if name in (pa.header_defaults or {}):
+        value, def_file, def_line = pa.header_defaults[name]
+        return f"header_default:{name}={value!r}"
+    if name in (pa.compiler_builtins or {}):
+        return f"builtin:{name}={pa.compiler_builtins[name]!r}"
+    return None
+
+
 def _enclosing_regions(fa: FileAnalysis, line: int) -> List[ConditionalRegion]:
     """Non-guard conditional regions containing ``line``."""
     return [
@@ -437,33 +618,96 @@ def _enclosing_regions(fa: FileAnalysis, line: int) -> List[ConditionalRegion]:
     ]
 
 
-def _is_defined(name: str, env: Dict[str, Optional[str]]) -> Optional[bool]:
-    """True/False if decidable; None if platform-unknown and not -D'd."""
+def _is_defined(
+    name: str,
+    env: Dict[str, Optional[str]],
+    *,
+    pa: Optional["PackageAnalysis"] = None,
+) -> Optional[bool]:
+    """True/False if decidable; None if we must not invent an answer.
+
+    * Name present in ``env`` (builtins / -D / headers / prior source) → defined.
+    * Platform name under ``compiler_builtins`` and absent from env →
+      **undefined** (empty-TU probe did not define it for this toolchain).
+    * Platform name under ``no_compiler`` → **unknown** (do not invent a host).
+    * Name the real translation unit gets from an ``#include`` → **defined**.
+      Empty-TU builtins cannot see these, and calling them undefined produced
+      confidently wrong labels: ``#ifndef NAN`` / ``isinf`` / ``isnan`` in
+      ``cJSON.c`` read *live* when ``math.h`` had already defined all three.
+    * Any other absent name → **undefined** (ordinary C rules for project ids).
+    """
     if name in env:
         return True
+    if pa is not None and name in getattr(pa, "include_macros", {}):
+        return True
     if name in _PLATFORM_MACROS:
-        return None  # unknown — do not treat as dead
+        if pa is not None and getattr(pa, "eval_mode", "no_compiler") == "compiler_builtins":
+            return False
+        return None
     return False
 
 
-def _eval_primary(expr: str, env: Dict[str, Optional[str]]) -> Tuple[Optional[bool], str]:
+def _name_basis(
+    pa: Optional["PackageAnalysis"],
+    fa: Optional[FileAnalysis],
+    name: str,
+    *,
+    before_line: Optional[int],
+    fallback: str,
+) -> str:
+    """Prefer structured provenance (builtin:…) over a plain fallback string."""
+    if pa is None:
+        return fallback
+    prov = _define_provenance(pa, fa, name, before_line=before_line)
+    if prov and prov.startswith("builtin:"):
+        return prov
+    if prov and prov.startswith("compile_d:"):
+        return prov
+    if prov and prov.startswith("header_default:"):
+        return prov
+    return fallback
+
+
+def _eval_primary(
+    expr: str,
+    env: Dict[str, Optional[str]],
+    *,
+    pa: Optional["PackageAnalysis"] = None,
+    fa: Optional[FileAnalysis] = None,
+    before_line: Optional[int] = None,
+) -> Tuple[Optional[bool], str]:
     """Evaluate a stripped primary condition fragment. None = unknown."""
     e = expr.strip()
     if not e:
         return None, "empty condition"
-    # defined(X) / !defined(X)
-    m = re.fullmatch(r"defined\s*\(\s*([A-Za-z_]\w*)\s*\)", e)
+    # defined(X) / defined X / !defined(X) / !defined X
+    m = re.fullmatch(r"defined\s*(?:\(\s*([A-Za-z_]\w*)\s*\)|([A-Za-z_]\w*))", e)
     if m:
-        d = _is_defined(m.group(1), env)
+        name = m.group(1) or m.group(2)
+        d = _is_defined(name, env, pa=pa)
         if d is None:
-            return None, f"platform macro {m.group(1)} not in compile -D"
-        return d, f"defined({m.group(1)})={'yes' if d else 'no'}"
-    m = re.fullmatch(r"!\s*defined\s*\(\s*([A-Za-z_]\w*)\s*\)", e)
+            return None, f"platform macro {name} not in compile -D/builtins"
+        if d and name in env:
+            fb = f"defined({name})={'yes'}"
+            return True, _name_basis(pa, fa, name, before_line=before_line, fallback=fb)
+        if d:
+            return True, f"defined({name})=yes"
+        # absent after builtins probe
+        if pa is not None and pa.eval_mode == "compiler_builtins" and name in _PLATFORM_MACROS:
+            return False, f"defined({name})=no (absent from builtins)"
+        return False, f"defined({name})=no"
+    m = re.fullmatch(r"!\s*defined\s*(?:\(\s*([A-Za-z_]\w*)\s*\)|([A-Za-z_]\w*))", e)
     if m:
-        d = _is_defined(m.group(1), env)
+        name = m.group(1) or m.group(2)
+        d = _is_defined(name, env, pa=pa)
         if d is None:
-            return None, f"platform macro {m.group(1)} not in compile -D"
-        return (not d), f"!defined({m.group(1)})={'yes' if not d else 'no'}"
+            return None, f"platform macro {name} not in compile -D/builtins"
+        if not d:
+            if pa is not None and pa.eval_mode == "compiler_builtins" and name in _PLATFORM_MACROS:
+                return True, f"!defined({name})=yes (absent from builtins)"
+            return True, f"!defined({name})=yes"
+        fb = f"!defined({name})=no"
+        return False, _name_basis(pa, fa, name, before_line=before_line, fallback=fb)
     # bare identifier (common for INI_USE_STACK style #if X)
     m = re.fullmatch(r"([A-Za-z_]\w*)", e)
     if m:
@@ -472,27 +716,38 @@ def _eval_primary(expr: str, env: Dict[str, Optional[str]]) -> Tuple[Optional[bo
             val = env[name]
             # defined with empty or non-zero token → true; 0 → false
             if val is None or str(val).strip() == "":
-                return True, f"{name} defined (empty/flag)"
+                fb = f"{name} defined (empty/flag)"
+                return True, _name_basis(pa, fa, name, before_line=before_line, fallback=fb)
             tok = str(val).strip().split()[0]
             if re.fullmatch(r"0[xX]?[0-9a-fA-F]*", tok) or tok == "0":
-                return False, f"{name}={tok}"
+                fb = f"{name}={tok}"
+                return False, _name_basis(pa, fa, name, before_line=before_line, fallback=fb)
             if re.fullmatch(r"[0-9]+", tok) or re.fullmatch(r"0[xX][0-9a-fA-F]+", tok):
-                return (int(tok, 0) != 0), f"{name}={tok}"
+                fb = f"{name}={tok}"
+                return (int(tok, 0) != 0), _name_basis(
+                    pa, fa, name, before_line=before_line, fallback=fb
+                )
             # non-numeric replacement (string, expression) → unknown
             return None, f"{name} has non-numeric value {tok!r}"
         if name in _PLATFORM_MACROS:
-            return None, f"platform macro {name} not in compile -D"
+            d = _is_defined(name, env, pa=pa)
+            if d is None:
+                return None, f"platform macro {name} not in compile -D/builtins"
+            # compiler_builtins mode: absent ⇒ 0
+            return False, f"{name} undefined (absent from builtins) → 0"
         # not defined → 0 in #if
         return False, f"{name} undefined → 0"
     # unary !
     if e.startswith("!"):
-        inner, basis = _eval_primary(e[1:].strip(), env)
+        inner, basis = _eval_primary(
+            e[1:].strip(), env, pa=pa, fa=fa, before_line=before_line
+        )
         if inner is None:
             return None, basis
         return (not inner), f"!({basis})"
     # parentheses
     if e.startswith("(") and e.endswith(")"):
-        return _eval_expr(e[1:-1], env)
+        return _eval_expr(e[1:-1], env, pa=pa, fa=fa, before_line=before_line)
     return None, f"unevaluable expression: {e[:60]}"
 
 
@@ -520,7 +775,14 @@ def _split_top(expr: str, op: str) -> Optional[List[str]]:
     return parts
 
 
-def _eval_expr(expr: str, env: Dict[str, Optional[str]]) -> Tuple[Optional[bool], str]:
+def _eval_expr(
+    expr: str,
+    env: Dict[str, Optional[str]],
+    *,
+    pa: Optional["PackageAnalysis"] = None,
+    fa: Optional[FileAnalysis] = None,
+    before_line: Optional[int] = None,
+) -> Tuple[Optional[bool], str]:
     e = expr.strip()
     if not e:
         return None, "empty"
@@ -562,7 +824,7 @@ def _eval_expr(expr: str, env: Dict[str, Optional[str]]) -> Tuple[Optional[bool]
         any_true = False
         any_unknown = False
         for p in parts:
-            v, b = _eval_expr(p, env)
+            v, b = _eval_expr(p, env, pa=pa, fa=fa, before_line=before_line)
             bases.append(b)
             if v is True:
                 any_true = True
@@ -580,7 +842,7 @@ def _eval_expr(expr: str, env: Dict[str, Optional[str]]) -> Tuple[Optional[bool]
         any_false = False
         any_unknown = False
         for p in parts:
-            v, b = _eval_expr(p, env)
+            v, b = _eval_expr(p, env, pa=pa, fa=fa, before_line=before_line)
             bases.append(b)
             if v is False:
                 any_false = True
@@ -592,33 +854,48 @@ def _eval_expr(expr: str, env: Dict[str, Optional[str]]) -> Tuple[Optional[bool]
             return None, " && ".join(bases)
         return True, " && ".join(bases)
 
-    return _eval_primary(e, env)
+    return _eval_primary(e, env, pa=pa, fa=fa, before_line=before_line)
 
 
 def evaluate_region_liveness(
-    reg: ConditionalRegion, env: Dict[str, Optional[str]]
+    reg: ConditionalRegion,
+    env: Dict[str, Optional[str]],
+    *,
+    pa: Optional["PackageAnalysis"] = None,
+    fa: Optional[FileAnalysis] = None,
+    before_line: Optional[int] = None,
 ) -> Tuple[Liveness, str]:
     """Return (live|dead|unknown, basis) for a region under define env."""
     kind = reg.kind
     cond = (reg.condition or "").strip()
+    bl = before_line if before_line is not None else reg.start_line
 
     if kind == "ifdef":
         name = cond.split()[0] if cond else ""
-        d = _is_defined(name, env)
+        d = _is_defined(name, env, pa=pa)
         if d is None:
-            return "unknown", f"platform macro {name} not in compile -D"
-        return ("live" if d else "dead"), f"ifdef({name}) → {'defined' if d else 'undefined'}"
+            return "unknown", f"platform macro {name} not in compile -D/builtins"
+        if d:
+            fb = f"ifdef({name}) → defined"
+            return "live", _name_basis(pa, fa, name, before_line=bl, fallback=fb)
+        if pa is not None and pa.eval_mode == "compiler_builtins" and name in _PLATFORM_MACROS:
+            return "dead", f"ifdef({name}) → undefined (absent from builtins)"
+        return "dead", f"ifdef({name}) → undefined"
 
     if kind == "ifndef":
         name = cond.split()[0] if cond else ""
-        d = _is_defined(name, env)
+        d = _is_defined(name, env, pa=pa)
         if d is None:
-            return "unknown", f"platform macro {name} not in compile -D"
-        return ("live" if not d else "dead"), f"ifndef({name}) → {'undefined' if not d else 'defined'}"
+            return "unknown", f"platform macro {name} not in compile -D/builtins"
+        if not d:
+            if pa is not None and pa.eval_mode == "compiler_builtins" and name in _PLATFORM_MACROS:
+                return "live", f"ifndef({name}) → undefined (absent from builtins)"
+            return "live", f"ifndef({name}) → undefined"
+        fb = f"ifndef({name}) → defined"
+        return "dead", _name_basis(pa, fa, name, before_line=bl, fallback=fb)
 
     if kind in ("if", "elif"):
-        # strip trailing backslash continuations already joined? keep simple
-        val, basis = _eval_expr(cond, env)
+        val, basis = _eval_expr(cond, env, pa=pa, fa=fa, before_line=bl)
         if val is None:
             return "unknown", basis
         return ("live" if val else "dead"), basis
@@ -634,7 +911,9 @@ def evaluate_region_liveness(
             depth=reg.depth,
             file=reg.file,
         )
-        parent_live, basis = evaluate_region_liveness(pseudo, env)
+        parent_live, basis = evaluate_region_liveness(
+            pseudo, env, pa=pa, fa=fa, before_line=bl
+        )
         if parent_live == "unknown":
             return "unknown", f"else of unknown parent ({basis})"
         if parent_live == "live":
@@ -655,12 +934,16 @@ def region_liveness(
     to be evaluable.
     """
     env = _defined_env(pa, fa, before_line=reg.start_line)
-    own, basis = evaluate_region_liveness(reg, env)
+    own, basis = evaluate_region_liveness(
+        reg, env, pa=pa, fa=fa, before_line=reg.start_line
+    )
     for parent in _enclosing_regions(fa, reg.start_line):
         if parent.start_line >= reg.start_line and parent.end_line <= reg.end_line:
             continue  # itself, or a sibling arm of the same chain
         parent_env = _defined_env(pa, fa, before_line=parent.start_line)
-        parent_live, parent_basis = evaluate_region_liveness(parent, parent_env)
+        parent_live, parent_basis = evaluate_region_liveness(
+            parent, parent_env, pa=pa, fa=fa, before_line=parent.start_line
+        )
         if parent_live == "dead":
             return "dead", f"inside dead {parent.kind} @{parent.start_line} ({parent_basis})"
         if parent_live == "unknown" and own != "dead":
@@ -708,6 +991,7 @@ def branches_for_span(
                 "end_line": reg.end_line,
                 "liveness": live,
                 "basis": basis,
+                "eval_mode": pa.eval_mode,
             }
         )
     return out
@@ -814,19 +1098,34 @@ def reasons_for_span(
 
 
 def annotate_byog(
-    data: Dict[str, List[Dict[str, Any]]], package_dir: Path
+    data: Dict[str, List[Dict[str, Any]]],
+    package_dir: Path,
+    *,
+    use_compiler_builtins: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """Stamp preprocessor provenance onto entities, relationships, observations.
 
     Does **not** flip ``is_deterministic`` or drop edges.
     Overwrites ``preprocessor_*`` fields (never merges with prior parquet values).
+
+    ``use_compiler_builtins`` is passed to ``analyze_package`` (see there). The
+    resulting ``eval_mode`` is stamped onto every item so artifacts record
+    whether toolchain builtins were used.
     """
-    pa = analyze_package(package_dir)
+    pa = analyze_package(
+        package_dir, use_compiler_builtins=use_compiler_builtins
+    )
     summary: Dict[str, Any] = {
         "package": str(package_dir),
         "function_like_macros": sorted(pa.all_function_macros),
         "compile_defines": dict(pa.compile_defines),
-        "header_defaults": dict(pa.header_defaults),
+        "header_defaults": {
+            k: v[0] if isinstance(v, tuple) else v
+            for k, v in (pa.header_defaults or {}).items()
+        },
+        "eval_mode": pa.eval_mode,
+        "compiler_path": pa.compiler_path,
+        "n_compiler_builtins": len(pa.compiler_builtins or {}),
         "entities_flagged": 0,
         "calls_flagged": 0,
         "observations_flagged": 0,
@@ -842,6 +1141,7 @@ def annotate_byog(
         # Overwrite — never merge with prior ndarray reasons from parquet.
         item["preprocessor_dependent"] = bool(reasons)
         item["preprocessor_reasons"] = list(reasons)
+        item["preprocessor_eval_mode"] = pa.eval_mode
         # JSON-serializable list of plain dicts (parquet round-trip safe as objects/JSON).
         item["preprocessor_branches"] = [
             {
@@ -957,6 +1257,8 @@ def format_report(summary: Dict[str, Any], *, totals: Optional[Dict[str, int]] =
         f"({', '.join(summary.get('function_like_macros') or []) or '—'})",
         f"  compile -D defines         : {summary.get('compile_defines') or '{}'}",
         f"  header defaults            : {summary.get('header_defaults') or '{}'}",
+        f"  eval_mode                  : {summary.get('eval_mode', 'no_compiler')} "
+        f"(builtins={summary.get('n_compiler_builtins', 0)})",
         f"  non-guard #if regions      : {summary.get('n_conditional_regions')}",
         f"  branch liveness (entity spans, non-unique): "
         f"live={summary.get('branches_live', 0)} "
@@ -1293,12 +1595,18 @@ def compare_liveness_to_compiler(
     package_dir: Path,
     *,
     compiler: Optional[str] = None,
+    use_compiler_builtins: Optional[bool] = True,
 ) -> Dict[str, Any]:
     """Compare diagnostic live/dead labels to real preprocessor line survival.
 
     * ``live`` regions with non-directive body lines must have ≥1 survivor.
     * ``dead`` regions must have 0 survivors among body lines.
     * ``unknown`` is **not** scored as agreement or error — only reported.
+    * ``vacuous`` (empty body, unscoreable) is separate from scored agreements.
+
+    ``use_compiler_builtins`` defaults to True so the labels under test match a
+    stamp produced with the toolchain table. Pass False to score the
+    toolchain-independent mode.
 
     Returns a machine-readable report. Raises RuntimeError if the compiler
     invocation fails.
@@ -1312,7 +1620,11 @@ def compare_liveness_to_compiler(
     if not entries:
         raise FileNotFoundError(f"no compile_commands.json under {package_dir}")
 
-    pa = analyze_package(package_dir)
+    pa = analyze_package(
+        package_dir,
+        use_compiler_builtins=use_compiler_builtins,
+        compiler=compiler,
+    )
 
     # Union survival maps across all compile_commands entries.
     package_names = {
@@ -1446,6 +1758,13 @@ def compare_liveness_to_compiler(
                         for name, value in usable
                     ]
                     ok = all(matched) if live == "live" else not any(matched)
+                    # A `live` label whose macro the final table attributes to
+                    # someone else *is* a wrong label — that is exactly the
+                    # `#ifndef NAN` case, where math.h defines it first and our
+                    # block never runs. Parking it as unscoreable hid three bad
+                    # cJSON labels behind a "model gap" note; the labeller now
+                    # consults the translation unit's include macros, so this
+                    # scores like any other region.
                     rec["note"] = "macro_state"
                     (agreements if ok else disagreements).append(rec)
                     continue
@@ -1476,6 +1795,8 @@ def compare_liveness_to_compiler(
     report = {
         "package": str(package_dir),
         "compiler": compiler,
+        "eval_mode": pa.eval_mode,
+        "n_compiler_builtins": len(pa.compiler_builtins or {}),
         "preprocess_commands": preprocess_cmds,
         "files_in_translation_units": sorted(files_in_tu),
         "regions_total": n_total,
@@ -1532,13 +1853,15 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         else:
             print(f"compiler oracle: {report['package']}")
             print(f"  compiler              : {report['compiler']}")
+            print(f"  eval_mode             : {report.get('eval_mode')} "
+                  f"(builtins={report.get('n_compiler_builtins', 0)})")
             print(f"  regions total         : {report['regions_total']}")
             print(f"  scored (live/dead)    : {report['regions_scored']}")
             print(f"  unknown (unscored)    : {report['regions_unknown']} "
                   f"({100.0 * report['unknown_rate']:.1f}%)")
             print(f"  vacuous (unscoreable) : {report['regions_vacuous']}")
             print(f"  agreements            : {report['agreements']} "
-                  f"{report['agreement_evidence']}")
+                  f"{report.get('agreement_evidence') or ''}")
             print(f"  disagreements         : {report['disagreements']}")
             print(f"  agreement rate (scored): {100.0 * report['agreement_rate_scored']:.1f}%")
             print(f"  unknown macro families: {report['unknown_macro_families']}")

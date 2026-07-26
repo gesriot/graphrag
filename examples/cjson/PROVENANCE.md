@@ -17,6 +17,59 @@ C→Rust ownership + owned-builder port.
   (`Copyright (c) 2009-2017 Dave Gamble and cJSON contributors`) and the MIT
   permission notice are present in both `cJSON.c` and `cJSON.h`.
 
+## Closed Rust-port scope (2026-07-26)
+
+This port is closed at its current safe, exclusive-`Box` representation. It is
+a typed Rust adaptation of the vendored cJSON API, not a drop-in C ABI or an
+FFI replacement. Use `API_SURFACE_AUDIT.md` to decide a specific call: its
+header-derived table is authoritative and fails closed if `cJSON.h` changes.
+
+**Covered.** The current header has **78 functions** and **23 public
+constants/macros/limits/types**. Of those functions, **68 are covered** by
+safe Rust equivalents: parsing/printing, getters and predicates, constructors,
+owned builders and structural mutation, duplicate/compare, parse/print options,
+setters, minify, and node-address detach/replace. The latter two use a
+compared-never-dereferenced `*const CJson` identity token; they do not require
+an aliasing redesign. **59 golden cases** are re-derived from vendored C, and
+the C/Rust safe trace is byte-compared under the C-oracle test. C ownership
+traces run under ASan when the toolchain supports it; the **11 Rust ownership
+properties** run under Miri in the full gate. The end-to-end `port_eval` gate is
+**59 golden / 0 manual fixes / OVERALL PASS**.
+
+**Deliberately refused.** **6 are genuinely blocked by the
+exclusive `Box` representation** for the exact C behavior:
+`cJSON_CreateStringReference`, `cJSON_CreateObjectReference`,
+`cJSON_CreateArrayReference`, `cJSON_AddItemToObjectCS`,
+`cJSON_AddItemReferenceToArray`, and `cJSON_AddItemReferenceToObject`.
+Each has both a reached C trace that observes a later source mutation and a
+checked-in Rust candidate whose primary `E0502` span is required to fall on
+that trace mutation. The candidates prove that ordinary safe borrowing does not
+express this behavior; they do not claim no Rust representation can. Closing
+them means shared mutable bytes (`Rc<RefCell<Vec<u8>>>`) or shared child nodes/
+an arena, changing current signatures, traversal, mutation, parsing/printing,
+and `Drop`. **4 are excluded for C process-global allocator/error state
+rather than ownership**: `cJSON_InitHooks`, `cJSON_GetErrorPtr`,
+`cJSON_malloc`, and `cJSON_free`. They need an explicit allocator/global
+error policy, not another tree helper.
+
+**Do not assume.** This port does not preserve C pointer aliasing, C global
+allocator/error state, the cJSON ABI, or a mutable borrowed-key/string API. It
+also does not claim locale-enabled decimal behavior, exhaustive malformed
+`strtod` behavior, cross-libc float-golden invariance, concurrency, or
+unbounded fuzz coverage. The non-function `prev`, `cJSON_IsReference`, and
+`cJSON_StringIsConst` boundaries follow from the same missing aliasing model.
+
+**Reproduce.** From a clean checkout run:
+
+```bash
+examples/cjson/tools/check_port.sh --full
+```
+
+It runs the header audit, compiler-rejection location checks, C oracle/ASan,
+Cargo tests, `port_eval`, and Miri. The default `--quick` mode omits only
+Miri; unavailable `rustc`, C/ASan, or nightly-Miri tooling is printed as an
+explicit skip and the final status says `PASS WITH SKIPS`.
+
 ## Compile metadata
 - `compile_commands.json` records the default build: `cc -c -I. cJSON.c`.
 - The current extractor is tree-sitter-c only; clang/compile-database semantic
@@ -69,9 +122,14 @@ The published current graph co-indexes `tests/parse/runner.c` the same way `jsmn
   simple header defaults, each overlapping non-guard region is labelled
   `live` / `dead` / `unknown` on entities as weak provenance
   (`preprocessor_branches`). Example: `cJSON:get_decimal_point` has
-  `ifdef(ENABLE_LOCALES)=dead` and its `else=live` (returns `'.'`). Platform
-  macros (`_MSC_VER`, `__GNUC__`, …) stay **unknown** — never folded into dead.
-  Context packs surface `preprocessor.branch_liveness`.
+  `ifdef(ENABLE_LOCALES)=dead` and its `else=live` (returns `'.'`). When a
+  compiler is available, labels also seed from `compiler -E -dM` builtins plus
+  the real translation unit's include-provided macros
+  (`eval_mode=compiler_builtins`, basis like `builtin:__GNUC__='4'`); without a
+  compiler, platform macros stay **unknown** (`eval_mode=no_compiler`). The
+  stamp records `preprocessor_eval_mode`. Context packs surface
+  `preprocessor.branch_liveness`. A compiler-oracle check
+  (`--vs-compiler`) locks agreement on scored regions.
 - What counts as a "header default" is deliberately narrow, because the first
   implementation was not: a `#define` is a default only when it sits outside
   every conditional (include guards excepted) or forms the `#ifndef X` /
@@ -90,20 +148,36 @@ The published current graph co-indexes `tests/parse/runner.c` the same way `jsmn
   compile-database packages, but the count that matters is how much is actually
   checked:
 
-  | package | regions | scored (line / macro) | vacuous | unknown |
-  |---|---:|---:|---:|---:|
-  | `cjson` | 34 | 7 (5 / 2) | 8 | 19 (55.9%) |
-  | `inih` | 52 | 39 (23 / 16) | 4 | 9 (17.3%) |
-  | `jsmn` | 20 | 18 (16 / 2) | 0 | 2 (10.0%) |
+  | package | regions | mode | scored (line / macro) | vacuous | unknown |
+  |---|---:|---|---:|---:|---:|
+  | `cjson` | 34 | `no_compiler` | 7 (5 / 2) | 8 | 19 (55.9%) |
+  | `cjson` | 34 | `compiler_builtins` | 25 (16 / 9) | 9 | 0 (0.0%) |
+  | `inih` | 52 | `no_compiler` | 39 (23 / 16) | 4 | 9 (17.3%) |
+  | `inih` | 52 | `compiler_builtins` | 44 (25 / 19) | 8 | 0 (0.0%) |
+  | `jsmn` | 20 | `no_compiler` | 18 (16 / 2) | 0 | 2 (10.0%) |
+  | `jsmn` | 20 | `compiler_builtins` | 20 (18 / 2) | 0 | 0 (0.0%) |
 
   *Vacuous* is a separate column on purpose. Directive-only regions that define
   nothing attributable — function-like macros, and names several exclusive
   branches define to the same replacement (`INI_API`, the `CJSON_PUBLIC` arms) —
   cannot be judged in either direction, and counting them as agreements made
-  cJSON read 15/15 when 7 regions were really checked. *Unknown* is the honest
-  ceiling of `-D` + header defaults without the toolchain's macro environment;
+  cJSON read 15/15 when 7 regions were really checked. *Unknown* is what
+  `no_compiler` mode cannot decide without the toolchain's macro environment:
   on cJSON it is dominated by `_MSC_VER`, `__GNUC__`, `_WIN32`, `__WINDOWS__`,
   `__clang__` and `__cplusplus`.
+
+  Two macro sources feed `compiler_builtins` mode, and both are needed. The
+  empty-TU probe (`-E -dM -x c -`) supplies the toolchain's own macros. It does
+  **not** supply what the translation unit gets from its `#include`s, and
+  treating those as undefined is not a harmless gap: it labelled `#ifndef isinf`,
+  `#ifndef isnan` and `#ifndef NAN` in `cJSON.c` *live* when `math.h` had
+  already defined all three, so those blocks never run. The labeller therefore
+  also reads the real compile command's `-E -dM` table, attributing a name to an
+  include only when no package `#define` of it matches the final replacement —
+  which keeps the inference non-circular, since our own macros can never make
+  themselves look external. Scoring, not excusing, is the rule here: an earlier
+  revision detected exactly this mismatch and filed it as an unscoreable "model
+  gap", which hid the three wrong labels behind a note.
 
 **History of this reindex (2026-07-26):** preprocessor labels were first stamped
 in place on the 131/239 snapshot so a provenance commit would not fold runner
@@ -241,7 +315,7 @@ diffs).
   - **Still untested:** concurrent use, Miri over the FFI float path, fuzzing
     against adversarial multi-MB inputs, and cross-libc float golden invariance.
 
-## Complete header audit and enforceable boundary (2026-07-26)
+## Audit derivation and evidence (2026-07-26)
 
 `API_SURFACE_AUDIT.md` is generated from `cJSON.h`, not from the port. Reproduce
 the inventory and its corruption check with:
@@ -257,6 +331,9 @@ every refusal trace, and runs those C traces under ASan where available. It is
 kept out of the indexed golden runner so the published `byog_cjson` snapshot
 remains the declared library + golden-runner graph.
 
+For the complete evidence chain rather than these audit-only steps, use the
+single `check_port.sh --full` command in the closed scope statement above.
+
 The current header has **78 functions** and **23 public constants/macros/limits/
 types**. Of the functions, **68 are covered**, **6 are genuinely blocked by the
 exclusive `Box` representation**, and **4 are excluded for C process-global
@@ -270,13 +347,14 @@ has a minimal candidate in `examples/cjson_rust/compiler_rejections/` that
 first stores the ordinary borrowed/Cow form successfully, then reproduces the
 same later source mutation. `rustc --edition=2021 --crate-type=lib` rejects
 that mutation with the recorded `E0502` error; the pytest audit compiles every
-candidate and checks the exact diagnostic. This proves safe shared borrows do
-not close these C traces over the present owned tree — not that another Rust
-representation is impossible. The generated audit names the concrete closure
-and cost for each: shared mutable bytes for string/key aliases, and shared
-nodes or a handle arena for child aliases; each changes existing signatures,
-traversal, parsing/printing, mutations, and/or `Drop` rather than adding an
-afternoon-scale helper.
+candidate, checks the exact diagnostic, and parses rustc JSON to require its
+primary span to fall inside `c_oracle_mutation_trace`. This proves safe shared
+borrows do not close these C traces over the present owned tree — not that
+another Rust representation is impossible. The generated audit names the
+concrete closure and cost for each: shared mutable bytes for string/key aliases,
+and shared nodes or a handle arena for child aliases; each changes existing
+signatures, traversal, parsing/printing, mutations, and/or `Drop` rather than
+adding an afternoon-scale helper.
 
 **Correction (2026-07-26, same day):** `DetachItemViaPointer` and
 `ReplaceItemViaPointer` were first classified ownership-blocked on the reasoning
@@ -308,7 +386,8 @@ deterministic ownership property exercises the non-aliasing helpers under Miri.
   whitespace checks so provenance-preserving bytes can stay verbatim while
   project-authored files remain checked normally.
 
-## Next scope
+## Closed handoff
+
 The header inventory is closed at the current representation: all safe
 non-aliasing functions are covered, and every remaining function has an
 executable, quantified refusal. Further cJSON work would be a deliberate

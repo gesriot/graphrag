@@ -69,12 +69,24 @@ def test_conditional_defines_are_not_harvested_as_build_defaults():
     default inverts the condition guarding it and reports the Windows-only
     calling-convention block as live on a POSIX build.
     """
-    pa_pkg = analyze_package(ROOT / "examples" / "cjson")
+    # Force toolchain-independent mode: platform macros stay unknown.
+    pa_pkg = analyze_package(
+        ROOT / "examples" / "cjson", use_compiler_builtins=False
+    )
     assert "__WINDOWS__" not in pa_pkg.header_defaults
     assert "CJSON_EXPORT_SYMBOLS" not in pa_pkg.header_defaults
     br = branches_for_span(pa_pkg, str(ROOT / "examples/cjson/cJSON.h"), "35:0-36:0")
     windows = [b for b in br if b["condition"] == "__WINDOWS__" and b["kind"] == "ifdef"]
     assert windows and all(b["liveness"] == "unknown" for b in windows), br
+    # With builtins, the same block is decidably *dead* on a non-Windows host —
+    # never live (the old bug).
+    pa_bi = analyze_package(
+        ROOT / "examples" / "cjson", use_compiler_builtins=True
+    )
+    if pa_bi.eval_mode == "compiler_builtins":
+        br2 = branches_for_span(pa_bi, str(ROOT / "examples/cjson/cJSON.h"), "35:0-36:0")
+        windows2 = [b for b in br2 if b["condition"] == "__WINDOWS__" and b["kind"] == "ifdef"]
+        assert windows2 and all(b["liveness"] == "dead" for b in windows2), br2
 
 
 def test_ifndef_default_region_is_live_not_falsified_by_its_own_define():
@@ -83,7 +95,9 @@ def test_ifndef_default_region_is_live_not_falsified_by_its_own_define():
     Reading the default without its location makes the guard read as already
     satisfied, so every config-default region in `ini.h` reports dead.
     """
-    pa_pkg = analyze_package(ROOT / "examples" / "inih")
+    pa_pkg = analyze_package(
+        ROOT / "examples" / "inih", use_compiler_builtins=False
+    )
     br = branches_for_span(pa_pkg, str(ROOT / "examples/inih/ini.h"), "107:0-109:0")
     guard = [b for b in br if b["kind"] == "ifndef" and "INI_ALLOW_MULTILINE" in b["condition"]]
     assert guard and all(b["liveness"] == "live" for b in guard), br
@@ -93,7 +107,9 @@ def test_ifndef_default_region_is_live_not_falsified_by_its_own_define():
 
 def test_branch_inside_undecidable_parent_is_not_reported_live():
     """Nesting propagates: a decidable `#if` inside an unknown block is unknown."""
-    pa_pkg = analyze_package(ROOT / "examples" / "cjson")
+    pa_pkg = analyze_package(
+        ROOT / "examples" / "cjson", use_compiler_builtins=False
+    )
     br = branches_for_span(pa_pkg, str(ROOT / "examples/cjson/cJSON.h"), "59:0-61:0")
     inner = [b for b in br if b["start_line"] == 59]
     assert inner and all(b["liveness"] != "live" for b in inner), br

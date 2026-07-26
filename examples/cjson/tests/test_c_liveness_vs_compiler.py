@@ -36,11 +36,12 @@ def _cc():
 @pytest.mark.skipif(_cc() is None, reason="no C compiler available")
 @pytest.mark.parametrize("pkg", ["cjson", "inih", "jsmn"])
 def test_liveness_labels_agree_with_compiler(pkg: str):
+    # Default: toolchain builtins when available (matches default stamps).
     report = compare_liveness_to_compiler(ROOT / "examples" / pkg)
     assert report["regions_scored"] > 0, report
     assert report["disagreements"] == 0, report["disagreement_details"]
     assert report["ok"] is True
-    # unknown is honest residual, not hidden and not counted as agreement
+    # unknown / vacuous are honest residual, not folded into agreements
     assert 0.0 <= report["unknown_rate"] <= 1.0
     assert (
         report["regions_unknown"] + report["regions_scored"] + report["regions_vacuous"]
@@ -51,11 +52,18 @@ def test_liveness_labels_agree_with_compiler(pkg: str):
     # decided against the compiler's macro table or set aside as vacuous.
     assert report["regions_vacuous"] == report["empty_body_regions"]
     assert report["agreement_evidence"].get("empty_body") is None
-    # cJSON default build has no -D; platform macros dominate unknowns
+
+    # Toolchain-independent mode: platform macros dominate the residual.
+    bare = compare_liveness_to_compiler(
+        ROOT / "examples" / pkg, use_compiler_builtins=False
+    )
+    assert bare["disagreements"] == 0, bare["disagreement_details"]
     if pkg == "cjson":
-        assert report["unknown_rate"] >= 0.4, report
-        fams = report["unknown_macro_families"]
+        assert bare["unknown_rate"] >= 0.4, bare
+        fams = bare["unknown_macro_families"]
         assert any(k.startswith("platform:") for k in fams), fams
+        # Builtins must strictly lower unknown rate without inventing agreements.
+        assert report["unknown_rate"] < bare["unknown_rate"]
 
 
 @pytest.mark.skipif(_cc() is None, reason="no C compiler available")
@@ -127,14 +135,16 @@ def test_deliberately_wrong_label_fails_oracle():
 @pytest.mark.skipif(_cc() is None, reason="no C compiler available")
 def test_unknown_not_scored_as_agreement():
     """unknown_rate is the residual; agreement_rate only covers scored regions."""
-    report = compare_liveness_to_compiler(ROOT / "examples" / "cjson")
+    report = compare_liveness_to_compiler(
+        ROOT / "examples" / "cjson", use_compiler_builtins=False
+    )
     # If we wrongly counted unknown as agreement, agreement would equal total.
     assert report["agreements"] + report["disagreements"] == report["regions_scored"]
     assert (
         report["regions_unknown"]
         == report["regions_total"] - report["regions_scored"] - report["regions_vacuous"]
     )
-    # Platform residual is real for the default cJSON compile_commands.
+    # Platform residual is real without builtins.
     assert report["regions_unknown"] > 0
     assert report["unknown_macro_families"]
 

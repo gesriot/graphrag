@@ -12,6 +12,10 @@ uv run python examples/cjson/tools/api_surface_audit.py --check
 uv run python examples/cjson/tools/api_surface_audit.py --write
 ```
 
+The complete C-oracle/Rust-port evidence chain is
+`examples/cjson/tools/check_port.sh --full`; its quick mode omits only
+Miri and reports unavailable C/ASan or nightly-Miri tooling as explicit skips.
+
 `--check` parses the header, validates that every parsed entry has exactly
 one classification, and compares this file to the generated result. The
 pytest audit test also copies and corrupts the header to prove that the
@@ -117,9 +121,10 @@ a list of names.
 
 For each remaining ownership exclusion, the checked-in candidate below is
 compiled directly with rustc --edition=2021 --crate-type=lib. The cJSON
-pytest audit asserts every source still fails and contains the exact error
-shown here. Each candidate reaches the same later source mutation that the
-named C oracle refusal trace observes; construction itself type-checks.
+pytest audit asserts every source still fails and that the JSON diagnostic's
+primary span falls inside its c_oracle_mutation_trace function. Each candidate
+reaches the same later source mutation that the named C oracle refusal trace
+observes; construction itself type-checks.
 These are proofs about safe shared borrows over the current owned-tree API,
 not claims that no Rust representation could express the operation.
 

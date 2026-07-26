@@ -6,7 +6,7 @@
       "kind": "current",
       "description": "Full examples pytest summary: passed + xfailed.",
       "expect": {
-        "passed": 474,
+        "passed": 484,
         "xfailed": 2
       },
       "source": {
@@ -18,12 +18,12 @@
       "docs": [
         {
           "path": "Plan.md",
-          "must_contain": "474 passed, 2 xfailed",
+          "must_contain": "484 passed, 2 xfailed",
           "role": "current"
         },
         {
           "path": "PHASE7_WRITEUP.md",
-          "must_contain": "474 passed, 2 xfailed",
+          "must_contain": "484 passed, 2 xfailed",
           "role": "current"
         }
       ]
@@ -56,6 +56,12 @@
           "path": "PHASE7_WRITEUP.md",
           "must_contain": "**59**",
           "role": "current"
+        },
+        {
+          "path": "examples/cjson/PROVENANCE.md",
+          "must_contain": "**59 golden cases** are re-derived from vendored C",
+          "role": "current",
+          "require_near": "## Closed Rust-port scope"
         }
       ]
     },
@@ -99,26 +105,30 @@
         {
           "path": "examples/cjson/PROVENANCE.md",
           "must_contain": "**78 functions**",
-          "role": "current"
+          "role": "current",
+          "require_near": "## Closed Rust-port scope"
         },
         {
           "path": "examples/cjson/PROVENANCE.md",
           "must_contain": "**68 are covered**",
-          "role": "current"
+          "role": "current",
+          "require_near": "## Closed Rust-port scope"
         },
         {
           "path": "examples/cjson/PROVENANCE.md",
           "must_contain": "**6 are genuinely blocked by the\nexclusive `Box` representation**",
-          "role": "current"
+          "role": "current",
+          "require_near": "## Closed Rust-port scope"
         },
         {
           "path": "examples/cjson/PROVENANCE.md",
           "must_contain": "**4 are excluded for C process-global\nallocator/error state rather than ownership**",
-          "role": "current"
+          "role": "current",
+          "require_near": "## Closed Rust-port scope"
         },
         {
           "path": "Plan.md",
-          "must_contain": "78 functions plus 23 public constants/macros/limits/types;\n68 functions are covered, 6 require shared/borrowed storage (reference\nconstructors/adds and the const-key alias), and 4 require a process-global\nallocator/error-state policy",
+          "must_contain": "78 functions plus 23 public constants/macros/limits/types;\n68 functions are covered, 6 require shared mutable/aliased storage (reference\nconstructors/adds and the const-key alias), and 4 require a process-global\nallocator/error-state policy",
           "role": "current"
         }
       ]
@@ -337,6 +347,12 @@
           "path": "Plan.md",
           "must_contain": "port_eval` 59 golden / 0 manual fixes",
           "role": "current"
+        },
+        {
+          "path": "examples/cjson/PROVENANCE.md",
+          "must_contain": "**59 golden / 0 manual fixes / OVERALL PASS**",
+          "role": "current",
+          "require_near": "## Closed Rust-port scope"
         }
       ]
     },
@@ -389,6 +405,12 @@
           "path": "examples/cjson/PROVENANCE.md",
           "must_contain": "11 property\n    tests, all pass",
           "role": "current"
+        },
+        {
+          "path": "examples/cjson/PROVENANCE.md",
+          "must_contain": "**11 Rust ownership\nproperties**",
+          "role": "current",
+          "require_near": "## Closed Rust-port scope"
         }
       ]
     },
