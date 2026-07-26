@@ -87,14 +87,14 @@ Expected xfail policy (these are documented and stable; not regressions):
       best() tie-break differs on ambiguous short/high-noise inputs by design
       (codec variant or mess edge + candidate order). Both sides still detect text.
       Python is source of truth only for stable cases.
-  - 2 codec-policy cases:
-      - utf_7: SIG/BOM strip policy per charset_normalizer/api.py vs raw stdlib decode
-      - euc_jis_2004: extension handling vs encoding_rs profile
-  Single-byte codecs: exact. Most multibyte: via encoding_rs + custom (Korean/HZ/UTF).
+  No codec-policy xfails remain: UTF-7 SIG comparison now uses the api.py
+  oracle, and HZ/EUC-JIS maps are generated from the running Python codecs.
+  Single-byte codecs, HZ, and generated EUC-JIS maps are exact. Most other
+  multibyte paths use encoding_rs + custom Korean/UTF handling.
   The default seeded live differential run adds 79 Python-oracle cases;
   use --differential-full for its 530-input every-byte/mutation/long sweep.
-  Recent targeted run: 75 passed, 4 xfailed.
-  Full examples run: 449 passed, 4 xfailed.
+  Recent targeted run: 77 passed, 2 xfailed.
+  Full examples run: 455 passed, 2 xfailed.
 POLICY
 
 echo

@@ -1484,6 +1484,18 @@ pub(crate) fn decode_bytes_strict(data: &[u8], encoding_iana: &str) -> Option<St
         return python_codecs::decode_utf7_strict(data);
     }
 
+    if encoding_iana == "euc_jis_2004" {
+        return python_codecs::decode_euc_jis_2004_strict(data);
+    }
+
+    if encoding_iana == "euc_jisx0213" {
+        return python_codecs::decode_euc_jisx0213_strict(data);
+    }
+
+    if encoding_iana == "euc_jp" {
+        return python_codecs::decode_euc_jp_strict(data);
+    }
+
     if encoding_iana == "hz" {
         return python_codecs::decode_hz_strict(data);
     }
@@ -1526,6 +1538,19 @@ pub(crate) fn decode_strict(
         };
     }
 
+    // UTF-7 signatures encode U+FEFF inside the shifted stream, rather than
+    // occupying removable bytes ahead of it. api.py therefore decodes the
+    // complete stream and removes one leading U+FEFF only after a signature
+    // was identified. Slicing `sig_payload` first corrupts the +/v9, +/v+,
+    // and +/v/ forms because their payload continues in that same shift.
+    if encoding_iana == "utf_7" {
+        let mut decoded = python_codecs::decode_utf7_strict(sequences)?;
+        if bom_or_sig_available && decoded.starts_with('\u{feff}') {
+            decoded.remove(0);
+        }
+        return Some(decoded);
+    }
+
     let payload = if strip_sig_or_bom {
         let mut start = sig_payload.len();
         if encoding_iana == "utf_7" && sequences.get(start) == Some(&b'-') {
@@ -1540,8 +1565,16 @@ pub(crate) fn decode_strict(
         return python_codecs::decode_utf32_strict(encoding_iana, payload, sig_payload);
     }
 
-    if encoding_iana == "utf_7" {
-        return python_codecs::decode_utf7_strict(payload);
+    if encoding_iana == "euc_jis_2004" {
+        return python_codecs::decode_euc_jis_2004_strict(payload);
+    }
+
+    if encoding_iana == "euc_jisx0213" {
+        return python_codecs::decode_euc_jisx0213_strict(payload);
+    }
+
+    if encoding_iana == "euc_jp" {
+        return python_codecs::decode_euc_jp_strict(payload);
     }
 
     if encoding_iana == "hz" {
@@ -1568,11 +1601,7 @@ pub(crate) fn decode_strict(
         return None;
     }
 
-    let mut decoded = decoded.into_owned();
-    if bom_or_sig_available && encoding_iana == "utf_7" && decoded.starts_with('\u{feff}') {
-        decoded.remove(0);
-    }
-
+    let decoded = decoded.into_owned();
     Some(decoded)
 }
 

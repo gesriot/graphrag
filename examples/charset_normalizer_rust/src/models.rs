@@ -771,6 +771,30 @@ impl CharsetMatch {
             return crate::python_codecs::encode_utf7_strict(&decoded);
         }
 
+        if norm == "euc_jis_2004" {
+            return if replacement {
+                crate::python_codecs::encode_euc_jis_2004_replace(&decoded)
+            } else {
+                crate::python_codecs::encode_euc_jis_2004_strict(&decoded)
+            };
+        }
+
+        if norm == "euc_jisx0213" {
+            return if replacement {
+                crate::python_codecs::encode_euc_jisx0213_replace(&decoded)
+            } else {
+                crate::python_codecs::encode_euc_jisx0213_strict(&decoded)
+            };
+        }
+
+        if norm == "euc_jp" {
+            return if replacement {
+                crate::python_codecs::encode_euc_jp_replace(&decoded)
+            } else {
+                crate::python_codecs::encode_euc_jp_strict(&decoded)
+            };
+        }
+
         if norm == "hz" {
             return if replacement {
                 crate::python_codecs::encode_hz_replace(&decoded)

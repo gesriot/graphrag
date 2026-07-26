@@ -64,6 +64,19 @@ dynamic-dispatch / static-registry / cross-module architectures**. Closing it
 requires modeling, at minimum, import edges and static data->entity references
 (the registry), then expanding classes to their methods in the closure.
 
+**Diagnostic (2026-07-26):** `scripts/python_dynamic.py` now labels these
+blind spots as provenance (`dynamic_dependent` / `dynamic_reasons`) without
+demoting `is_deterministic` or adding/dropping edges. On the published
+`byog_jsonpatch` graph it flags:
+- `jsonpatch:JsonPatch._get_operation` — `registry_lookup:operations`,
+  `call_through_dynamic_name:cls<…>`
+- `jsonpatch:JsonPatch.apply` — `registry_derived_iter:_ops`,
+  `polymorphic_call:operation.apply<…>`
+- the weak observation `JsonPatch.apply -> operation.apply`
+
+Context packs surface a top-level `dynamic_warning` (same shape as the C
+`preprocessor_warning`). Detection only — not resolution of the missing edges.
+
 ## Graph-frontier step-1 outcome (tractable edges added; boundary confirmed)
 Per the agreed plan, the tractable/static-fact resolver edges were added and each
 was measured against `scripts/ablation_specs/jsonpatch_adequacy.json`:

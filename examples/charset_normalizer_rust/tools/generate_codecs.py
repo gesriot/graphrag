@@ -138,6 +138,7 @@ def render_python_codecs() -> str:
     )
 
     lines.extend(render_hz_tables())
+    lines.extend(render_euc_jis_tables())
 
     existing = (SRC / "python_codecs.rs").read_text()
     helper_start = existing.index("pub(crate) fn is_charmap_encoding")
@@ -198,6 +199,115 @@ def render_hz_tables() -> list[str]:
             + ","
         )
     lines.extend(["];", ""])
+    return lines
+
+
+def euc_jis_2004_payloads() -> list[bytes]:
+    """Return every non-ASCII byte form accepted by Python's EUC-JIS-2004 codec."""
+    payloads = [
+        bytes((lead, trail))
+        for lead in range(0xA1, 0xFF)
+        for trail in range(0xA1, 0xFF)
+    ]
+    payloads.extend(bytes((0x8E, trail)) for trail in range(0xA1, 0xE0))
+    payloads.extend(
+        bytes((0x8F, lead, trail))
+        for lead in range(0xA1, 0xFF)
+        for trail in range(0xA1, 0xFF)
+    )
+    return payloads
+
+
+def pack_bytes(payload: bytes) -> int:
+    value = 0
+    for byte in payload:
+        value = (value << 8) | byte
+    return value
+
+
+def rust_string(value: str) -> str:
+    return '"' + "".join(f"\\u{{{ord(character):X}}}" for character in value) + '"'
+
+
+def collect_euc_jis_decode(encoding: str) -> list[tuple[int, str]]:
+    decoded: list[tuple[int, str]] = []
+    for payload in euc_jis_2004_payloads():
+        try:
+            text = payload.decode(encoding, "strict")
+        except UnicodeDecodeError:
+            continue
+        decoded.append((pack_bytes(payload), text))
+    return sorted(decoded)
+
+
+def collect_euc_jis_encode(encoding: str) -> list[tuple[int, int, int]]:
+    encoded: list[tuple[int, int, int]] = []
+    for scalar in range(0x80, 0x110000):
+        if 0xD800 <= scalar <= 0xDFFF:
+            continue
+        try:
+            payload = chr(scalar).encode(encoding, "strict")
+        except UnicodeEncodeError:
+            continue
+        encoded.append((scalar, pack_bytes(payload), len(payload)))
+    return encoded
+
+
+def render_euc_jis_table(encoding: str, const_prefix: str) -> list[str]:
+    """Render one Python EUC-JIS-X-0213 codec map, including sequences."""
+    decoded = collect_euc_jis_decode(encoding)
+    encoded = collect_euc_jis_encode(encoding)
+    sequence_encodes: list[tuple[str, int, int]] = []
+    for packed, text in decoded:
+        if len(text) <= 1:
+            continue
+        payload = text.encode(encoding, "strict")
+        expected_length = 3 if packed > 0xFFFF else 2
+        if (pack_bytes(payload), len(payload)) != (packed, expected_length):
+            raise RuntimeError(
+                f"{encoding} sequence {text!r} does not encode canonically to {packed:X}"
+            )
+        sequence_encodes.append((text, packed, expected_length))
+
+    if len({scalar for scalar, _, _ in encoded}) != len(encoded):
+        raise RuntimeError(f"Python {encoding} scalar encoder is not one-to-one")
+
+    lines = [
+        f"// Generated from Python stdlib's strict `{encoding}` codec.",
+        "// encoding_rs has an EUC-JP profile, not this JIS X 0213 mapping.",
+        "",
+        f"const {const_prefix}_DECODE: &[(u32, &str)] = &[",
+    ]
+    for index in range(0, len(decoded), 2):
+        row = decoded[index : index + 2]
+        lines.append(
+            "    "
+            + ", ".join(f"(0x{packed:X}, {rust_string(text)})" for packed, text in row)
+            + ","
+        )
+    lines.extend(["];", "", f"const {const_prefix}_ENCODE: &[(u32, u32, u8)] = &["])
+    for index in range(0, len(encoded), 4):
+        row = encoded[index : index + 4]
+        lines.append(
+            "    "
+            + ", ".join(
+                f"(0x{scalar:X}, 0x{packed:X}, {length})"
+                for scalar, packed, length in row
+            )
+            + ","
+        )
+    lines.extend(["];", "", f"const {const_prefix}_SEQUENCE_ENCODE: &[(&str, u32, u8)] = &["])
+    for text, packed, length in sequence_encodes:
+        lines.append(f"    ({rust_string(text)}, 0x{packed:X}, {length}),")
+    lines.extend(["];", ""])
+    return lines
+
+
+def render_euc_jis_tables() -> list[str]:
+    """Render both distinct Python codecs named by currently supported aliases."""
+    lines = render_euc_jis_table("euc_jis_2004", "EUC_JIS_2004")
+    lines.extend(render_euc_jis_table("euc_jisx0213", "EUC_JISX0213"))
+    lines.extend(render_euc_jis_table("euc_jp", "EUC_JP"))
     return lines
 
 

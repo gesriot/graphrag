@@ -339,12 +339,30 @@ def build_byog_for_package(use_advanced: bool = False, package_dir: Path | None 
     for tu in all_text_units:
         tu["relationship_ids"] = relationship_ids_by_tu.get(tu["id"], [])
 
-    return {
+    data = {
         "entities": all_entities,
         "relationships": all_relationships,
         "text_units": all_text_units,
         "call_observations": call_observations,
     }
+    # Provenance labels only: mark facts that sit on dynamic-dispatch ground
+    # the syntax/AST frontend cannot follow. Does not demote is_deterministic
+    # or drop edges (audit pass rates stay comparable). See scripts/python_dynamic.py.
+    try:
+        from python_dynamic import annotate_byog  # type: ignore
+
+        annotate_byog(data, pkg_dir)
+    except Exception:
+        for e in all_entities:
+            e.setdefault("dynamic_dependent", False)
+            e.setdefault("dynamic_reasons", [])
+        for r in all_relationships:
+            r.setdefault("dynamic_dependent", False)
+            r.setdefault("dynamic_reasons", [])
+        for o in call_observations:
+            o.setdefault("dynamic_dependent", False)
+            o.setdefault("dynamic_reasons", [])
+    return data
 
 
 @app.command()

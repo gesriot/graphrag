@@ -143,6 +143,12 @@ def compact_relationship(rel: Dict[str, Any]) -> Dict[str, Any]:
         reasons = _reasons_list(rel.get("preprocessor_reasons"))
         if reasons:
             out["preprocessor_reasons"] = reasons
+    # Python dynamic-dispatch provenance (same shape).
+    if "dynamic_dependent" in rel and _as_bool(rel.get("dynamic_dependent")):
+        out["dynamic_dependent"] = True
+        reasons = _reasons_list(rel.get("dynamic_reasons"))
+        if reasons:
+            out["dynamic_reasons"] = reasons
     return out
 
 
@@ -213,6 +219,8 @@ def pack(
             "extractor", "confidence", "is_deterministic",
             # C frontend honesty: tree-sitter cannot resolve the preprocessor.
             "preprocessor_dependent", "preprocessor_reasons",
+            # Python frontend honesty: syntax/AST cannot follow dynamic dispatch.
+            "dynamic_dependent", "dynamic_reasons",
         )
     }
     # Normalize reasons to plain str lists (parquet may yield ndarrays).
@@ -220,6 +228,10 @@ def pack(
         entity_fields["preprocessor_reasons"] = _reasons_list(entity_fields.get("preprocessor_reasons"))
     if "preprocessor_dependent" in entity_fields:
         entity_fields["preprocessor_dependent"] = _as_bool(entity_fields.get("preprocessor_dependent"))
+    if "dynamic_reasons" in entity_fields:
+        entity_fields["dynamic_reasons"] = _reasons_list(entity_fields.get("dynamic_reasons"))
+    if "dynamic_dependent" in entity_fields:
+        entity_fields["dynamic_dependent"] = _as_bool(entity_fields.get("dynamic_dependent"))
 
     pack: Dict[str, Any] = {
         "symbol": ent_dict.get("title"),
@@ -259,6 +271,41 @@ def pack(
             "note": (
                 "Detection only (scripts/c_preprocessor.py). Not clang macro "
                 "expansion, include resolution, or type facts."
+            ),
+        }
+
+    # Python analogue: dynamic-dispatch dependence (registry tables, getattr with
+    # non-literal names, polymorphic receivers). Same shape as preprocessor_*.
+    entity_dyn = _as_bool(ent_dict.get("dynamic_dependent"))
+    entity_dyn_reasons = _reasons_list(ent_dict.get("dynamic_reasons"))
+    flagged_dyn_neighbor_calls = [
+        n for n in pack["neighbors"]
+        if str(n.get("type", "")) == "calls" and n.get("dynamic_dependent")
+    ]
+    if entity_dyn or flagged_dyn_neighbor_calls:
+        sample_dyn = entity_dyn_reasons[:10]
+        if not sample_dyn and flagged_dyn_neighbor_calls:
+            sample_dyn = _reasons_list(flagged_dyn_neighbor_calls[0].get("dynamic_reasons"))[:10]
+        pack["dynamic_warning"] = (
+            "DYNAMIC-DISPATCH-DEPENDENT (Python syntax/AST frontend): this symbol "
+            "and/or its call edges use registry/dict callable tables, getattr with "
+            "a non-literal name, or polymorphic receivers the extractor cannot "
+            "follow. Missing callees are often runtime-chosen, not absent. Labels "
+            "are provenance only and do not demote is_deterministic. "
+            f"entity_flagged={entity_dyn}; "
+            f"flagged_neighbor_calls={len(flagged_dyn_neighbor_calls)}; "
+            f"sample_reasons={sample_dyn}."
+        )
+        pack["dynamic"] = {
+            "entity_dependent": entity_dyn,
+            "entity_reasons": entity_dyn_reasons,
+            "flagged_neighbor_calls": len(flagged_dyn_neighbor_calls),
+            "flagged_call_targets": sorted({
+                str(n.get("target")) for n in flagged_dyn_neighbor_calls if n.get("target")
+            }),
+            "note": (
+                "Detection only (scripts/python_dynamic.py). Not type inference, "
+                "import resolution of dynamic modules, or adding missing edges."
             ),
         }
 
@@ -367,6 +414,10 @@ def pack(
         provenance["preprocessor_dependent"] = entity_pp
         if entity_reasons:
             provenance["preprocessor_reasons"] = entity_reasons
+    if "dynamic_dependent" in ent_dict:
+        provenance["dynamic_dependent"] = entity_dyn
+        if entity_dyn_reasons:
+            provenance["dynamic_reasons"] = entity_dyn_reasons
     pack.update({
         "text_units": packed_texts,
         "provenance": provenance,
@@ -407,6 +458,11 @@ def pack(
                         reasons = _reasons_list(o.get("preprocessor_reasons"))
                         if reasons:
                             entry["preprocessor_reasons"] = reasons
+                    if "dynamic_dependent" in o.index and _as_bool(o.get("dynamic_dependent")):
+                        entry["dynamic_dependent"] = True
+                        reasons = _reasons_list(o.get("dynamic_reasons"))
+                        if reasons:
+                            entry["dynamic_reasons"] = reasons
                     uncertain.append(entry)
                 pack["uncertain_calls"] = uncertain
                 pack["analysis_note"] = "Some call sites were tracked with low confidence or ambiguity (see uncertain_calls). Review during port."

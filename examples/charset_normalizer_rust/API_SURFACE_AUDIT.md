@@ -70,7 +70,7 @@ The category has a deliberately narrow meaning:
 | `alphabets` | `alphabets() -> Vec<String>`. | Covered |
 | `could_be_from_charset` | `could_be_from_charset() -> Vec<String>`. | Covered |
 | `fingerprint` | `fingerprint() -> Option<u64>`. Hash width and process seeding are Rust-specific. | Covered (typed adaptation) |
-| `output(encoding="utf_8")` | `output(encoding)` follows Python replacement-mode encoding; `output_default()` is Rust's explicit zero-argument equivalent and `output_strict()` preserves the fallible codec operation. Oracle cases cover ASCII/CP1252, Shift-JIS, Johab, ISO-2022-KR, the UTF-8 default, and HZ. `tools/generate_codecs.py` derives HZ's complete 7,445-pair strict GB2312 map from the running Python codec; codec/CD parity checks both strict directions and U+20AC replacement behavior. | Covered (typed adaptation). |
+| `output(encoding="utf_8")` | `output(encoding)` follows Python replacement-mode encoding; `output_default()` is Rust's explicit zero-argument equivalent and `output_strict()` preserves the fallible codec operation. Oracle cases cover ASCII/CP1252, Shift-JIS, Johab, ISO-2022-KR, the UTF-8 default, HZ, and generated EUC-JIS maps. `tools/generate_codecs.py` derives HZ's 7,445-pair strict GB2312 map and `euc_jis_2004`'s 17,363 decode forms / 14,429 scalar encodes / 25 canonical sequences from the running Python codecs; codec/CD parity builds those expectations live. | Covered (typed adaptation). |
 | `add_submatch(other)` | `add_submatch(other) -> Result<(), AddSubmatchError>` appends a distinct owned match and rejects same encoding + decoded-fingerprint matches. | Covered (typed adaptation); Python's non-`CharsetMatch` runtime-type rejection is not applicable in a statically typed call. |
 | `__str__`, `__repr__` | `decoded()` returns the decoded string; no `Display`/`Debug` parity contract. | Not applicable — Python lazy string/repr semantics are object-model behavior. |
 | `__eq__`, `__lt__` | Rust derives structural `PartialEq`; sorting is internal to `CharsetMatches`. Python's string comparison and ranking protocol are not exposed. | Not applicable — Python operator protocol and cross-type equality have no direct typed equivalent. |
@@ -140,6 +140,22 @@ earlier version/BOM/input-form work, the Rust surface supplies
 with an explicit Rust default method, and the formerly stubbed `utils`/missing
 `cd` helpers. `tests/test_api_surface_parity.py` executes the vendored Python
 reference and the Rust `parity_probe` for every group.
+
+Codec scope is deliberately narrower than API availability. UTF-7 signature
+decoding is covered against `api.py`: for each of `+/v8`, `+/v9`, `+/v+`, and
+`+/v/`, the complete stream is decoded and exactly one leading U+FEFF is
+removed. The old raw-stdlib comparison was therefore a wrong oracle, not a
+Rust exclusion. `euc_jis_2004` is now exact through a reproducible Python-codec
+map (17,363 valid non-ASCII decode forms, 14,429 scalar encodes, and 25
+canonical two-scalar entries); the same generator also closes the distinct
+`euc_jisx0213` (17,353 / 14,419 / 25) and `euc_jp` (13,009 / 13,010 / 0)
+profiles discovered while unmasking the prior xfail. The direct pre-fix
+`encoding_rs::EUC_JP` enumeration differed from Python `euc_jis_2004` by
+7,078 Python-only / 41 legacy-only / 341 remapped encode entries and 3,907 /
+10 / 381 decode entries, respectively. This is not a general
+claim of exhaustive multibyte parity: the bounded representative roundtrip
+continues to exclude the 12 observed ISO-2022/Shift-JIS extension-profile and
+23 UTF output-mode cases listed in `test_codec_cd_parity.py`.
 
 The only reclassification is the Python CLI-framework trio
 `query_yes_no`/`FileType`/`cli_detect`: it is **not applicable** as a Rust

@@ -27,8 +27,8 @@ This is an experiment using the graphrag-code deterministic extraction + context
   - `CharsetMatches::first()`, `len()`, `is_empty()`, `iter()`, indexed lookup, alias lookup, and borrowed iteration.
 - ✅ Python-compatible codec backend for the upstream `IANA_SUPPORTED` set:
   - exact generated Python charmap tables for 66 single-byte codecs (DOS/OEM, EBCDIC, Mac, KOI8, ISO-8859, `latin_1`, etc.)
-  - strict UTF-32 and UTF-7 handlers
-  - exact generated Python HZ/GB2312 shifted-pair table and state machine (strict and replacement mode)
+  - strict UTF-32 and UTF-7 handlers; UTF-7 SIG detection decodes the full stream then removes exactly one leading U+FEFF, matching `api.py` for all four `+/v` marks
+  - exact generated Python HZ/GB2312 shifted-pair table and state machine (strict and replacement mode), plus generated strict maps for `euc_jis_2004`, `euc_jisx0213`, and `euc_jp`
   - generated `johab` and `iso2022_kr` tables/state machine
   - most other multibyte (big5/cp95x, euc_*, iso2022_jp_*, shift_jis, gb*, etc.) via encoding_rs profiles (single-byte exact; rare MB table/extension diffs vs py stdlib documented as expected)
 - ✅ Product CLI slice:
@@ -39,7 +39,7 @@ This is an experiment using the graphrag-code deterministic extraction + context
   - `--normalize --replace` for in-place UTF-8 rewrite, including interactive confirmation unless `--force` is set
 - ✅ Python-vs-Rust CLI snapshot tests cover help/version, argparse-style errors, pretty JSON, absolute paths, stdin, minimal output, normalization side effects, replace/force, and prompt-decline behavior.
 - ✅ `cargo test` (83 tests total): 58 unit parity tests (cd/models/md/codec/API) + 9 CLI byte-exact/trace tests + 3 detection-contract tests (including 18/18 golden) + 13 off-golden/large-lazy integration tests pass; 0 ignored.
-- ✅ Python-vs-Rust pytest matrix: fixed CLI/detector differential has 72 items (70 pass + 2 expected xfails for ambiguous adversarial inputs); the bounded live seeded differential gate runs 79 Python-oracle cases through `tools/check_port.sh` (79 strong agreements, seed `20260725`); exhaustive codec/CD parity adds 6 items (4 pass + 2 expected xfails for documented UTF-7 (SIG strip policy) / euc_jis_2004 extension cases), including all 7,445 Python HZ shifted pairs in both strict directions and replacement-mode U+20AC; API-surface oracle coverage adds 1 passing item. Full `PYTHONPATH=. uv run pytest examples -q --tb=no` is expected to report 449 passed, 4 xfailed. (short_20 xfail removed after narrow is_printable fix.) Single-byte codecs and HZ are exact; most other MB paths use encoding_rs/custom Korean/UTF special handling; rare table variants are documented.
+- ✅ Python-vs-Rust pytest matrix: fixed CLI/detector differential has 72 items (70 pass + 2 expected xfails for ambiguous adversarial inputs); the bounded live seeded differential gate runs 79 Python-oracle cases through `tools/check_port.sh` (79 strong agreements, seed `20260725`); exhaustive codec/CD parity adds 6 passing items, including all 7,445 Python HZ shifted pairs, all four UTF-7 SIG forms against the live API oracle, and complete generated `euc_jis_2004` maps (17,363 decode forms / 14,429 scalar encodes / 25 sequences). API-surface oracle coverage adds 1 passing item. Full `PYTHONPATH=. uv run pytest examples -q --tb=no` is expected to report 455 passed, 2 xfailed. The remaining xfails are only the two ambiguous detector cases; bounded non-exact ISO-2022/Shift-JIS and UTF output variants are explicitly outside the representative roundtrip contract.
 
 ## Scope
 Core detection:
@@ -81,7 +81,7 @@ Golden (byte-exact on 18/18 samples), off-golden (exact best-match assertions), 
 Distinctions:
 - Byte-exact: golden JSON/CLI non-verbose cases, off-golden best assertions, normalize outputs.
 - Normalized verbose trace parity (ts/floats/sets masked; events from api/md; not raw logs).
-- Expected xfails: 2 adversarial detector cases with unstable best-encoding tie-breaks (bom8_badcont, short_high), plus 2 low-level codec-policy cases (UTF-7 SIG/BOM policy vs raw, euc_jis_2004 extension vs encoding_rs). short_20 resolved. Documented in pytest files with stable assertions added for the detector xfails. Single-byte codecs exact; most MB via encoding_rs/custom Korean/HZ/UTF special handling; rare MB table variants documented.
+- Expected xfails: only 2 adversarial detector cases with unstable best-encoding tie-breaks (bom8_badcont, short_high). UTF-7 SIG behavior is tested against the live `api.py` oracle, and the formerly divergent EUC-JIS profiles are generated from Python codec tables. The bounded representative roundtrip still excludes documented ISO-2022/Shift-JIS extension and UTF output-mode variants; this is not a claim of exhaustive multibyte variant parity.
 - Untested in default runs: broad random corpora and exhaustive multibyte variant tables beyond representative probes. 100k+ scale is covered by the opt-in harness (see below).
 
 API availability is itemized in `API_SURFACE_AUDIT.md`: it distinguishes covered typed APIs (including `CliDetectionResult`, direct submatches, replacement/default output, and callable helper modules), deliberate exclusions (global logging and the same-name legacy `detect` behavior), and Python-only mechanics.

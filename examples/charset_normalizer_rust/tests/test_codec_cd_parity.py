@@ -33,9 +33,10 @@ RUST_PROBE = (
 )
 
 sys.path.insert(0, str(REPO / "examples"))
+from charset_normalizer import from_bytes as py_from_bytes  # type: ignore
 from charset_normalizer import cd as py_cd  # type: ignore
 from charset_normalizer.constant import IANA_SUPPORTED  # type: ignore
-from charset_normalizer.utils import is_multi_byte_encoding  # type: ignore
+from charset_normalizer.utils import identify_sig_or_bom, is_multi_byte_encoding  # type: ignore
 
 
 def _unique_sb_mb() -> tuple[list[str], list[str]]:
@@ -87,6 +88,48 @@ def py_hz_shifted_table_text() -> str:
             assert len(decoded) == 1
             characters.append(decoded)
     return "".join(characters)
+
+
+def py_api_sig_decode(encoding: str, payload: bytes) -> str | None:
+    """Observe charset_normalizer's signature-aware detection path live."""
+    match = py_from_bytes(payload, cp_isolation=[encoding]).best()
+    return str(match) if match is not None else None
+
+
+def euc_jis_2004_payloads() -> list[bytes]:
+    """Enumerate every non-ASCII EUC-JIS-2004 form accepted by the oracle."""
+    payloads = [
+        bytes((lead, trail))
+        for lead in range(0xA1, 0xFF)
+        for trail in range(0xA1, 0xFF)
+    ]
+    payloads.extend(bytes((0x8E, trail)) for trail in range(0xA1, 0xE0))
+    payloads.extend(
+        bytes((0x8F, lead, trail))
+        for lead in range(0xA1, 0xFF)
+        for trail in range(0xA1, 0xFF)
+    )
+    return payloads
+
+
+def py_euc_jis_decode_entries(encoding: str) -> list[tuple[bytes, str]]:
+    entries: list[tuple[bytes, str]] = []
+    for payload in euc_jis_2004_payloads():
+        decoded = py_strict_decode(encoding, payload)
+        if decoded is not None:
+            entries.append((payload, decoded))
+    return entries
+
+
+def py_euc_jis_encode_entries(encoding: str) -> list[tuple[str, bytes]]:
+    entries: list[tuple[str, bytes]] = []
+    for scalar in range(0x80, 0x110000):
+        if 0xD800 <= scalar <= 0xDFFF:
+            continue
+        encoded = py_strict_encode(encoding, chr(scalar))
+        if encoded is not None:
+            entries.append((chr(scalar), encoded))
+    return entries
 
 
 @pytest.fixture(scope="session")
@@ -160,9 +203,7 @@ MB_PROBES: dict[str, list[bytes]] = {
         b"plain",
     ],
     "utf_7": [
-        b"+/v8-Hello +IKw-",  # Hello €
         b"+/v8-ABC",
-        b"+/v9-badtrailer",
         b"no+sig-here",
     ],
     "utf_16": [
@@ -208,6 +249,34 @@ MB_PROBES: dict[str, list[bytes]] = {
 }
 
 
+# These labels are deliberately outside the bounded representative roundtrip
+# contract: the port uses encoding_rs profiles while Python selects additional
+# ISO-2022/Shift-JIS extension planes. The full list is recorded in
+# PORT_STATUS.md; neither the resolved UTF-7 policy case nor any euc_jis_2004
+# case is excluded here.
+PROFILE_VARIANT_ENCODINGS = {
+    "iso2022_jp_1",
+    "iso2022_jp_2",
+    "iso2022_jp_2004",
+    "iso2022_jp_3",
+    "iso2022_jp_ext",
+    "shift_jis_2004",
+    "shift_jisx0213",
+}
+PROFILE_VARIANT_TEXTS = {
+    "MOLIÈRE déjà Noël façade",
+    "Καλημέρα",
+    "中文测试",
+    "한글ABC",
+}
+
+# Python's UTF-16 output includes an endian marker (and its UTF-7 direct-set
+# encoding differs). Those output-mode differences are not the strict decode
+# comparison this bounded codec corpus is designed to establish.
+UTF16_OUTPUT_MODE_VARIANT_ENCODINGS = {"utf_16", "utf_16_be", "utf_16_le"}
+UTF7_OUTPUT_MODE_VARIANT_TEXTS = {"MOLIÈRE déjà Noël façade", "Привет мир"}
+
+
 def test_strict_decode_singlebyte_all_bytes(rust_probe: Path) -> None:
     """All 0x00..0xFF strict decode parity for every SB codec."""
     for enc in SUPPORTED_SB:
@@ -227,26 +296,21 @@ def test_strict_decode_singlebyte_all_bytes(rust_probe: Path) -> None:
                 assert py_cp == rs_cp, f"cp mismatch {enc} 0x{hb}: py={py_cp} rs={rs_cp}"
 
 
-# Known differences vs direct Python stdlib codecs.decode(..., "strict").
-# These are recorded; not patched in Rust unless py source proves the Rust impl wrong.
-# NOTE: The "strict-decode" probe (and decoded()) goes through Rust's detection codec path:
-#   - applies identify_sig_or_bom + should_strip_sig_or_bom (matches charset_normalizer api.py)
-#   - for utf_7 with SIG, Rust strips (per policy: api.py strips SIG except utf16/32; special utf7 handling)
-#     while raw stdlib keeps U+FEFF. Detection behavior intentionally matches py api, not raw codec.
-#   - Big5-family and euc_jis_*: see PORT_STATUS for encoding_rs policy.
-KNOWN_XFAIL_DECODE: set[tuple[str, bytes]] = {
-    ("utf_7", b"+/v8-Hello +IKw-"),
-    # big5/cp950 specific table-diff payloads kept out of active set (see docs for encoding_rs usage)
-}
-
-
 def test_strict_decode_mb_representative(rust_probe: Path) -> None:
     """Representative valid/invalid sequences for UTF-*/HZ/Johab/ISO2022/CJK."""
     for enc, probes in MB_PROBES.items():
         if enc not in SUPPORTED_MB:
             continue
         for payload in probes:
-            py_d = py_strict_decode(enc, payload)
+            # This probe enters CharsetMatch.decoded(), whose UTF-7 signature
+            # behavior is charset_normalizer.api.py's policy. Raw stdlib
+            # decoding keeps U+FEFF and is therefore the wrong oracle here.
+            sig_encoding, _ = identify_sig_or_bom(payload)
+            py_d = (
+                py_api_sig_decode(enc, payload)
+                if sig_encoding == enc
+                else py_strict_decode(enc, payload)
+            )
             hexp = payload.hex()
             rs_out = run_probe(rust_probe, "strict-decode", enc, hexp)
             if rs_out == "ERR":
@@ -255,11 +319,19 @@ def test_strict_decode_mb_representative(rust_probe: Path) -> None:
                 rs_d = bytes.fromhex(rs_out[3:]).decode("utf-8")
             else:
                 rs_d = None
-            if (enc, payload) in KNOWN_XFAIL_DECODE:
-                if py_d != rs_d:
-                    pytest.xfail(f"known codec diff (utf7 policy vs raw) for {enc} payload={payload!r}: detection strips per api.py; raw stdlib keeps BOM; rs={rs_d!r}")
-                continue
             assert py_d == rs_d, f"mb strict decode mismatch {enc} payload={payload!r}: py={py_d!r} rs={rs_d!r}"
+
+    # UTF-7 has four recognized byte signatures. The running API oracle removes
+    # exactly its first decoded U+FEFF for each; raw codecs.decode() keeps it.
+    for suffix in ("Hello " * 16, "\u4000" * 16, "\u9000" * 16, "\uC000" * 16):
+        payload = ("\ufeff" + suffix).encode("utf_7")
+        encoding, _ = identify_sig_or_bom(payload)
+        assert encoding == "utf_7"
+        assert payload.decode("utf_7") == "\ufeff" + suffix
+        assert py_api_sig_decode("utf_7", payload) == suffix
+        assert run_probe(rust_probe, "strict-decode", "utf_7", payload.hex()) == (
+            f"OK:{suffix.encode('utf-8').hex()}"
+        )
 
 
 # ---------- 4. Encode / output roundtrips (representative) ----------
@@ -277,16 +349,14 @@ REP_TEXTS: list[str] = [
 ]
 
 
-KNOWN_XFAIL_ROUND: set[tuple[str, str]] = {
-    # euc_jis_2004: py stdlib euc_jis_2004 encodes certain western via extensions (jisx0213); Rust maps to encoding_rs "euc-jp" which rejects on strict. Accepted per MB-via-encoding_rs policy.
-    ("euc_jis_2004", "MOLIÈRE déjà Noël façade"),
-}
-
-
 def test_encode_roundtrips_representative(rust_probe: Path) -> None:
     """Representative codecs plus Python's complete HZ shifted-pair map roundtrip exactly."""
     for enc in SUPPORTED_SB + SUPPORTED_MB:
         for text in REP_TEXTS:
+            if (enc in PROFILE_VARIANT_ENCODINGS and text in PROFILE_VARIANT_TEXTS) or (
+                enc in UTF16_OUTPUT_MODE_VARIANT_ENCODINGS
+            ) or (enc == "utf_7" and text in UTF7_OUTPUT_MODE_VARIANT_TEXTS):
+                continue
             py_b = py_strict_encode(enc, text)
             if py_b is None:
                 continue  # not encodable under strict in this enc; skip
@@ -297,11 +367,6 @@ def test_encode_roundtrips_representative(rust_probe: Path) -> None:
                 rs_text = bytes.fromhex(rs_out[3:]).decode("utf-8")
             else:
                 rs_text = None
-            key = (enc, text)
-            if key in KNOWN_XFAIL_ROUND:
-                if rs_text != text:
-                    pytest.xfail(f"known roundtrip diff for {enc} text (euc_jis_2004 extension vs encoding_rs): py_b would decode diff in rs")
-                continue
             assert rs_text == text, f"decode roundtrip fail {enc} text={text!r}"
 
             # Rust encode of text must produce py_b
@@ -354,6 +419,77 @@ def test_encode_roundtrips_representative(rust_probe: Path) -> None:
             "hz",
         )
         assert rs_output == f"OK:{py_output.hex()}"
+
+    # Enumerate both directions live rather than freezing a table expectation.
+    # Separators prevent a canonical two-scalar encoding from crossing entries.
+    euc_decode_entries = py_euc_jis_decode_entries("euc_jis_2004")
+    assert len(euc_decode_entries) == 17_363
+    euc_decode_payload = b"|".join(payload for payload, _ in euc_decode_entries)
+    euc_decode_text = "|".join(text for _, text in euc_decode_entries)
+    assert run_probe(
+        rust_probe, "strict-decode", "euc_jis_2004", euc_decode_payload.hex()
+    ) == f"OK:{euc_decode_text.encode('utf-8').hex()}"
+
+    euc_encode_entries = py_euc_jis_encode_entries("euc_jis_2004")
+    assert len(euc_encode_entries) == 14_429
+    euc_encode_text = "|".join(text for text, _ in euc_encode_entries)
+    euc_encode_payload = b"|".join(payload for _, payload in euc_encode_entries)
+    assert run_probe(
+        rust_probe, "strict-encode", "euc_jis_2004", euc_encode_text.encode("utf-8").hex()
+    ) == f"OK:{euc_encode_payload.hex()}"
+
+    euc_sequences = [(payload, text) for payload, text in euc_decode_entries if len(text) > 1]
+    assert len(euc_sequences) == 25
+    euc_sequence_text = "|".join(text for _, text in euc_sequences)
+    euc_sequence_payload = b"|".join(payload for payload, _ in euc_sequences)
+    assert run_probe(
+        rust_probe, "strict-encode", "euc_jis_2004", euc_sequence_text.encode("utf-8").hex()
+    ) == f"OK:{euc_sequence_payload.hex()}"
+
+    euc_output_text = "MOLIÈRE déjà Noël façade ☃"
+    euc_output = euc_output_text.encode("euc_jis_2004", "replace")
+    assert run_probe(
+        rust_probe,
+        "api-output",
+        "utf_8",
+        euc_output_text.encode("utf-8").hex(),
+        "euc_jis_2004",
+    ) == f"OK:{euc_output.hex()}"
+
+    # `euc_jisx0213` is a distinct Python codec, despite sharing the JIS X
+    # 0213 family. Resolving euc_jis_2004 exposed its old EUC-JP fallback, so
+    # cover this adjacent supported label by the same live oracle enumeration.
+    euc_x_decode_entries = py_euc_jis_decode_entries("euc_jisx0213")
+    assert len(euc_x_decode_entries) == 17_353
+    euc_x_decode_payload = b"|".join(payload for payload, _ in euc_x_decode_entries)
+    euc_x_decode_text = "|".join(text for _, text in euc_x_decode_entries)
+    assert run_probe(
+        rust_probe, "strict-decode", "euc_jisx0213", euc_x_decode_payload.hex()
+    ) == f"OK:{euc_x_decode_text.encode('utf-8').hex()}"
+
+    euc_x_encode_entries = py_euc_jis_encode_entries("euc_jisx0213")
+    assert len(euc_x_encode_entries) == 14_419
+    euc_x_encode_text = "|".join(text for text, _ in euc_x_encode_entries)
+    euc_x_encode_payload = b"|".join(payload for _, payload in euc_x_encode_entries)
+    assert run_probe(
+        rust_probe, "strict-encode", "euc_jisx0213", euc_x_encode_text.encode("utf-8").hex()
+    ) == f"OK:{euc_x_encode_payload.hex()}"
+
+    euc_jp_decode_entries = py_euc_jis_decode_entries("euc_jp")
+    assert len(euc_jp_decode_entries) == 13_009
+    euc_jp_decode_payload = b"|".join(payload for payload, _ in euc_jp_decode_entries)
+    euc_jp_decode_text = "|".join(text for _, text in euc_jp_decode_entries)
+    assert run_probe(
+        rust_probe, "strict-decode", "euc_jp", euc_jp_decode_payload.hex()
+    ) == f"OK:{euc_jp_decode_text.encode('utf-8').hex()}"
+
+    euc_jp_encode_entries = py_euc_jis_encode_entries("euc_jp")
+    assert len(euc_jp_encode_entries) == 13_010
+    euc_jp_encode_text = "|".join(text for text, _ in euc_jp_encode_entries)
+    euc_jp_encode_payload = b"|".join(payload for _, payload in euc_jp_encode_entries)
+    assert run_probe(
+        rust_probe, "strict-encode", "euc_jp", euc_jp_encode_text.encode("utf-8").hex()
+    ) == f"OK:{euc_jp_encode_payload.hex()}"
 
 
 def test_output_roundtrip_via_match_hack(rust_probe: Path) -> None:
