@@ -6,14 +6,16 @@
 #   examples/charset_normalizer_rust/tools/check_port.sh
 #   examples/charset_normalizer_rust/tools/check_port.sh --full
 #   examples/charset_normalizer_rust/tools/check_port.sh --scale
-#   examples/charset_normalizer_rust/tools/check_port.sh --full --scale
+#   examples/charset_normalizer_rust/tools/check_port.sh --differential-full
+#   examples/charset_normalizer_rust/tools/check_port.sh --full --scale --differential-full
 #
 # Does:
 #   - cargo fmt --check (inside crate dir)
 #   - cargo test --quiet
-#   - targeted pytest for charset_normalizer_rust tests (the differential + parity)
+#   - targeted pytest for fixed differential/parity tests
 #   - if --full: full examples pytest
 #   - if --scale: opt-in scale harness (CN_SCALE=1)
+#   - if --differential-full: longer seeded Python-oracle differential sweep
 #   - prints expected xfail policy
 #   - exits non-zero on unexpected (real) failures
 #
@@ -27,14 +29,16 @@ RUST_DIR="$REPO_ROOT/examples/charset_normalizer_rust"
 
 FULL=0
 SCALE=0
+DIFFERENTIAL_FULL=0
 
 for arg in "$@"; do
   case "$arg" in
     --full) FULL=1 ;;
     --scale) SCALE=1 ;;
+    --differential-full) DIFFERENTIAL_FULL=1 ;;
     *)
       echo "Unknown argument: $arg"
-      echo "Usage: $0 [--full] [--scale]"
+      echo "Usage: $0 [--full] [--scale] [--differential-full]"
       exit 2
       ;;
   esac
@@ -72,6 +76,11 @@ fi
 echo "targeted pytest: OK (xfails are expected per policy below)"
 echo
 
+echo ">>> bounded seeded differential harness"
+( cd "$REPO_ROOT" && PYTHONPATH=. uv run python examples/charset_normalizer_rust/tools/differential_harness.py --assert-clean )
+echo "bounded seeded differential harness: OK"
+echo
+
 cat << 'POLICY'
 Expected xfail policy (these are documented and stable; not regressions):
   - 2 adversarial detector cases (bom8_badcont, short_high):
@@ -82,8 +91,10 @@ Expected xfail policy (these are documented and stable; not regressions):
       - utf_7: SIG/BOM strip policy per charset_normalizer/api.py vs raw stdlib decode
       - euc_jis_2004: extension handling vs encoding_rs profile
   Single-byte codecs: exact. Most multibyte: via encoding_rs + custom (Korean/HZ/UTF).
+  The default seeded live differential run adds 79 Python-oracle cases;
+  use --differential-full for its 530-input every-byte/mutation/long sweep.
   Recent targeted run: 74 passed, 4 xfailed.
-  Full examples run: 440 passed, 4 xfailed.
+  Full examples run: 445 passed, 4 xfailed.
 POLICY
 
 echo
@@ -104,6 +115,13 @@ if [[ $FULL -eq 1 ]]; then
     exit 1
   fi
   echo "full examples pytest: OK"
+  echo
+fi
+
+if [[ $DIFFERENTIAL_FULL -eq 1 ]]; then
+  echo ">>> full seeded differential sweep (--differential-full)"
+  ( cd "$REPO_ROOT" && PYTHONPATH=. uv run python examples/charset_normalizer_rust/tools/differential_harness.py --full --assert-clean )
+  echo "full seeded differential sweep: OK"
   echo
 fi
 

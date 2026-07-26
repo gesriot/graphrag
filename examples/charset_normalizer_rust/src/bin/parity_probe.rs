@@ -2,7 +2,7 @@
 //! Invoked by pytest harness in tests/test_codec_cd_parity.py
 //! Does NOT modify the production CLI (main.rs) or core behavior.
 
-use charset_normalizer_rust::{cd, CharsetMatch};
+use charset_normalizer_rust::{cd, from_bytes, CharsetMatch};
 use std::env;
 use std::process::ExitCode;
 
@@ -48,6 +48,50 @@ fn emit_json_langs(langs: &[String]) {
         print!("\"{}\"", l);
     }
     println!("]");
+}
+
+/// Emit a deliberately simple, tab-delimited detection observation for the
+/// seeded Python-vs-Rust differential harness.  Hex avoids JSON escaping and
+/// preserves an exact decoded UTF-8 payload without adding a runtime-only
+/// serialization dependency to this test helper.
+fn detect_file(path: &str) -> Result<(), String> {
+    let payload = std::fs::read(path)
+        .map_err(|error| format!("unable to read differential payload '{}': {}", path, error))?;
+    let matches = from_bytes(&payload);
+    let candidate_encodings = matches
+        .results
+        .iter()
+        .map(|candidate| candidate.encoding.as_str())
+        .collect::<Vec<_>>()
+        .join("|");
+
+    match matches.best() {
+        Some(best) => {
+            let decoded_hex = match best.decoded() {
+                Some(decoded) => to_hex(decoded.as_bytes()),
+                // A detector result without a strict decoded form is itself a
+                // useful observation. The harness records it as a mismatch.
+                None => "-".to_string(),
+            };
+            println!(
+                "BEST\t{}\t{}\t{:.17}\t{:.17}\t{}\t{}\t{}\t{}",
+                best.encoding,
+                match best.language.as_deref() {
+                    Some(language) => language,
+                    None => "Unknown",
+                },
+                best.chaos,
+                best.coherence,
+                u8::from(best.bom),
+                matches.len(),
+                candidate_encodings,
+                decoded_hex
+            );
+        }
+        None => println!("NONE\t{}\t{}", matches.len(), candidate_encodings),
+    }
+
+    Ok(())
 }
 
 fn main() -> ExitCode {
@@ -187,6 +231,16 @@ fn main() -> ExitCode {
                 None => {
                     print!("ERR");
                 }
+            }
+        }
+        "detect-file" => {
+            if args.len() < 3 {
+                eprintln!("usage: parity_probe detect-file <payload-path>");
+                return ExitCode::from(2);
+            }
+            if let Err(error) = detect_file(&args[2]) {
+                eprintln!("parity_probe: {}", error);
+                return ExitCode::from(2);
             }
         }
         other => {

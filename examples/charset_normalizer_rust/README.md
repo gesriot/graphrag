@@ -38,8 +38,8 @@ This is an experiment using the graphrag-code deterministic extraction + context
   - `--normalize` for stdin and files
   - `--normalize --replace` for in-place UTF-8 rewrite, including interactive confirmation unless `--force` is set
 - ✅ Python-vs-Rust CLI snapshot tests cover help/version, argparse-style errors, pretty JSON, absolute paths, stdin, minimal output, normalization side effects, replace/force, and prompt-decline behavior.
-- ✅ `cargo test` (81 tests total): 56 unit parity tests (cd/models/md/codec/API) + 9 CLI byte-exact/trace tests + 3 detection-contract tests (including 18/18 golden) + 13 off-golden/large-lazy integration tests pass; 0 ignored.
-- ✅ Python-vs-Rust pytest matrix: CLI/detector differential has 72 items (70 pass + 2 expected xfails for ambiguous adversarial inputs); exhaustive codec/CD parity adds 6 items (4 pass + 2 expected xfails for documented UTF-7 (SIG strip policy) / euc_jis_2004 extension cases); full `PYTHONPATH=. uv run pytest examples -q --tb=no` is expected to report 442 passed, 4 xfailed after adding the humanize-v2 Python contract tests. (short_20 xfail removed after narrow is_printable fix.) Single-byte codecs exact; most MB via encoding_rs/custom Korean/HZ/UTF special handling; rare MB table variants documented.
+- ✅ `cargo test` (82 tests total): 57 unit parity tests (cd/models/md/codec/API) + 9 CLI byte-exact/trace tests + 3 detection-contract tests (including 18/18 golden) + 13 off-golden/large-lazy integration tests pass; 0 ignored.
+- ✅ Python-vs-Rust pytest matrix: fixed CLI/detector differential has 72 items (70 pass + 2 expected xfails for ambiguous adversarial inputs); the bounded live seeded differential gate runs 79 Python-oracle cases through `tools/check_port.sh` (79 strong agreements, seed `20260725`); exhaustive codec/CD parity adds 6 items (4 pass + 2 expected xfails for documented UTF-7 (SIG strip policy) / euc_jis_2004 extension cases). Full `PYTHONPATH=. uv run pytest examples -q --tb=no` is expected to report 445 passed, 4 xfailed. (short_20 xfail removed after narrow is_printable fix.) Single-byte codecs exact; most MB via encoding_rs/custom Korean/HZ/UTF special handling; rare MB table variants documented.
 
 ## Scope
 Core detection:
@@ -76,7 +76,7 @@ pub fn detect_chardet_compatible(byte_str: &[u8]) -> LegacyDetectionResult;
 CLI: binary `normalizer` (see [[bin]] in Cargo.toml). Shared flags mirror Python: -v/--verbose, -a/--with-alternative, -n/--normalize, -m/--minimal, -r/--replace, -f/--force, -i/--no-preemptive, -t/--threshold, --version. Supports files, `-` for stdin, and normalization rewrite (with confirm/force). The Rust binary also accepts `--cp-isolation` / `--cp-exclusion` as Rust-only parity/test harness extensions that map to `FromBytesOptions`; they are intentionally omitted from `--help` so shared help text remains byte-exact with the vendored Python CLI.
 
 ## Parity scope (precise)
-Golden (byte-exact on 18/18 samples), off-golden (exact best-match assertions), deterministic diff matrix (17 fixed + 21 seeded + 26 adversarial payloads, plus fixtures/toggles), exhaustive CD + single-byte codec probes, representative multibyte codec probes, large/lazy paths, and CLI byte-exact (non-verbose JSON/outputs/side-effects) + normalized trace parity (verbose logs).
+Golden (byte-exact on 18/18 samples), off-golden (exact best-match assertions), fixed deterministic diff matrix (17 fixed + 21 earlier seeded + 26 adversarial payloads, plus fixtures/toggles), a live seeded Python-oracle differential gate (79 inputs by default, 530 with `--full`), exhaustive CD + single-byte codec probes, representative multibyte codec probes, large/lazy paths, and CLI byte-exact (non-verbose JSON/outputs/side-effects) + normalized trace parity (verbose logs).
 
 Distinctions:
 - Byte-exact: golden JSON/CLI non-verbose cases, off-golden best assertions, normalize outputs.

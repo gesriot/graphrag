@@ -5,7 +5,7 @@ use std::process::ExitCode;
 
 const PROG: &str = "normalizer";
 const UPSTREAM_VERSION: &str =
-    "Charset-Normalizer 3.4.7 - Python 3.14.4 - Unicode 16.0.0 - SpeedUp OFF";
+    "Charset-Normalizer 3.4.7 - Python 3.14.6 - Unicode 16.0.0 - SpeedUp OFF";
 
 const HELP: &str = "\
 usage: normalizer [-h] [-v] [-a] [-n] [-m] [-r] [-f] [-i] [-t THRESHOLD]

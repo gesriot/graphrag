@@ -891,7 +891,7 @@ fn from_bytes_impl(sequences: &[u8], options: FromBytesOptions) -> (CharsetMatch
                 ));
             }
         }
-        let cd_ratios_merged = merge_coherence_ratios(cd_results);
+        let cd_ratios_merged = cd::merge_coherence_ratios(&cd_results);
 
         if !cd_ratios_merged.is_empty() {
             log_trace(
@@ -1125,20 +1125,13 @@ fn make_match(
     chaos: f64,
     bom: bool,
     languages: Vec<(String, f64)>,
-    decoded_payload: Option<String>,
+    _decoded_payload: Option<String>,
     preemptive_declaration: Option<String>,
 ) -> CharsetMatch {
     let (language, coherence) = if let Some((language, ratio)) = languages.first() {
         (Some(language.clone()), *ratio)
     } else {
-        (
-            Some(infer_language(
-                encoding,
-                sequences,
-                decoded_payload.as_deref(),
-            )),
-            0.0,
-        )
+        (Some(infer_language(encoding)), 0.0)
     };
 
     CharsetMatch {
@@ -1154,12 +1147,11 @@ fn make_match(
     }
 }
 
-fn infer_language(encoding: &str, sequences: &[u8], decoded_payload: Option<&str>) -> String {
-    if encoding == "ascii"
-        || decoded_payload
-            .map(|s| !s.is_empty() && s.is_ascii())
-            .unwrap_or(false)
-    {
+fn infer_language(encoding: &str) -> String {
+    // Python returns English only when the selected match (or one of its
+    // submatches) is actually ``ascii``. A non-ASCII codec can decode a tiny
+    // ASCII-compatible byte sequence without proving that it is English.
+    if encoding == "ascii" {
         return "English".to_string();
     }
 
@@ -1170,11 +1162,7 @@ fn infer_language(encoding: &str, sequences: &[u8], decoded_payload: Option<&str
     };
 
     if languages.is_empty() || languages.iter().any(|l| l == "Latin Based") {
-        if !sequences.is_empty() && sequences.is_ascii() {
-            "English".to_string()
-        } else {
-            "Unknown".to_string()
-        }
+        "Unknown".to_string()
     } else {
         languages[0].clone()
     }
@@ -1624,41 +1612,6 @@ fn is_multi_byte_encoding_name(name: &str) -> bool {
             | "shift_jis_2004"
             | "shift_jisx0213"
     )
-}
-
-fn merge_coherence_ratios(results: Vec<Vec<(String, f64)>>) -> Vec<(String, f64)> {
-    let mut per_language: HashMap<String, Vec<f64>> = HashMap::new();
-
-    for result in results {
-        for (language, ratio) in result {
-            per_language.entry(language).or_default().push(ratio);
-        }
-    }
-
-    let mut merged: Vec<(String, f64)> = per_language
-        .into_iter()
-        .map(|(language, ratios)| {
-            let mean = ratios.iter().sum::<f64>() / ratios.len() as f64;
-            (language, (mean * 10_000.0).round() / 10_000.0)
-        })
-        .collect();
-
-    merged.sort_by(|a, b| {
-        b.1.partial_cmp(&a.1)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| {
-                let pa = crate::cd::LANGUAGE_ORDER
-                    .iter()
-                    .position(|&x| x == a.0)
-                    .unwrap_or(99);
-                let pb = crate::cd::LANGUAGE_ORDER
-                    .iter()
-                    .position(|&x| x == b.0)
-                    .unwrap_or(99);
-                pa.cmp(&pb)
-            })
-    });
-    merged
 }
 
 #[cfg(test)]
@@ -2639,6 +2592,41 @@ mod tests {
                 || got.contains(&"Bulgarian".to_string())
                 || !got.is_empty()
         );
+    }
+
+    #[test]
+    fn detector_preserves_python_language_tie_order() {
+        // Python 3.14.6 from_bytes() observations for these payloads. The
+        // detector's selected encoding and score are tied; preserving the
+        // upstream candidate order selects the language shown here.
+        let western = b"Moli\xe8re d\xe9j\xe0 fa\xe7ade No\xebl \xe9l\xe8ve. ".repeat(18);
+        let western_matches = from_bytes(&western);
+        let western_best = match western_matches.best() {
+            Some(best) => best,
+            None => panic!("invariant: Western detector fixture must have a best match"),
+        };
+        assert_eq!(western_best.encoding, "cp1257");
+        assert_eq!(western_best.language.as_deref(), Some("Slovak"));
+
+        let utf16 = ("UTF sixteen little endian: café русский 中文. ".repeat(18))
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<u8>>();
+        let utf16_matches = from_bytes(&utf16);
+        let utf16_best = match utf16_matches.best() {
+            Some(best) => best,
+            None => panic!("invariant: UTF-16 detector fixture must have a best match"),
+        };
+        assert_eq!(utf16_best.encoding, "utf_16_le");
+        assert_eq!(utf16_best.language.as_deref(), Some("Swedish"));
+
+        let tiny_matches = from_bytes(b"\0");
+        let tiny_best = match tiny_matches.best() {
+            Some(best) => best,
+            None => panic!("invariant: one-byte detector fixture must have a best match"),
+        };
+        assert_eq!(tiny_best.encoding, "utf_8");
+        assert_eq!(tiny_best.language.as_deref(), Some("Unknown"));
     }
 
     // === models parity tests ===

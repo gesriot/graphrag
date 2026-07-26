@@ -1,4 +1,3 @@
-use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use unicode_normalization::UnicodeNormalization;
@@ -131,21 +130,10 @@ fn target_features(language: &str) -> (bool, bool) {
 }
 
 fn sort_by_ratio_desc<T: AsRef<str>>(items: &mut [(T, f64)]) {
-    items.sort_by(|a, b| {
-        b.1.partial_cmp(&a.1)
-            .unwrap_or(Ordering::Equal)
-            .then_with(|| {
-                let pa = LANGUAGE_ORDER
-                    .iter()
-                    .position(|&x| x == a.0.as_ref())
-                    .unwrap_or(99);
-                let pb = LANGUAGE_ORDER
-                    .iter()
-                    .position(|&x| x == b.0.as_ref())
-                    .unwrap_or(99);
-                pa.cmp(&pb)
-            })
-    });
+    // Python's sorted(..., key=ratio, reverse=True) is stable. The caller's
+    // candidate order carries the upstream tie-break, so preserve it for
+    // equal scores rather than imposing a Rust-only language order.
+    items.sort_by(|a, b| b.1.total_cmp(&a.1));
 }
 
 fn filter_alt_coherence_matches(results: CoherenceMatches) -> CoherenceMatches {

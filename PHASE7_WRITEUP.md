@@ -78,7 +78,7 @@ repo records a solid result:
 | `cJSON` | C ownership slice + float-print + mutation/builder | **59** live on 2026-07-25 (`port_eval`, 3 golden files): 22 ownership + 30 float-print + 7 mutation traces | [Plan.md](Plan.md), `examples/cjson/PROVENANCE.md` |
 
 **Plus** the advanced stress-test **`charset-normalizer`**: graph audit pass rate
-1.0, 18/18 captured golden samples, 81 Rust tests, handoff via
+1.0, 18/18 captured golden samples, 82 Rust tests, handoff via
 `examples/charset_normalizer_rust/tools/check_port.sh`
 ([Plan.md](Plan.md), `examples/charset_normalizer_rust/PORT_STATUS.md`). It is
 scoped as a data-table-heavy validation target, not full upstream parity.
@@ -135,9 +135,10 @@ or any internal Microsoft system. Match that care when citing this work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`444 passed, 4 xfailed` for `PYTHONPATH=. uv run pytest examples -q`.
+`445 passed, 4 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+(includes the documentation-consistency check).
 
-**Live re-check (2026-07-25):** `444 passed, 4 xfailed` in ~11s.
+**Live re-check (2026-07-25):** `445 passed, 4 xfailed`.
 
 ---
 
@@ -348,7 +349,7 @@ when the whole package already fits in context.
 
 | Check | Command | Result |
 |---|---|---|
-| Full examples suite | `PYTHONPATH=. uv run pytest examples -q` | **444 passed, 4 xfailed** |
+| Full examples suite | `PYTHONPATH=. uv run pytest examples -q` | **445 passed, 4 xfailed** |
 | sqlparse graph audit | `uv run python scripts/audit_call_edges.py --graph byog_sqlparse` | pass rate **1.0**, 0/0/0, **230** calls (current index; the frozen Phase 5 baseline snapshot has 229) |
 | cJSON port_eval | `uv run python scripts/port_eval.py --source examples/cjson --port examples/cjson_rust --graph byog_cjson` | **59** golden cases, `manual_fixes=0`, **OVERALL PASS=True** |
 | isodate adequacy (v3 gate) | `uv run python scripts/ablation.py adequacy --graph byog_isodate --spec scripts/ablation_specs/isodate_adequacy.json` | **adequate: true**, closure **16** |

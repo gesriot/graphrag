@@ -1,0 +1,335 @@
+{
+  "_comment": "Load-bearing, mechanically derivable documentation claims. Each claim names its artifact/source and which docs must still state the number. kind=current|frozen_snapshot|historical|traced. Writers: when a live number changes, update expect + the listed docs in the same change; do not rewrite kind=historical paragraphs.",
+  "claims": [
+    {
+      "id": "examples_suite_summary",
+      "kind": "current",
+      "description": "Full examples pytest summary: passed + xfailed.",
+      "expect": {
+        "passed": 445,
+        "xfailed": 4
+      },
+      "source": {
+        "type": "pytest_collect",
+        "mode": "live",
+        "path": "examples",
+        "note": "Live check is collection only (total == passed+xfailed). Pass/xfail split is pinned for docs; the suite run itself is the live pass/fail gate."
+      },
+      "docs": [
+        {
+          "path": "Plan.md",
+          "must_contain": "445 passed, 4 xfailed",
+          "role": "current"
+        },
+        {
+          "path": "PHASE7_WRITEUP.md",
+          "must_contain": "445 passed, 4 xfailed",
+          "role": "current"
+        }
+      ]
+    },
+    {
+      "id": "cjson_golden_cases",
+      "kind": "current",
+      "description": "cJSON golden case count under examples/cjson/tests (all golden_*.json).",
+      "expect": {
+        "cases": 59
+      },
+      "source": {
+        "type": "golden_cases",
+        "mode": "live",
+        "package": "cjson"
+      },
+      "docs": [
+        {
+          "path": "Plan.md",
+          "must_contain": "port_eval` 59 golden / 0 manual fixes",
+          "role": "current",
+          "note": "Readiness snapshot / current-state lines, not the 2026-06-25 bootstrap paragraph."
+        },
+        {
+          "path": "Plan.md",
+          "must_contain": "59 golden cases (22 parse ownership + 30 float print + 7 mutation traces)",
+          "role": "current"
+        },
+        {
+          "path": "PHASE7_WRITEUP.md",
+          "must_contain": "**59**",
+          "role": "current"
+        }
+      ]
+    },
+    {
+      "id": "jsmn_golden_cases",
+      "kind": "current",
+      "description": "jsmn golden case count.",
+      "expect": {
+        "cases": 18
+      },
+      "source": {
+        "type": "golden_cases",
+        "mode": "live",
+        "package": "jsmn"
+      },
+      "docs": [
+        {
+          "path": "Plan.md",
+          "must_contain": "18 golden",
+          "role": "current"
+        }
+      ]
+    },
+    {
+      "id": "inih_golden_cases",
+      "kind": "current",
+      "description": "inih golden case count.",
+      "expect": {
+        "cases": 21
+      },
+      "source": {
+        "type": "golden_cases",
+        "mode": "live",
+        "package": "inih"
+      },
+      "docs": [
+        {
+          "path": "Plan.md",
+          "must_contain": "21 golden",
+          "role": "current"
+        }
+      ]
+    },
+    {
+      "id": "sqlparse_golden_cases",
+      "kind": "current",
+      "description": "sqlparse golden case count (lex + split).",
+      "expect": {
+        "cases": 65
+      },
+      "source": {
+        "type": "golden_cases",
+        "mode": "live",
+        "package": "sqlparse"
+      },
+      "docs": [
+        {
+          "path": "PHASE5_REPORT.md",
+          "must_contain": "**65**",
+          "role": "current"
+        },
+        {
+          "path": "Plan.md",
+          "must_contain": "65 golden cases",
+          "role": "current"
+        }
+      ]
+    },
+    {
+      "id": "sqlparse_graph_phase5_baseline",
+      "kind": "frozen_snapshot",
+      "description": "sqlparse BYOG Phase 5 frozen baseline (pre uses_data expansion).",
+      "expect": {
+        "entities": 243,
+        "relationships": 454,
+        "calls": 229
+      },
+      "source": {
+        "type": "graph_counts",
+        "mode": "live",
+        "graph": "byog_sqlparse",
+        "snapshot": "20260618-151436-ad7b5954"
+      },
+      "docs": [
+        {
+          "path": "PHASE5_REPORT.md",
+          "must_contain": "243 entities, 454 relationships",
+          "role": "frozen_snapshot"
+        },
+        {
+          "path": "PHASE5_REPORT.md",
+          "must_contain": "229 resolved calls",
+          "role": "frozen_snapshot"
+        },
+        {
+          "path": "Plan.md",
+          "must_contain": "243 entities / 454 relationships",
+          "role": "frozen_snapshot",
+          "note": "Readiness snapshot still quotes the Phase 5 baseline scale metrics."
+        },
+        {
+          "path": "Plan.md",
+          "must_contain": "229 resolved calls",
+          "role": "frozen_snapshot"
+        }
+      ]
+    },
+    {
+      "id": "sqlparse_graph_current_index",
+      "kind": "frozen_snapshot",
+      "description": "sqlparse BYOG current index after post-v1 data/uses_data packing fix.",
+      "expect": {
+        "entities": 283,
+        "relationships": 537,
+        "calls": 230
+      },
+      "source": {
+        "type": "graph_counts",
+        "mode": "live",
+        "graph": "byog_sqlparse",
+        "snapshot": "20260625-154143-8ce62d57"
+      },
+      "docs": [
+        {
+          "path": "PHASE7_WRITEUP.md",
+          "must_contain": "20260625-154143",
+          "role": "frozen_snapshot"
+        },
+        {
+          "path": "PHASE7_WRITEUP.md",
+          "must_contain": "| `20260625-154143` | 283 | 537 | 230 |",
+          "role": "frozen_snapshot"
+        }
+      ]
+    },
+    {
+      "id": "cjson_graph_calls",
+      "kind": "current",
+      "description": "cJSON graph CALLS edge count (current snapshot).",
+      "expect": {
+        "calls": 239,
+        "pass_rate": 1.0
+      },
+      "source": {
+        "type": "graph_audit",
+        "mode": "live",
+        "graph": "byog_cjson"
+      },
+      "docs": [
+        {
+          "path": "Plan.md",
+          "must_contain": "239 C/runner calls",
+          "role": "current"
+        }
+      ]
+    },
+    {
+      "id": "isodate_adequacy_v3",
+      "kind": "current",
+      "description": "isodate v3 parser-only adequacy gate.",
+      "expect": {
+        "adequate": true,
+        "closure_size": 16,
+        "must_reach_total": 13,
+        "must_reach_missing": 0,
+        "must_exclude_leaked": 0
+      },
+      "source": {
+        "type": "ablation_adequacy",
+        "mode": "live",
+        "graph": "byog_isodate",
+        "spec": "scripts/ablation_specs/isodate_adequacy.json"
+      },
+      "docs": [
+        {
+          "path": "PHASE7_WRITEUP.md",
+          "must_contain": "closure_size: 16",
+          "role": "current"
+        },
+        {
+          "path": "PHASE7_ISODATE_V3_PREREG.md",
+          "must_contain": "closure **16**",
+          "role": "current"
+        }
+      ]
+    },
+    {
+      "id": "cjson_port_eval_overall",
+      "kind": "traced",
+      "description": "cJSON port_eval OVERALL PASS (slow cargo stages \u2014 not re-executed here).",
+      "expect": {
+        "golden_cases": 59,
+        "manual_fixes": 0,
+        "overall_pass": true
+      },
+      "source": {
+        "type": "port_eval",
+        "mode": "traced",
+        "command": "uv run python scripts/port_eval.py --source examples/cjson --port examples/cjson_rust --graph byog_cjson",
+        "note": "Golden case count is cross-checked live via golden_cases claim; overall_pass is traced only."
+      },
+      "docs": [
+        {
+          "path": "Plan.md",
+          "must_contain": "port_eval` 59 golden / 0 manual fixes",
+          "role": "current"
+        }
+      ]
+    },
+    {
+      "id": "cjson_golden_bootstrap_20260625_historical",
+      "kind": "historical",
+      "description": "Dated bootstrap paragraph: 52 golden at 2026-06-25 (ownership+float only). Not current.",
+      "expect": {
+        "cases": 52
+      },
+      "source": {
+        "type": "none",
+        "mode": "traced",
+        "note": "Historical record under 'Bootstrap/port status (2026-06-25)'. Superseded by 'cJSON update (2026-07-25)' with 59. Not verified against current goldens."
+      },
+      "docs": [
+        {
+          "path": "Plan.md",
+          "must_contain": "Bootstrap/port status (2026-06-25)",
+          "role": "historical"
+        },
+        {
+          "path": "Plan.md",
+          "must_contain": "port_eval` with 52 golden cases (22 ownership + 30 float-print)",
+          "role": "historical",
+          "require_near": "Bootstrap/port status (2026-06-25)"
+        }
+      ]
+    },
+    {
+      "id": "charset_rust_test_count",
+      "kind": "traced",
+      "description": "charset-normalizer Rust test count (cargo; slow to run here, but pinned so documents cannot disagree with each other).",
+      "expect": {
+        "rust_tests": 82
+      },
+      "source": {
+        "type": "cargo_test",
+        "mode": "traced",
+        "command": "cd examples/charset_normalizer_rust && cargo test",
+        "note": "Live execution is left to check_port.sh; pinning it here caught a real 81-vs-82 split between Plan.md and PHASE7_WRITEUP.md."
+      },
+      "docs": [
+        {
+          "path": "Plan.md",
+          "must_contain": "82 Rust tests",
+          "role": "current"
+        },
+        {
+          "path": "PHASE7_WRITEUP.md",
+          "must_contain": "82 Rust tests",
+          "role": "current"
+        }
+      ]
+    }
+  ],
+  "left_out": [
+    {
+      "what": "Ablation N=3 per-run scores and medians",
+      "why": "Archived under examples/isodate/ablation_v3/ and PHASE7_ABLATION.md; re-running is out of scope and the v3 archive must stay frozen."
+    },
+    {
+      "what": "Miri wall-clock timings",
+      "why": "Environment-dependent and slow; not load-bearing for correctness claims."
+    },
+    {
+      "what": "Self-reported tool-uses / build attempts",
+      "why": "Agent narrative, not harness-measured (explicitly labelled self-reported in the ablation harness)."
+    }
+  ]
+}
