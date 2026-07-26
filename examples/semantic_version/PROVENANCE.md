@@ -13,6 +13,13 @@ were our own code). Vendored so indexing / golden / port are reproducible.
 - **BSD-2-Clause** (`License :: OSI Approved :: BSD License`). Full text in `LICENSE` (verbatim).
 - Redistribution permitted with the copyright notice retained, which this directory does.
 
+## Common evidence gate
+
+Run `uv run python scripts/port_eval.py --gate semantic_version` from the
+repository root. It regenerates the graph and context packs, runs the Python
+golden contracts, then runs the Rust port-eval stages. See
+`examples/PORT_EVIDENCE.md` for the complete manifest and tool-skip policy.
+
 ## What was vendored / modified
 - `base.py` — **verbatim** upstream (1449 LOC). Contains the port target (`Version`)
   plus the v2-scope spec/range machinery (`SimpleSpec`, `NpmSpec`, `BaseSpec`, ...).

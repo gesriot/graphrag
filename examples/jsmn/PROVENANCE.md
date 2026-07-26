@@ -18,6 +18,13 @@ bounded C→Rust port with `manual_fixes=0`.
 ## License — gate step 1 (captured)
 - **MIT**. Full text in `LICENSE` (verbatim).
 
+## Common evidence gate
+
+Run `uv run python scripts/port_eval.py --gate jsmn` from the repository root.
+It regenerates the C graph and context packs, runs the C-oracle golden contract,
+then runs the Rust port-eval stages. See `examples/PORT_EVIDENCE.md` for the
+complete manifest and tool-skip policy.
+
 ## Build metadata
 - `compile_commands.json` is present and captures the bootstrap configuration:
   `cc -DJSMN_HEADER=0 -I. -x c -fsyntax-only jsmn.h`.

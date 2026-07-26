@@ -1,0 +1,286 @@
+{
+  "schema_version": 1,
+  "required_source_gaps": [
+    "humanize",
+    "isodate",
+    "jsonpatch"
+  ],
+  "ports": [
+    {
+      "id": "mini_game",
+      "source": "examples/mini_game",
+      "port": "examples/mini_game_rust",
+      "indexer": "python",
+      "symbols": [
+        "sim:run_simulation",
+        "physics:update_player",
+        "main:run"
+      ],
+      "checks": [
+        {
+          "name": "Python golden trace contract",
+          "command": [
+            "{python}",
+            "-m",
+            "pytest",
+            "examples/mini_game/tests/test_sim.py",
+            "-q"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mini_lang",
+      "source": "examples/mini_lang",
+      "port": "examples/mini_lang_rust",
+      "indexer": "python",
+      "checks": [
+        {
+          "name": "Python golden contract",
+          "command": [
+            "{python}",
+            "-m",
+            "pytest",
+            "examples/mini_lang/tests/test_contract.py",
+            "-q"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "jsmn",
+      "source": "examples/jsmn",
+      "port": "examples/jsmn_rust",
+      "indexer": "c",
+      "checks": [
+        {
+          "name": "C graph and golden-oracle contract",
+          "tools": [
+            "c_compiler"
+          ],
+          "command": [
+            "{python}",
+            "-m",
+            "pytest",
+            "examples/jsmn/tests/test_c_extract.py",
+            "examples/jsmn/tests/test_jsmn_parse_contract.py",
+            "-q",
+            "-rs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "inih",
+      "source": "examples/inih",
+      "port": "examples/inih_rust",
+      "indexer": "c",
+      "checks": [
+        {
+          "name": "C graph and golden-oracle contract",
+          "tools": [
+            "c_compiler"
+          ],
+          "command": [
+            "{python}",
+            "-m",
+            "pytest",
+            "examples/inih/tests",
+            "-q",
+            "-rs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sqlparse",
+      "source": "examples/sqlparse",
+      "port": "examples/sqlparse_rust",
+      "indexer": "python",
+      "checks": [
+        {
+          "name": "Python golden contract",
+          "command": [
+            "{python}",
+            "-m",
+            "pytest",
+            "examples/sqlparse/tests/test_split_contract.py",
+            "-q"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "semantic_version",
+      "source": "examples/semantic_version",
+      "port": "examples/semantic_version_rust",
+      "indexer": "python",
+      "checks": [
+        {
+          "name": "Python golden contracts",
+          "command": [
+            "{python}",
+            "-m",
+            "pytest",
+            "examples/semantic_version/tests",
+            "-q"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "diff_match_patch",
+      "source": "examples/diff_match_patch",
+      "port": "examples/diff_match_patch_rust",
+      "indexer": "python",
+      "checks": [
+        {
+          "name": "Python golden contracts",
+          "command": [
+            "{python}",
+            "-m",
+            "pytest",
+            "examples/diff_match_patch/tests",
+            "-q"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "charset_normalizer",
+      "source": "examples/charset_normalizer",
+      "port": "examples/charset_normalizer_rust",
+      "indexer": "python",
+      "symbols": [
+        "api:from_bytes",
+        "__main__:cli_detect"
+      ],
+      "contract_tests": {
+        ".": "detection_contract.rs"
+      },
+      "run_binary": false,
+      "checks": [
+        {
+          "name": "Rust/Python targeted parity suite",
+          "command": [
+            "{python}",
+            "-m",
+            "pytest",
+            "examples/charset_normalizer_rust",
+            "-q",
+            "--tb=no"
+          ]
+        },
+        {
+          "name": "seeded live Python-oracle differential",
+          "command": [
+            "{python}",
+            "examples/charset_normalizer_rust/tools/differential_harness.py",
+            "--assert-clean"
+          ]
+        },
+        {
+          "name": "full examples pytest",
+          "when": "full",
+          "command": [
+            "{python}",
+            "-m",
+            "pytest",
+            "examples",
+            "-q",
+            "--tb=no"
+          ]
+        },
+        {
+          "name": "full seeded Python-oracle differential",
+          "when": "differential-full",
+          "command": [
+            "{python}",
+            "examples/charset_normalizer_rust/tools/differential_harness.py",
+            "--full",
+            "--assert-clean"
+          ]
+        },
+        {
+          "name": "release scale harness",
+          "when": "scale",
+          "env": {
+            "CN_SCALE": "1"
+          },
+          "command": [
+            "{python}",
+            "examples/charset_normalizer_rust/tools/scale_harness.py"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cjson",
+      "source": "examples/cjson",
+      "port": "examples/cjson_rust",
+      "indexer": "c",
+      "symbols": [
+        "runner:trace_step",
+        "cJSON:cJSON_Delete",
+        "runner:emit_raw"
+      ],
+      "checks": [
+        {
+          "name": "header-derived API audit",
+          "command": [
+            "{python}",
+            "examples/cjson/tools/api_surface_audit.py",
+            "--check"
+          ]
+        },
+        {
+          "name": "C oracle, ASan, and compiler-rejection locations",
+          "tools": [
+            "c_compiler",
+            "rustc"
+          ],
+          "command": [
+            "{python}",
+            "-m",
+            "pytest",
+            "examples/cjson/tests/test_cjson_extract.py",
+            "examples/cjson/tests/test_cjson_parse_contract.py",
+            "-q",
+            "-rs"
+          ]
+        },
+        {
+          "name": "Miri ownership properties",
+          "when": "full",
+          "tools": [
+            "miri"
+          ],
+          "cwd": "examples/cjson_rust",
+          "command": [
+            "cargo",
+            "+nightly",
+            "miri",
+            "test",
+            "--test",
+            "ownership_props"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "jsonpatch",
+      "kind": "gap",
+      "gap": "The RFC 6902 apply contract is source-only (25 golden cases, published byog_jsonpatch graph); no Rust port exists. Retired as the v2 ablation target after the closure boundary in PROVENANCE.md, and kept as the registry-dispatch diagnostic case rather than a port."
+    },
+    {
+      "id": "humanize",
+      "kind": "gap",
+      "gap": "The bounded Python number-formatting contract exists, but there is no Rust port directory or Rust golden consumer; no port evidence can be claimed."
+    },
+    {
+      "id": "isodate",
+      "kind": "gap",
+      "gap": "The duration contract is source-only; no Rust port exists. Its archived ablation_v3 graph/experiment is deliberately not indexed or run by this gate."
+    }
+  ]
+}

@@ -15,6 +15,13 @@ algorithm — Myers diff, Bitap fuzzy match, and patch make/apply.
 ## License — gate step 1 (captured)
 - **Apache-2.0** (`License :: OSI Approved :: Apache Software License`). Full text in `LICENSE` (verbatim).
 
+## Common evidence gate
+
+Run `uv run python scripts/port_eval.py --gate diff_match_patch` from the
+repository root. It regenerates the graph and context packs, runs the Python
+golden contracts, then runs the Rust port-eval stages. See
+`examples/PORT_EVIDENCE.md` for the complete manifest and tool-skip policy.
+
 ## What was vendored / modified
 - `diff_match_patch.py` — **verbatim** upstream (2022 LOC): the single
   `diff_match_patch` class (diff / match / patch) plus `patch_obj`.

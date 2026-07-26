@@ -15,6 +15,13 @@ adequate — unlike the `jsonpatch` boundary case (dynamic dispatch).
 ## License — gate step 1 (captured)
 - **MIT** (`LICENSE`, vendored verbatim from upstream `LICENCE`).
 
+## Common evidence status
+
+`uv run python scripts/port_eval.py --gate humanize` deliberately reports a
+**GAP**: this source contract has no Rust port directory or Rust golden
+consumer. It is listed in `examples/PORT_EVIDENCE.md` rather than being treated
+as a passing port.
+
 ## Scope (bounded slice — gate step 2, frozen)
 - `number.py` formatters, default locale: `intcomma(value, ndigits=None)`,
   `intword(value, format="%.1f")`, `apnumber(value)`, `ordinal(value, gender="male")`,

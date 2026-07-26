@@ -138,6 +138,20 @@ def _cjson_api_surface() -> dict[str, int]:
     }
 
 
+def _port_gate_manifest() -> dict[str, int]:
+    """Count the declared port profiles and gaps, validating the manifest."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from port_eval import load_gate_manifest  # type: ignore
+
+    gates = load_gate_manifest(ROOT / "scripts" / "port_gates.json")
+    return {
+        "profiles": sum(
+            1 for e in gates.values() if e.get("kind", "port") == "port"
+        ),
+        "declared_gaps": sum(1 for e in gates.values() if e.get("kind") == "gap"),
+    }
+
+
 def derive(claim: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
     """Return (derived_values or None, status) where status is live|traced|historical."""
     src = claim["source"]
@@ -170,6 +184,8 @@ def derive(claim: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
         return _ablation_adequacy(src["graph"], src["spec"]), "live"
     if stype == "cjson_api_surface":
         return _cjson_api_surface(), "live"
+    if stype == "port_gate_manifest":
+        return _port_gate_manifest(), "live"
     if mode == "traced":
         return None, "traced"
     raise ValueError(f"unknown source type {stype!r} for claim {claim['id']}")

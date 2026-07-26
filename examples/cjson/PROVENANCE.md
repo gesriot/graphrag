@@ -122,14 +122,21 @@ The published current graph co-indexes `tests/parse/runner.c` the same way `jsmn
   simple header defaults, each overlapping non-guard region is labelled
   `live` / `dead` / `unknown` on entities as weak provenance
   (`preprocessor_branches`). Example: `cJSON:get_decimal_point` has
-  `ifdef(ENABLE_LOCALES)=dead` and its `else=live` (returns `'.'`). When a
-  compiler is available, labels also seed from `compiler -E -dM` builtins plus
-  the real translation unit's include-provided macros
-  (`eval_mode=compiler_builtins`, basis like `builtin:__GNUC__='4'`); without a
-  compiler, platform macros stay **unknown** (`eval_mode=no_compiler`). The
-  stamp records `preprocessor_eval_mode`. Context packs surface
-  `preprocessor.branch_liveness`. A compiler-oracle check
-  (`--vs-compiler`) locks agreement on scored regions.
+  `ifdef(ENABLE_LOCALES)=dead` and its `else=live` (returns `'.'`).
+  **Published graphs default to `eval_mode=no_compiler`** (host-independent:
+  platform macros stay **unknown**; labels are byte-identical across machines).
+  Local analysis may opt into `compiler -E -dM` builtins plus include-provided
+  macros (`eval_mode=compiler_builtins`, basis like `builtin:__GNUC__='4'`) via
+  `index_c.py --compiler-builtins`. Every stamp records
+  `preprocessor_eval_mode` and `preprocessor_macro_seed_digest`; the snapshot
+  `manifest.json` carries a `preprocessor_liveness` block
+  (`eval_mode`, `compiler_id` / `compiler_version` when host-specific,
+  `macro_seed_digest`, `host_independent`). Re-stamping when the recorded
+  digest/mode does not match this host refuses unless
+  `--allow-toolchain-drift` is set. Context packs surface
+  `preprocessor.branch_liveness` and the digest. A compiler-oracle check
+  (`--vs-compiler`) locks agreement on scored regions (typically run under
+  `compiler_builtins` for denser coverage).
 - What counts as a "header default" is deliberately narrow, because the first
   implementation was not: a `#define` is a default only when it sits outside
   every conditional (include guards excepted) or forms the `#ifndef X` /

@@ -6,7 +6,7 @@
       "kind": "current",
       "description": "Full examples pytest summary: passed + xfailed.",
       "expect": {
-        "passed": 484,
+        "passed": 495,
         "xfailed": 2
       },
       "source": {
@@ -18,13 +18,19 @@
       "docs": [
         {
           "path": "Plan.md",
-          "must_contain": "484 passed, 2 xfailed",
+          "must_contain": "495 passed, 2 xfailed",
           "role": "current"
         },
         {
           "path": "PHASE7_WRITEUP.md",
-          "must_contain": "484 passed, 2 xfailed",
+          "must_contain": "495 passed, 2 xfailed",
           "role": "current"
+        },
+        {
+          "path": "examples/charset_normalizer_rust/tools/check_port.sh",
+          "must_contain": "Full examples run: 495 passed, 2 xfailed.",
+          "role": "current",
+          "note": "The compatibility handoff prints this live suite summary; keep it aligned with the documented claim."
         }
       ]
     },
@@ -129,6 +135,37 @@
         {
           "path": "Plan.md",
           "must_contain": "78 functions plus 23 public constants/macros/limits/types;\n68 functions are covered, 6 require shared mutable/aliased storage (reference\nconstructors/adds and the const-key alias), and 4 require a process-global\nallocator/error-state policy",
+          "role": "current"
+        }
+      ]
+    },
+    {
+      "id": "port_gate_coverage",
+      "kind": "current",
+      "description": "Declared port-evidence profiles and named source-only gaps in scripts/port_gates.json.",
+      "expect": {
+        "profiles": 9,
+        "declared_gaps": 3
+      },
+      "source": {
+        "type": "port_gate_manifest",
+        "mode": "live",
+        "note": "Loads the manifest through its own validator, which fails closed both on an unprofiled examples/*_rust and on a source package with a golden contract and no profile."
+      },
+      "docs": [
+        {
+          "path": "examples/PORT_EVIDENCE.md",
+          "must_contain": "`jsonpatch`",
+          "role": "current"
+        },
+        {
+          "path": "examples/PORT_EVIDENCE.md",
+          "must_contain": "`humanize`",
+          "role": "current"
+        },
+        {
+          "path": "examples/PORT_EVIDENCE.md",
+          "must_contain": "`isodate`",
           "role": "current"
         }
       ]

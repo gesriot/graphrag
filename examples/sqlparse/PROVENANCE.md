@@ -14,6 +14,13 @@ resolution at scale rather than one-file complexity.
 ## License — gate step 1 (captured)
 - **BSD-3-Clause** (`License :: OSI Approved :: BSD License`). Full text in `LICENSE` (verbatim).
 
+## Common evidence gate
+
+Run `uv run python scripts/port_eval.py --gate sqlparse` from the repository
+root. It regenerates the graph and context packs, runs the Python golden
+contract, then runs the Rust port-eval stages. See `examples/PORT_EVIDENCE.md`
+for the complete manifest and tool-skip policy.
+
 ## What was vendored
 - The full `sqlparse/` package (21 modules incl. `engine/` and `filters/`
   sub-packages), verbatim, plus `LICENSE`.

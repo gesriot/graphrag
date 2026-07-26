@@ -121,6 +121,7 @@ def publish_byog_snapshot(
     keep_last: int = 5,
     source_root: Optional[Path] = None,
     call_observations_df: Optional[pd.DataFrame] = None,
+    extra_manifest: Optional[Dict[str, Any]] = None,
 ) -> Path:
     """Write a complete BYOG snapshot atomically and publish a 'current' pointer.
 
@@ -169,7 +170,7 @@ def publish_byog_snapshot(
     files_list = ["entities.parquet", "relationships.parquet", "text_units.parquet"]
     if has_obs:
         files_list.append("call_observations.parquet")
-    manifest = {
+    manifest: Dict[str, Any] = {
         "id": snap_id,
         "created_at": datetime.now().isoformat(),
         "schema_version": 1,
@@ -185,6 +186,11 @@ def publish_byog_snapshot(
         "total_size_bytes": None,
         "corpus_hash": None,
     }
+    # Optional provenance blocks (e.g. preprocessor_liveness for C graphs).
+    if extra_manifest:
+        for k, v in extra_manifest.items():
+            if k not in manifest:
+                manifest[k] = v
 
     # Try to capture git commit (best effort)
     try:

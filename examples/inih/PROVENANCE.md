@@ -16,6 +16,13 @@ string parser C→Rust port.
 - **New BSD (BSD-3-Clause)**. Full text in `LICENSE.txt` (verbatim); SPDX
   `BSD-3-Clause` header is present in both `ini.c` and `ini.h`.
 
+## Common evidence gate
+
+Run `uv run python scripts/port_eval.py --gate inih` from the repository root.
+It regenerates the C graph and context packs, runs the C-oracle golden contract,
+then runs the Rust port-eval stages. See `examples/PORT_EVIDENCE.md` for the
+complete manifest and tool-skip policy.
+
 ## Compile metadata
 - `compile_commands.json` records the default-config build: `cc -c -I. ini.c`.
 - "Default config" means the header defaults: `INI_HANDLER_LINENO=0`,

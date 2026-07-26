@@ -10,6 +10,13 @@ combination v1/jsonpatch/v2 never hit together.
 - **BSD-3-Clause** (`LICENSE`, verbatim). `version.py` is a vendored-snapshot shim
   (`0+vendored-snapshot`); upstream is build-generated.
 
+## Common evidence status
+
+`uv run python scripts/port_eval.py --gate isodate` deliberately reports a
+**GAP**: the duration contract is source-only and has no Rust port. The gate
+does not index or run the protected `ablation_v3` archive; see
+`examples/PORT_EVIDENCE.md` for the declared boundary.
+
 ## Candidate slice
 - Entry: `parse_duration` (+ formatter `duration_isoformat`) from `isoduration.py`.
 - **Important type nuance:** `parse_duration` returns a `Duration` when the ISO

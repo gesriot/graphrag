@@ -64,6 +64,7 @@ product CLI does not re-surface:
 | Context pack | `uv run python scripts/context_pack.py <symbol> --graph … --purpose port-to-rust` |
 | Graph audit | `uv run python scripts/audit_call_edges.py --graph …` |
 | Port eval | `uv run python scripts/port_eval.py --graph … --source … --port …` |
+| All declared port evidence | `uv run python scripts/port_eval.py --all-gates --full` (see `examples/PORT_EVIDENCE.md`) |
 | Ablation harness | `uv run python scripts/ablation.py {adequacy,prep,audit,verify-fill,eval,report} …` |
 
 Examples still used in day-to-day work:

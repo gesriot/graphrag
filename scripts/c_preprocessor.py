@@ -124,6 +124,11 @@ class PackageAnalysis:
     # cannot see these, so without them `#ifndef NAN` reads "undefined" when
     # math.h has in fact defined it. Name -> replacement text.
     include_macros: Dict[str, str] = field(default_factory=dict)
+    # Host/toolchain fingerprint for reproducibility (filled when eval runs).
+    compiler_id: Optional[str] = None  # first line of `compiler --version`
+    compiler_version: Optional[str] = None
+    # SHA-256 (hex, truncated) of the macro seed table that drove liveness.
+    macro_seed_digest: Optional[str] = None
 
 
 def parse_compile_commands(package_dir: Path) -> Dict[str, Dict[str, Optional[str]]]:
@@ -403,22 +408,105 @@ def fetch_compiler_builtins(
     return out
 
 
+def _compiler_identity(compiler: str) -> Tuple[Optional[str], Optional[str]]:
+    """Return (id_line, version_string) from ``compiler --version``."""
+    import subprocess
+
+    try:
+        proc = subprocess.run(
+            [compiler, "--version"],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None, None
+    lines = [ln.strip() for ln in (proc.stdout or proc.stderr or "").splitlines() if ln.strip()]
+    if not lines:
+        return None, None
+    id_line = lines[0]
+    # Prefer a version-looking token if present.
+    ver = None
+    m = re.search(r"(\d+\.\d+(?:\.\d+)?)", id_line)
+    if m:
+        ver = m.group(1)
+    return id_line, ver
+
+
+def macro_seed_digest(
+    *,
+    eval_mode: str,
+    compile_defines: Dict[str, Optional[str]],
+    header_defaults: Dict[str, Any],
+    compiler_builtins: Optional[Dict[str, str]] = None,
+    include_macros: Optional[Dict[str, str]] = None,
+) -> str:
+    """Stable hash of everything that can change liveness answers.
+
+    ``no_compiler`` digests only package-local inputs (host-independent).
+    ``compiler_builtins`` also hashes toolchain builtins + include-attributed
+    macros so a different host cannot silently claim the same stamp.
+    """
+    import hashlib
+
+    def _hd_items() -> List[Tuple[str, str]]:
+        items: List[Tuple[str, str]] = []
+        for k, v in sorted((header_defaults or {}).items()):
+            if isinstance(v, tuple):
+                items.append((k, str(v[0])))
+            else:
+                items.append((k, str(v)))
+        return items
+
+    payload: Dict[str, Any] = {
+        "eval_mode": eval_mode,
+        "compile_defines": {k: compile_defines[k] for k in sorted(compile_defines or {})},
+        "header_defaults": _hd_items(),
+    }
+    if eval_mode == "compiler_builtins":
+        payload["compiler_builtins"] = {
+            k: (compiler_builtins or {})[k]
+            for k in sorted(compiler_builtins or {})
+        }
+        payload["include_macros"] = {
+            k: (include_macros or {})[k] for k in sorted(include_macros or {})
+        }
+    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def build_liveness_provenance(pa: PackageAnalysis) -> Dict[str, Any]:
+    """Machine-readable record of how liveness labels were produced."""
+    return {
+        "eval_mode": pa.eval_mode,
+        "compiler_path": pa.compiler_path,
+        "compiler_id": pa.compiler_id,
+        "compiler_version": pa.compiler_version,
+        "macro_seed_digest": pa.macro_seed_digest,
+        "n_compiler_builtins": len(pa.compiler_builtins or {}),
+        "n_include_macros": len(pa.include_macros or {}),
+        "host_independent": pa.eval_mode == "no_compiler",
+    }
+
+
 def analyze_package(
     package_dir: Path,
     *,
-    use_compiler_builtins: Optional[bool] = None,
+    use_compiler_builtins: bool = False,
     compiler: Optional[str] = None,
 ) -> PackageAnalysis:
     """Analyse a C package for preprocessor structure and weak liveness.
 
     ``use_compiler_builtins``:
-      * ``True`` — require/use ``compiler -E -dM`` builtins (eval_mode
-        ``compiler_builtins`` when the probe succeeds).
-      * ``False`` — never query the compiler (eval_mode ``no_compiler``);
-        platform macros stay ``unknown``.
-      * ``None`` (default) — use builtins when a compiler is available,
-        otherwise ``no_compiler``. The chosen mode is recorded on the analysis
-        and stamped into artifacts so a builtins stamp is never silent.
+      * ``False`` (default) — never query the compiler (``eval_mode=no_compiler``).
+        Platform macros stay ``unknown``. **This is the publish default:**
+        host-independent, reproducible labels.
+      * ``True`` — seed from ``compiler -E -dM`` builtins (+ include-attributed
+        macros when collectable). Labels become host-specific; the toolchain
+        fingerprint and macro-seed digest are recorded so a stamp is never silent.
+
+    The chosen mode and digest are always recorded on the analysis object.
     """
     package_dir = Path(package_dir).resolve()
     cc = parse_compile_commands(package_dir)
@@ -426,18 +514,23 @@ def analyze_package(
 
     compiler = compiler or find_c_compiler()
     builtins: Dict[str, str] = {}
-    if use_compiler_builtins is False:
-        eval_mode = "no_compiler"
-    else:
+    compiler_id: Optional[str] = None
+    compiler_version: Optional[str] = None
+    if use_compiler_builtins:
         if compiler:
             builtins = fetch_compiler_builtins(compiler)
             eval_mode = "compiler_builtins" if builtins else "no_compiler"
+            if builtins:
+                compiler_id, compiler_version = _compiler_identity(compiler)
         else:
             eval_mode = "no_compiler"
-        if use_compiler_builtins is True and eval_mode != "compiler_builtins":
+        if use_compiler_builtins and eval_mode != "compiler_builtins":
             # Explicit request but probe failed — stay honest.
             eval_mode = "no_compiler"
             builtins = {}
+            compiler_id, compiler_version = None, None
+    else:
+        eval_mode = "no_compiler"
 
     pa = PackageAnalysis(
         package_dir=package_dir,
@@ -445,6 +538,8 @@ def analyze_package(
         compiler_builtins=dict(builtins),
         eval_mode=eval_mode,
         compiler_path=compiler if eval_mode == "compiler_builtins" else None,
+        compiler_id=compiler_id,
+        compiler_version=compiler_version,
     )
     files = sorted(
         p for p in package_dir.rglob("*") if p.suffix in (".c", ".h") and p.is_file()
@@ -473,6 +568,13 @@ def analyze_package(
     pa.header_defaults = _collect_header_defaults(pa.files)
     if eval_mode == "compiler_builtins" and compiler:
         pa.include_macros = _collect_include_macros(pa, cc, compiler=compiler)
+    pa.macro_seed_digest = macro_seed_digest(
+        eval_mode=pa.eval_mode,
+        compile_defines=pa.compile_defines,
+        header_defaults=pa.header_defaults,
+        compiler_builtins=pa.compiler_builtins,
+        include_macros=pa.include_macros,
+    )
     return pa
 
 
@@ -1097,24 +1199,125 @@ def reasons_for_span(
     return out
 
 
+class ToolchainDriftError(RuntimeError):
+    """Re-stamp would change host-specific liveness relative to a prior stamp."""
+
+
+def read_graph_liveness_provenance(graph_dir: Path) -> Optional[Dict[str, Any]]:
+    """Load ``preprocessor_liveness`` from the published snapshot manifest, if any."""
+    graph_dir = Path(graph_dir)
+    current = graph_dir / "current"
+    if not current.is_file():
+        return None
+    try:
+        snap_id = current.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    man_path = graph_dir / "snapshots" / snap_id / "manifest.json"
+    if not man_path.is_file():
+        return None
+    try:
+        man = json.loads(man_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    prov = man.get("preprocessor_liveness")
+    return prov if isinstance(prov, dict) else None
+
+
+def check_liveness_stamp_freshness(
+    graph_dir: Path,
+    package_dir: Path,
+    *,
+    use_compiler_builtins: bool = False,
+    compiler: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Compare a graph's recorded liveness provenance to a fresh analysis.
+
+    Returns a report with ``ok`` / ``status``:
+      * ``ok`` — no prior record, or digests match
+      * ``drift`` — prior stamp's macro seed / mode differs from this host
+      * ``missing`` — no prior preprocessor_liveness in the manifest
+
+    Does not modify the graph.
+    """
+    prior = read_graph_liveness_provenance(graph_dir)
+    pa = analyze_package(
+        package_dir,
+        use_compiler_builtins=use_compiler_builtins,
+        compiler=compiler,
+    )
+    current = build_liveness_provenance(pa)
+    if prior is None:
+        return {
+            "ok": True,
+            "status": "missing",
+            "prior": None,
+            "current": current,
+            "message": "no preprocessor_liveness in snapshot manifest",
+        }
+    prior_mode = prior.get("eval_mode")
+    prior_digest = prior.get("macro_seed_digest")
+    if prior_mode == current["eval_mode"] and prior_digest == current["macro_seed_digest"]:
+        return {
+            "ok": True,
+            "status": "match",
+            "prior": prior,
+            "current": current,
+            "message": "macro seed digest matches recorded stamp",
+        }
+    return {
+        "ok": False,
+        "status": "drift",
+        "prior": prior,
+        "current": current,
+        "message": (
+            f"liveness stamp drift: recorded eval_mode={prior_mode!r} "
+            f"digest={prior_digest!r}; this host would produce "
+            f"eval_mode={current['eval_mode']!r} digest={current['macro_seed_digest']!r} "
+            f"(compiler_id={current.get('compiler_id')!r}). "
+            f"Re-stamp with an explicit policy change or --allow-toolchain-drift."
+        ),
+    }
+
+
 def annotate_byog(
     data: Dict[str, List[Dict[str, Any]]],
     package_dir: Path,
     *,
-    use_compiler_builtins: Optional[bool] = None,
+    use_compiler_builtins: bool = False,
+    graph_dir: Optional[Path] = None,
+    allow_toolchain_drift: bool = False,
 ) -> Dict[str, Any]:
     """Stamp preprocessor provenance onto entities, relationships, observations.
 
     Does **not** flip ``is_deterministic`` or drop edges.
     Overwrites ``preprocessor_*`` fields (never merges with prior parquet values).
 
-    ``use_compiler_builtins`` is passed to ``analyze_package`` (see there). The
-    resulting ``eval_mode`` is stamped onto every item so artifacts record
-    whether toolchain builtins were used.
+    Default ``use_compiler_builtins=False`` (``no_compiler``): host-independent
+    labels for published artifacts. Pass ``True`` for local host-specific
+    analysis; the toolchain fingerprint and macro-seed digest are recorded in
+    the analysis and (via the publisher) the snapshot manifest. When
+    ``graph_dir`` is set, a digest/mode mismatch against a prior recorded
+    stamp raises ``ToolchainDriftError`` unless ``allow_toolchain_drift=True``
+    — so a different host cannot quietly rewrite host-specific labels, and a
+    mode switch cannot look like a silent re-stamp.
     """
+    if graph_dir is not None and not allow_toolchain_drift:
+        freshness = check_liveness_stamp_freshness(
+            graph_dir,
+            package_dir,
+            use_compiler_builtins=use_compiler_builtins,
+        )
+        prior = freshness.get("prior") or {}
+        # Any recorded digest/mode that would not match this re-stamp is a
+        # policy or host change — refuse rather than quietly relabel.
+        if freshness["status"] == "drift" and prior.get("macro_seed_digest"):
+            raise ToolchainDriftError(freshness["message"])
+
     pa = analyze_package(
         package_dir, use_compiler_builtins=use_compiler_builtins
     )
+    liveness_prov = build_liveness_provenance(pa)
     summary: Dict[str, Any] = {
         "package": str(package_dir),
         "function_like_macros": sorted(pa.all_function_macros),
@@ -1126,6 +1329,7 @@ def annotate_byog(
         "eval_mode": pa.eval_mode,
         "compiler_path": pa.compiler_path,
         "n_compiler_builtins": len(pa.compiler_builtins or {}),
+        "liveness_provenance": liveness_prov,
         "entities_flagged": 0,
         "calls_flagged": 0,
         "observations_flagged": 0,
@@ -1142,6 +1346,7 @@ def annotate_byog(
         item["preprocessor_dependent"] = bool(reasons)
         item["preprocessor_reasons"] = list(reasons)
         item["preprocessor_eval_mode"] = pa.eval_mode
+        item["preprocessor_macro_seed_digest"] = pa.macro_seed_digest
         # JSON-serializable list of plain dicts (parquet round-trip safe as objects/JSON).
         item["preprocessor_branches"] = [
             {
@@ -1258,7 +1463,9 @@ def format_report(summary: Dict[str, Any], *, totals: Optional[Dict[str, int]] =
         f"  compile -D defines         : {summary.get('compile_defines') or '{}'}",
         f"  header defaults            : {summary.get('header_defaults') or '{}'}",
         f"  eval_mode                  : {summary.get('eval_mode', 'no_compiler')} "
-        f"(builtins={summary.get('n_compiler_builtins', 0)})",
+        f"(builtins={summary.get('n_compiler_builtins', 0)}, "
+        f"digest={(summary.get('liveness_provenance') or {}).get('macro_seed_digest')}, "
+        f"host_independent={(summary.get('liveness_provenance') or {}).get('host_independent')})",
         f"  non-guard #if regions      : {summary.get('n_conditional_regions')}",
         f"  branch liveness (entity spans, non-unique): "
         f"live={summary.get('branches_live', 0)} "

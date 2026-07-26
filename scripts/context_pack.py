@@ -219,7 +219,7 @@ def pack(
             "extractor", "confidence", "is_deterministic",
             # C frontend honesty: tree-sitter cannot resolve the preprocessor.
             "preprocessor_dependent", "preprocessor_reasons", "preprocessor_branches",
-            "preprocessor_eval_mode",
+            "preprocessor_eval_mode", "preprocessor_macro_seed_digest",
             # Python frontend honesty: syntax/AST cannot follow dynamic dispatch.
             "dynamic_dependent", "dynamic_reasons",
         )
@@ -330,13 +330,16 @@ def pack(
             or (
                 (entity_branches[0].get("eval_mode") if entity_branches else None)
             ),
+            "macro_seed_digest": _json_safe(
+                ent_dict.get("preprocessor_macro_seed_digest")
+            ),
             "note": (
-                "Detection + weak liveness under compile_commands -D, header "
-                "defaults, and optionally toolchain builtins from "
-                "`compiler -E -dM` (scripts/c_preprocessor.py). "
-                "eval_mode=no_compiler keeps platform macros unknown; "
-                "compiler_builtins seeds them with basis=builtin:NAME=… . "
-                "Not full clang expansion of arbitrary expressions."
+                "Detection + weak liveness under compile_commands -D and header "
+                "defaults (scripts/c_preprocessor.py). Published default is "
+                "eval_mode=no_compiler (host-independent; platform macros unknown). "
+                "Local --compiler-builtins seeds toolchain tables with "
+                "basis=builtin:NAME=… and records macro_seed_digest in the "
+                "snapshot manifest. Not full clang expansion of arbitrary expressions."
             ),
         }
 
