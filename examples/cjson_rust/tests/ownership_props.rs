@@ -12,10 +12,13 @@
 //!   `cargo +nightly miri test --test ownership_props`
 
 use cjson_rust::{
-    add_item_to_array, compare, create_number, delete_item_from_array, detach_item_from_array,
-    duplicate, get_array_size, insert_item_in_array, is_array, is_bool, is_null, is_number,
-    is_object, is_string, is_true, parse, print_unformatted, replace_item_in_array, CJson,
-    CJSON_ARRAY, CJSON_FALSE, CJSON_NULL, CJSON_NUMBER, CJSON_OBJECT, CJSON_STRING, CJSON_TRUE,
+    add_bool_to_object, add_item_to_array, add_number_to_object, children, compare, create_number,
+    create_object, delete_item_from_array, detach_item_from_array, detach_item_via_pointer,
+    duplicate, get_array_item, get_array_size, get_object_item_case_sensitive,
+    insert_item_in_array, is_array, is_bool, is_null, is_number, is_object, is_string, is_true,
+    minify, parse, parse_with_opts, print_unformatted, replace_item_in_array,
+    replace_item_via_pointer, set_bool_value, set_int_value, set_number_value, CJson, CJSON_ARRAY,
+    CJSON_FALSE, CJSON_NULL, CJSON_NUMBER, CJSON_OBJECT, CJSON_STRING, CJSON_TRUE,
 };
 use proptest::prelude::*;
 use proptest::test_runner::{Config, TestRunner};
@@ -251,6 +254,79 @@ fn prop_mutation_transfers_and_releases_ownership() {
         prop_assert!(replace_item_in_array(&mut root, 0, create_number(42.0)).is_ok());
         prop_assert_eq!(get_array_size(&root), numbers.len() as i32 - 1);
         drop(root);
+
+        // The non-aliasing API closure is also safe under Miri: object helper
+        // constructors own their inserted boxes, setters mutate only their
+        // unique node, the iterator borrows without raw links, and minify
+        // compacts one uniquely owned byte buffer.
+        let mut object = create_object();
+        add_number_to_object(&mut object, "number", 1.0);
+        add_bool_to_object(&mut object, "bool", false);
+        prop_assert_eq!(children(&object).count(), 2);
+        let number = object
+            .child
+            .as_deref_mut()
+            .ok_or_else(|| TestCaseError::fail("object helper must insert number"))?;
+        prop_assert_eq!(set_number_value(number, 2.5), 2.5);
+        let boolean = number
+            .next
+            .as_deref_mut()
+            .ok_or_else(|| TestCaseError::fail("object helper must insert bool"))?;
+        prop_assert_ne!(set_bool_value(boolean, true), 0);
+        prop_assert_eq!(set_int_value(number, -4), -4);
+        prop_assert!(get_object_item_case_sensitive(&object, b"number").is_some());
+        let (_, end) = parse_with_opts(b"{\"x\":1}\0", true)
+            .map_err(|offset| TestCaseError::fail(format!("NUL parse failed at {offset}")))?;
+        prop_assert_eq!(end, 7);
+        let mut compact = b" { /*x*/ \"a b\" : 1 } ".to_vec();
+        minify(&mut compact);
+        prop_assert_eq!(compact, b"{\"a b\":1}");
+        drop(object);
+        Ok(())
+    })
+    .unwrap();
+}
+
+/// **deterministic** — node-address identity does not weaken ownership. The
+/// target is a `*const CJson` compared and never dereferenced, so detaching by
+/// address returns the same allocation the caller named, with no sibling
+/// attached, and replacing by address drops exactly the old node. Miri checks
+/// that taking the address under a shared borrow and mutating afterwards leaves
+/// no invalidated tag behind.
+#[test]
+fn prop_via_pointer_identity_preserves_ownership() {
+    let mut r = runner();
+    r.run(&prop::collection::vec(-1000i32..1000, 2..12), |numbers| {
+        let mut root = cjson_rust::create_array();
+        for &number in &numbers {
+            add_item_to_array(&mut root, create_number(number as f64));
+        }
+        let index = (numbers.len() / 2) as i32;
+        let target: *const CJson = get_array_item(&root, index)
+            .ok_or_else(|| TestCaseError::fail("index selected from array must exist"))?;
+
+        let detached = detach_item_via_pointer(&mut root, target)
+            .ok_or_else(|| TestCaseError::fail("address of a current child must detach"))?;
+        prop_assert!(
+            std::ptr::eq(&*detached as *const CJson, target),
+            "detach must return the identified allocation"
+        );
+        prop_assert!(detached.next.is_none(), "detached node retained a sibling");
+        prop_assert_eq!(get_array_size(&root), numbers.len() as i32 - 1);
+        drop(detached);
+
+        let survivor: *const CJson = get_array_item(&root, 0)
+            .ok_or_else(|| TestCaseError::fail("array keeps at least one child"))?;
+        prop_assert!(replace_item_via_pointer(&mut root, survivor, create_number(42.0)).is_ok());
+        prop_assert_eq!(get_array_size(&root), numbers.len() as i32 - 1);
+
+        // A miss must hand the replacement back rather than leak or unlink.
+        let orphan = create_number(7.0);
+        let stale: *const CJson = &*orphan;
+        prop_assert!(replace_item_via_pointer(&mut root, stale, create_number(1.0)).is_err());
+        prop_assert_eq!(get_array_size(&root), numbers.len() as i32 - 1);
+        drop(orphan);
+        drop(root);
         Ok(())
     })
     .unwrap();
@@ -280,7 +356,8 @@ fn prop_recursive_duplicate_is_independent_and_comparable() {
         prop_assert!(compare(&source, &deep, true));
         let deep_before = print_unformatted(&deep);
 
-        prop_assert!(replace_item_in_array(&mut source, 0, create_number(42.0)).is_ok());
+        let changed_value = if numbers[0] == 42 { 43.0 } else { 42.0 };
+        prop_assert!(replace_item_in_array(&mut source, 0, create_number(changed_value)).is_ok());
         prop_assert!(!compare(&source, &deep, true));
         prop_assert_eq!(print_unformatted(&deep), deep_before.clone());
         drop(source);

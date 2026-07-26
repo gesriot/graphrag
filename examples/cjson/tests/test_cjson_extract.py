@@ -16,6 +16,7 @@ Run: uv run python -m pytest examples/cjson/tests/test_cjson_extract.py -q
 from __future__ import annotations
 
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).parents[3]
@@ -45,6 +46,32 @@ def test_struct_graph_and_slice_functions():
         "cJSON:cJSON_GetArraySize",
     ):
         assert fn in titles, f"missing function entity {fn}"
+
+    # The API audit is header-derived, not a hand-maintained list of the slice.
+    # A copied header with one synthetic exported declaration must enumerate
+    # that declaration and then fail closed until it is classified.
+    sys.path.insert(0, str(ROOT / "examples" / "cjson" / "tools"))
+    import api_surface_audit  # type: ignore
+
+    assert api_surface_audit.main(["--check"]) == 0
+    header = ROOT / "examples" / "cjson" / "cJSON.h"
+    with tempfile.TemporaryDirectory() as td:
+        altered = Path(td) / "cJSON.h"
+        text = header.read_text()
+        insert_at = text.rfind("#endif")
+        altered.write_text(
+            text[:insert_at]
+            + "\nCJSON_PUBLIC(void) cJSON_AuditProbe(void);\n"
+            + text[insert_at:]
+        )
+        functions, _ = api_surface_audit.parse_header(altered)
+        assert "cJSON_AuditProbe" in functions
+        try:
+            api_surface_audit.render(altered)
+        except ValueError as error:
+            assert "unclassified" in str(error)
+        else:
+            raise AssertionError("header addition must require an audit classification")
 
 
 def test_parse_chain_and_recursive_ownership_edges():

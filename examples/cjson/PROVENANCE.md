@@ -65,6 +65,23 @@ The published current graph co-indexes `tests/parse/runner.c` the same way `jsmn
   observations flagged. Library trusted calls remain **0/188** flagged — the
   port rests on unconditional internal library calls; the mutation runner did
   not introduce preprocessor-dependent call edges.
+- Branch liveness (2026-07-26): under `compile_commands.json` (no `-D`) plus
+  simple header defaults, each overlapping non-guard region is labelled
+  `live` / `dead` / `unknown` on entities as weak provenance
+  (`preprocessor_branches`). Example: `cJSON:get_decimal_point` has
+  `ifdef(ENABLE_LOCALES)=dead` and its `else=live` (returns `'.'`). Platform
+  macros (`_MSC_VER`, `__GNUC__`, …) stay **unknown** — never folded into dead.
+  Context packs surface `preprocessor.branch_liveness`.
+- What counts as a "header default" is deliberately narrow, because the first
+  implementation was not: a `#define` is a default only when it sits outside
+  every conditional (include guards excepted) or forms the `#ifndef X` /
+  `#define X v` idiom, and it is applied in source order within its own file.
+  Harvesting nested defines made `#define __WINDOWS__` — which lives inside
+  `#if !defined(__WINDOWS__) && (defined(WIN32) || …)` — read as set on a POSIX
+  build, and made every `#ifndef INI_*` default region in `inih` read as dead
+  because the `#define` it guards had already been scraped. Liveness also
+  propagates: a branch inside a dead region is dead, and inside an undecidable
+  region it is undecidable however evaluable its own condition is.
 
 **History of this reindex (2026-07-26):** preprocessor labels were first stamped
 in place on the 131/239 snapshot so a provenance commit would not fold runner
@@ -142,10 +159,11 @@ diffs).
 - Port crate: `examples/cjson_rust`.
 - Scope: `parse -> inspect tree -> print -> drop/delete` plus the captured
   owned builders, typed arrays, add/insert/detach/delete/replace operations,
-  recursive/non-recursive duplication, structural comparison, and value
-  accessors. The Rust side reproduces the C-derived unformatted/inspect/formatted
-  and mutation-trace oracles (59 golden cases: 22 ownership + 30 float-print +
-  7 mutation).
+  recursive/non-recursive duplication, structural comparison, value accessors,
+  parse-end options, buffered/preallocated printing, minification, type/object
+  predicates, object-construction helpers, and setters. The Rust side
+  reproduces the C-derived unformatted/inspect/formatted and mutation-trace
+  oracles (59 golden cases: 22 ownership + 30 float-print + 7 mutation).
 - Representation: structure-preserving `CJson` node with a cJSON-style type tag,
   `child`/`next` `Box`-owned singly linked list, `valuestring`, `valueint`,
   `valuedouble`, and object key `string`. It deliberately avoids an idiomatic
@@ -198,22 +216,59 @@ diffs).
     - *inferred* — printed output is UTF-8 and re-parsable (not byte-identical
       to the input); wide-array drop is iterative-safe
     - *human-approved* — nesting past the default limit (1000) is rejected
-  - **Still untested:** custom allocators/hooks, concurrent use, Miri over the
-    FFI float path, fuzzing against adversarial multi-MB inputs, and cross-libc
-    float golden invariance.
-- **Explicitly excluded aliasing/pointer APIs:** `CreateStringReference`,
-  `CreateObjectReference`, `CreateArrayReference`, `AddItemReferenceToArray`,
-  `AddItemReferenceToObject`, `DetachItemViaPointer`, and
-  `ReplaceItemViaPointer` are not ported. The reference constructors and add
-  calls deliberately create non-owning aliases in C; object/array aliases would
-  require shared or borrowed children rather than this milestone's exclusive
-  `Box` tree ownership. The `ViaPointer` calls use raw node identity while
-  mutating the same parent, which has no equivalent safe signature over an
-  exclusively borrowed `Box` list. `AddItemToObjectCS` and `StringIsConst` are
-  also excluded because the Rust port stores every object key as owned bytes.
-  Custom hooks/allocators, `prev` links, `ENABLE_LOCALES` decimal-point
-  printing, duplicate/reference-flag combinations, and malformed-number edge
-  cases that depend on `strtod` partial consumption remain deferred.
+  - **Still untested:** concurrent use, Miri over the FFI float path, fuzzing
+    against adversarial multi-MB inputs, and cross-libc float golden invariance.
+
+## Complete header audit and enforceable boundary (2026-07-26)
+
+`API_SURFACE_AUDIT.md` is generated from `cJSON.h`, not from the port. Reproduce
+the inventory and its corruption check with:
+
+```bash
+uv run python examples/cjson/tools/api_surface_audit.py --check
+PYTHONPATH=. uv run pytest examples/cjson/tests/test_cjson_extract.py examples/cjson/tests/test_cjson_parse_contract.py -q
+```
+
+The second command compiles a temporary C oracle linked to vendored `cJSON.c`,
+compares its safe-surface trace byte-for-byte with Rust `api_trace`, executes
+every refusal trace, and runs those C traces under ASan where available. It is
+kept out of the indexed golden runner so the published `byog_cjson` snapshot
+remains the declared library + golden-runner graph.
+
+The current header has **78 functions** and **23 public constants/macros/limits/
+types**. Of the functions, **68 are covered**, **6 are genuinely blocked by the
+exclusive `Box` representation**, and **4 are excluded for C process-global
+allocator/error state rather than ownership**. There are no merely unimplemented
+functions. The six ownership-blocked entries are
+`CreateStringReference`, `CreateObjectReference`, `CreateArrayReference`,
+`AddItemToObjectCS`, `AddItemReferenceToArray`, and `AddItemReferenceToObject`.
+Their C traces prove, respectively, observing caller string/key mutation or
+aliasing a child chain. Faithfully closing them needs borrowed/shared storage,
+not another helper over the current `Box` tree.
+
+**Correction (2026-07-26, same day):** `DetachItemViaPointer` and
+`ReplaceItemViaPointer` were first classified ownership-blocked on the reasoning
+that a `&CJson` borrowed from the tree cannot coexist with `&mut parent`. That
+is true of a reference and false of an address. Both are now covered by
+`detach_item_via_pointer` / `replace_item_via_pointer`, which take a
+`*const CJson` identity token that is compared and never dereferenced — no
+`unsafe`, no handle arena, no interior mutability — and both appear in the
+byte-compared safe C/Rust trace, including detach identity (`detached == item`)
+and the surviving array shape. This is the second time an "impossible under
+exclusive `Box` ownership" claim on this port covered more ground than the
+evidence supported; the first was insert/duplicate/compare.
+
+The four non-ownership exclusions are `InitHooks`,
+`GetErrorPtr`, `cJSON_malloc`, and `cJSON_free`; they need a global/parameterized
+allocator and error-state policy. `prev`, `cJSON_IsReference`, and
+`cJSON_StringIsConst` are the matching non-function structural boundary.
+
+The C-compatible safe closure includes the functions that were previously only
+absent: version metadata; parse options with end/error offsets; buffered and
+preallocated printing; case-sensitive/object-presence getters; invalid/false
+predicates; minification; all nine `Add*ToObject` helpers; numeric/bool/string
+setters; and a borrowed child iterator for `cJSON_ArrayForEach`. The extended
+deterministic ownership property exercises the non-aliasing helpers under Miri.
 
 ## Vendored whitespace
 - `cJSON.h` and `LICENSE` contain upstream whitespace that fails vanilla
@@ -222,9 +277,10 @@ diffs).
   project-authored files remain checked normally.
 
 ## Next scope
-The ownership-bearing slice, owned builder/mutation API, duplicate/compare
-structural API, value accessors, and bounded float-printing fidelity suite are
-complete. Remaining cJSON depth is the reference/alias and pointer-identity API,
-custom hooks, locale decimal points, and partial-`strtod` malformation; the
-Phase 6 checkpoint can stand while the project moves to
-productization/benchmarking or clang-backed C/C++ semantic extraction.
+The header inventory is closed at the current representation: all safe
+non-aliasing functions are covered, and every remaining function has an
+executable, quantified refusal. Further cJSON work would be a deliberate
+representation/policy change (shared/borrowed nodes or handles; allocator/error
+state), locale decimal-point support, or partial-`strtod` malformation work —
+not a hidden API-parity TODO. The Phase 6 checkpoint can stand while the project
+moves to productization/benchmarking or clang-backed C/C++ semantic extraction.

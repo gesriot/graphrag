@@ -31,7 +31,14 @@ pub const CJSON_ARRAY: i32 = 1 << 5;
 pub const CJSON_OBJECT: i32 = 1 << 6;
 pub const CJSON_RAW: i32 = 1 << 7;
 
-const NESTING_LIMIT: usize = 1000;
+/// Vendored `cJSON.h` version metadata.
+pub const VERSION_MAJOR: u8 = 1;
+pub const VERSION_MINOR: u8 = 7;
+pub const VERSION_PATCH: u8 = 19;
+pub const VERSION: &str = "1.7.19";
+
+/// Matches `CJSON_NESTING_LIMIT` in the vendored default header.
+pub const NESTING_LIMIT: usize = 1000;
 
 /// Mirror of the C `cJSON` node. Strings are kept as bytes (cJSON's `char*`),
 /// since decoded values and keys may hold arbitrary UTF-8.
@@ -43,6 +50,33 @@ pub struct CJson {
     pub valueint: i32,
     pub valuedouble: f64,
     pub string: Option<Vec<u8>>,
+}
+
+/// Safe borrowed traversal equivalent to `cJSON_ArrayForEach`.
+pub struct Children<'a> {
+    next: Option<&'a CJson>,
+}
+
+impl<'a> Iterator for Children<'a> {
+    type Item = &'a CJson;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let current = self.next?;
+        self.next = current.next.as_deref();
+        Some(current)
+    }
+}
+
+/// `cJSON_ArrayForEach` without exposing raw sibling pointers.
+pub fn children(item: &CJson) -> Children<'_> {
+    Children {
+        next: item.child.as_deref(),
+    }
+}
+
+/// `cJSON_Version`.
+pub fn version() -> &'static str {
+    VERSION
 }
 
 impl CJson {
@@ -76,6 +110,12 @@ impl Drop for CJson {
 
 pub fn is_null(item: &CJson) -> bool {
     (item.type_ & 0xff) == CJSON_NULL
+}
+pub fn is_invalid(item: &CJson) -> bool {
+    (item.type_ & 0xff) == CJSON_INVALID
+}
+pub fn is_false(item: &CJson) -> bool {
+    (item.type_ & 0xff) == CJSON_FALSE
 }
 pub fn is_bool(item: &CJson) -> bool {
     (item.type_ & (CJSON_TRUE | CJSON_FALSE)) != 0
@@ -141,6 +181,23 @@ pub fn get_object_item<'a>(item: &'a CJson, name: &[u8]) -> Option<&'a CJson> {
     None
 }
 
+/// `cJSON_GetObjectItemCaseSensitive`.
+pub fn get_object_item_case_sensitive<'a>(item: &'a CJson, name: &[u8]) -> Option<&'a CJson> {
+    let mut cur = item.child.as_deref();
+    while let Some(node) = cur {
+        if node.string.as_deref().is_some_and(|key| key == name) {
+            return Some(node);
+        }
+        cur = node.next.as_deref();
+    }
+    None
+}
+
+/// `cJSON_HasObjectItem` (ASCII case-insensitive, matching cJSON).
+pub fn has_object_item(item: &CJson, name: &[u8]) -> bool {
+    get_object_item(item, name).is_some()
+}
+
 pub fn get_string_value(item: &CJson) -> Option<&[u8]> {
     if is_string(item) {
         item.valuestring.as_deref()
@@ -177,6 +234,60 @@ fn set_number(item: &mut CJson, number: f64) {
     } else {
         number as i32
     };
+}
+
+fn set_number_fields(item: &mut CJson, number: f64) -> f64 {
+    item.valuedouble = number;
+    item.valueint = if number >= i32::MAX as f64 {
+        i32::MAX
+    } else if number <= i32::MIN as f64 {
+        i32::MIN
+    } else {
+        number as i32
+    };
+    number
+}
+
+/// Typed replacement for `cJSON_SetIntValue`.
+pub fn set_int_value(item: &mut CJson, number: i32) -> i32 {
+    item.valueint = number;
+    item.valuedouble = number as f64;
+    number
+}
+
+/// Typed replacement for `cJSON_SetNumberHelper` / `cJSON_SetNumberValue`.
+/// Unlike `create_number`, this preserves the node's existing type bits.
+pub fn set_number_value(item: &mut CJson, number: f64) -> f64 {
+    set_number_fields(item, number)
+}
+
+/// Typed replacement for `cJSON_SetBoolValue`.
+pub fn set_bool_value(item: &mut CJson, value: bool) -> i32 {
+    if !is_bool(item) {
+        return CJSON_INVALID;
+    }
+    item.type_ =
+        (item.type_ & !(CJSON_FALSE | CJSON_TRUE)) | if value { CJSON_TRUE } else { CJSON_FALSE };
+    item.type_
+}
+
+/// Typed replacement for `cJSON_SetValuestring`.
+///
+/// Reference strings are not representable in this port, so a string node with
+/// no owned bytes models the C failure case. Successful updates return the
+/// owned replacement bytes.
+pub fn set_value_string<'a>(item: &'a mut CJson, value: impl AsRef<[u8]>) -> Option<&'a [u8]> {
+    if !is_string(item) || item.valuestring.is_none() {
+        return None;
+    }
+    item.valuestring = Some(value.as_ref().to_vec());
+    item.valuestring.as_deref()
+}
+
+/// C-shaped migration helper for `cJSON_Delete`; normal Rust callers should
+/// simply let the `Box<CJson>` drop at scope end.
+pub fn delete(item: Box<CJson>) {
+    drop(item);
 }
 
 /// `cJSON_CreateNull`.
@@ -234,12 +345,19 @@ pub fn create_object() -> Box<CJson> {
     new_with_type(CJSON_OBJECT)
 }
 
-fn append_child(parent: &mut CJson, item: Box<CJson>) {
+fn append_child(parent: &mut CJson, item: Box<CJson>) -> &mut CJson {
     let mut link = &mut parent.child;
-    while let Some(node) = link {
-        link = &mut node.next;
+    loop {
+        match link {
+            Some(node) => link = &mut node.next,
+            slot @ None => {
+                *slot = Some(item);
+                return slot
+                    .as_deref_mut()
+                    .expect("invariant: assigning an appended child fills its link");
+            }
+        }
     }
-    *link = Some(item);
 }
 
 /// `cJSON_AddItemToArray`.
@@ -247,16 +365,77 @@ fn append_child(parent: &mut CJson, item: Box<CJson>) {
 /// `item` is consumed: its `Box` now belongs to `array` and will be dropped
 /// with that tree unless a later detach transfers it back to the caller.
 pub fn add_item_to_array(array: &mut CJson, item: Box<CJson>) {
-    append_child(array, item);
+    let _ = append_child(array, item);
 }
 
 /// `cJSON_AddItemToObject`.
 ///
 /// The key is copied, as cJSON duplicates `string`; `item` is consumed by the
 /// object on return.
-pub fn add_item_to_object(object: &mut CJson, key: impl AsRef<[u8]>, mut item: Box<CJson>) {
+fn add_item_to_object_impl(
+    object: &mut CJson,
+    key: impl AsRef<[u8]>,
+    mut item: Box<CJson>,
+) -> &mut CJson {
     item.string = Some(key.as_ref().to_vec());
-    append_child(object, item);
+    append_child(object, item)
+}
+
+pub fn add_item_to_object(object: &mut CJson, key: impl AsRef<[u8]>, item: Box<CJson>) {
+    let _ = add_item_to_object_impl(object, key, item);
+}
+
+/// `cJSON_AddNullToObject`.
+pub fn add_null_to_object(object: &mut CJson, key: impl AsRef<[u8]>) -> &mut CJson {
+    add_item_to_object_impl(object, key, create_null())
+}
+
+/// `cJSON_AddTrueToObject`.
+pub fn add_true_to_object(object: &mut CJson, key: impl AsRef<[u8]>) -> &mut CJson {
+    add_item_to_object_impl(object, key, create_true())
+}
+
+/// `cJSON_AddFalseToObject`.
+pub fn add_false_to_object(object: &mut CJson, key: impl AsRef<[u8]>) -> &mut CJson {
+    add_item_to_object_impl(object, key, create_false())
+}
+
+/// `cJSON_AddBoolToObject`.
+pub fn add_bool_to_object(object: &mut CJson, key: impl AsRef<[u8]>, value: bool) -> &mut CJson {
+    add_item_to_object_impl(object, key, create_bool(value))
+}
+
+/// `cJSON_AddNumberToObject`.
+pub fn add_number_to_object(object: &mut CJson, key: impl AsRef<[u8]>, value: f64) -> &mut CJson {
+    add_item_to_object_impl(object, key, create_number(value))
+}
+
+/// `cJSON_AddStringToObject`.
+pub fn add_string_to_object(
+    object: &mut CJson,
+    key: impl AsRef<[u8]>,
+    value: impl AsRef<[u8]>,
+) -> &mut CJson {
+    add_item_to_object_impl(object, key, create_string(value))
+}
+
+/// `cJSON_AddRawToObject`.
+pub fn add_raw_to_object(
+    object: &mut CJson,
+    key: impl AsRef<[u8]>,
+    value: impl AsRef<[u8]>,
+) -> &mut CJson {
+    add_item_to_object_impl(object, key, create_raw(value))
+}
+
+/// `cJSON_AddObjectToObject`.
+pub fn add_object_to_object(object: &mut CJson, key: impl AsRef<[u8]>) -> &mut CJson {
+    add_item_to_object_impl(object, key, create_object())
+}
+
+/// `cJSON_AddArrayToObject`.
+pub fn add_array_to_object(object: &mut CJson, key: impl AsRef<[u8]>) -> &mut CJson {
+    add_item_to_object_impl(object, key, create_array())
 }
 
 /// `cJSON_InsertItemInArray`.
@@ -323,6 +502,29 @@ fn object_child_slot<'a>(
     }
 }
 
+/// Locate a child by node address rather than by index or key.
+///
+/// The target is a `*const CJson` used purely as an identity token: it is
+/// compared, never dereferenced, so any pointer value (including a dangling
+/// one) is sound and no `unsafe` is required. The caller obtains it from a
+/// shared borrow that ends before the mutable borrow starts, which is why this
+/// works over the exclusive-`Box` tree without handles or interior mutability.
+fn child_slot_by_address(
+    parent: &mut CJson,
+    target: *const CJson,
+) -> Option<&mut Option<Box<CJson>>> {
+    let mut link = &mut parent.child;
+    loop {
+        let matches = link
+            .as_deref()
+            .is_some_and(|node| std::ptr::eq(node as *const CJson, target));
+        if matches {
+            return Some(link);
+        }
+        link = &mut link.as_mut()?.next;
+    }
+}
+
 fn detach_from_slot(slot: &mut Option<Box<CJson>>) -> Option<Box<CJson>> {
     let mut detached = slot.take()?;
     *slot = detached.next.take();
@@ -347,6 +549,12 @@ pub fn detach_item_from_object_case_sensitive(
     key: impl AsRef<[u8]>,
 ) -> Option<Box<CJson>> {
     detach_from_slot(object_child_slot(object, key.as_ref(), true)?)
+}
+
+/// `cJSON_DetachItemViaPointer`. The returned box is caller-owned again, and it
+/// is the same allocation the caller identified, as in C.
+pub fn detach_item_via_pointer(parent: &mut CJson, target: *const CJson) -> Option<Box<CJson>> {
+    detach_from_slot(child_slot_by_address(parent, target)?)
 }
 
 /// `cJSON_DeleteItemFromArray`. A successful detach is immediately dropped.
@@ -383,6 +591,20 @@ pub fn replace_item_in_array(
     newitem: Box<CJson>,
 ) -> Result<(), Box<CJson>> {
     let Some(slot) = child_slot_at(array, index) else {
+        return Err(newitem);
+    };
+    replace_at_slot(slot, newitem);
+    Ok(())
+}
+
+/// `cJSON_ReplaceItemViaPointer`. Identity is the node address, as in C; on a
+/// miss the replacement box is returned untouched instead of leaking.
+pub fn replace_item_via_pointer(
+    parent: &mut CJson,
+    target: *const CJson,
+    newitem: Box<CJson>,
+) -> Result<(), Box<CJson>> {
+    let Some(slot) = child_slot_by_address(parent, target) else {
         return Err(newitem);
     };
     replace_at_slot(slot, newitem);
@@ -949,10 +1171,18 @@ fn utf16_literal_to_utf8(c: &[u8], idx: usize, end: usize, out: &mut Vec<u8>) ->
     }
 }
 
-/// `cJSON_ParseWithLength` (default opts: not requiring null termination).
-pub fn parse(input: &[u8]) -> Option<Box<CJson>> {
+/// Typed equivalent of `cJSON_ParseWithLengthOpts` / `cJSON_ParseWithOpts`.
+///
+/// The returned offset is the next byte after the parsed value (or the trailing
+/// NUL after whitespace when `require_null_terminated` is true). A Rust slice
+/// supplies C's explicit length; callers that request C's NUL-termination rule
+/// must include that terminating `0` byte in the slice.
+pub fn parse_with_opts(
+    input: &[u8],
+    require_null_terminated: bool,
+) -> Result<(Box<CJson>, usize), usize> {
     if input.is_empty() {
-        return None;
+        return Err(0);
     }
     let mut buffer = ParseBuffer {
         content: input,
@@ -963,11 +1193,27 @@ pub fn parse(input: &[u8]) -> Option<Box<CJson>> {
     let mut item = Box::new(CJson::new());
     buffer.skip_utf8_bom();
     buffer.skip_whitespace();
-    if buffer.parse_value(&mut item) {
-        Some(item)
-    } else {
-        None
+    if !buffer.parse_value(&mut item) {
+        return Err(buffer.offset.min(input.len().saturating_sub(1)));
     }
+
+    if require_null_terminated {
+        while buffer.offset < buffer.length
+            && buffer.content[buffer.offset] != 0
+            && buffer.content[buffer.offset] <= 32
+        {
+            buffer.offset += 1;
+        }
+        if buffer.offset >= buffer.length || buffer.content[buffer.offset] != 0 {
+            return Err(buffer.offset.min(input.len().saturating_sub(1)));
+        }
+    }
+    Ok((item, buffer.offset))
+}
+
+/// `cJSON_ParseWithLength` (default opts: not requiring null termination).
+pub fn parse(input: &[u8]) -> Option<Box<CJson>> {
+    parse_with_opts(input, false).ok().map(|(item, _)| item)
 }
 
 /* ---------- print ---------- */
@@ -1194,16 +1440,99 @@ fn print_object(item: &CJson, out: &mut Vec<u8>, format: bool, depth: usize) {
 
 /// `cJSON_PrintUnformatted`.
 pub fn print_unformatted(item: &CJson) -> Vec<u8> {
-    let mut out = Vec::new();
-    print_value(item, &mut out, false, 0);
-    out
+    print_buffered(item, 0, false)
 }
 
 /// `cJSON_Print` (formatted).
 pub fn print_formatted(item: &CJson) -> Vec<u8> {
-    let mut out = Vec::new();
-    print_value(item, &mut out, true, 0);
+    print_buffered(item, 0, true)
+}
+
+/// `cJSON_PrintBuffered`. Rust exposes the prebuffer as a non-negative
+/// capacity hint and returns owned bytes, avoiding C's caller-allocator rule.
+pub fn print_buffered(item: &CJson, prebuffer: usize, formatted: bool) -> Vec<u8> {
+    let mut out = Vec::with_capacity(prebuffer);
+    print_value(item, &mut out, formatted, 0);
     out
+}
+
+/// `cJSON_PrintPreallocated`.
+///
+/// On success it writes the NUL-terminated result and leaves bytes after that
+/// terminator untouched. On failure cJSON may already have written a prefix;
+/// its preallocated path reserves four bytes of safety slack, so this typed
+/// adaptation copies that same bounded prefix without adding a terminator.
+pub fn print_preallocated(item: &CJson, buffer: &mut [u8], formatted: bool) -> bool {
+    let rendered = print_buffered(item, buffer.len(), formatted);
+    let Some(required) = rendered.len().checked_add(1) else {
+        return false;
+    };
+    if required > buffer.len() {
+        let prefix = rendered.len().min(buffer.len().saturating_sub(4));
+        buffer[..prefix].copy_from_slice(&rendered[..prefix]);
+        return false;
+    }
+    buffer[..rendered.len()].copy_from_slice(&rendered);
+    buffer[rendered.len()] = 0;
+    true
+}
+
+/// `cJSON_Minify` with a Rust-owned byte buffer. Whitespace and C/JSON-style
+/// comments outside strings are removed; string bytes and escapes are retained.
+pub fn minify(json: &mut Vec<u8>) {
+    let mut read = 0usize;
+    let mut write = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    while read < json.len() {
+        let byte = json[read];
+        if in_string {
+            json[write] = byte;
+            write += 1;
+            read += 1;
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        if byte <= b' ' {
+            read += 1;
+            continue;
+        }
+        if byte == b'/' && read + 1 < json.len() {
+            match json[read + 1] {
+                b'/' => {
+                    read += 2;
+                    while read < json.len() && json[read] != b'\n' && json[read] != b'\r' {
+                        read += 1;
+                    }
+                    continue;
+                }
+                b'*' => {
+                    read += 2;
+                    while read + 1 < json.len() && !(json[read] == b'*' && json[read + 1] == b'/') {
+                        read += 1;
+                    }
+                    if read + 1 < json.len() {
+                        read += 2;
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        json[write] = byte;
+        write += 1;
+        read += 1;
+        if byte == b'"' {
+            in_string = true;
+        }
+    }
+    json.truncate(write);
 }
 
 /* ---------- inspect (canonical descriptor via the getter API) ---------- */

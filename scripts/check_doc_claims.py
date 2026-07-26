@@ -17,6 +17,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import importlib.util
 import re
 import subprocess
 import sys
@@ -118,6 +119,25 @@ def _ablation_adequacy(graph: str, spec: str) -> dict[str, Any]:
     }
 
 
+def _cjson_api_surface() -> dict[str, int]:
+    """Derive the cJSON audit counts from its header-backed audit program."""
+    audit_path = ROOT / "examples" / "cjson" / "tools" / "api_surface_audit.py"
+    spec = importlib.util.spec_from_file_location("cjson_api_surface_audit", audit_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"could not load cJSON API audit from {audit_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    functions, data = module.parse_header(module.DEFAULT_HEADER)
+    module.validate_manifest(functions, data)
+    return {
+        "functions": len(functions),
+        "public_data": len(data),
+        "covered_functions": len(module.COVERED_FUNCTIONS),
+        "ownership_blocked": len(module.OWNERSHIP_BLOCKED),
+        "global_state_excluded": len(module.GLOBAL_STATE_EXCLUDED),
+    }
+
+
 def derive(claim: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
     """Return (derived_values or None, status) where status is live|traced|historical."""
     src = claim["source"]
@@ -148,6 +168,8 @@ def derive(claim: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
         return _graph_audit(src["graph"]), "live"
     if stype == "ablation_adequacy":
         return _ablation_adequacy(src["graph"], src["spec"]), "live"
+    if stype == "cjson_api_surface":
+        return _cjson_api_surface(), "live"
     if mode == "traced":
         return None, "traced"
     raise ValueError(f"unknown source type {stype!r} for claim {claim['id']}")

@@ -218,7 +218,7 @@ def pack(
             "id", "title", "type", "description", "source_file", "span",
             "extractor", "confidence", "is_deterministic",
             # C frontend honesty: tree-sitter cannot resolve the preprocessor.
-            "preprocessor_dependent", "preprocessor_reasons",
+            "preprocessor_dependent", "preprocessor_reasons", "preprocessor_branches",
             # Python frontend honesty: syntax/AST cannot follow dynamic dispatch.
             "dynamic_dependent", "dynamic_reasons",
         )
@@ -228,6 +228,8 @@ def pack(
         entity_fields["preprocessor_reasons"] = _reasons_list(entity_fields.get("preprocessor_reasons"))
     if "preprocessor_dependent" in entity_fields:
         entity_fields["preprocessor_dependent"] = _as_bool(entity_fields.get("preprocessor_dependent"))
+    if "preprocessor_branches" in entity_fields:
+        entity_fields["preprocessor_branches"] = _json_safe(entity_fields.get("preprocessor_branches"))
     if "dynamic_reasons" in entity_fields:
         entity_fields["dynamic_reasons"] = _reasons_list(entity_fields.get("dynamic_reasons"))
     if "dynamic_dependent" in entity_fields:
@@ -248,16 +250,67 @@ def pack(
         n for n in pack["neighbors"]
         if str(n.get("type", "")) == "calls" and n.get("preprocessor_dependent")
     ]
+    # Structured branch liveness under compile_commands -D + header defaults
+    # (live / dead / unknown). Never invents a decision for platform macros.
+    def _normalize_branches(raw: Any) -> List[Dict[str, Any]]:
+        items = _json_safe(raw)
+        if items is None:
+            return []
+        if not isinstance(items, list):
+            items = [items]
+        out: List[Dict[str, Any]] = []
+        for b in items:
+            b = _json_safe(b)
+            if isinstance(b, dict):
+                out.append({
+                    "kind": str(b.get("kind", "")),
+                    "condition": str(b.get("condition", "")),
+                    "start_line": int(b.get("start_line") or 0),
+                    "end_line": int(b.get("end_line") or 0),
+                    "liveness": str(b.get("liveness", "unknown")),
+                    "basis": str(b.get("basis", "")),
+                })
+            elif isinstance(b, str) and b:
+                # tolerate JSON-encoded branch rows from awkward parquet types
+                try:
+                    parsed = json.loads(b)
+                    if isinstance(parsed, dict):
+                        out.append(parsed)
+                except Exception:
+                    pass
+        return out
+
+    entity_branches: List[Dict[str, Any]] = []
+    if "preprocessor_branches" in ent_dict or "preprocessor_dependent" in ent_dict:
+        entity_branches = _normalize_branches(ent_dict.get("preprocessor_branches"))
+        if "preprocessor_branches" in entity_fields:
+            entity_fields["preprocessor_branches"] = entity_branches
+
     if entity_pp or flagged_neighbor_calls:
         sample_reasons = entity_reasons[:10]
         if not sample_reasons and flagged_neighbor_calls:
             sample_reasons = _reasons_list(flagged_neighbor_calls[0].get("preprocessor_reasons"))[:10]
+        live_n = sum(1 for b in entity_branches if b.get("liveness") == "live")
+        dead_n = sum(1 for b in entity_branches if b.get("liveness") == "dead")
+        unk_n = sum(1 for b in entity_branches if b.get("liveness") == "unknown")
+        live_bits = [
+            f"{b.get('kind')}({str(b.get('condition'))[:30]})"
+            for b in entity_branches if b.get("liveness") == "live"
+        ][:6]
+        dead_bits = [
+            f"{b.get('kind')}({str(b.get('condition'))[:30]})"
+            for b in entity_branches if b.get("liveness") == "dead"
+        ][:6]
         pack["preprocessor_warning"] = (
             "PREPROCESSOR-DEPENDENT (tree-sitter C frontend): this symbol and/or "
             "its call edges sit inside #if/#ifdef regions or involve function-like "
-            "macros. The extractor does NOT expand macros, evaluate conditionals, "
-            "or resolve typedef chains — labels are provenance only and do not "
-            f"demote is_deterministic. entity_flagged={entity_pp}; "
+            "macros. Branch liveness under compile_commands -D + header defaults "
+            f"is reported as weak provenance (live={live_n}, dead={dead_n}, "
+            f"unknown={unk_n}"
+            + (f"; live_regions={live_bits}" if live_bits else "")
+            + (f"; dead_regions={dead_bits}" if dead_bits else "")
+            + "). unknown must not be treated as dead. Labels do not demote "
+            f"is_deterministic. entity_flagged={entity_pp}; "
             f"flagged_neighbor_calls={len(flagged_neighbor_calls)}; "
             f"sample_reasons={sample_reasons}."
         )
@@ -268,9 +321,13 @@ def pack(
             "flagged_call_targets": sorted({
                 str(n.get("target")) for n in flagged_neighbor_calls if n.get("target")
             }),
+            # Parallel to dynamic.dispatch_candidates: names the work (which
+            # branches are live/dead under the recorded build), still weak.
+            "branch_liveness": entity_branches,
             "note": (
-                "Detection only (scripts/c_preprocessor.py). Not clang macro "
-                "expansion, include resolution, or type facts."
+                "Detection + weak liveness under compile_commands -D and simple "
+                "header #ifndef/#define defaults (scripts/c_preprocessor.py). "
+                "Not full clang expansion; platform macros stay unknown."
             ),
         }
 
@@ -417,6 +474,8 @@ def pack(
         provenance["preprocessor_dependent"] = entity_pp
         if entity_reasons:
             provenance["preprocessor_reasons"] = entity_reasons
+        if entity_branches:
+            provenance["preprocessor_branches"] = entity_branches
     if "dynamic_dependent" in ent_dict:
         provenance["dynamic_dependent"] = entity_dyn
         if entity_dyn_reasons:

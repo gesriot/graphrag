@@ -33,6 +33,41 @@ _DEFINE_OBJ_RE = re.compile(r"^([A-Za-z_]\w*)\b")
 _D_FLAG_RE = re.compile(r"(?:^|\s)-D([A-Za-z_]\w*)(?:=(\S+))?")
 
 
+# Compiler/platform macros the compile_commands -D list does not set. Presence
+# depends on the toolchain, so liveness under those names is *unknown* unless
+# the user -D'd them. Never treat "absent from -D" as dead for these.
+_PLATFORM_MACROS = frozenset(
+    {
+        "_MSC_VER",
+        "_MSC_FULL_VER",
+        "__GNUC__",
+        "__GNUC_MINOR__",
+        "__clang__",
+        "__clang_major__",
+        "_WIN32",
+        "_WIN64",
+        "WIN32",
+        "WIN64",
+        "__WINDOWS__",
+        "__CYGWIN__",
+        "__cplusplus",
+        "__APPLE__",
+        "__linux__",
+        "__unix__",
+        "__SUNPRO_C",
+        "__SUNPRO_CC",
+        "__MINGW32__",
+        "__MINGW64__",
+        "__BYTE_ORDER__",
+        "__ORDER_LITTLE_ENDIAN__",
+        "__ORDER_BIG_ENDIAN__",
+    }
+)
+
+# Liveness under a recorded build configuration.
+Liveness = str  # "live" | "dead" | "unknown"
+
+
 @dataclass
 class ConditionalRegion:
     """A contiguous region controlled by #if / #ifdef / #ifndef / #elif / #else."""
@@ -44,6 +79,9 @@ class ConditionalRegion:
     depth: int
     is_include_guard: bool = False
     file: str = ""
+    # For else/elif chains: the opening if/ifdef condition (used to invert else).
+    chain_condition: str = ""
+    chain_kind: str = ""
 
 
 @dataclass
@@ -61,6 +99,8 @@ class FileAnalysis:
     regions: List[ConditionalRegion] = field(default_factory=list)
     macros: List[MacroDef] = field(default_factory=list)
     compile_defines: Dict[str, Optional[str]] = field(default_factory=dict)
+    # Object-like #define NAME [value] with source line (for ordered env).
+    object_defines_at: List[Tuple[int, str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -70,6 +110,8 @@ class PackageAnalysis:
     all_function_macros: Set[str] = field(default_factory=set)
     all_object_macros: Set[str] = field(default_factory=set)
     compile_defines: Dict[str, Optional[str]] = field(default_factory=dict)
+    # Header build defaults: name -> (value, defining file, defining line).
+    header_defaults: Dict[str, Tuple[str, str, int]] = field(default_factory=dict)
 
 
 def parse_compile_commands(package_dir: Path) -> Dict[str, Dict[str, Optional[str]]]:
@@ -169,15 +211,19 @@ def analyze_source_text(
             else:
                 om = _DEFINE_OBJ_RE.match(rest)
                 if om:
+                    name = om.group(1)
+                    # remainder after name is the replacement list (may be empty)
+                    repl = rest[len(name) :].strip()
                     fa.macros.append(
                         MacroDef(
-                            name=om.group(1),
+                            name=name,
                             function_like=False,
                             line=i,
                             file=str(path),
                             body_preview=rest[:80],
                         )
                     )
+                    fa.object_defines_at.append((i, name, repl))
             continue
         if directive in ("if", "ifdef", "ifndef"):
             depth = len(stack) + 1
@@ -190,6 +236,8 @@ def analyze_source_text(
                     condition=rest,
                     depth=depth,
                     file=str(path),
+                    chain_kind=directive,
+                    chain_condition=rest,
                 )
             )
         elif directive == "elif":
@@ -197,6 +245,8 @@ def analyze_source_text(
             depth = len(stack)  # same depth as the if it continues
             if depth == 0:
                 depth = 1
+            chain_kind = stack[-1][1] if stack else "if"
+            chain_cond = stack[-1][2] if stack else rest
             open_regions.append(
                 ConditionalRegion(
                     start_line=i,
@@ -205,11 +255,15 @@ def analyze_source_text(
                     condition=rest,
                     depth=depth,
                     file=str(path),
+                    chain_kind=chain_kind,
+                    chain_condition=chain_cond,
                 )
             )
         elif directive == "else":
             close_top(i - 1)
             depth = len(stack) if stack else 1
+            chain_kind = stack[-1][1] if stack else "if"
+            chain_cond = stack[-1][2] if stack else ""
             open_regions.append(
                 ConditionalRegion(
                     start_line=i,
@@ -218,6 +272,8 @@ def analyze_source_text(
                     condition="",
                     depth=depth,
                     file=str(path),
+                    chain_kind=chain_kind,
+                    chain_condition=chain_cond,
                 )
             )
         elif directive == "endif":
@@ -237,11 +293,68 @@ def analyze_source_text(
     return fa
 
 
+def _collect_header_defaults(
+    file_analyses: Dict[str, FileAnalysis],
+) -> Dict[str, Tuple[str, str, int]]:
+    """Collect header ``#define`` values that act as build defaults.
+
+    The compile database usually lists only ``.c`` files; the real build still
+    includes headers that set INI_*/CJSON_* defaults. Two — and only two —
+    shapes are treated as defaults, because only these hold regardless of the
+    toolchain:
+
+    * an object-like ``#define`` outside every conditional (include guards
+      excepted), e.g. ``CJSON_VERSION_MAJOR``;
+    * the ``#ifndef X`` / ``#define X val`` idiom, whose whole purpose is "this
+      is the value unless the build overrides it".
+
+    A ``#define`` nested in any other conditional is **not** a default: it is
+    conditional on something we may not be able to decide. Harvesting those
+    inverts the very condition that guards them — ``#define __WINDOWS__`` inside
+    ``#if !defined(__WINDOWS__) && defined(WIN32)…`` would otherwise make a
+    POSIX build look like Windows.
+
+    Each default carries (value, file, line) so a region can be evaluated in the
+    environment that existed *at* the directive: the ``#ifndef X`` that
+    establishes a default must still read as live.
+
+    Compile-command ``-D`` always wins over these.
+    """
+    defaults: Dict[str, Tuple[str, str, int]] = {}
+    for key, fa in file_analyses.items():
+        if not key.endswith(".h"):
+            continue
+        guarding: Dict[int, List[ConditionalRegion]] = {}
+        for line, name, value in fa.object_defines_at:
+            if name in defaults:
+                continue
+            containing = guarding.get(line)
+            if containing is None:
+                containing = [
+                    reg
+                    for reg in fa.regions
+                    if not reg.is_include_guard and reg.start_line <= line <= reg.end_line
+                ]
+                guarding[line] = containing
+            if containing:
+                # Only the `#ifndef NAME` default idiom survives nesting.
+                if len(containing) != 1:
+                    continue
+                reg = containing[0]
+                if reg.kind != "ifndef" or (reg.condition or "").split()[:1] != [name]:
+                    continue
+            defaults[name] = (value, key, line)
+    return defaults
+
+
 def analyze_package(package_dir: Path) -> PackageAnalysis:
     package_dir = Path(package_dir).resolve()
     cc = parse_compile_commands(package_dir)
     package_defines = cc.get("*", {})
-    pa = PackageAnalysis(package_dir=package_dir, compile_defines=dict(package_defines))
+    pa = PackageAnalysis(
+        package_dir=package_dir,
+        compile_defines=dict(package_defines),
+    )
     files = sorted(
         p for p in package_dir.rglob("*") if p.suffix in (".c", ".h") and p.is_file()
     )
@@ -265,7 +378,339 @@ def analyze_package(package_dir: Path) -> PackageAnalysis:
                 pa.all_function_macros.add(mac.name)
             else:
                 pa.all_object_macros.add(mac.name)
+    # Defaults need the parsed regions, so collect them after the files are read.
+    pa.header_defaults = _collect_header_defaults(pa.files)
     return pa
+
+
+def _defined_env(
+    pa: PackageAnalysis,
+    fa: Optional[FileAnalysis],
+    *,
+    before_line: Optional[int] = None,
+) -> Dict[str, Optional[str]]:
+    """Merge header defaults, compile -D, and file-local object defines.
+
+    Precedence (highest last): header_defaults < package -D < file -D <
+    in-file ``#define`` that appear *before* ``before_line`` (if given).
+    Using only prior in-file defines avoids treating a later ``#define true``
+    as already visible to an earlier ``#ifdef true``.
+
+    Header defaults obey the same ordering within their own file, so the
+    ``#ifndef X`` that establishes a default still evaluates as live rather than
+    being falsified by the ``#define X`` it guards.
+    """
+    env: Dict[str, Optional[str]] = {}
+    same_file = {str(getattr(fa, "path", "")), Path(str(getattr(fa, "path", ""))).name}
+    for k, (value, def_file, def_line) in (pa.header_defaults or {}).items():
+        if (
+            before_line is not None
+            and def_line >= before_line
+            and (def_file in same_file or Path(def_file).name in same_file)
+        ):
+            continue
+        env[k] = value
+    for k, v in (pa.compile_defines or {}).items():
+        env[k] = v
+    if fa is not None:
+        for k, v in (fa.compile_defines or {}).items():
+            env[k] = v
+        for line, name, val in fa.object_defines_at or []:
+            if before_line is not None and line >= before_line:
+                continue
+            # A `#define` nested in a conditional only holds when that
+            # conditional does; `#define __WINDOWS__` inside
+            # `#if !defined(__WINDOWS__) && defined(WIN32)…` must not make a
+            # POSIX build look like Windows.
+            if _enclosing_regions(fa, line):
+                continue
+            env[name] = val
+    return env
+
+
+def _enclosing_regions(fa: FileAnalysis, line: int) -> List[ConditionalRegion]:
+    """Non-guard conditional regions containing ``line``."""
+    return [
+        reg
+        for reg in fa.regions
+        if not reg.is_include_guard and reg.start_line <= line <= reg.end_line
+    ]
+
+
+def _is_defined(name: str, env: Dict[str, Optional[str]]) -> Optional[bool]:
+    """True/False if decidable; None if platform-unknown and not -D'd."""
+    if name in env:
+        return True
+    if name in _PLATFORM_MACROS:
+        return None  # unknown — do not treat as dead
+    return False
+
+
+def _eval_primary(expr: str, env: Dict[str, Optional[str]]) -> Tuple[Optional[bool], str]:
+    """Evaluate a stripped primary condition fragment. None = unknown."""
+    e = expr.strip()
+    if not e:
+        return None, "empty condition"
+    # defined(X) / !defined(X)
+    m = re.fullmatch(r"defined\s*\(\s*([A-Za-z_]\w*)\s*\)", e)
+    if m:
+        d = _is_defined(m.group(1), env)
+        if d is None:
+            return None, f"platform macro {m.group(1)} not in compile -D"
+        return d, f"defined({m.group(1)})={'yes' if d else 'no'}"
+    m = re.fullmatch(r"!\s*defined\s*\(\s*([A-Za-z_]\w*)\s*\)", e)
+    if m:
+        d = _is_defined(m.group(1), env)
+        if d is None:
+            return None, f"platform macro {m.group(1)} not in compile -D"
+        return (not d), f"!defined({m.group(1)})={'yes' if not d else 'no'}"
+    # bare identifier (common for INI_USE_STACK style #if X)
+    m = re.fullmatch(r"([A-Za-z_]\w*)", e)
+    if m:
+        name = m.group(1)
+        if name in env:
+            val = env[name]
+            # defined with empty or non-zero token → true; 0 → false
+            if val is None or str(val).strip() == "":
+                return True, f"{name} defined (empty/flag)"
+            tok = str(val).strip().split()[0]
+            if re.fullmatch(r"0[xX]?[0-9a-fA-F]*", tok) or tok == "0":
+                return False, f"{name}={tok}"
+            if re.fullmatch(r"[0-9]+", tok) or re.fullmatch(r"0[xX][0-9a-fA-F]+", tok):
+                return (int(tok, 0) != 0), f"{name}={tok}"
+            # non-numeric replacement (string, expression) → unknown
+            return None, f"{name} has non-numeric value {tok!r}"
+        if name in _PLATFORM_MACROS:
+            return None, f"platform macro {name} not in compile -D"
+        # not defined → 0 in #if
+        return False, f"{name} undefined → 0"
+    # unary !
+    if e.startswith("!"):
+        inner, basis = _eval_primary(e[1:].strip(), env)
+        if inner is None:
+            return None, basis
+        return (not inner), f"!({basis})"
+    # parentheses
+    if e.startswith("(") and e.endswith(")"):
+        return _eval_expr(e[1:-1], env)
+    return None, f"unevaluable expression: {e[:60]}"
+
+
+def _split_top(expr: str, op: str) -> Optional[List[str]]:
+    """Split on op at paren depth 0; op is '&&' or '||'."""
+    parts: List[str] = []
+    depth = 0
+    i = 0
+    start = 0
+    while i < len(expr):
+        c = expr[i]
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+        elif depth == 0 and expr.startswith(op, i):
+            parts.append(expr[start:i].strip())
+            i += len(op)
+            start = i
+            continue
+        i += 1
+    if not parts:
+        return None
+    parts.append(expr[start:].strip())
+    return parts
+
+
+def _eval_expr(expr: str, env: Dict[str, Optional[str]]) -> Tuple[Optional[bool], str]:
+    e = expr.strip()
+    if not e:
+        return None, "empty"
+    # comparison forms we can do when both sides numeric/known: A != B, A == B
+    m = re.fullmatch(
+        r"(.+?)\s*(==|!=|<=|>=|<|>)\s*(.+)", e
+    )
+    # only if no &&/|| at top level
+    if m and _split_top(e, "&&") is None and _split_top(e, "||") is None:
+        left, op, right = m.group(1).strip(), m.group(2), m.group(3).strip()
+        def _num(side: str) -> Optional[int]:
+            side = side.strip()
+            if re.fullmatch(r"[0-9]+|0[xX][0-9a-fA-F]+", side):
+                return int(side, 0)
+            if re.fullmatch(r"[A-Za-z_]\w*", side) and side in env:
+                v = env[side]
+                if v is None or str(v).strip() == "":
+                    return None
+                tok = str(v).strip().split()[0]
+                if re.fullmatch(r"[0-9]+|0[xX][0-9a-fA-F]+", tok):
+                    return int(tok, 0)
+            return None
+        lv, rv = _num(left), _num(right)
+        if lv is not None and rv is not None:
+            ops = {
+                "==": lv == rv,
+                "!=": lv != rv,
+                "<": lv < rv,
+                ">": lv > rv,
+                "<=": lv <= rv,
+                ">=": lv >= rv,
+            }
+            return ops[op], f"{left}{op}{right} ({lv}{op}{rv})"
+        # fall through to unknown if identifiers missing
+
+    parts = _split_top(e, "||")
+    if parts and len(parts) > 1:
+        bases = []
+        any_true = False
+        any_unknown = False
+        for p in parts:
+            v, b = _eval_expr(p, env)
+            bases.append(b)
+            if v is True:
+                any_true = True
+            elif v is None:
+                any_unknown = True
+        if any_true:
+            return True, " || ".join(bases)
+        if any_unknown:
+            return None, " || ".join(bases)
+        return False, " || ".join(bases)
+
+    parts = _split_top(e, "&&")
+    if parts and len(parts) > 1:
+        bases = []
+        any_false = False
+        any_unknown = False
+        for p in parts:
+            v, b = _eval_expr(p, env)
+            bases.append(b)
+            if v is False:
+                any_false = True
+            elif v is None:
+                any_unknown = True
+        if any_false:
+            return False, " && ".join(bases)
+        if any_unknown:
+            return None, " && ".join(bases)
+        return True, " && ".join(bases)
+
+    return _eval_primary(e, env)
+
+
+def evaluate_region_liveness(
+    reg: ConditionalRegion, env: Dict[str, Optional[str]]
+) -> Tuple[Liveness, str]:
+    """Return (live|dead|unknown, basis) for a region under define env."""
+    kind = reg.kind
+    cond = (reg.condition or "").strip()
+
+    if kind == "ifdef":
+        name = cond.split()[0] if cond else ""
+        d = _is_defined(name, env)
+        if d is None:
+            return "unknown", f"platform macro {name} not in compile -D"
+        return ("live" if d else "dead"), f"ifdef({name}) → {'defined' if d else 'undefined'}"
+
+    if kind == "ifndef":
+        name = cond.split()[0] if cond else ""
+        d = _is_defined(name, env)
+        if d is None:
+            return "unknown", f"platform macro {name} not in compile -D"
+        return ("live" if not d else "dead"), f"ifndef({name}) → {'undefined' if not d else 'defined'}"
+
+    if kind in ("if", "elif"):
+        # strip trailing backslash continuations already joined? keep simple
+        val, basis = _eval_expr(cond, env)
+        if val is None:
+            return "unknown", basis
+        return ("live" if val else "dead"), basis
+
+    if kind == "else":
+        # opposite of opening if/ifdef when decidable
+        ck, cc = reg.chain_kind or "if", reg.chain_condition or ""
+        pseudo = ConditionalRegion(
+            start_line=reg.start_line,
+            end_line=reg.end_line,
+            kind=ck if ck in ("if", "ifdef", "ifndef") else "if",
+            condition=cc,
+            depth=reg.depth,
+            file=reg.file,
+        )
+        parent_live, basis = evaluate_region_liveness(pseudo, env)
+        if parent_live == "unknown":
+            return "unknown", f"else of unknown parent ({basis})"
+        if parent_live == "live":
+            return "dead", f"else of live parent ({basis})"
+        return "live", f"else of dead parent ({basis})"
+
+    return "unknown", f"unhandled directive {kind}"
+
+
+def region_liveness(
+    pa: PackageAnalysis, fa: FileAnalysis, reg: ConditionalRegion
+) -> Tuple[Liveness, str]:
+    """Liveness of ``reg`` including the regions that enclose it.
+
+    A branch inside a dead conditional is dead however decidable its own
+    condition is, and one inside an undecidable conditional is undecidable —
+    otherwise a Windows-only block reads as live because its inner `#if` happens
+    to be evaluable.
+    """
+    env = _defined_env(pa, fa, before_line=reg.start_line)
+    own, basis = evaluate_region_liveness(reg, env)
+    for parent in _enclosing_regions(fa, reg.start_line):
+        if parent.start_line >= reg.start_line and parent.end_line <= reg.end_line:
+            continue  # itself, or a sibling arm of the same chain
+        parent_env = _defined_env(pa, fa, before_line=parent.start_line)
+        parent_live, parent_basis = evaluate_region_liveness(parent, parent_env)
+        if parent_live == "dead":
+            return "dead", f"inside dead {parent.kind} @{parent.start_line} ({parent_basis})"
+        if parent_live == "unknown" and own != "dead":
+            return (
+                "unknown",
+                f"inside undecidable {parent.kind} @{parent.start_line} ({parent_basis})",
+            )
+    return own, basis
+
+
+def branches_for_span(
+    pa: PackageAnalysis,
+    source_file: str,
+    span: str,
+) -> List[Dict[str, Any]]:
+    """Structured live/dead/unknown decisions for non-guard regions overlapping span."""
+    fa = _file_analysis_for(pa, source_file)
+    lines = _parse_span_lines(span)
+    if not fa or not lines:
+        return []
+    start, end = lines
+    out: List[Dict[str, Any]] = []
+    seen: Set[Tuple[int, int, str]] = set()
+    for reg in fa.regions:
+        if reg.is_include_guard:
+            continue
+        if end < reg.start_line or start > reg.end_line:
+            continue
+        key = (reg.start_line, reg.end_line, reg.kind)
+        if key in seen:
+            continue
+        seen.add(key)
+        # Env as of the directive line (defines that appear later do not count).
+        live, basis = region_liveness(pa, fa, reg)
+        cond_disp = reg.condition if reg.kind != "else" else (
+            f"else of {reg.chain_kind}({reg.chain_condition[:40]})"
+            if reg.chain_condition
+            else "else"
+        )
+        out.append(
+            {
+                "kind": reg.kind,
+                "condition": cond_disp,
+                "start_line": reg.start_line,
+                "end_line": reg.end_line,
+                "liveness": live,
+                "basis": basis,
+            }
+        )
+    return out
 
 
 def _parse_span_lines(span: str) -> Optional[Tuple[int, int]]:
@@ -297,6 +742,22 @@ def _file_analysis_for(pa: PackageAnalysis, source_file: str) -> Optional[FileAn
     return None
 
 
+def _json_safe_list(val: Any) -> List[Any]:
+    """Normalize parquet/numpy list-ish values to a plain Python list (overwrite path)."""
+    if val is None:
+        return []
+    if hasattr(val, "tolist") and not isinstance(val, (str, bytes, dict)):
+        try:
+            val = val.tolist()
+        except Exception:
+            pass
+    if isinstance(val, list):
+        return list(val)
+    if isinstance(val, tuple):
+        return list(val)
+    return [val]
+
+
 def reasons_for_span(
     pa: PackageAnalysis,
     source_file: str,
@@ -326,11 +787,15 @@ def reasons_for_span(
             if reg.condition:
                 tag += f"({reg.condition[:40]})"
             reasons.append(tag)
+            live, basis = region_liveness(pa, fa, reg)
+            reasons.append(f"branch_{live}:{reg.kind}({(reg.condition or reg.chain_condition or '')[:40]})")
             # config-ish if condition mentions a known define
-            cond_tokens = set(re.findall(r"[A-Za-z_]\w*", reg.condition))
+            cond_tokens = set(re.findall(r"[A-Za-z_]\w*", reg.condition or reg.chain_condition or ""))
             for name in cond_tokens:
                 if name in pa.compile_defines or name in fa.compile_defines:
                     reasons.append(f"compile_define_condition:{name}")
+                if name in pa.header_defaults:
+                    reasons.append(f"header_default:{name}")
                 if name in pa.all_object_macros or name in pa.all_function_macros:
                     reasons.append(f"macro_condition:{name}")
 
@@ -354,19 +819,41 @@ def annotate_byog(
     """Stamp preprocessor provenance onto entities, relationships, observations.
 
     Does **not** flip ``is_deterministic`` or drop edges.
+    Overwrites ``preprocessor_*`` fields (never merges with prior parquet values).
     """
     pa = analyze_package(package_dir)
-    summary = {
+    summary: Dict[str, Any] = {
         "package": str(package_dir),
         "function_like_macros": sorted(pa.all_function_macros),
         "compile_defines": dict(pa.compile_defines),
+        "header_defaults": dict(pa.header_defaults),
         "entities_flagged": 0,
         "calls_flagged": 0,
         "observations_flagged": 0,
         "trusted_calls_flagged": 0,  # is_deterministic call edges that are flagged
+        "branches_live": 0,
+        "branches_dead": 0,
+        "branches_unknown": 0,
         "by_file": defaultdict(lambda: {"entities": 0, "calls": 0, "observations": 0}),
         "samples": [],
     }
+
+    def _stamp_item(item: Dict[str, Any], reasons: List[str], branches: List[Dict[str, Any]]) -> None:
+        # Overwrite — never merge with prior ndarray reasons from parquet.
+        item["preprocessor_dependent"] = bool(reasons)
+        item["preprocessor_reasons"] = list(reasons)
+        # JSON-serializable list of plain dicts (parquet round-trip safe as objects/JSON).
+        item["preprocessor_branches"] = [
+            {
+                "kind": str(b.get("kind", "")),
+                "condition": str(b.get("condition", "")),
+                "start_line": int(b.get("start_line") or 0),
+                "end_line": int(b.get("end_line") or 0),
+                "liveness": str(b.get("liveness", "unknown")),
+                "basis": str(b.get("basis", "")),
+            }
+            for b in branches
+        ]
 
     for e in data.get("entities") or []:
         reasons = reasons_for_span(
@@ -376,8 +863,16 @@ def annotate_byog(
             entity_type=str(e.get("type", "")),
             snippet=str(e.get("snippet") or e.get("text") or ""),
         )
-        e["preprocessor_dependent"] = bool(reasons)
-        e["preprocessor_reasons"] = reasons
+        branches = branches_for_span(pa, str(e.get("source_file", "")), str(e.get("span", "")))
+        _stamp_item(e, reasons, branches)
+        for b in branches:
+            live = b.get("liveness")
+            if live == "live":
+                summary["branches_live"] += 1
+            elif live == "dead":
+                summary["branches_dead"] += 1
+            else:
+                summary["branches_unknown"] += 1
         if reasons:
             summary["entities_flagged"] += 1
             sf = Path(str(e.get("source_file", ""))).name or "?"
@@ -390,6 +885,7 @@ def annotate_byog(
                         "file": sf,
                         "span": e.get("span"),
                         "reasons": reasons,
+                        "branches": branches,
                     }
                 )
 
@@ -398,16 +894,14 @@ def annotate_byog(
         if r.get("type") == "calls":
             tgt = str(r.get("target", ""))
             callee = tgt.split(":")[-1] if tgt else None
-            # also check display name in description
         reasons = reasons_for_span(
             pa,
             str(r.get("source_file", "")),
             str(r.get("span", "")),
             callee=callee,
         )
-        # For contains edges with empty span, check target entity reasons later — skip
-        r["preprocessor_dependent"] = bool(reasons)
-        r["preprocessor_reasons"] = reasons
+        branches = branches_for_span(pa, str(r.get("source_file", "")), str(r.get("span", "")))
+        _stamp_item(r, reasons, branches)
         if reasons and r.get("type") == "calls":
             summary["calls_flagged"] += 1
             if r.get("is_deterministic"):
@@ -424,6 +918,7 @@ def annotate_byog(
                         "span": r.get("span"),
                         "is_deterministic": r.get("is_deterministic"),
                         "reasons": reasons,
+                        "branches": branches,
                     }
                 )
 
@@ -434,8 +929,8 @@ def annotate_byog(
             str(o.get("span", "")),
             callee=str(o.get("display_target") or ""),
         )
-        o["preprocessor_dependent"] = bool(reasons)
-        o["preprocessor_reasons"] = reasons
+        branches = branches_for_span(pa, str(o.get("source_file", "")), str(o.get("span", "")))
+        _stamp_item(o, reasons, branches)
         if reasons:
             summary["observations_flagged"] += 1
             sf = Path(str(o.get("source_file", ""))).name or "?"
@@ -443,10 +938,6 @@ def annotate_byog(
 
     summary["by_file"] = dict(summary["by_file"])
     summary["n_function_like_macros"] = len(pa.all_function_macros)
-    summary["n_conditional_regions"] = sum(
-        len([r for r in fa.regions if not r.is_include_guard])
-        for fa in {id(f): f for f in pa.files.values()}.values()
-    )
     # recount regions uniquely by file path
     seen_fa = set()
     n_reg = 0
@@ -465,7 +956,12 @@ def format_report(summary: Dict[str, Any], *, totals: Optional[Dict[str, int]] =
         f"  function-like macros found : {summary.get('n_function_like_macros')} "
         f"({', '.join(summary.get('function_like_macros') or []) or '—'})",
         f"  compile -D defines         : {summary.get('compile_defines') or '{}'}",
+        f"  header defaults            : {summary.get('header_defaults') or '{}'}",
         f"  non-guard #if regions      : {summary.get('n_conditional_regions')}",
+        f"  branch liveness (entity spans, non-unique): "
+        f"live={summary.get('branches_live', 0)} "
+        f"dead={summary.get('branches_dead', 0)} "
+        f"unknown={summary.get('branches_unknown', 0)}",
         f"  entities flagged           : {summary.get('entities_flagged')}"
         + (f" / {totals['entities']}" if totals and "entities" in totals else ""),
         f"  call edges flagged         : {summary.get('calls_flagged')}"
@@ -550,7 +1046,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     summary["totals"] = totals
     summary["analysed"] = source_desc
     if args.json:
-        print(json.dumps(summary, indent=2, ensure_ascii=False))
+        print(json.dumps(summary, indent=2, ensure_ascii=False, default=str))
     else:
         print(f"analysed: {source_desc}")
         print(format_report(summary, totals=totals))

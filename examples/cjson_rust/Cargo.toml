@@ -2,6 +2,7 @@
 name = "cjson_rust"
 version = "0.1.0"
 edition = "2021"
+default-run = "cjson_rust"
 
 [dependencies]
 # Pure std: structure-preserving port of cJSON's node tree (Box child/next).

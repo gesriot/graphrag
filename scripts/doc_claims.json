@@ -6,7 +6,7 @@
       "kind": "current",
       "description": "Full examples pytest summary: passed + xfailed.",
       "expect": {
-        "passed": 456,
+        "passed": 465,
         "xfailed": 2
       },
       "source": {
@@ -18,12 +18,12 @@
       "docs": [
         {
           "path": "Plan.md",
-          "must_contain": "456 passed, 2 xfailed",
+          "must_contain": "465 passed, 2 xfailed",
           "role": "current"
         },
         {
           "path": "PHASE7_WRITEUP.md",
-          "must_contain": "456 passed, 2 xfailed",
+          "must_contain": "465 passed, 2 xfailed",
           "role": "current"
         }
       ]
@@ -55,6 +55,70 @@
         {
           "path": "PHASE7_WRITEUP.md",
           "must_contain": "**59**",
+          "role": "current"
+        }
+      ]
+    },
+    {
+      "id": "cjson_api_surface",
+      "kind": "current",
+      "description": "cJSON public-header surface and the exclusive-ownership boundary, derived by the fail-closed header audit.",
+      "expect": {
+        "functions": 78,
+        "public_data": 23,
+        "covered_functions": 68,
+        "ownership_blocked": 6,
+        "global_state_excluded": 4
+      },
+      "source": {
+        "type": "cjson_api_surface",
+        "mode": "live",
+        "note": "Imports the cJSON audit generator, parses cJSON.h, and validates the exact classification manifest before counting."
+      },
+      "docs": [
+        {
+          "path": "examples/cjson/API_SURFACE_AUDIT.md",
+          "must_contain": "**78 functions**",
+          "role": "current"
+        },
+        {
+          "path": "examples/cjson/API_SURFACE_AUDIT.md",
+          "must_contain": "**68 are covered**",
+          "role": "current"
+        },
+        {
+          "path": "examples/cjson/API_SURFACE_AUDIT.md",
+          "must_contain": "**6 are blocked by the exclusive `Box` representation**",
+          "role": "current"
+        },
+        {
+          "path": "examples/cjson/API_SURFACE_AUDIT.md",
+          "must_contain": "**4 are\nexcluded for process-global C allocator/error state rather than ownership**",
+          "role": "current"
+        },
+        {
+          "path": "examples/cjson/PROVENANCE.md",
+          "must_contain": "**78 functions**",
+          "role": "current"
+        },
+        {
+          "path": "examples/cjson/PROVENANCE.md",
+          "must_contain": "**68 are covered**",
+          "role": "current"
+        },
+        {
+          "path": "examples/cjson/PROVENANCE.md",
+          "must_contain": "**6 are genuinely blocked by the\nexclusive `Box` representation**",
+          "role": "current"
+        },
+        {
+          "path": "examples/cjson/PROVENANCE.md",
+          "must_contain": "**4 are excluded for C process-global\nallocator/error state rather than ownership**",
+          "role": "current"
+        },
+        {
+          "path": "Plan.md",
+          "must_contain": "78 functions plus 23 public constants/macros/limits/types; 68 functions are covered, 6 require shared/borrowed storage (reference constructors/adds and the const-key alias), and 4 require a process-global allocator/error-state policy",
           "role": "current"
         }
       ]
