@@ -39,28 +39,39 @@ The bootstrap captures the facts that matter for ownership analysis:
   `memcpy`/`memset`/`strlen` are weak observations, never core deterministic
   edges, so heap ownership is visible but not silently promoted.
 
-## Verified graph result (`byog_cjson`, snapshot `20260726-030425-ca3fc280`)
-The published graph also contains the co-located golden runner
-(`tests/parse/runner.c`) as package code, the same way `jsmn`/`inih` do:
-- 131 entities, 367 relationships, 131 text units, 125 call observations.
-- Entity mix: 121 functions (116 library + 5 runner), 7 typedefs (`cJSON`,
+## Verified graph result (`byog_cjson`, snapshot `20260726-040744-fcee0a70`)
+
+Two figures matter; do not mix them:
+
+| scope | entities | relationships | calls | observations | when to quote |
+|---|---:|---:|---:|---:|---|
+| **Full graph (current)** — library + golden runner including mutation/builder helpers | 145 | 637 | **495** | 144 | live audit, `port_eval` graph stage, `doc_claims` `cjson_graph_calls` |
+| **Library subgraph** — `cJSON.c` / `cJSON.h` only (`cJSON:` titles; cJSON→cJSON calls) | 125 | — | **188** | — | ownership/API claims about the ported library itself |
+| **Pre-mutation-runner snapshot** (historical; e.g. `20260625-123603` / provenance-stamped `20260726-030425`) | 131 | 367 | **239** | 125 | bootstrap and pre-mutation evidence; ownership slice before mutation traces landed |
+
+The published current graph co-indexes `tests/parse/runner.c` the same way `jsmn`/`inih` do, now including the mutation-scenario helpers:
+- Entity mix: 135 functions (116 library + 19 runner), 7 typedefs (`cJSON`,
   `cJSON_Hooks`, `cJSON_bool`, `parse_buffer`, `printbuffer`, `internal_hooks`,
   `error`), 3 files (cJSON.c, cJSON.h, runner.c).
-- Relationship mix: 239 `calls`, 128 `contains`.
-- `audit_call_edges`: 239 calls, structural pass rate 1.0, 0 anomalies,
+- Relationship mix: 495 `calls`, 142 `contains`.
+- `audit_call_edges`: 495 calls, structural pass rate 1.0, 0 anomalies,
   0 dangling targets, 0 semantic suspicions.
-- The **library** subgraph (cJSON.c/cJSON.h) is 125 entities and 188
-  deterministic calls; the remaining edges are the runner's own helpers.
+- Of the 495 calls, 188 are library-internal (cJSON→cJSON) and 307 have a
+  `runner:` source; the +256 call delta from the pre-mutation snapshot is
+  entirely runner-source edges (library keys identical).
 - Resolved entry chains: `cJSON_Parse -> cJSON_ParseWithOpts`,
   `cJSON_ParseWithLength -> cJSON_ParseWithLengthOpts`.
-- Preprocessor provenance (2026-07-26): stamped **in place** on this structural
-  snapshot (6/131 entities, 0/239 calls, 69/125 observations flagged). A full
-  reindex is **not** behaviour-preserving: `tests/parse/runner.c` grew mutation
-  helpers after this graph was built, so a fresh extract yields 145 entities /
-  495 calls while the library subgraph stays 125 entities / 188 calls. The
-  provenance commit deliberately did not fold that runner growth into the
-  published counts. Reindexing the library+mutation runner is a separate
-  decision.
+- Preprocessor provenance: 6/145 entities, **0/495** trusted call edges, 71/144
+  observations flagged. Library trusted calls remain **0/188** flagged — the
+  port rests on unconditional internal library calls; the mutation runner did
+  not introduce preprocessor-dependent call edges.
+
+**History of this reindex (2026-07-26):** preprocessor labels were first stamped
+in place on the 131/239 snapshot so a provenance commit would not fold runner
+growth into a label-only change. A separate, deliberate reindex then published
+the mutation runner into `byog_cjson` after confirming the library subgraph was
+unchanged (125 entities / 188 cJSON→cJSON calls, zero call-key or confidence
+diffs).
 
 ## Regression
 - `examples/cjson/tests/test_cjson_extract.py` locks the struct graph, the
@@ -159,9 +170,9 @@ The published graph also contains the co-located golden runner
   libc `snprintf`/`sscanf` — Rust's `Display` for `f64` is a different algorithm
   and does not agree byte-for-byte with the C oracle. Default build (no
   `ENABLE_LOCALES`) keeps the decimal point as `'.'`.
-- `port_eval`: graph pass rate 1.0 (239 calls, 125 observations, 0 anomalies,
-  0 dangling, 0 semantic suspicions), context packs 3/3 for
-  `cJSON_Delete`, runner `emit_raw`, and `cJSON_New_Item`;
+- `port_eval`: graph pass rate 1.0 (495 calls full graph / 188 library-only,
+  144 observations, 0 anomalies, 0 dangling, 0 semantic suspicions), context
+  packs 3/3 for `cJSON_Delete`, runner `emit_raw`, and `cJSON_New_Item`;
   Rust fmt/check/golden_test/run all ok; 59 golden cases (22 ownership + 30
   float-print + 7 mutation); `manual_fixes=0`; `OVERALL PASS=True`.
 - **Rust hardening (Miri + properties):**

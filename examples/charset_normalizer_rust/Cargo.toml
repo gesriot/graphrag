@@ -13,7 +13,6 @@ path = "src/main.rs"
 
 [dependencies]
 encoding_rs = "0.8"
-encoding = "0.2"
 once_cell = "1"
 phf = { version = "0.11", features = ["macros"] }
 lazy_static = "1"

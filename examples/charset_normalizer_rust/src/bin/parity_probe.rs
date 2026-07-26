@@ -179,6 +179,35 @@ fn detect_file(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Emit the strict HZ mappings supplied by the port's current codec backend.
+///
+/// The output is intentionally a compact tab-delimited observation protocol for
+/// the Python-oracle parity test and the re-runnable characterization script:
+/// `E <scalar> <bytes>` for successful non-ASCII encodes and `D <pair>
+/// <UTF-8-bytes>` for successful HZ shifted-pair decodes. Keeping the full
+/// enumeration in this one process makes a table comparison practical without
+/// making the production codec expose its implementation detail.
+fn emit_hz_codec_map() {
+    for scalar in 0x80..=0x10ffff {
+        let Some(character) = char::from_u32(scalar) else {
+            continue;
+        };
+        let text = character.to_string();
+        if let Some(bytes) = output_match("utf_8", text.into_bytes()).output_strict("hz") {
+            println!("E\t{scalar:x}\t{}", to_hex(&bytes));
+        }
+    }
+
+    for lead in 0x21u8..=0x7e {
+        for trail in 0x21u8..=0x7e {
+            let payload = [b'~', b'{', lead, trail, b'~', b'}'];
+            if let Some(decoded) = output_match("hz", payload.to_vec()).decoded() {
+                println!("D\t{lead:02x}{trail:02x}\t{}", to_hex(decoded.as_bytes()));
+            }
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
@@ -318,6 +347,7 @@ fn main() -> ExitCode {
                 }
             }
         }
+        "hz-codec-map" => emit_hz_codec_map(),
         "detect-file" => {
             if args.len() < 3 {
                 eprintln!("usage: parity_probe detect-file <payload-path>");

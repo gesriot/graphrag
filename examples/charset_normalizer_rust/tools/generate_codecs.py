@@ -100,8 +100,6 @@ def render_python_codecs() -> str:
         "// Generated from Python stdlib codecs for charset-normalizer IANA single-byte encodings.",
         "// INVALID marks byte values rejected by Python strict decoding.",
         "",
-        "use encoding::{DecoderTrap, EncoderTrap, Encoding as LegacyEncoding};",
-        "",
         "const INVALID: u32 = 0xFFFF_FFFF;",
         "",
     ]
@@ -139,10 +137,68 @@ def render_python_codecs() -> str:
         ]
     )
 
+    lines.extend(render_hz_tables())
+
     existing = (SRC / "python_codecs.rs").read_text()
     helper_start = existing.index("pub(crate) fn is_charmap_encoding")
     lines.append(existing[helper_start:].rstrip())
     return "\n".join(lines) + "\n"
+
+
+def collect_hz_pairs() -> list[tuple[int, int]]:
+    """Return Python's complete HZ shifted-pair map, keyed by encoded bytes."""
+    pairs: list[tuple[int, int]] = []
+    for lead in range(0x21, 0x7F):
+        for trail in range(0x21, 0x7F):
+            pair = bytes((lead, trail))
+            try:
+                decoded = (b"~{" + pair + b"~}").decode("hz", "strict")
+            except UnicodeDecodeError:
+                continue
+            if len(decoded) != 1:
+                raise RuntimeError(f"HZ pair {pair.hex()} decoded to {decoded!r}")
+            encoded = decoded.encode("hz", "strict")
+            expected = b"~{" + pair + b"~}"
+            if encoded != expected:
+                raise RuntimeError(
+                    f"HZ pair {pair.hex()} is not Python's canonical encoding for {decoded!r}: "
+                    f"{encoded.hex()} != {expected.hex()}"
+                )
+            pairs.append(((lead << 8) | trail, ord(decoded)))
+    return pairs
+
+
+def render_hz_tables() -> list[str]:
+    """Render exact HZ/GB2312 tables from the running Python codec oracle."""
+    decode_pairs = collect_hz_pairs()
+    encode_pairs = sorted((scalar, pair) for pair, scalar in decode_pairs)
+    if len({scalar for _, scalar in decode_pairs}) != len(decode_pairs):
+        raise RuntimeError("Python HZ shifted-pair table is not one-to-one")
+
+    lines = [
+        "// Generated from Python stdlib's strict `hz` codec shifted-pair table.",
+        "// The legacy `encoding` crate HZ table is GBK-like; this exact GB2312 map",
+        "// keeps strict decoding and CharsetMatch.output() aligned with Python.",
+        "",
+        "const HZ_DECODE_PAIRS: &[(u16, u32)] = &[",
+    ]
+    for index in range(0, len(decode_pairs), 4):
+        row = decode_pairs[index : index + 4]
+        lines.append(
+            "    "
+            + ", ".join(f"(0x{pair:04X}, 0x{scalar:X})" for pair, scalar in row)
+            + ","
+        )
+    lines.extend(["];", "", "const HZ_ENCODE_PAIRS: &[(u32, u16)] = &["])
+    for index in range(0, len(encode_pairs), 4):
+        row = encode_pairs[index : index + 4]
+        lines.append(
+            "    "
+            + ", ".join(f"(0x{scalar:X}, 0x{pair:04X})" for scalar, pair in row)
+            + ","
+        )
+    lines.extend(["];", ""])
+    return lines
 
 
 def collect_johab_pairs() -> list[tuple[int, int]]:

@@ -1,7 +1,7 @@
 // Generated from Python stdlib johab and iso2022_kr codecs.
 // Tables are sorted by encoded pair for binary-search decoding.
 
-const ISO2022_KR_DESIGNATOR: &[u8; 4] = b"$)C";
+const ISO2022_KR_DESIGNATOR: &[u8; 4] = b"\x1b$)C";
 
 const JOHAB_PAIRS: &[(u16, u32)] = &[
     (0x8441, 0x3000),

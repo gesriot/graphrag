@@ -194,9 +194,9 @@
     {
       "id": "cjson_graph_calls",
       "kind": "current",
-      "description": "cJSON graph CALLS edge count (current snapshot).",
+      "description": "cJSON graph CALLS edge count (current snapshot: library + mutation golden runner).",
       "expect": {
-        "calls": 239,
+        "calls": 495,
         "pass_rate": 1.0
       },
       "source": {
@@ -207,7 +207,18 @@
       "docs": [
         {
           "path": "Plan.md",
-          "must_contain": "239 C/runner calls",
+          "must_contain": "495 C/runner calls",
+          "role": "current",
+          "note": "Full graph including mutation-runner helpers. Library-only is 188 cJSON→cJSON calls (stable since bootstrap)."
+        },
+        {
+          "path": "PHASE7_WRITEUP.md",
+          "must_contain": "**495**",
+          "role": "current"
+        },
+        {
+          "path": "examples/cjson/PROVENANCE.md",
+          "must_contain": "495 `calls`",
           "role": "current"
         }
       ]

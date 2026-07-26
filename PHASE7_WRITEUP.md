@@ -123,6 +123,24 @@ two snapshots and both numbers are correct for the one they describe.
 Quote the baseline when citing Phase 5 evidence and the current index when
 reporting a live audit; do not silently mix them.
 
+### 1.3b Scale snapshot (cJSON — Phase 6 ownership + mutation graph)
+
+From [examples/cjson/PROVENANCE.md](examples/cjson/PROVENANCE.md) and [Plan.md](Plan.md):
+
+The cJSON BYOG has two load-bearing scopes. Quote the one the claim needs.
+
+| scope | entities | relationships | calls | observations | |
+|---|---:|---:|---:|---:|---|
+| Full graph **current** (`20260726-040744`, library + mutation golden runner) | 145 | 637 | **495** | 144 | live audit / `port_eval` graph stage / `doc_claims` `cjson_graph_calls` |
+| Library subgraph only (`cJSON:` → `cJSON:`) | 125 | — | **188** | — | ownership and ported-API claims |
+| Pre-mutation-runner snapshot (bootstrap / provenance-stamp era) | 131 | 367 | **239** | 125 | historical; ownership slice before mutation traces |
+
+The +14 entities / +256 calls from 239 → 495 are entirely
+`runner:mutation_*` / `runner:trace_*` helpers in `tests/parse/runner.c`. The
+library subgraph is identical across those snapshots. Preprocessor detection
+flags 0/495 trusted call edges on the current full graph (and 0/188 on the
+library).
+
 ### 1.4 Framing relative to the Russinovich / GraphRAG story
 
 [Plan.md](Plan.md) §1 is careful: Microsoft GraphRAG is open source; the specific
@@ -351,6 +369,7 @@ when the whole package already fits in context.
 |---|---|---|
 | Full examples suite | `PYTHONPATH=. uv run pytest examples -q` | **449 passed, 4 xfailed** |
 | sqlparse graph audit | `uv run python scripts/audit_call_edges.py --graph byog_sqlparse` | pass rate **1.0**, 0/0/0, **230** calls (current index; the frozen Phase 5 baseline snapshot has 229) |
+| cJSON graph audit | `uv run python scripts/audit_call_edges.py --graph byog_cjson` | pass rate **1.0**, 0/0/0, **495** calls (full graph incl. mutation runner; library-only is 188) |
 | cJSON port_eval | `uv run python scripts/port_eval.py --source examples/cjson --port examples/cjson_rust --graph byog_cjson` | **59** golden cases, `manual_fixes=0`, **OVERALL PASS=True** |
 | isodate adequacy (v3 gate) | `uv run python scripts/ablation.py adequacy --graph byog_isodate --spec scripts/ablation_specs/isodate_adequacy.json` | **adequate: true**, closure **16** |
 

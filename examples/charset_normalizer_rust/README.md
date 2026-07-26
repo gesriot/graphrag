@@ -28,7 +28,7 @@ This is an experiment using the graphrag-code deterministic extraction + context
 - ✅ Python-compatible codec backend for the upstream `IANA_SUPPORTED` set:
   - exact generated Python charmap tables for 66 single-byte codecs (DOS/OEM, EBCDIC, Mac, KOI8, ISO-8859, `latin_1`, etc.)
   - strict UTF-32 and UTF-7 handlers
-  - HZ via strict `rust-encoding` with Python-compatible closing shift
+  - exact generated Python HZ/GB2312 shifted-pair table and state machine (strict and replacement mode)
   - generated `johab` and `iso2022_kr` tables/state machine
   - most other multibyte (big5/cp95x, euc_*, iso2022_jp_*, shift_jis, gb*, etc.) via encoding_rs profiles (single-byte exact; rare MB table/extension diffs vs py stdlib documented as expected)
 - ✅ Product CLI slice:
@@ -39,7 +39,7 @@ This is an experiment using the graphrag-code deterministic extraction + context
   - `--normalize --replace` for in-place UTF-8 rewrite, including interactive confirmation unless `--force` is set
 - ✅ Python-vs-Rust CLI snapshot tests cover help/version, argparse-style errors, pretty JSON, absolute paths, stdin, minimal output, normalization side effects, replace/force, and prompt-decline behavior.
 - ✅ `cargo test` (83 tests total): 58 unit parity tests (cd/models/md/codec/API) + 9 CLI byte-exact/trace tests + 3 detection-contract tests (including 18/18 golden) + 13 off-golden/large-lazy integration tests pass; 0 ignored.
-- ✅ Python-vs-Rust pytest matrix: fixed CLI/detector differential has 72 items (70 pass + 2 expected xfails for ambiguous adversarial inputs); the bounded live seeded differential gate runs 79 Python-oracle cases through `tools/check_port.sh` (79 strong agreements, seed `20260725`); exhaustive codec/CD parity adds 6 items (4 pass + 2 expected xfails for documented UTF-7 (SIG strip policy) / euc_jis_2004 extension cases); API-surface oracle coverage adds 1 passing item. Full `PYTHONPATH=. uv run pytest examples -q --tb=no` is expected to report 449 passed, 4 xfailed. (short_20 xfail removed after narrow is_printable fix.) Single-byte codecs exact; most MB via encoding_rs/custom Korean/HZ/UTF special handling; rare MB table variants documented.
+- ✅ Python-vs-Rust pytest matrix: fixed CLI/detector differential has 72 items (70 pass + 2 expected xfails for ambiguous adversarial inputs); the bounded live seeded differential gate runs 79 Python-oracle cases through `tools/check_port.sh` (79 strong agreements, seed `20260725`); exhaustive codec/CD parity adds 6 items (4 pass + 2 expected xfails for documented UTF-7 (SIG strip policy) / euc_jis_2004 extension cases), including all 7,445 Python HZ shifted pairs in both strict directions and replacement-mode U+20AC; API-surface oracle coverage adds 1 passing item. Full `PYTHONPATH=. uv run pytest examples -q --tb=no` is expected to report 449 passed, 4 xfailed. (short_20 xfail removed after narrow is_printable fix.) Single-byte codecs and HZ are exact; most other MB paths use encoding_rs/custom Korean/UTF special handling; rare table variants are documented.
 
 ## Scope
 Core detection:

@@ -532,9 +532,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     from extract_c import build_c_byog  # type: ignore
 
     pkg = args.package.resolve()
-    # A fresh extraction and a published snapshot are different graphs -- cJSON
-    # rebuilds to 495 call edges where byog_cjson holds 239 -- so a report over
-    # the rebuild says nothing about the ports. Name the source in the output.
+    # Prefer --graph when making claims about the ports: a published snapshot
+    # and a fresh extraction can diverge when the package (e.g. golden runner)
+    # grows. Name the source in the output so reports are not mis-attributed.
     if args.graph is not None:
         data = _load_published_byog(args.graph.resolve())
         source_desc = f"published graph {args.graph}"

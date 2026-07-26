@@ -75,6 +75,20 @@ def py_strict_encode(enc: str, text: str) -> bytes | None:
         return None
 
 
+def py_hz_shifted_table_text() -> str:
+    """Enumerate Python's complete valid HZ shifted-pair domain in byte order."""
+    characters: list[str] = []
+    for lead in range(0x21, 0x7F):
+        for trail in range(0x21, 0x7F):
+            try:
+                decoded = (b"~{" + bytes((lead, trail)) + b"~}").decode("hz", "strict")
+            except UnicodeDecodeError:
+                continue
+            assert len(decoded) == 1
+            characters.append(decoded)
+    return "".join(characters)
+
+
 @pytest.fixture(scope="session")
 def rust_probe() -> Path:
     # Build the *probe* helper (separate from production main CLI).
@@ -166,7 +180,12 @@ MB_PROBES: dict[str, list[bytes]] = {
     "hz": [
         b"~{VPND2bJT~}",  # from existing golden sample
         b"ascii only",
+        b"~{VP~}a~{ND~}",  # shifted/non-shifted state transitions
+        b"~~",  # literal tilde
+        b"~\n",  # ASCII-mode line continuation
         b"~{bad",  # incomplete
+        b"~}A",  # invalid state transition
+        b"\x80",  # non-ASCII byte is invalid in HZ ASCII mode
     ],
     "johab": [
         b"\xd0\x65\x8b\x69\x41\x42\x43\xd0\x65",  # from existing test
@@ -265,7 +284,7 @@ KNOWN_XFAIL_ROUND: set[tuple[str, str]] = {
 
 
 def test_encode_roundtrips_representative(rust_probe: Path) -> None:
-    """For each enc, for texts encodable in py, roundtrip via Rust strict encode/decode matches py."""
+    """Representative codecs plus Python's complete HZ shifted-pair map roundtrip exactly."""
     for enc in SUPPORTED_SB + SUPPORTED_MB:
         for text in REP_TEXTS:
             py_b = py_strict_encode(enc, text)
@@ -293,6 +312,48 @@ def test_encode_roundtrips_representative(rust_probe: Path) -> None:
             else:
                 rs_bytes = None
             assert rs_bytes == py_b, f"encode roundtrip fail {enc} text={text!r}: py={py_b!r} rs={rs_bytes!r}"
+
+    # This one corpus covers every valid HZ shifted pair, so it detects both
+    # GB2312-vs-GBK table drift directions without sampling only U+20AC.
+    hz_text = py_hz_shifted_table_text()
+    assert len(hz_text) == 7_445
+    py_hz = hz_text.encode("hz", "strict")
+    rs_encoded = run_probe(rust_probe, "strict-encode", "hz", hz_text.encode("utf-8").hex())
+    assert rs_encoded == f"OK:{py_hz.hex()}"
+    rs_decoded = run_probe(rust_probe, "strict-decode", "hz", py_hz.hex())
+    assert rs_decoded == f"OK:{hz_text.encode('utf-8').hex()}"
+    rs_output_map = run_probe(
+        rust_probe,
+        "api-output",
+        "utf_8",
+        hz_text.encode("utf-8").hex(),
+        "hz",
+    )
+    assert rs_output_map == f"OK:{py_hz.hex()}"
+
+    # `CharsetMatch.output()` is replacement-mode. U+20AC was the original
+    # observed failure: Python HZ replaces it rather than using the GBK entry.
+    output_text = "中€文"
+    py_replacement = output_text.encode("hz", "replace")
+    rs_output = run_probe(
+        rust_probe,
+        "api-output",
+        "utf_8",
+        output_text.encode("utf-8").hex(),
+        "hz",
+    )
+    assert rs_output == f"OK:{py_replacement.hex()}"
+
+    for output_text in ("中a文", "中~文", "中\n文", "中・文"):
+        py_output = output_text.encode("hz", "replace")
+        rs_output = run_probe(
+            rust_probe,
+            "api-output",
+            "utf_8",
+            output_text.encode("utf-8").hex(),
+            "hz",
+        )
+        assert rs_output == f"OK:{py_output.hex()}"
 
 
 def test_output_roundtrip_via_match_hack(rust_probe: Path) -> None:
