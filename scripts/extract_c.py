@@ -339,9 +339,29 @@ def build_c_byog(package_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
                         ),
                     })
 
-    return {
+    data = {
         "entities": entities,
         "relationships": relationships,
         "text_units": text_units,
         "call_observations": observations,
     }
+    # Provenance labels only: mark facts that sit on preprocessor ground
+    # tree-sitter cannot verify. Does not demote is_deterministic or drop edges
+    # (audit pass rates stay comparable). See scripts/c_preprocessor.py.
+    try:
+        from c_preprocessor import annotate_byog  # type: ignore
+
+        annotate_byog(data, package_dir)
+    except Exception:
+        # Annotation is best-effort; extraction must not fail if the diagnostic
+        # module is unavailable. Tests import c_preprocessor directly.
+        for e in entities:
+            e.setdefault("preprocessor_dependent", False)
+            e.setdefault("preprocessor_reasons", [])
+        for r in relationships:
+            r.setdefault("preprocessor_dependent", False)
+            r.setdefault("preprocessor_reasons", [])
+        for o in observations:
+            o.setdefault("preprocessor_dependent", False)
+            o.setdefault("preprocessor_reasons", [])
+    return data

@@ -17,6 +17,14 @@ const DEFAULT_CHUNK_SIZE: usize = 512;
 const DEFAULT_THRESHOLD: f64 = 0.2;
 const DEFAULT_LANGUAGE_THRESHOLD: f64 = 0.1;
 
+/// Vendored Python reference version, exposed with Rust-appropriate names.
+///
+/// This corresponds to Python's ``charset_normalizer.__version__``. Rust
+/// identifiers cannot begin with two underscores, so the public Rust spelling
+/// is `VERSION_STRING`; `VERSION` mirrors Python's three-component list.
+pub const VERSION_STRING: &str = "3.4.7";
+pub const VERSION: [&str; 3] = ["3", "4", "7"];
+
 #[derive(Debug, Clone)]
 pub struct FromBytesOptions {
     pub steps: usize,
@@ -229,9 +237,51 @@ pub fn is_binary_bytes_with_options_and_trace(
     (m.results.is_empty(), t)
 }
 
+/// Determine whether all bytes read from a reader are binary data.
+///
+/// This is the typed Rust counterpart to Python's `is_binary(fp_or_path_or_payload)`
+/// reader dispatch. The byte-slice, reader, and path forms are separate because
+/// Rust does not use Python's runtime union dispatch.
+pub fn is_binary_reader<R: std::io::Read>(reader: R) -> std::io::Result<bool> {
+    is_binary_reader_with_options(reader, FromBytesOptions::default())
+}
+
+pub fn is_binary_reader_with_options<R: std::io::Read>(
+    mut reader: R,
+    options: FromBytesOptions,
+) -> std::io::Result<bool> {
+    let mut buf = Vec::new();
+    reader.read_to_end(&mut buf)?;
+    Ok(is_binary_bytes_with_options(&buf, options))
+}
+
+pub fn is_binary_reader_with_options_and_trace<R: std::io::Read>(
+    mut reader: R,
+    options: FromBytesOptions,
+) -> std::io::Result<(bool, Vec<String>)> {
+    let mut buf = Vec::new();
+    reader.read_to_end(&mut buf)?;
+    Ok(is_binary_bytes_with_options_and_trace(&buf, options))
+}
+
 pub fn is_binary_path<P: AsRef<std::path::Path>>(path: P) -> std::io::Result<bool> {
+    is_binary_path_with_options(path, FromBytesOptions::default())
+}
+
+pub fn is_binary_path_with_options<P: AsRef<std::path::Path>>(
+    path: P,
+    options: FromBytesOptions,
+) -> std::io::Result<bool> {
     let buf = std::fs::read(path)?;
-    Ok(is_binary_bytes(&buf))
+    Ok(is_binary_bytes_with_options(&buf, options))
+}
+
+pub fn is_binary_path_with_options_and_trace<P: AsRef<std::path::Path>>(
+    path: P,
+    options: FromBytesOptions,
+) -> std::io::Result<(bool, Vec<String>)> {
+    let buf = std::fs::read(path)?;
+    Ok(is_binary_bytes_with_options_and_trace(&buf, options))
 }
 
 fn from_bytes_impl(sequences: &[u8], options: FromBytesOptions) -> (CharsetMatches, Vec<String>) {
@@ -1775,6 +1825,37 @@ mod tests {
         let bin: &[u8] = b"abc\x00\x01\xffdef";
         assert!(is_binary_bytes(bin));
         assert!(is_binary(bin));
+    }
+
+    #[test]
+    fn is_binary_reader_and_path_options_match_byte_slice() {
+        let text = include_bytes!("../tests/data/sample-english.bom.txt");
+        let options = FromBytesOptions::default();
+        match is_binary_reader_with_options(Cursor::new(text), options.clone()) {
+            Ok(value) => assert_eq!(value, is_binary_bytes_with_options(text, options.clone())),
+            Err(error) => panic!("test fixture reader must be readable: {error}"),
+        }
+
+        let sample_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/data/sample-english.bom.txt"
+        );
+        match is_binary_path_with_options(sample_path, options.clone()) {
+            Ok(value) => assert_eq!(value, is_binary_bytes_with_options(text, options.clone())),
+            Err(error) => panic!("test fixture path must be readable: {error}"),
+        }
+
+        let trace_options = FromBytesOptions {
+            explain: true,
+            ..options
+        };
+        match is_binary_reader_with_options_and_trace(Cursor::new(text), trace_options) {
+            Ok((is_binary, traces)) => {
+                assert!(!is_binary);
+                assert!(!traces.is_empty());
+            }
+            Err(error) => panic!("test fixture reader must be readable: {error}"),
+        }
     }
 
     #[test]

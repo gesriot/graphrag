@@ -14,9 +14,11 @@ Saved GraphRAG context packs: `examples/charset_normalizer_rust/packs/`
 Core + product surface:
 - `from_bytes` and options-aware / trace variants
 - `from_path` / `from_reader` / `from_fp` (+ `_with_options*`)
+- typed `is_binary` byte, reader, and path forms (+ options/trace variants)
 - `FromBytesOptions`
 - `detect_legacy` / `detect_chardet_compatible`
-- `CharsetMatch` / `CharsetMatches` surface used by CLI + normalization
+- `CharsetMatch` / `CharsetMatches` observation surface used by CLI + normalization
+- `VERSION_STRING` / `VERSION` Rust equivalents of the vendored Python version metadata
 - Full upstream-style CLI (`normalizer`) with normalize/JSON/minimal/verbose/alternatives/threshold/preemptive/replace/force + stdin support
 
 ## Achieved on captured contracts (scoped language)
@@ -28,8 +30,9 @@ Core + product surface:
 - **Exhaustive codec/CD parity**: 6 pytest items covering all supported single-byte `encoding_languages`, multibyte language mapping, all 0x00..0xFF strict decode probes for single-byte codecs, representative multibyte strict decode probes, and representative encode/output round-trips. Current status: 4 pass + 2 expected xfails for UTF-7 (SIG/BOM strip policy per api.py vs raw stdlib) and euc_jis_2004 (extension vs encoding_rs profile). Single-byte codecs exact; most MB via encoding_rs/custom Korean/HZ/UTF special handling; rare MB table variants documented.
 - **CLI byte-exact / snapshot**: non-verbose JSON, minimal output, argparse errors, paths (abs), stdin, normalize side-effects (written bytes), replace/force flows.
 - **Normalized verbose trace parity**: when `explain=true` (or `--verbose`), trace events from api/md match in content (timestamps, some floats/sets masked for determinism; not raw log strings).
+- **API-surface audit**: `API_SURFACE_AUDIT.md` mechanically enumerates the Python root exports, model members, and CLI flags. It adds Python-oracle coverage for version metadata, `CharsetMatch.byte_order_mark`, and typed `is_binary` reader/path forms.
 
-**Total Rust tests**: 82 (57 unit parity in cd/models/md/codec/API + 9 CLI + 3 contract/golden + 13 off-golden/large-lazy). All pass; 0 ignored.
+**Total Rust tests**: 83 (58 unit parity in cd/models/md/codec/API + 9 CLI + 3 contract/golden + 13 off-golden/large-lazy). All pass; 0 ignored.
 
 ## Byte-exact vs. normalized parity (precise)
 
@@ -41,28 +44,29 @@ Core + product surface:
 
 The seeded harness compares the canonical best encoding, strictly decoded Unicode text, language, BOM flag, and chaos/coherence scores (each within 0.005) on live Python and Rust observations. A Python result is *confident* only when the payload is at least 32 bytes, its chaos is at most 0.05, and the sorted result has one de-duplicated candidate. A confident difference fails the default `check_port.sh` gate. Tiny, noisy, or multi-candidate cases use the same comparison but are printed as explicit ambiguous findings, with the payload and decoded-text fingerprints needed to reproduce them; they are never silently counted as agreement. The current two historical detector xfails are still retained in the fixed adversarial matrix and are not covered up by this policy.
 
-## Intentional non-parity / design differences (not bugs)
+## API-surface scope (specific)
 
-- No global `set_logging_handler` / side-effect logging setup. Use `from_*_with_options_and_trace(..., explain=true)` (returns `Vec<String>`) or `--verbose` (emits to stderr with fixed ts for tests).
-- `detect(&[u8])` returns modern best `CharsetMatch` (simple path). Python top-level `detect` is the legacy wrapper. Rust equivalents: `detect_legacy(byte_str, should_rename_legacy: bool)` and `detect_chardet_compatible(byte_str)`.
-- `FromBytesOptions::explain` controls trace collection (no logger mutation).
-- Rust CLI accepts `--cp-isolation` / `--cp-exclusion` as additive parity/test harness extensions wired to `FromBytesOptions`. The vendored Python CLI does not expose these flags, so Rust intentionally keeps them out of `--help` to preserve byte-exact shared help snapshots.
-- Small differences in error message text or Python-only type paths are expected.
-- Legacy post-processing (small-sample confidence adjust, utf_8_sig mapping, CHARDET_CORRESPONDENCE) lives only in the `detect_legacy*` fns.
-- Codec contract for detection: matches Python api.py (SIG/BOM stripping per should_strip_sig_or_bom except utf16/utf32; utf7 special full-decode-then-strip). Raw stdlib codecs.decode may differ for utf7 (keeps U+FEFF) and certain MB table variants (big5*/euc_jis_2004 extensions); Rust uses custom only for utf7/hz/johab/iso2022_kr + encoding_rs for most other MB. See KNOWN_XFAIL in parity test.
+`API_SURFACE_AUDIT.md` is the authoritative row-by-row matrix. In brief:
+
+- **Covered:** detection with `FromBytesOptions`; byte/reader/path input forms; version metadata through `VERSION_STRING`/`VERSION`; `CharsetMatch` observations including `byte_order_mark`; `CharsetMatches` access/iteration/append; legacy migration wrappers; and every vendored Python CLI flag.
+- **Deliberately excluded:** global `set_logging_handler` state (use trace collection or `--verbose`); making Rust's established `detect(&[u8])` mean Python's legacy top-level `detect` (use `detect_legacy` or `detect_chardet_compatible`); and showing Rust-only cp-isolation/exclusion controls in Python-compatible help. These are design choices, not claims that the operations are impossible in Rust.
+- **Simply not done:** a public `CliDetectionResult`/`to_json` type, direct `CharsetMatch::add_submatch`, Python replacement-mode/zero-argument `output()`, and faithful callable parity for the non-root `utils`/remaining `cd` helper modules. They are recorded as outstanding work rather than treated as exclusions.
+- **Not applicable:** Python `__str__`, `__repr__`, implicit truthiness, dynamic union dispatch, and subclass/plugin extension protocols. Rust exposes typed methods, `Option`, iteration, and concrete detector components instead.
+
+The legacy post-processing (small-sample confidence adjustment, `utf_8_sig` mapping, and `CHARDET_CORRESPONDENCE`) is implemented only in `detect_legacy*`. The detection codec contract matches Python `api.py` (SIG/BOM stripping per `should_strip_sig_or_bom` except UTF-16/32; UTF-7 special full-decode-then-strip). Raw stdlib `codecs.decode` may differ for UTF-7 (keeps U+FEFF) and rare MB table variants (big5*/euc_jis_2004 extensions); Rust uses custom handling only for utf7/hz/johab/iso2022_kr plus encoding_rs for most other MB. See `KNOWN_XFAIL` in the parity test.
 
 ## Test commands (current counts as of this status)
 
 From inside Rust dir:
 ```bash
 cargo fmt
-cargo test --quiet   # expects 82 passing tests (see breakdown above)
+cargo test --quiet   # expects 83 passing tests (see breakdown above)
 ```
 
 From repo root:
 ```bash
 PYTHONPATH=. uv run pytest examples -q --tb=no
-# expected current summary: 445 passed, 4 xfailed
+# expected current summary: 449 passed, 4 xfailed
 # xfails are documented adversarial detector (bom8_badcont, short_high) + codec-policy (utf7 policy-vs-raw, euc_jis_2004) cases
 # (short_20 xfail burned down via narrow is_printable fix matching Python source)
 # MB codec note: single-byte codecs exact; most MB via encoding_rs/custom Korean/HZ/UTF special handling; rare MB table variants documented.
@@ -128,7 +132,7 @@ All regeneration commands are documented in this file, README.md, and tool sourc
 
 - Ambiguous single-byte/adversarial cases can produce ranking differences; the two pre-existing pinned unstable cases remain expected xfails with source-backed reasons. The new harness reports any future ambiguous divergence as a finding instead of accepting it by category.
 - Default test surface includes exhaustive CD and single-byte codec probes, representative multibyte probes, and the 79-input seeded live detector corpus; the 530-input full corpus is opt-in. This is not an unbounded random fuzzer or exhaustive multibyte variant table. Single-byte codecs are exact via generated tables; most multibyte paths use encoding_rs (with documented rare table/extension differences for big5*/euc_jis_2004/iso2022_jp* variants versus Python stdlib codecs).
-- No claim of "full upstream parity" or complete feature match. Readiness is scoped to the golden contract, fixed and seeded differential matrices, and product CLI surface on the exercised inputs.
+- API availability is itemized in `API_SURFACE_AUDIT.md`: root detector/model/CLI coverage is explicit, intentional design differences are named, and unimplemented public/helper surfaces remain marked "simply not done."
 - Integration with external callers (beyond the provided Python differential and CLI snapshots) should be validated with target workloads.
 - The port prioritizes observable behavior on golden + generated cases; internal structure follows the contract packs rather than line-by-line port.
 

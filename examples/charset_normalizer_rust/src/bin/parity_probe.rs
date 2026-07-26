@@ -2,7 +2,10 @@
 //! Invoked by pytest harness in tests/test_codec_cd_parity.py
 //! Does NOT modify the production CLI (main.rs) or core behavior.
 
-use charset_normalizer_rust::{cd, from_bytes, CharsetMatch};
+use charset_normalizer_rust::{
+    cd, from_bytes, is_binary_path_with_options, is_binary_reader, CharsetMatch, FromBytesOptions,
+    VERSION, VERSION_STRING,
+};
 use std::env;
 use std::process::ExitCode;
 
@@ -241,6 +244,63 @@ fn main() -> ExitCode {
             if let Err(error) = detect_file(&args[2]) {
                 eprintln!("parity_probe: {}", error);
                 return ExitCode::from(2);
+            }
+        }
+        "version" => {
+            println!("{}\t{}", VERSION_STRING, VERSION.join("."));
+        }
+        "is-binary-reader" => {
+            if args.len() < 3 {
+                eprintln!("usage: parity_probe is-binary-reader <payload-path>");
+                return ExitCode::from(2);
+            }
+            let file = match std::fs::File::open(&args[2]) {
+                Ok(file) => file,
+                Err(error) => {
+                    eprintln!("parity_probe: unable to open '{}': {}", args[2], error);
+                    return ExitCode::from(2);
+                }
+            };
+            match is_binary_reader(file) {
+                Ok(value) => println!("{}", u8::from(value)),
+                Err(error) => {
+                    eprintln!("parity_probe: unable to classify '{}': {}", args[2], error);
+                    return ExitCode::from(2);
+                }
+            }
+        }
+        "is-binary-path-options" => {
+            if args.len() < 3 {
+                eprintln!("usage: parity_probe is-binary-path-options <payload-path>");
+                return ExitCode::from(2);
+            }
+            match is_binary_path_with_options(&args[2], FromBytesOptions::default()) {
+                Ok(value) => println!("{}", u8::from(value)),
+                Err(error) => {
+                    eprintln!("parity_probe: unable to classify '{}': {}", args[2], error);
+                    return ExitCode::from(2);
+                }
+            }
+        }
+        "byte-order-mark" => {
+            if args.len() < 3 {
+                eprintln!("usage: parity_probe byte-order-mark <hexpayload>");
+                return ExitCode::from(2);
+            }
+            let payload = match from_hex(&args[2]) {
+                Ok(payload) => payload,
+                Err(error) => {
+                    eprintln!("bad hex: {}", error);
+                    return ExitCode::from(2);
+                }
+            };
+            match from_bytes(&payload).best() {
+                Some(best) => println!(
+                    "{}\t{}",
+                    u8::from(best.bom),
+                    u8::from(best.byte_order_mark())
+                ),
+                None => println!("NONE"),
             }
         }
         other => {

@@ -50,6 +50,14 @@ but observations still include some disabled-branch calls (for example the
 configuration-aware. Config-aware C facts are the motivation for the
 clang/preprocessor layer in Plan Phase 6.
 
+**Diagnostic (2026-07-26):** `scripts/c_preprocessor.py` labels these
+preprocessor-dependent facts as provenance (`preprocessor_dependent` /
+`preprocessor_reasons`) without demoting `is_deterministic` or changing audit
+pass rates. On inih it flags the `HANDLER` function-like macro observations and
+trusted calls inside `INI_ALLOW_MULTILINE` / related `#if` regions — the known
+failure mode from this PROVENANCE note. See also
+`examples/inih/tests/test_c_preprocessor_flags.py`.
+
 ## Verified graph result (`byog_inih`, snapshot `20260625-112030-39d0cdd0`)
 The published graph now also contains the co-located golden runner
 (`tests/parse/runner.c`) as package code, the same way `jsmn` indexes its runner:

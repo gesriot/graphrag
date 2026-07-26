@@ -491,6 +491,11 @@ impl CharsetMatch {
             .collect()
     }
 
+    /// Alias for `bom`, matching Python's `CharsetMatch.byte_order_mark`.
+    pub fn byte_order_mark(&self) -> bool {
+        self.bom
+    }
+
     pub fn submatch(&self) -> &[CharsetMatch] {
         &self.submatches
     }

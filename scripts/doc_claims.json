@@ -6,7 +6,7 @@
       "kind": "current",
       "description": "Full examples pytest summary: passed + xfailed.",
       "expect": {
-        "passed": 445,
+        "passed": 449,
         "xfailed": 4
       },
       "source": {
@@ -18,12 +18,12 @@
       "docs": [
         {
           "path": "Plan.md",
-          "must_contain": "445 passed, 4 xfailed",
+          "must_contain": "449 passed, 4 xfailed",
           "role": "current"
         },
         {
           "path": "PHASE7_WRITEUP.md",
-          "must_contain": "445 passed, 4 xfailed",
+          "must_contain": "449 passed, 4 xfailed",
           "role": "current"
         }
       ]
@@ -296,7 +296,7 @@
       "kind": "traced",
       "description": "charset-normalizer Rust test count (cargo; slow to run here, but pinned so documents cannot disagree with each other).",
       "expect": {
-        "rust_tests": 82
+        "rust_tests": 83
       },
       "source": {
         "type": "cargo_test",
@@ -307,12 +307,12 @@
       "docs": [
         {
           "path": "Plan.md",
-          "must_contain": "82 Rust tests",
+          "must_contain": "83 Rust tests",
           "role": "current"
         },
         {
           "path": "PHASE7_WRITEUP.md",
-          "must_contain": "82 Rust tests",
+          "must_contain": "83 Rust tests",
           "role": "current"
         }
       ]

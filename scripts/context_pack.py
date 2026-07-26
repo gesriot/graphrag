@@ -162,7 +162,12 @@ def pack(
         "purpose": purpose,
         "entity": {
             k: v for k, v in ent_dict.items()
-            if k in ("id", "title", "type", "description", "source_file", "span", "extractor", "confidence", "is_deterministic")
+            if k in (
+                "id", "title", "type", "description", "source_file", "span",
+                "extractor", "confidence", "is_deterministic",
+                # C frontend honesty: tree-sitter cannot resolve the preprocessor.
+                "preprocessor_dependent", "preprocessor_reasons",
+            )
         },
         "neighbors": [compact_relationship(nr) for nr in neighbors[:30]],
     }

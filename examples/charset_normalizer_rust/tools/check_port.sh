@@ -93,8 +93,8 @@ Expected xfail policy (these are documented and stable; not regressions):
   Single-byte codecs: exact. Most multibyte: via encoding_rs + custom (Korean/HZ/UTF).
   The default seeded live differential run adds 79 Python-oracle cases;
   use --differential-full for its 530-input every-byte/mutation/long sweep.
-  Recent targeted run: 74 passed, 4 xfailed.
-  Full examples run: 445 passed, 4 xfailed.
+  Recent targeted run: 75 passed, 4 xfailed.
+  Full examples run: 449 passed, 4 xfailed.
 POLICY
 
 echo

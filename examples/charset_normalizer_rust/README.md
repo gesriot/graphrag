@@ -13,13 +13,13 @@ This is an experiment using the graphrag-code deterministic extraction + context
 - ✅ `audit_call_edges`: structural pass rate **1.0**, 0 anomalies, 0 dangling, 0 semantic suspicions.
 - ✅ Context packs generated for key symbols (e.g. `api:from_bytes` pulls data tables via `uses_data` / data_dependencies). Saved packs are checked in under `packs/` beside this Rust crate; the local `byog_charset_normalizer` snapshot is intentionally ignored like other reproducible graph artifacts.
 - ✅ Rust core port implemented with real candidate probing, mess detection, coherence/language scoring, BOM/SIG handling, and deterministic sorting.
-- ✅ File/reader API layer: `from_bytes`, `from_bytes_with_options`, `from_reader`, `from_fp`, `from_path`, `is_binary`, `is_binary_bytes`, `is_binary_path`.
+- ✅ File/reader API layer: `from_bytes`, `from_bytes_with_options`, `from_reader`, `from_fp`, `from_path`, and typed `is_binary` byte/reader/path forms with options/trace variants.
 - ✅ Legacy chardet-style wrapper: `detect_legacy(byte_str, should_rename_legacy)`, `detect_chardet_compatible(byte_str)` (defaults to rename=false for chardet names), `LegacyDetectionResult`; includes upstream `CHARDET_CORRESPONDENCE` and small-sample/BOM post-processing. Note: top-level `detect(&[u8]) -> Option<CharsetMatch>` is preserved as the simple modern best-match path (different from Python's `detect` which is the legacy entrypoint).
 - ✅ `CharsetMatch` surface slice:
   - `decoded()`
   - `output_utf8()` and `output(target_encoding)`
   - preemptive declaration patching in `output()` for `encoding` / `charset` / `coding` headers
-  - `alphabets()`
+  - `alphabets()` and `byte_order_mark()`
   - `languages()`, `percent_chaos()`, `percent_coherence()`, `multi_byte_usage()`, `fingerprint()`
   - full Python-order `encoding_aliases()` table from `encodings.aliases`
   - `submatch()`, `has_submatch()`, `could_be_from_charset()`
@@ -38,8 +38,8 @@ This is an experiment using the graphrag-code deterministic extraction + context
   - `--normalize` for stdin and files
   - `--normalize --replace` for in-place UTF-8 rewrite, including interactive confirmation unless `--force` is set
 - ✅ Python-vs-Rust CLI snapshot tests cover help/version, argparse-style errors, pretty JSON, absolute paths, stdin, minimal output, normalization side effects, replace/force, and prompt-decline behavior.
-- ✅ `cargo test` (82 tests total): 57 unit parity tests (cd/models/md/codec/API) + 9 CLI byte-exact/trace tests + 3 detection-contract tests (including 18/18 golden) + 13 off-golden/large-lazy integration tests pass; 0 ignored.
-- ✅ Python-vs-Rust pytest matrix: fixed CLI/detector differential has 72 items (70 pass + 2 expected xfails for ambiguous adversarial inputs); the bounded live seeded differential gate runs 79 Python-oracle cases through `tools/check_port.sh` (79 strong agreements, seed `20260725`); exhaustive codec/CD parity adds 6 items (4 pass + 2 expected xfails for documented UTF-7 (SIG strip policy) / euc_jis_2004 extension cases). Full `PYTHONPATH=. uv run pytest examples -q --tb=no` is expected to report 445 passed, 4 xfailed. (short_20 xfail removed after narrow is_printable fix.) Single-byte codecs exact; most MB via encoding_rs/custom Korean/HZ/UTF special handling; rare MB table variants documented.
+- ✅ `cargo test` (83 tests total): 58 unit parity tests (cd/models/md/codec/API) + 9 CLI byte-exact/trace tests + 3 detection-contract tests (including 18/18 golden) + 13 off-golden/large-lazy integration tests pass; 0 ignored.
+- ✅ Python-vs-Rust pytest matrix: fixed CLI/detector differential has 72 items (70 pass + 2 expected xfails for ambiguous adversarial inputs); the bounded live seeded differential gate runs 79 Python-oracle cases through `tools/check_port.sh` (79 strong agreements, seed `20260725`); exhaustive codec/CD parity adds 6 items (4 pass + 2 expected xfails for documented UTF-7 (SIG strip policy) / euc_jis_2004 extension cases); API-surface oracle coverage adds 1 passing item. Full `PYTHONPATH=. uv run pytest examples -q --tb=no` is expected to report 449 passed, 4 xfailed. (short_20 xfail removed after narrow is_printable fix.) Single-byte codecs exact; most MB via encoding_rs/custom Korean/HZ/UTF special handling; rare MB table variants documented.
 
 ## Scope
 Core detection:
@@ -84,7 +84,7 @@ Distinctions:
 - Expected xfails: 2 adversarial detector cases with unstable best-encoding tie-breaks (bom8_badcont, short_high), plus 2 low-level codec-policy cases (UTF-7 SIG/BOM policy vs raw, euc_jis_2004 extension vs encoding_rs). short_20 resolved. Documented in pytest files with stable assertions added for the detector xfails. Single-byte codecs exact; most MB via encoding_rs/custom Korean/HZ/UTF special handling; rare MB table variants documented.
 - Untested in default runs: broad random corpora and exhaustive multibyte variant tables beyond representative probes. 100k+ scale is covered by the opt-in harness (see below).
 
-Intentional non-parity: no global set_logging_handler; detect=modern best (legacy_* explicit); Rust-only `--cp-isolation` / `--cp-exclusion` CLI extensions are hidden from help to preserve Python help parity; see FromBytesOptions::explain.
+API availability is itemized in `API_SURFACE_AUDIT.md`: it distinguishes covered typed APIs, deliberate exclusions (global logging and the same-name legacy `detect` behavior), Python-only mechanics, and surfaces simply not done (including direct submatch mutation, replacement-mode `output`, and non-root helper APIs).
 
 ## Reproduce the porting rails
 1. `uv run python scripts/context_pack.py "api:from_bytes" --graph byog_charset_normalizer --full-text`

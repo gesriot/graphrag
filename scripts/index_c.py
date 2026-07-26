@@ -42,6 +42,13 @@ def main(
     print(f"  Entities: {len(ents_df)}, Relationships: {len(rels_df)}, TextUnits: {len(tus_df)}")
     if len(obs_df):
         print(f"  Call observations: {len(obs_df)}")
+    # Surface preprocessor provenance summary (labels already stamped in extract_c).
+    n_pp_ent = int(ents_df["preprocessor_dependent"].fillna(False).astype(bool).sum()) if "preprocessor_dependent" in ents_df.columns else 0
+    n_pp_call = 0
+    if "preprocessor_dependent" in rels_df.columns and "type" in rels_df.columns:
+        calls = rels_df[rels_df["type"].astype(str) == "calls"]
+        n_pp_call = int(calls["preprocessor_dependent"].fillna(False).astype(bool).sum())
+    print(f"  Preprocessor-dependent (provenance): entities={n_pp_ent}, calls={n_pp_call}")
     snap_dir = publish_byog_snapshot(
         ents_df, rels_df, tus_df, graph.resolve(), SETTINGS,
         keep_last=keep_snapshots, source_root=pkg_dir,
