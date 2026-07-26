@@ -87,14 +87,16 @@ Expected xfail policy (these are documented and stable; not regressions):
       best() tie-break differs on ambiguous short/high-noise inputs by design
       (codec variant or mess edge + candidate order). Both sides still detect text.
       Python is source of truth only for stable cases.
-  No codec-policy xfails remain: UTF-7 SIG comparison now uses the api.py
-  oracle, and HZ/EUC-JIS maps are generated from the running Python codecs.
-  Single-byte codecs, HZ, and generated EUC-JIS maps are exact. Most other
-  multibyte paths use encoding_rs + custom Korean/UTF handling.
+  No codec-policy xfails remain: UTF-7 SIG comparison uses the api.py oracle;
+  HZ, EUC-JIS, and Shift-JIS-X-0213 maps are generated from running Python
+  codecs; and all 23 formerly excluded UTF output cases are exact.
+  The only named non-exact codec scope is five stateful ISO-2022 profiles.
+  Each has 3,960–11,365 Python-only scalar encodes relative to encoding_rs;
+  see PORT_STATUS.md for the per-profile counts and refusal rationale.
   The default seeded live differential run adds 79 Python-oracle cases;
   use --differential-full for its 530-input every-byte/mutation/long sweep.
   Recent targeted run: 77 passed, 2 xfailed.
-  Full examples run: 455 passed, 2 xfailed.
+  Full examples run: 456 passed, 2 xfailed.
 POLICY
 
 echo

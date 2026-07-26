@@ -303,9 +303,12 @@ def pack(
             "flagged_call_targets": sorted({
                 str(n.get("target")) for n in flagged_dyn_neighbor_calls if n.get("target")
             }),
+            # Filled after uncertain_calls are assembled (registry_candidate obs).
+            "dispatch_candidates": [],
             "note": (
-                "Detection only (scripts/python_dynamic.py). Not type inference, "
-                "import resolution of dynamic modules, or adding missing edges."
+                "Detection only (scripts/python_dynamic.py). Registry member names "
+                "may appear as weak dispatch_candidates / uncertain_calls with "
+                "reason registry_candidate:* — heuristic, not resolved call edges."
             ),
         }
 
@@ -442,7 +445,17 @@ def pack(
                 mask = (obs_src == symbol_title) | obs_src.str.startswith(module_prefix)
             else:
                 mask = (obs_src == symbol_title) | obs_src.str.startswith(symbol_title + ".")
-            relevant = obs[mask].head(15)
+            matched = obs[mask]
+            # Prefer registry_candidate rows so dispatch targets are not truncated
+            # out of the uncertain_calls window. Both halves stay capped: a large
+            # registry must not crowd the rest of the pack out either.
+            if len(matched) > 0 and "reason" in matched.columns:
+                reasons_s = matched["reason"].astype(str)
+                reg_rows = matched[reasons_s.str.startswith("registry_candidate:")].head(15)
+                other_rows = matched[~reasons_s.str.startswith("registry_candidate:")]
+                relevant = pd.concat([reg_rows, other_rows.head(max(0, 15 - len(reg_rows)))], axis=0)
+            else:
+                relevant = matched.head(15)
             if len(relevant) > 0:
                 uncertain = []
                 for _, o in relevant.iterrows():
@@ -466,6 +479,33 @@ def pack(
                     uncertain.append(entry)
                 pack["uncertain_calls"] = uncertain
                 pack["analysis_note"] = "Some call sites were tracked with low confidence or ambiguity (see uncertain_calls). Review during port."
+                # Promote static registry candidates into the dynamic summary so a
+                # porting agent sees *which* implementations dispatch may reach,
+                # not only that dispatch exists.
+                if pack.get("dynamic") is not None:
+                    cands = []
+                    seen_disp: set[str] = set()
+                    for u in uncertain:
+                        reason = str(u.get("reason", ""))
+                        if not reason.startswith("registry_candidate:"):
+                            continue
+                        disp = str(u.get("display_target", ""))
+                        if disp in seen_disp:
+                            continue
+                        seen_disp.add(disp)
+                        cands.append({
+                            "display_target": disp,
+                            "confidence": u.get("confidence"),
+                            "reason": reason,
+                        })
+                    pack["dynamic"]["dispatch_candidates"] = cands
+                    if cands:
+                        pack["dynamic_warning"] = (
+                            str(pack.get("dynamic_warning") or "")
+                            + f" dispatch_candidates={len(cands)} "
+                            f"({', '.join(str(c.get('display_target')) for c in cands[:8])}"
+                            f"{', …' if len(cands) > 8 else ''})."
+                        ).strip()
         except Exception:
             pass  # best-effort; observations are supplemental
 

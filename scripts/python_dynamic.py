@@ -55,6 +55,9 @@ class FileAnalysis:
     path: Path
     sites: List[DynamicSite] = field(default_factory=list)
     registries: Set[str] = field(default_factory=set)
+    # bare or Class.attr registry name -> ordered (key, value_name) entries
+    # from the static dict literal (e.g. operations['add'] -> AddOperation).
+    registry_tables: Dict[str, List[Tuple[str, str]]] = field(default_factory=dict)
 
 
 @dataclass
@@ -63,6 +66,8 @@ class PackageAnalysis:
     files: Dict[str, FileAnalysis] = field(default_factory=dict)
     n_sites: int = 0
     kinds: Dict[str, int] = field(default_factory=dict)
+    # merged Class.attr / bare -> entries (last file wins; rare conflict)
+    registry_tables: Dict[str, List[Tuple[str, str]]] = field(default_factory=dict)
 
 
 def _is_callable_registry_dict(d: ast.Dict) -> bool:
@@ -100,6 +105,22 @@ def _registry_dict_from_value(node: ast.AST) -> Optional[ast.Dict]:
             if isinstance(inner, ast.Dict) and _is_callable_registry_dict(inner):
                 return inner
     return None
+
+
+def _registry_table_entries(d: ast.Dict) -> List[Tuple[str, str]]:
+    """Extract (key, callee_name) pairs from a callable-registry dict literal."""
+    entries: List[Tuple[str, str]] = []
+    for k, v in zip(d.keys, d.values):
+        key_s = "?"
+        if isinstance(k, ast.Constant) and isinstance(k.value, str):
+            key_s = k.value
+        elif isinstance(k, ast.Constant):
+            key_s = str(k.value)
+        if isinstance(v, ast.Name):
+            entries.append((key_s, v.id))
+        elif isinstance(v, ast.Attribute):
+            entries.append((key_s, v.attr))
+    return entries
 
 
 def _target_names(targets: List[ast.AST]) -> List[str]:
@@ -153,33 +174,45 @@ def analyze_source_text(text: str, path: Path) -> FileAnalysis:
     except SyntaxError:
         return fa
 
-    # --- collect registry attribute names (module + class body) ---
+    # --- collect registry attribute names + static table members ---
     registries: Set[str] = set()
+    registry_tables: Dict[str, List[Tuple[str, str]]] = {}
 
-    def note_registry(name: str, class_name: Optional[str] = None) -> None:
+    def note_registry(
+        name: str,
+        dict_node: ast.Dict,
+        class_name: Optional[str] = None,
+    ) -> None:
         registries.add(name)
+        entries = _registry_table_entries(dict_node)
+        registry_tables[name] = entries
         if class_name:
             registries.add(f"{class_name}.{name}")
+            registry_tables[f"{class_name}.{name}"] = entries
 
     for node in tree.body:
-        if isinstance(node, ast.Assign) and _registry_dict_from_value(node.value) is not None:
+        dnode = _registry_dict_from_value(node.value) if isinstance(node, ast.Assign) else None
+        if isinstance(node, ast.Assign) and dnode is not None:
             for n in _target_names(node.targets):
-                note_registry(n)
+                note_registry(n, dnode)
         elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            if _registry_dict_from_value(node.value) is not None and isinstance(node.target, ast.Name):
-                note_registry(node.target.id)
+            dnode = _registry_dict_from_value(node.value)
+            if dnode is not None and isinstance(node.target, ast.Name):
+                note_registry(node.target.id, dnode)
         elif isinstance(node, ast.ClassDef):
             for stmt in node.body:
-                if isinstance(stmt, ast.Assign) and _registry_dict_from_value(stmt.value) is not None:
-                    for n in _target_names(stmt.targets):
-                        note_registry(n, node.name)
+                if isinstance(stmt, ast.Assign):
+                    dnode = _registry_dict_from_value(stmt.value)
+                    if dnode is not None:
+                        for n in _target_names(stmt.targets):
+                            note_registry(n, dnode, node.name)
                 elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
-                    if _registry_dict_from_value(stmt.value) is not None and isinstance(
-                        stmt.target, ast.Name
-                    ):
-                        note_registry(stmt.target.id, node.name)
+                    dnode = _registry_dict_from_value(stmt.value)
+                    if dnode is not None and isinstance(stmt.target, ast.Name):
+                        note_registry(stmt.target.id, dnode, node.name)
 
     fa.registries = set(registries)
+    fa.registry_tables = registry_tables
 
     def is_registry_expr(expr: ast.AST) -> Optional[str]:
         """If expr loads a known registry, return a short name for the reason tag."""
@@ -511,6 +544,7 @@ def analyze_package(package_dir: Path) -> PackageAnalysis:
         n_sites += len(fa.sites)
         for s in fa.sites:
             kinds[s.kind] += 1
+        pa.registry_tables.update(fa.registry_tables)
     pa.n_sites = n_sites
     pa.kinds = dict(kinds)
     return pa
@@ -655,6 +689,18 @@ def annotate_byog(
                     }
                 )
 
+    # Drop prior heuristic registry-candidate observations so re-annotation is
+    # idempotent (observations may grow; calls edges must not).
+    existing_obs = [
+        o
+        for o in (data.get("call_observations") or [])
+        if not (
+            str(o.get("reason", "")).startswith("registry_candidate:")
+            or str(o.get("extractor", "")) == "python_dynamic"
+        )
+    ]
+    data["call_observations"] = existing_obs
+
     for o in data.get("call_observations") or []:
         reasons = reasons_for_span(
             pa,
@@ -662,6 +708,9 @@ def annotate_byog(
             str(o.get("span", "")),
         )
         # Observations already marked unresolved/low-conf at a dynamic site keep the label.
+        # Labels are always recomputed from source, never merged with what a previous
+        # stamp wrote: re-annotating a published snapshot must not accumulate stale
+        # reasons (and parquet round-trips reasons as arrays, not lists).
         o["dynamic_dependent"] = bool(reasons)
         o["dynamic_reasons"] = reasons
         if reasons:
@@ -680,8 +729,161 @@ def annotate_byog(
                     }
                 )
 
+    # Cheap, high-value gap fill: name static registry members as weak
+    # observations (never as calls edges). A porting agent can then see *which*
+    # implementations the dispatch could reach, still labelled non-deterministic.
+    candidate_obs = _registry_candidate_observations(data, pa)
+    summary["registry_candidates_emitted"] = len(candidate_obs)
+    data.setdefault("call_observations", []).extend(candidate_obs)
+    for o in candidate_obs:
+        summary["observations_flagged"] += 1
+        sf = Path(str(o.get("source_file", ""))).name or "?"
+        summary["by_file"][sf]["observations"] += 1
+        if len(summary["samples"]) < 40:
+            summary["samples"].append(
+                {
+                    "kind": "observation",
+                    "source": o.get("source"),
+                    "display_target": o.get("display_target"),
+                    "file": sf,
+                    "span": o.get("span"),
+                    "reasons": o.get("dynamic_reasons"),
+                }
+            )
+
     summary["by_file"] = dict(summary["by_file"])
+    summary["registry_tables"] = {k: list(v) for k, v in pa.registry_tables.items()}
     return summary
+
+
+def _entity_class_and_method(title: str) -> Tuple[Optional[str], Optional[str]]:
+    """``mod:JsonPatch.apply`` → (``JsonPatch``, ``apply``); ``mod:fn`` → (None, ``fn``)."""
+    bare = str(title).split(":")[-1]
+    if "." in bare:
+        cls, meth = bare.split(".", 1)
+        return cls, meth
+    return None, bare
+
+
+def _tables_for_class(pa: PackageAnalysis, class_name: str) -> List[Tuple[str, List[Tuple[str, str]]]]:
+    """Return (registry_name, entries) for registries defined on class_name."""
+    out: List[Tuple[str, List[Tuple[str, str]]]] = []
+    prefix = f"{class_name}."
+    for key, entries in pa.registry_tables.items():
+        if key.startswith(prefix):
+            out.append((key.split(".", 1)[1], entries))
+    return out
+
+
+def _registry_candidate_observations(
+    data: Dict[str, List[Dict[str, Any]]], pa: PackageAnalysis
+) -> List[Dict[str, Any]]:
+    """Emit weak observations naming static registry members as possible callees.
+
+    Never creates ``calls`` relationships. Confidence stays low; reason is
+    ``registry_candidate:…`` so consumers can tell these are heuristic.
+    """
+    entity_titles = {str(e.get("title", "")) for e in data.get("entities") or []}
+    # module prefix per source file stem from existing titles (jsonpatch:…)
+    module_by_class: Dict[str, str] = {}
+    for t in entity_titles:
+        if ":" not in t:
+            continue
+        mod, bare = t.split(":", 1)
+        if "." in bare:
+            cls = bare.split(".", 1)[0]
+            module_by_class.setdefault(cls, mod)
+
+    emitted: List[Dict[str, Any]] = []
+    seen: Set[Tuple[str, str, str]] = set()
+
+    for e in data.get("entities") or []:
+        if not e.get("dynamic_dependent"):
+            continue
+        reasons = [str(r) for r in (e.get("dynamic_reasons") or [])]
+        title = str(e.get("title", ""))
+        cls, _meth = _entity_class_and_method(title)
+        if not cls:
+            continue
+        tables = _tables_for_class(pa, cls)
+        if not tables:
+            continue
+
+        # polymorphic_call:operation.apply<…> → dispatched method name "apply"
+        poly_methods: List[str] = []
+        has_registry_lookup = any(
+            r.startswith("registry_lookup:")
+            or r.startswith("call_through_registry")
+            or r.startswith("call_through_dynamic_name:cls")
+            for r in reasons
+        )
+        has_poly = False
+        for r in reasons:
+            if r.startswith("polymorphic_call:"):
+                has_poly = True
+                # polymorphic_call:operation.apply<registry_derived_iter:_ops>
+                body = r[len("polymorphic_call:") :]
+                head = body.split("<", 1)[0]
+                if "." in head:
+                    poly_methods.append(head.split(".", 1)[1])
+            if r.startswith("registry_derived_iter:"):
+                has_poly = True  # iteration feeds polymorphic apply in same method
+
+        if not has_poly and not has_registry_lookup:
+            continue
+
+        mod = module_by_class.get(cls, title.split(":")[0] if ":" in title else "")
+        for reg_name, entries in tables:
+            for key, val_name in entries:
+                if has_poly and poly_methods:
+                    targets = [f"{val_name}.{pm}" for pm in poly_methods]
+                elif has_poly and not poly_methods:
+                    # registry-derived iterator without a parsed method: still
+                    # name the classes (agent can open .apply themselves)
+                    targets = [val_name]
+                else:
+                    # pure registry lookup / construct: candidate is the class/func
+                    targets = [val_name]
+
+                for disp in targets:
+                    # Prefer fully-qualified entity titles when they exist.
+                    fq = f"{mod}:{disp}" if mod else disp
+                    display = fq if fq in entity_titles else (
+                        f"{mod}:{val_name}" if (mod and f"{mod}:{val_name}" in entity_titles and "." not in disp)
+                        else disp
+                    )
+                    # If Class.method entity exists, use that title as display_target.
+                    if "." in disp and mod and f"{mod}:{disp}" in entity_titles:
+                        display = f"{mod}:{disp}"
+                    elif mod and f"{mod}:{val_name}" in entity_titles and has_registry_lookup and not has_poly:
+                        display = f"{mod}:{val_name}"
+
+                    dedup = (title, display, reg_name)
+                    if dedup in seen:
+                        continue
+                    seen.add(dedup)
+                    emitted.append(
+                        {
+                            "source": title,
+                            "display_target": display,
+                            "confidence": 0.35,
+                            "reason": f"registry_candidate:{reg_name}[{key!r}]->{display}",
+                            "source_file": e.get("source_file", ""),
+                            "span": e.get("span", ""),
+                            "extractor": "python_dynamic",
+                            "description": (
+                                f"{title} may dispatch via static registry "
+                                f"{cls}.{reg_name}[{key!r}] to {display} "
+                                f"(heuristic candidate; not a resolved call edge)"
+                            ),
+                            "dynamic_dependent": True,
+                            "dynamic_reasons": [
+                                f"registry_candidate:{reg_name}",
+                                f"registry_key:{key}",
+                            ],
+                        }
+                    )
+    return emitted
 
 
 def format_report(summary: Dict[str, Any], *, totals: Optional[Dict[str, int]] = None) -> str:

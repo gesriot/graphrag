@@ -6,7 +6,7 @@
       "kind": "current",
       "description": "Full examples pytest summary: passed + xfailed.",
       "expect": {
-        "passed": 455,
+        "passed": 456,
         "xfailed": 2
       },
       "source": {
@@ -18,12 +18,12 @@
       "docs": [
         {
           "path": "Plan.md",
-          "must_contain": "455 passed, 2 xfailed",
+          "must_contain": "456 passed, 2 xfailed",
           "role": "current"
         },
         {
           "path": "PHASE7_WRITEUP.md",
-          "must_contain": "455 passed, 2 xfailed",
+          "must_contain": "456 passed, 2 xfailed",
           "role": "current"
         }
       ]
@@ -256,7 +256,7 @@
     {
       "id": "cjson_port_eval_overall",
       "kind": "traced",
-      "description": "cJSON port_eval OVERALL PASS (slow cargo stages \u2014 not re-executed here).",
+      "description": "cJSON port_eval OVERALL PASS (slow cargo stages — not re-executed here).",
       "expect": {
         "golden_cases": 59,
         "manual_fixes": 0,

@@ -28,9 +28,9 @@ This is an experiment using the graphrag-code deterministic extraction + context
 - ✅ Python-compatible codec backend for the upstream `IANA_SUPPORTED` set:
   - exact generated Python charmap tables for 66 single-byte codecs (DOS/OEM, EBCDIC, Mac, KOI8, ISO-8859, `latin_1`, etc.)
   - strict UTF-32 and UTF-7 handlers; UTF-7 SIG detection decodes the full stream then removes exactly one leading U+FEFF, matching `api.py` for all four `+/v` marks
-  - exact generated Python HZ/GB2312 shifted-pair table and state machine (strict and replacement mode), plus generated strict maps for `euc_jis_2004`, `euc_jisx0213`, and `euc_jp`
+  - exact generated Python HZ/GB2312 shifted-pair table and state machine (strict and replacement mode), plus generated strict maps for `euc_jis_2004`, `euc_jisx0213`, `euc_jp`, `shift_jis_2004`, and `shift_jisx0213`
   - generated `johab` and `iso2022_kr` tables/state machine
-  - most other multibyte (big5/cp95x, euc_*, iso2022_jp_*, shift_jis, gb*, etc.) via encoding_rs profiles (single-byte exact; rare MB table/extension diffs vs py stdlib documented as expected)
+  - most other multibyte (big5/cp95x, euc_*, iso2022_jp_*, shift_jis, gb*, etc.) via encoding_rs profiles; the five ISO-2022 extension profiles are the only named non-exact codec boundary, quantified below
 - ✅ Product CLI slice:
   - one or more files, or `-`/stdin
   - JSON output with `path`, `encoding`, `language`, `chaos`, `coherence`, `has_sig_or_bom`, `encoding_aliases`, `alternative_encodings`, `alphabets`, `unicode_path`, `is_preferred`
@@ -39,7 +39,7 @@ This is an experiment using the graphrag-code deterministic extraction + context
   - `--normalize --replace` for in-place UTF-8 rewrite, including interactive confirmation unless `--force` is set
 - ✅ Python-vs-Rust CLI snapshot tests cover help/version, argparse-style errors, pretty JSON, absolute paths, stdin, minimal output, normalization side effects, replace/force, and prompt-decline behavior.
 - ✅ `cargo test` (83 tests total): 58 unit parity tests (cd/models/md/codec/API) + 9 CLI byte-exact/trace tests + 3 detection-contract tests (including 18/18 golden) + 13 off-golden/large-lazy integration tests pass; 0 ignored.
-- ✅ Python-vs-Rust pytest matrix: fixed CLI/detector differential has 72 items (70 pass + 2 expected xfails for ambiguous adversarial inputs); the bounded live seeded differential gate runs 79 Python-oracle cases through `tools/check_port.sh` (79 strong agreements, seed `20260725`); exhaustive codec/CD parity adds 6 passing items, including all 7,445 Python HZ shifted pairs, all four UTF-7 SIG forms against the live API oracle, and complete generated `euc_jis_2004` maps (17,363 decode forms / 14,429 scalar encodes / 25 sequences). API-surface oracle coverage adds 1 passing item. Full `PYTHONPATH=. uv run pytest examples -q --tb=no` is expected to report 455 passed, 2 xfailed. The remaining xfails are only the two ambiguous detector cases; bounded non-exact ISO-2022/Shift-JIS and UTF output variants are explicitly outside the representative roundtrip contract.
+- ✅ Python-vs-Rust pytest matrix: fixed CLI/detector differential has 72 items (70 pass + 2 expected xfails for ambiguous adversarial inputs); the bounded live seeded differential gate runs 79 Python-oracle cases through `tools/check_port.sh` (79 strong agreements, seed `20260725`); exhaustive codec/CD parity adds 6 passing items, including all 7,445 Python HZ shifted pairs, all four UTF-7 SIG forms against the live API oracle, all 23 UTF output cases, and complete generated EUC-/Shift-JIS-X-0213 maps. API-surface oracle coverage adds 1 passing item. Full `PYTHONPATH=. uv run pytest examples -q --tb=no` is expected to report 456 passed, 2 xfailed. The remaining xfails are only the two ambiguous detector cases; the only named non-exact codec scope is the quantified five-profile ISO-2022 refusal below.
 
 ## Scope
 Core detection:
@@ -81,7 +81,7 @@ Golden (byte-exact on 18/18 samples), off-golden (exact best-match assertions), 
 Distinctions:
 - Byte-exact: golden JSON/CLI non-verbose cases, off-golden best assertions, normalize outputs.
 - Normalized verbose trace parity (ts/floats/sets masked; events from api/md; not raw logs).
-- Expected xfails: only 2 adversarial detector cases with unstable best-encoding tie-breaks (bom8_badcont, short_high). UTF-7 SIG behavior is tested against the live `api.py` oracle, and the formerly divergent EUC-JIS profiles are generated from Python codec tables. The bounded representative roundtrip still excludes documented ISO-2022/Shift-JIS extension and UTF output-mode variants; this is not a claim of exhaustive multibyte variant parity.
+- Expected xfails: only 2 adversarial detector cases with unstable best-encoding tie-breaks (bom8_badcont, short_high). UTF-7 SIG behavior is tested against the live `api.py` oracle; HZ, EUC-JIS, and Shift-JIS-X-0213 maps are generated from Python codecs; and all 23 former UTF output exclusions are exact. The sole named codec refusal is five stateful ISO-2022 profiles: relative to the 7,392-scalar `encoding_rs` profile, Python has 3,960–11,365 extra scalar encodes per profile (with 155–236 Rust-only and 280–363 remapped entries); see `PORT_STATUS.md` for the per-profile table. This is not a claim of exhaustive multibyte variant parity.
 - Untested in default runs: broad random corpora and exhaustive multibyte variant tables beyond representative probes. 100k+ scale is covered by the opt-in harness (see below).
 
 API availability is itemized in `API_SURFACE_AUDIT.md`: it distinguishes covered typed APIs (including `CliDetectionResult`, direct submatches, replacement/default output, and callable helper modules), deliberate exclusions (global logging and the same-name legacy `detect` behavior), and Python-only mechanics.

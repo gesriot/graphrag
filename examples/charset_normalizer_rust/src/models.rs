@@ -763,6 +763,10 @@ impl CharsetMatch {
             };
         }
 
+        if let Some(bytes) = crate::python_codecs::encode_utf16_strict(&norm, &decoded) {
+            return Some(bytes);
+        }
+
         if let Some(bytes) = crate::python_codecs::encode_utf32_strict(&norm, &decoded) {
             return Some(bytes);
         }
@@ -792,6 +796,22 @@ impl CharsetMatch {
                 crate::python_codecs::encode_euc_jp_replace(&decoded)
             } else {
                 crate::python_codecs::encode_euc_jp_strict(&decoded)
+            };
+        }
+
+        if norm == "shift_jis_2004" {
+            return if replacement {
+                crate::python_codecs::encode_shift_jis_2004_replace(&decoded)
+            } else {
+                crate::python_codecs::encode_shift_jis_2004_strict(&decoded)
+            };
+        }
+
+        if norm == "shift_jisx0213" {
+            return if replacement {
+                crate::python_codecs::encode_shift_jisx0213_replace(&decoded)
+            } else {
+                crate::python_codecs::encode_shift_jisx0213_strict(&decoded)
             };
         }
 

@@ -1,6 +1,6 @@
 # charset_normalizer_rust — Port Readiness / Productization Status
 
-Date: 2026-07-25
+Date: 2026-07-26
 
 This records a scoped readiness pass for packaging, docs, CLI parity, and handoff artifacts.
 It does not change the detector algorithm.
@@ -27,7 +27,7 @@ Core + product surface:
 - **Off-golden best-match assertions**: exact encoding matches on additional fixed cases.
 - **Fixed/adversarial differential matrix**: 72 CLI/detector pytest items (17 fixed generated + 21 earlier seeded + 26 adversarial payloads + fixtures/toggles). Current status: 70 pass + 2 expected xfails for adversarial inputs whose best-encoding tie-break is intentionally unstable (short_20 resolved by matching Python `str.isprintable()` on U+00A0 in mess detection).
 - **Seeded live differential harness**: Python is executed as the oracle on each run; Rust is observed through its own strict decoder, rather than re-decoding Rust's selected label in Python. The default `check_port.sh` corpus has 79 generated inputs across 15 source-encoding categories (real UTF-8/BOM, UTF-16 LE/BE, Latin-1, CP1251, Shift-JIS, GB2312, truncations, invalid/mixed runs, empty/single/very-short, multi-valid, and seeded mutations). The on-demand full corpus has 530 inputs, adding all 256 one-byte values, 240 seeded mutations, and long text. Seed `20260725`: 79/79 and 530/530 strong agreements, respectively; no divergences were suppressed. The harness initially exposed two port bugs: a tie-order mismatch on the 1,584-byte `real_utf16le` input (Python `Swedish`, Rust `German`) caused by a Rust-only language-order tie-break and hash-map merge, and an over-broad `English` inference for the one-byte `00`/`e3` and five-byte `4100420043` inputs. The port now preserves Python's stable candidate order and infers English only for an actual `ascii` match; both findings are covered by Rust regression tests and the live sweep.
-- **Exhaustive codec/CD parity**: 6 pytest items covering all supported single-byte `encoding_languages`, multibyte language mapping, all 0x00..0xFF strict decode probes for single-byte codecs, representative multibyte strict decode probes, and representative encode/output round-trips. Current status: 6 pass, no codec xfails. The corpus checks all 7,445 Python HZ shifted pairs in both strict directions plus replacement-mode U+20AC; all four UTF-7 SIG forms against the running `api.py` path; and complete live Python maps for `euc_jis_2004` (17,363 decode forms / 14,429 scalar encodes / 25 two-scalar sequences) and its distinct `euc_jisx0213` sibling (17,353 / 14,419 / 25). Single-byte codecs, HZ, and these JIS maps are exact; most other MB paths use encoding_rs or custom Korean/UTF handling, with bounded profile variants documented below.
+- **Exhaustive codec/CD parity**: 6 pytest items covering all supported single-byte `encoding_languages`, multibyte language mapping, all 0x00..0xFF strict decode probes for single-byte codecs, representative multibyte strict decode probes, and representative encode/output round-trips. Current status: 6 pass, no codec xfails. The corpus checks all 7,445 Python HZ shifted pairs in both strict directions plus replacement-mode U+20AC; all four UTF-7 SIG forms against the running `api.py` path; all 23 formerly excluded UTF output cases; and complete live Python maps for the generated EUC-JIS and Shift-JIS-X-0213 profiles. The only codec behavior deliberately left non-exact is the quantified ISO-2022 extension family below.
 - **CLI byte-exact / snapshot**: non-verbose JSON, minimal output, argparse errors, paths (abs), stdin, normalize side-effects (written bytes), replace/force flows.
 - **Normalized verbose trace parity**: when `explain=true` (or `--verbose`), trace events from api/md match in content (timestamps, some floats/sets masked for determinism; not raw log strings).
 - **API-surface audit**: `API_SURFACE_AUDIT.md` mechanically enumerates the Python root exports, model members, CLI flags, and accessible helper modules. Its live Python-oracle coverage now includes version metadata, `CharsetMatch.byte_order_mark`, typed `is_binary` reader/path forms, `CliDetectionResult` JSON, direct submatches, replacement/default output, and the formerly stubbed utils/CD helpers.
@@ -52,7 +52,59 @@ The seeded harness compares the canonical best encoding, strictly decoded Unicod
 - **Deliberately excluded:** global `set_logging_handler` state (use trace collection or `--verbose`); making Rust's established `detect(&[u8])` mean Python's legacy top-level `detect` (use `detect_legacy` or `detect_chardet_compatible`); and showing Rust-only cp-isolation/exclusion controls in Python-compatible help. These are design choices, not claims that the operations are impossible in Rust.
 - **Not applicable:** Python `__str__`, `__repr__`, implicit truthiness, dynamic union dispatch, subclass/plugin extension protocols, and the argparse callback/process-global `cli_detect` helpers. Rust exposes typed methods, `Option`, iteration, concrete detector components, and the observable `normalizer` binary instead.
 
-The legacy post-processing (small-sample confidence adjustment, `utf_8_sig` mapping, and `CHARDET_CORRESPONDENCE`) is implemented only in `detect_legacy*`. The detection codec contract matches Python `api.py` (SIG/BOM stripping per `should_strip_sig_or_bom` except UTF-16/32; UTF-7 full-decode-then-strip). Raw `codecs.decode("utf_7")` retains U+FEFF, so it is the wrong oracle for a recognized SIG: Rust now decodes the complete `+/v8`, `+/v9`, `+/v+`, or `+/v/` stream and removes exactly its first U+FEFF, as `api.py` does. The prior direct `encoding_rs::EUC_JP` enumeration made a generated map proportionate: against Python `euc_jis_2004`, encode had 14,429 versus 7,392 entries (7,078 Python-only, 41 legacy-only, 341 remapped), and decode had 17,363 versus 13,466 entries (3,907 Python-only, 10 legacy-only, 381 remapped). HZ and the three supported EUC-JIS profiles (`euc_jis_2004`, `euc_jisx0213`, `euc_jp`) are therefore generated from the running Python codecs; HZ has 7,445 shifted pairs, while the live JIS maps cover their strict byte/scalar domains and canonical sequences. Rust uses custom handling for utf7/hz/johab/iso2022_kr plus generated JIS tables, and encoding_rs for most other MB.
+The legacy post-processing (small-sample confidence adjustment, `utf_8_sig` mapping, and `CHARDET_CORRESPONDENCE`) is implemented only in `detect_legacy*`. The detection codec contract matches Python `api.py` (SIG/BOM stripping per `should_strip_sig_or_bom` except UTF-16/32; UTF-7 full-decode-then-strip). Raw `codecs.decode("utf_7")` retains U+FEFF, so it is the wrong oracle for a recognized SIG: Rust decodes the complete `+/v8`, `+/v9`, `+/v+`, or `+/v/` stream and removes exactly its first U+FEFF. Its canonical UTF-7 output now matches Python's complete 128-byte ASCII direct-set/shift-boundary corpus, and UTF-16 output matches Python for all 21 formerly excluded BOM/endian cases. HZ, the three EUC-JIS profiles (`euc_jis_2004`, `euc_jisx0213`, `euc_jp`), and the two Shift-JIS-X-0213 profiles (`shift_jis_2004`, `shift_jisx0213`) are generated from the running Python codecs. The latter contribute 11,296 / 11,271 / 25 and 11,286 / 11,261 / 25 strict decode forms / scalar encodes / canonical sequences, respectively. Rust uses custom handling for UTF, HZ, Korean, and generated JIS tables; the ISO-2022 refusal is the sole named profile boundary.
+
+### Closed codec scope
+
+The port claims exact codec behavior only where the corpus proves it: all
+single-byte byte values; HZ's 7,445 shifted pairs; the three generated EUC-JIS
+profiles; the two generated Shift-JIS-X-0213 profiles; UTF-7 SIG and ASCII
+output boundaries; UTF-16 output; and the existing representative/default
+detection contracts. The remaining ten named ISO-2022 cases are a deliberate,
+quantified refusal, not a test omission. The port has one `encoding_rs`
+ISO-2022-JP profile with 7,392 non-ASCII scalar encodes. The reproducible
+isolated-scalar encode enumeration reports the following Python domains and
+differences from that profile:
+
+| Python codec | Scalars | Python-only | Rust-only | Remapped |
+| --- | ---: | ---: | ---: | ---: |
+| `iso2022_jp_1` | 12,947 | 5,791 | 236 | 280 |
+| `iso2022_jp_2` | 18,600 | 11,365 | 157 | 359 |
+| `iso2022_jp_2004` | 11,207 | 3,970 | 155 | 363 |
+| `iso2022_jp_3` | 11,197 | 3,960 | 155 | 363 |
+| `iso2022_jp_ext` | 13,010 | 5,791 | 173 | 343 |
+
+Reproduce the table (the probe emits `E\t<scalar-hex>\t<bytes-hex>` per encodable
+scalar; the Python side is the stdlib codec):
+
+```bash
+cargo run --quiet --bin parity_probe -- encoding-rs-scalar-map iso-2022-jp > /tmp/rs_iso.tsv
+uv run python - <<'PY'
+rs = {int(s, 16): bytes.fromhex(b) for _, s, b in
+      (l.rstrip("\n").split("\t") for l in open("/tmp/rs_iso.tsv"))}
+for enc in ("iso2022_jp_1", "iso2022_jp_2", "iso2022_jp_2004", "iso2022_jp_3", "iso2022_jp_ext"):
+    py = {}
+    for s in range(0x80, 0x110000):
+        if 0xD800 <= s <= 0xDFFF:
+            continue
+        try:
+            py[s] = chr(s).encode(enc, "strict")
+        except UnicodeEncodeError:
+            pass
+    shared = set(py) & set(rs)
+    print(enc, len(py), len(set(py) - set(rs)), len(set(rs) - set(py)),
+          sum(1 for s in shared if py[s] != rs[s]))
+PY
+```
+
+The ten asserted cases are `iso2022_jp_1` French/Greek, `iso2022_jp_2`
+French/Greek/Chinese/Korean, `iso2022_jp_2004` French, `iso2022_jp_3` French,
+and `iso2022_jp_ext` French/Greek. For each, Python emits a stateful escape
+sequence while the current Rust profile rejects both strict decode and encode.
+Closing that boundary would require five separate generated stateful ISO-2022
+encoders/decoders, rather than a table overlay. That is the sixth codec frontier
+and is deliberately not started. Finite corpus coverage is also a policy
+boundary: no claim is made about arbitrary untested byte strings.
 
 ## Test commands (current counts as of this status)
 
@@ -65,10 +117,10 @@ cargo test --quiet   # expects 83 passing tests (see breakdown above)
 From repo root:
 ```bash
 PYTHONPATH=. uv run pytest examples -q --tb=no
-# expected current summary: 455 passed, 2 xfailed
+# expected current summary: 456 passed, 2 xfailed
 # xfails are the documented adversarial detector cases (bom8_badcont, short_high)
 # (short_20 xfail burned down via narrow is_printable fix matching Python source)
-# MB codec note: single-byte codecs and generated Python HZ/GB2312 are exact; most other MB use encoding_rs/custom Korean/UTF special handling; rare MB table variants are documented.
+# MB codec note: exact generated maps cover HZ, EUC-JIS, and Shift-JIS-X-0213; the five quantified ISO-2022 extension profiles are the only named non-exact codec boundary.
 ```
 
 Handoff/CI wrapper (recommended for repeatable verification; runs fmt+test+targeted, optional --full/--scale):
@@ -130,7 +182,7 @@ All regeneration commands are documented in this file, README.md, and tool sourc
 ## Remaining handoff caveats (P2/P3)
 
 - Ambiguous single-byte/adversarial cases can produce ranking differences; the two pre-existing pinned unstable cases remain expected xfails with source-backed reasons. The new harness reports any future ambiguous divergence as a finding instead of accepting it by category.
-- Default test surface includes exhaustive CD and single-byte codec probes, every valid generated Python HZ shifted pair, all strict forms of the three generated EUC-JIS profiles, representative other-multibyte probes, and the 79-input seeded live detector corpus; the 530-input full corpus is opt-in. This is not an unbounded random fuzzer or exhaustive multibyte variant table. The representative roundtrip deliberately excludes the 12 observed ISO-2022/Shift-JIS extension-profile text cases and 23 UTF output-mode cases where the port's encoding_rs/custom output behavior is not claimed exact; they are enumerated as profile boundaries in `test_codec_cd_parity.py`, not xfailed. Big5-family and other unenumerated MB variant tables remain outside this scope.
+- Default test surface includes exhaustive CD and single-byte codec probes, every valid generated Python HZ shifted pair, all strict forms of the three generated EUC-JIS and two Shift-JIS-X-0213 profiles, the complete 23-case UTF output boundary, the ten asserted ISO-2022 refusal cases, representative other-multibyte probes, and the 79-input seeded live detector corpus; the 530-input full corpus is opt-in. Finite test corpora are a deliberate verification policy, not a claim about arbitrary untested byte strings. The five quantified ISO-2022 extension profiles are the only named codec behavior the port does not claim exact.
 - API availability is itemized in `API_SURFACE_AUDIT.md`: the prior “simply not done” surface is now closed, and the remaining intentional differences and Python-only mechanics are explicitly named.
 - Integration with external callers (beyond the provided Python differential and CLI snapshots) should be validated with target workloads.
 - The port prioritizes observable behavior on golden + generated cases; internal structure follows the contract packs rather than line-by-line port.

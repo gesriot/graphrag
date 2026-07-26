@@ -37,7 +37,9 @@ target after the mini-gate exposed a real closure boundary** (details below).
 - After graph-frontier step 1, `byog_jsonpatch` remains at 104 entities and has
   222 relationships: 104 calls / 102 contains / 9 property / 7 uses_data, plus
   19 call observations; `audit_call_edges` remains pass_rate 1.0 with 0
-  anomalies/dangling/suspicions.
+  anomalies/dangling/suspicions. (Observations later grew to 31 — see
+  *Actionable candidates* below; entities, relationships and pass rate did not
+  move.)
 
 ## Closure-coverage finding (gate step 4 — BLOCKER for a fair ablation)
 The calls-closure from `apply_patch` reaches only **3 entities** and never reaches
@@ -76,6 +78,19 @@ demoting `is_deterministic` or adding/dropping edges. On the published
 
 Context packs surface a top-level `dynamic_warning` (same shape as the C
 `preprocessor_warning`). Detection only — not resolution of the missing edges.
+
+**Actionable candidates (same day):** reading the flag alone only told an agent
+that *some* implementations exist. The diagnostic now also emits weak
+`call_observations` with `reason=registry_candidate:operations['…']` naming
+each static table member (`AddOperation.apply`, `RemoveOperation.apply`, …) at
+confidence 0.35 — never as `calls` edges. Context packs expose them as
+`dynamic.dispatch_candidates` so a porter can open the right methods without
+resolver changes or pass-rate moves. On the published graph this is 12 new
+observations (19 → 31): six `.apply` targets for `JsonPatch.apply` and the six
+operation classes for `JsonPatch._get_operation`. Recall is deliberately narrow
+— only dict literals whose values are plain names resolve, so lambda-valued
+tables elsewhere (`isodate:STRF_DT_MAP`, `humanize:_TRANSLATIONS`) yield no
+candidates rather than guesses.
 
 ## Graph-frontier step-1 outcome (tractable edges added; boundary confirmed)
 Per the agreed plan, the tractable/static-fact resolver edges were added and each

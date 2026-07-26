@@ -1496,6 +1496,14 @@ pub(crate) fn decode_bytes_strict(data: &[u8], encoding_iana: &str) -> Option<St
         return python_codecs::decode_euc_jp_strict(data);
     }
 
+    if encoding_iana == "shift_jis_2004" {
+        return python_codecs::decode_shift_jis_2004_strict(data);
+    }
+
+    if encoding_iana == "shift_jisx0213" {
+        return python_codecs::decode_shift_jisx0213_strict(data);
+    }
+
     if encoding_iana == "hz" {
         return python_codecs::decode_hz_strict(data);
     }
@@ -1575,6 +1583,14 @@ pub(crate) fn decode_strict(
 
     if encoding_iana == "euc_jp" {
         return python_codecs::decode_euc_jp_strict(payload);
+    }
+
+    if encoding_iana == "shift_jis_2004" {
+        return python_codecs::decode_shift_jis_2004_strict(payload);
+    }
+
+    if encoding_iana == "shift_jisx0213" {
+        return python_codecs::decode_shift_jisx0213_strict(payload);
     }
 
     if encoding_iana == "hz" {

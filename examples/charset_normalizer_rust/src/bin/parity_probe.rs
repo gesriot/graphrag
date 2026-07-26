@@ -6,6 +6,7 @@ use charset_normalizer_rust::{
     cd, from_bytes, is_binary_path_with_options, is_binary_reader, utils, CharsetMatch,
     CliDetectionResult, FromBytesOptions, VERSION, VERSION_STRING,
 };
+use encoding_rs::Encoding;
 use std::env;
 use std::process::ExitCode;
 
@@ -208,6 +209,27 @@ fn emit_hz_codec_map() {
     }
 }
 
+/// Emit the scalar encoder domain of an encoding_rs profile for an oracle-side
+/// comparison. This is characterization-only: the table generator and parity
+/// tests remain responsible for any production replacement. PORT_STATUS.md
+/// documents the ISO-2022 recipe that consumes this output.
+fn emit_encoding_rs_scalar_map(label: &str) -> Result<(), String> {
+    let encoding = Encoding::for_label(label.as_bytes())
+        .ok_or_else(|| format!("unknown encoding_rs label {label:?}"))?;
+
+    for scalar in 0x80..=0x10ffff {
+        let Some(character) = char::from_u32(scalar) else {
+            continue;
+        };
+        let text = character.to_string();
+        let (encoded, _, had_errors) = encoding.encode(&text);
+        if !had_errors {
+            println!("E\t{scalar:x}\t{}", to_hex(&encoded));
+        }
+    }
+    Ok(())
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
@@ -348,6 +370,16 @@ fn main() -> ExitCode {
             }
         }
         "hz-codec-map" => emit_hz_codec_map(),
+        "encoding-rs-scalar-map" => {
+            if args.len() < 3 {
+                eprintln!("usage: parity_probe encoding-rs-scalar-map <label>");
+                return ExitCode::from(2);
+            }
+            if let Err(error) = emit_encoding_rs_scalar_map(&args[2]) {
+                eprintln!("parity_probe: {error}");
+                return ExitCode::from(2);
+            }
+        }
         "detect-file" => {
             if args.len() < 3 {
                 eprintln!("usage: parity_probe detect-file <payload-path>");

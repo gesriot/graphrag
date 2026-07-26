@@ -45,6 +45,33 @@ def test_jsonpatch_registry_dispatch_is_detected():
     ]
     assert obs, "expected unresolved observation for operation.apply"
     assert all(o.get("dynamic_dependent") for o in obs)
+
+    # Registry candidates name *which* implementations dispatch may reach —
+    # weak observations only, never promoted to calls edges.
+    cands = [
+        o
+        for o in data["call_observations"]
+        if o.get("source") == "jsonpatch:JsonPatch.apply"
+        and str(o.get("reason", "")).startswith("registry_candidate:")
+    ]
+    targets = {str(o.get("display_target")) for o in cands}
+    for need in (
+        "jsonpatch:AddOperation.apply",
+        "jsonpatch:RemoveOperation.apply",
+        "jsonpatch:ReplaceOperation.apply",
+        "jsonpatch:MoveOperation.apply",
+        "jsonpatch:TestOperation.apply",
+        "jsonpatch:CopyOperation.apply",
+    ):
+        assert need in targets, (need, targets)
+    assert all(float(o.get("confidence", 1)) < 0.6 for o in cands)
+    assert not any(
+        r.get("type") == "calls"
+        and r.get("source") == "jsonpatch:JsonPatch.apply"
+        and "Operation.apply" in str(r.get("target"))
+        for r in data["relationships"]
+    ), "registry candidates must not become calls edges"
+
     # Labels do not demote trusted edges elsewhere.
     trusted = [r for r in data["relationships"] if r.get("type") == "calls" and r.get("is_deterministic")]
     assert trusted, "sanity: graph still has trusted calls"
@@ -99,12 +126,52 @@ def test_annotation_does_not_change_counts_or_determinism(tmp_path: Path):
     n_ent = len(data["entities"])
     n_rel = len(data["relationships"])
     n_calls = sum(1 for r in data["relationships"] if r.get("type") == "calls")
+    n_obs = len(data["call_observations"])
     dets = [bool(r.get("is_deterministic")) for r in data["relationships"] if r.get("type") == "calls"]
-    # Re-annotate is idempotent on structure.
+    # Re-annotate is idempotent on entities/rels/calls; observations stay same count
+    # (registry_candidate rows are replaced, not doubled).
+    annotate_byog(data, tmp_path)
     annotate_byog(data, tmp_path)
     assert len(data["entities"]) == n_ent
     assert len(data["relationships"]) == n_rel
     assert sum(1 for r in data["relationships"] if r.get("type") == "calls") == n_calls
+    assert len(data["call_observations"]) == n_obs
     assert [bool(r.get("is_deterministic")) for r in data["relationships"] if r.get("type") == "calls"] == dets
     run = next(e for e in data["entities"] if str(e["title"]).endswith(":run") or e["title"] == "m:run")
     assert run.get("dynamic_dependent") is True
+
+
+def test_reannotating_a_published_snapshot_round_trips(tmp_path: Path):
+    """Stamping a published graph twice must work: parquet returns list columns
+    as numpy arrays, and the first stamp writes the very columns the second reads.
+    """
+    import pandas as pd
+
+    data = build_byog_for_package(package_dir=ROOT / "examples" / "jsonpatch")
+    annotate_byog(data, ROOT / "examples" / "jsonpatch")
+    n_obs = len(data["call_observations"])
+
+    # Round-trip exactly like scripts/python_dynamic.py --graph does.
+    round_tripped = {}
+    for key in ("entities", "relationships", "call_observations"):
+        path = tmp_path / f"{key}.parquet"
+        pd.DataFrame(data[key]).to_parquet(path)
+        round_tripped[key] = pd.read_parquet(path).to_dict("records")
+
+    annotate_byog(round_tripped, ROOT / "examples" / "jsonpatch")
+    assert len(round_tripped["call_observations"]) == n_obs
+    assert len(round_tripped["relationships"]) == len(data["relationships"])
+    apply_obs = next(
+        o
+        for o in round_tripped["call_observations"]
+        if o.get("source") == "jsonpatch:JsonPatch.apply"
+        and str(o.get("display_target")) == "operation.apply"
+    )
+    assert sorted(apply_obs["dynamic_reasons"]) == sorted(
+        next(
+            o
+            for o in data["call_observations"]
+            if o.get("source") == "jsonpatch:JsonPatch.apply"
+            and str(o.get("display_target")) == "operation.apply"
+        )["dynamic_reasons"]
+    )

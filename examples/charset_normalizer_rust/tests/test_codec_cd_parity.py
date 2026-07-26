@@ -132,6 +132,37 @@ def py_euc_jis_encode_entries(encoding: str) -> list[tuple[str, bytes]]:
     return entries
 
 
+def shift_jis_payloads() -> list[bytes]:
+    """Enumerate every non-ASCII Shift-JIS byte form the tables can accept."""
+    payloads = [
+        bytes((lead, trail))
+        for lead in [*range(0x81, 0xA0), *range(0xE0, 0xFD)]
+        for trail in [*range(0x40, 0x7F), *range(0x80, 0xFD)]
+    ]
+    payloads.extend(bytes((trail,)) for trail in range(0xA1, 0xE0))
+    return payloads
+
+
+def py_shift_jis_decode_entries(encoding: str) -> list[tuple[bytes, str]]:
+    entries: list[tuple[bytes, str]] = []
+    for payload in shift_jis_payloads():
+        decoded = py_strict_decode(encoding, payload)
+        if decoded is not None:
+            entries.append((payload, decoded))
+    return entries
+
+
+def py_shift_jis_encode_entries(encoding: str) -> list[tuple[str, bytes]]:
+    entries: list[tuple[str, bytes]] = []
+    for scalar in range(0x80, 0x110000):
+        if 0xD800 <= scalar <= 0xDFFF:
+            continue
+        encoded = py_strict_encode(encoding, chr(scalar))
+        if encoded is not None:
+            entries.append((chr(scalar), encoded))
+    return entries
+
+
 @pytest.fixture(scope="session")
 def rust_probe() -> Path:
     # Build the *probe* helper (separate from production main CLI).
@@ -249,32 +280,23 @@ MB_PROBES: dict[str, list[bytes]] = {
 }
 
 
-# These labels are deliberately outside the bounded representative roundtrip
-# contract: the port uses encoding_rs profiles while Python selects additional
-# ISO-2022/Shift-JIS extension planes. The full list is recorded in
-# PORT_STATUS.md; neither the resolved UTF-7 policy case nor any euc_jis_2004
-# case is excluded here.
-PROFILE_VARIANT_ENCODINGS = {
-    "iso2022_jp_1",
-    "iso2022_jp_2",
-    "iso2022_jp_2004",
-    "iso2022_jp_3",
-    "iso2022_jp_ext",
-    "shift_jis_2004",
-    "shift_jisx0213",
+# These are the ten observed ISO-2022 extension-profile failures. They remain
+# asserted as a quantified scope boundary: Python can encode them and the
+# single encoding_rs ISO-2022-JP profile rejects both directions. They are not
+# skipped, and a future implementation must replace these assertions and the
+# documented refusal with a live oracle parity check.
+PROFILE_VARIANT_CASES = {
+    ("iso2022_jp_1", "MOLIÈRE déjà Noël façade"),
+    ("iso2022_jp_1", "Καλημέρα"),
+    ("iso2022_jp_2", "MOLIÈRE déjà Noël façade"),
+    ("iso2022_jp_2", "Καλημέρα"),
+    ("iso2022_jp_2", "中文测试"),
+    ("iso2022_jp_2", "한글ABC"),
+    ("iso2022_jp_2004", "MOLIÈRE déjà Noël façade"),
+    ("iso2022_jp_3", "MOLIÈRE déjà Noël façade"),
+    ("iso2022_jp_ext", "MOLIÈRE déjà Noël façade"),
+    ("iso2022_jp_ext", "Καλημέρα"),
 }
-PROFILE_VARIANT_TEXTS = {
-    "MOLIÈRE déjà Noël façade",
-    "Καλημέρα",
-    "中文测试",
-    "한글ABC",
-}
-
-# Python's UTF-16 output includes an endian marker (and its UTF-7 direct-set
-# encoding differs). Those output-mode differences are not the strict decode
-# comparison this bounded codec corpus is designed to establish.
-UTF16_OUTPUT_MODE_VARIANT_ENCODINGS = {"utf_16", "utf_16_be", "utf_16_le"}
-UTF7_OUTPUT_MODE_VARIANT_TEXTS = {"MOLIÈRE déjà Noël façade", "Привет мир"}
 
 
 def test_strict_decode_singlebyte_all_bytes(rust_probe: Path) -> None:
@@ -351,12 +373,9 @@ REP_TEXTS: list[str] = [
 
 def test_encode_roundtrips_representative(rust_probe: Path) -> None:
     """Representative codecs plus Python's complete HZ shifted-pair map roundtrip exactly."""
+    observed_variant_cases: set[tuple[str, str]] = set()
     for enc in SUPPORTED_SB + SUPPORTED_MB:
         for text in REP_TEXTS:
-            if (enc in PROFILE_VARIANT_ENCODINGS and text in PROFILE_VARIANT_TEXTS) or (
-                enc in UTF16_OUTPUT_MODE_VARIANT_ENCODINGS
-            ) or (enc == "utf_7" and text in UTF7_OUTPUT_MODE_VARIANT_TEXTS):
-                continue
             py_b = py_strict_encode(enc, text)
             if py_b is None:
                 continue  # not encodable under strict in this enc; skip
@@ -367,7 +386,6 @@ def test_encode_roundtrips_representative(rust_probe: Path) -> None:
                 rs_text = bytes.fromhex(rs_out[3:]).decode("utf-8")
             else:
                 rs_text = None
-            assert rs_text == text, f"decode roundtrip fail {enc} text={text!r}"
 
             # Rust encode of text must produce py_b
             text_hex = text.encode("utf-8").hex()
@@ -376,7 +394,20 @@ def test_encode_roundtrips_representative(rust_probe: Path) -> None:
                 rs_bytes = bytes.fromhex(rs_e_out[3:])
             else:
                 rs_bytes = None
+            if (enc, text) in PROFILE_VARIANT_CASES:
+                observed_variant_cases.add((enc, text))
+                assert rs_text is None, f"scope boundary changed for {enc} text={text!r}"
+                assert rs_bytes is None, f"scope boundary changed for {enc} text={text!r}"
+                continue
+            assert rs_text == text, f"decode roundtrip fail {enc} text={text!r}"
             assert rs_bytes == py_b, f"encode roundtrip fail {enc} text={text!r}: py={py_b!r} rs={rs_bytes!r}"
+
+    # Every declared boundary case must actually be reached and asserted: an
+    # entry Python cannot encode would be skipped above and would sit in the set
+    # as a documented refusal that nothing checks.
+    assert observed_variant_cases == PROFILE_VARIANT_CASES, (
+        "declared but never exercised: " f"{sorted(PROFILE_VARIANT_CASES - observed_variant_cases)}"
+    )
 
     # This one corpus covers every valid HZ shifted pair, so it detects both
     # GB2312-vs-GBK table drift directions without sampling only U+20AC.
@@ -490,6 +521,61 @@ def test_encode_roundtrips_representative(rust_probe: Path) -> None:
     assert run_probe(
         rust_probe, "strict-encode", "euc_jp", euc_jp_encode_text.encode("utf-8").hex()
     ) == f"OK:{euc_jp_encode_payload.hex()}"
+
+    for encoding, expected_decode, expected_encode in (
+        ("shift_jis_2004", 11_296, 11_271),
+        ("shift_jisx0213", 11_286, 11_261),
+    ):
+        shift_decode_entries = py_shift_jis_decode_entries(encoding)
+        assert len(shift_decode_entries) == expected_decode
+        shift_decode_payload = b"|".join(payload for payload, _ in shift_decode_entries)
+        shift_decode_text = "|".join(text for _, text in shift_decode_entries)
+        assert run_probe(
+            rust_probe, "strict-decode", encoding, shift_decode_payload.hex()
+        ) == f"OK:{shift_decode_text.encode('utf-8').hex()}"
+
+        shift_encode_entries = py_shift_jis_encode_entries(encoding)
+        assert len(shift_encode_entries) == expected_encode
+        shift_encode_text = "|".join(text for text, _ in shift_encode_entries)
+        shift_encode_payload = b"|".join(payload for _, payload in shift_encode_entries)
+        assert run_probe(
+            rust_probe, "strict-encode", encoding, shift_encode_text.encode("utf-8").hex()
+        ) == f"OK:{shift_encode_payload.hex()}"
+
+        shift_sequences = [(payload, text) for payload, text in shift_decode_entries if len(text) > 1]
+        assert len(shift_sequences) == 25
+        shift_sequence_text = "|".join(text for _, text in shift_sequences)
+        shift_sequence_payload = b"|".join(payload for payload, _ in shift_sequences)
+        assert run_probe(
+            rust_probe, "strict-encode", encoding, shift_sequence_text.encode("utf-8").hex()
+        ) == f"OK:{shift_sequence_payload.hex()}"
+
+    utf_output_cases = [
+        (encoding, text)
+        for encoding in ("utf_16", "utf_16_be", "utf_16_le")
+        for text in REP_TEXTS
+    ]
+    utf_output_cases.extend(
+        ("utf_7", text) for text in ("MOLIÈRE déjà Noël façade", "Привет мир")
+    )
+    assert len(utf_output_cases) == 23
+    for encoding, text in utf_output_cases:
+        expected = text.encode(encoding, "strict")
+        assert run_probe(
+            rust_probe,
+            "api-output",
+            "utf_8",
+            text.encode("utf-8").hex(),
+            encoding,
+        ) == f"OK:{expected.hex()}"
+
+    # This live expected byte string covers every ASCII direct-set decision,
+    # including the canonical optional UTF-7 shift terminator before direct
+    # punctuation, and the special in-shift plus path.
+    utf7_boundary_text = "".join(f"é{chr(value)}" for value in range(128)) + "é+"
+    assert run_probe(
+        rust_probe, "strict-encode", "utf_7", utf7_boundary_text.encode("utf-8").hex()
+    ) == f"OK:{utf7_boundary_text.encode('utf_7').hex()}"
 
 
 def test_output_roundtrip_via_match_hack(rust_probe: Path) -> None:

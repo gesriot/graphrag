@@ -139,6 +139,7 @@ def render_python_codecs() -> str:
 
     lines.extend(render_hz_tables())
     lines.extend(render_euc_jis_tables())
+    lines.extend(render_shift_jis_tables())
 
     existing = (SRC / "python_codecs.rs").read_text()
     helper_start = existing.index("pub(crate) fn is_charmap_encoding")
@@ -308,6 +309,98 @@ def render_euc_jis_tables() -> list[str]:
     lines = render_euc_jis_table("euc_jis_2004", "EUC_JIS_2004")
     lines.extend(render_euc_jis_table("euc_jisx0213", "EUC_JISX0213"))
     lines.extend(render_euc_jis_table("euc_jp", "EUC_JP"))
+    return lines
+
+
+def shift_jis_payloads() -> list[bytes]:
+    """Return every non-ASCII one- or two-byte Shift-JIS form to probe."""
+    payloads = [
+        bytes((lead, trail))
+        for lead in [*range(0x81, 0xA0), *range(0xE0, 0xFD)]
+        for trail in [*range(0x40, 0x7F), *range(0x80, 0xFD)]
+    ]
+    payloads.extend(bytes((trail,)) for trail in range(0xA1, 0xE0))
+    return payloads
+
+
+def collect_shift_jis_decode(encoding: str) -> list[tuple[int, str]]:
+    decoded: list[tuple[int, str]] = []
+    for payload in shift_jis_payloads():
+        try:
+            text = payload.decode(encoding, "strict")
+        except UnicodeDecodeError:
+            continue
+        decoded.append((pack_bytes(payload), text))
+    return sorted(decoded)
+
+
+def collect_shift_jis_encode(encoding: str) -> list[tuple[int, int, int]]:
+    encoded: list[tuple[int, int, int]] = []
+    for scalar in range(0x80, 0x110000):
+        if 0xD800 <= scalar <= 0xDFFF:
+            continue
+        try:
+            payload = chr(scalar).encode(encoding, "strict")
+        except UnicodeEncodeError:
+            continue
+        encoded.append((scalar, pack_bytes(payload), len(payload)))
+    return encoded
+
+
+def render_shift_jis_table(encoding: str, const_prefix: str) -> list[str]:
+    """Render one strict Python Shift-JIS-X-0213 profile, including sequences."""
+    decoded = collect_shift_jis_decode(encoding)
+    encoded = collect_shift_jis_encode(encoding)
+    sequence_encodes: list[tuple[str, int, int]] = []
+    for packed, text in decoded:
+        if len(text) <= 1:
+            continue
+        payload = text.encode(encoding, "strict")
+        expected_length = 1 if packed <= 0xFF else 2
+        if (pack_bytes(payload), len(payload)) != (packed, expected_length):
+            raise RuntimeError(
+                f"{encoding} sequence {text!r} does not encode canonically to {packed:X}"
+            )
+        sequence_encodes.append((text, packed, expected_length))
+
+    if len({scalar for scalar, _, _ in encoded}) != len(encoded):
+        raise RuntimeError(f"Python {encoding} scalar encoder is not one-to-one")
+
+    lines = [
+        f"// Generated from Python stdlib's strict `{encoding}` codec.",
+        "// encoding_rs has only a Shift-JIS profile, not these JIS X 0213 maps.",
+        "",
+        f"const {const_prefix}_DECODE: &[(u16, &str)] = &[",
+    ]
+    for index in range(0, len(decoded), 2):
+        row = decoded[index : index + 2]
+        lines.append(
+            "    "
+            + ", ".join(f"(0x{packed:X}, {rust_string(text)})" for packed, text in row)
+            + ","
+        )
+    lines.extend(["];", "", f"const {const_prefix}_ENCODE: &[(u32, u16, u8)] = &["])
+    for index in range(0, len(encoded), 4):
+        row = encoded[index : index + 4]
+        lines.append(
+            "    "
+            + ", ".join(
+                f"(0x{scalar:X}, 0x{packed:X}, {length})"
+                for scalar, packed, length in row
+            )
+            + ","
+        )
+    lines.extend(["];", "", f"const {const_prefix}_SEQUENCE_ENCODE: &[(&str, u16, u8)] = &["])
+    for text, packed, length in sequence_encodes:
+        lines.append(f"    ({rust_string(text)}, 0x{packed:X}, {length}),")
+    lines.extend(["];", ""])
+    return lines
+
+
+def render_shift_jis_tables() -> list[str]:
+    """Render the two supported Python Shift-JIS-X-0213 profiles."""
+    lines = render_shift_jis_table("shift_jis_2004", "SHIFT_JIS_2004")
+    lines.extend(render_shift_jis_table("shift_jisx0213", "SHIFT_JISX0213"))
     return lines
 
 
