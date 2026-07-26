@@ -25332,6 +25332,21 @@ pub(crate) fn encode_johab_strict(text: &str) -> Option<Vec<u8>> {
     Some(encoded)
 }
 
+pub(crate) fn encode_johab_replace(text: &str) -> Vec<u8> {
+    let mut encoded = Vec::with_capacity(text.len());
+    for ch in text.chars() {
+        if ch.is_ascii() {
+            encoded.push(ch as u8);
+        } else if let Some(pair) = find_pair(JOHAB_PAIRS, ch) {
+            encoded.push((pair >> 8) as u8);
+            encoded.push((pair & 0xff) as u8);
+        } else {
+            encoded.push(b'?');
+        }
+    }
+    encoded
+}
+
 pub(crate) fn decode_iso2022_kr_strict(payload: &[u8]) -> Option<String> {
     let mut decoded = String::with_capacity(payload.len());
     let mut designated = false;
@@ -25407,6 +25422,46 @@ pub(crate) fn encode_iso2022_kr_strict(text: &str) -> Option<Vec<u8>> {
     }
 
     Some(encoded)
+}
+
+pub(crate) fn encode_iso2022_kr_replace(text: &str) -> Vec<u8> {
+    let needs_designator = text.chars().any(|ch| !ch.is_ascii());
+    let mut encoded = Vec::with_capacity(text.len() + 8);
+    if needs_designator {
+        encoded.extend_from_slice(ISO2022_KR_DESIGNATOR);
+    }
+
+    let mut shifted = false;
+    for ch in text.chars() {
+        if ch.is_ascii() {
+            if shifted {
+                encoded.push(0x0f);
+                shifted = false;
+            }
+            encoded.push(ch as u8);
+            continue;
+        }
+
+        if let Some(pair) = find_pair(ISO2022_KR_PAIRS, ch) {
+            if !shifted {
+                encoded.push(0x0e);
+                shifted = true;
+            }
+            encoded.push((pair >> 8) as u8);
+            encoded.push((pair & 0xff) as u8);
+        } else {
+            if shifted {
+                encoded.push(0x0f);
+                shifted = false;
+            }
+            encoded.push(b'?');
+        }
+    }
+
+    if shifted {
+        encoded.push(0x0f);
+    }
+    encoded
 }
 
 fn lookup_pair(table: &[(u16, u32)], key: u16) -> Option<char> {

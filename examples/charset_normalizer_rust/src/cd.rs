@@ -129,6 +129,11 @@ fn target_features(language: &str) -> (bool, bool) {
     (target_have_accents, target_pure_latin)
 }
 
+/// Public helper corresponding to Python's `cd.get_target_features`.
+pub fn get_target_features(language: &str) -> (bool, bool) {
+    target_features(language)
+}
+
 fn sort_by_ratio_desc<T: AsRef<str>>(items: &mut [(T, f64)]) {
     // Python's sorted(..., key=ratio, reverse=True) is stable. The caller's
     // candidate order carries the upstream tie-break, so preserve it for
@@ -136,7 +141,7 @@ fn sort_by_ratio_desc<T: AsRef<str>>(items: &mut [(T, f64)]) {
     items.sort_by(|a, b| b.1.total_cmp(&a.1));
 }
 
-fn filter_alt_coherence_matches(results: CoherenceMatches) -> CoherenceMatches {
+pub fn filter_alt_coherence_matches(results: CoherenceMatches) -> CoherenceMatches {
     let mut order: Vec<String> = Vec::new();
     let mut ratios: HashMap<String, Vec<f64>> = HashMap::new();
 
@@ -176,7 +181,7 @@ fn is_unicode_range_secondary(range: &str) -> bool {
         .any(|keyword| range.contains(keyword))
 }
 
-fn unicode_range_languages(primary_range: &str) -> Vec<String> {
+pub fn unicode_range_languages(primary_range: &str) -> Vec<String> {
     let mut languages = Vec::new();
 
     for &language in LANGUAGE_ORDER {
@@ -252,7 +257,7 @@ fn fallback_encoding_languages(name: &str) -> Option<Vec<String>> {
     primary_range.map(unicode_range_languages)
 }
 
-fn encoding_unicode_range(name: &str) -> Vec<String> {
+pub fn encoding_unicode_range(name: &str) -> Vec<String> {
     if is_multi_byte_encoding(name) {
         return Vec::new();
     }

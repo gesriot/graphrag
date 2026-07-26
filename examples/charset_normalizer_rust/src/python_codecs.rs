@@ -1475,6 +1475,23 @@ pub(crate) fn encode_charmap_strict(name: &str, text: &str) -> Option<Vec<u8>> {
     Some(encoded)
 }
 
+/// Python's `str.encode(name, "replace")` behavior for generated single-byte
+/// charmaps: each scalar without a mapping becomes ASCII question mark.
+pub(crate) fn encode_charmap_replace(name: &str, text: &str) -> Option<Vec<u8>> {
+    let table = table(name)?;
+    let mut encoded = Vec::with_capacity(text.len());
+    for ch in text.chars() {
+        let value = ch as u32;
+        let byte = table
+            .iter()
+            .position(|&candidate| candidate == value)
+            .map(|index| index as u8)
+            .unwrap_or(b'?');
+        encoded.push(byte);
+    }
+    Some(encoded)
+}
+
 pub(crate) fn decode_hz_strict(payload: &[u8]) -> Option<String> {
     encoding::all::HZ.decode(payload, DecoderTrap::Strict).ok()
 }
@@ -1483,6 +1500,26 @@ pub(crate) fn encode_hz_strict(text: &str) -> Option<Vec<u8>> {
     let mut encoded = encoding::all::HZ.encode(text, EncoderTrap::Strict).ok()?;
     if hz_is_shifted_open(&encoded) {
         encoded.extend_from_slice(b"~}");
+    }
+    Some(encoded)
+}
+
+pub(crate) fn encode_hz_replace(text: &str) -> Option<Vec<u8>> {
+    if let Some(encoded) = encode_hz_strict(text) {
+        if decode_hz_strict(&encoded).as_deref() == Some(text) {
+            return Some(encoded);
+        }
+    }
+
+    let mut encoded = Vec::with_capacity(text.len());
+    for character in text.chars() {
+        let character = character.to_string();
+        match encode_hz_strict(&character) {
+            Some(bytes) if decode_hz_strict(&bytes).as_deref() == Some(character.as_str()) => {
+                encoded.extend_from_slice(&bytes);
+            }
+            _ => encoded.push(b'?'),
+        }
     }
     Some(encoded)
 }

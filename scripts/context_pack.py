@@ -86,8 +86,49 @@ def get_neighbors(rels: pd.DataFrame, entity_id: str, entity_title: str) -> List
     return rels[mask].to_dict(orient="records")
 
 
+def _json_safe(val: Any) -> Any:
+    """Convert numpy/pandas values to plain Python for JSON serialization."""
+    if val is None:
+        return None
+    if isinstance(val, (str, int, float, bool)):
+        return val
+    if isinstance(val, (list, tuple)):
+        return [_json_safe(x) for x in val]
+    if isinstance(val, dict):
+        return {str(k): _json_safe(v) for k, v in val.items()}
+    # numpy ndarray / pandas extension arrays
+    if hasattr(val, "tolist") and not isinstance(val, (bytes, memoryview)):
+        try:
+            return _json_safe(val.tolist())
+        except Exception:
+            pass
+    # numpy scalar (bool_, int64, …)
+    if hasattr(val, "item"):
+        try:
+            return _json_safe(val.item())
+        except Exception:
+            pass
+    try:
+        if pd.isna(val):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return val
+
+
+def _as_bool(val: Any) -> bool:
+    v = _json_safe(val)
+    if v is None:
+        return False
+    return bool(v)
+
+
+def _reasons_list(val: Any) -> List[str]:
+    return [str(x) for x in _to_list(val) if x is not None and str(x) not in ("", "nan", "None")]
+
+
 def compact_relationship(rel: Dict[str, Any]) -> Dict[str, Any]:
-    return {
+    out: Dict[str, Any] = {
         "id": rel.get("id"),
         "source": rel.get("source"),
         "target": rel.get("target"),
@@ -95,6 +136,14 @@ def compact_relationship(rel: Dict[str, Any]) -> Dict[str, Any]:
         "description": rel.get("description"),
         "weight": rel.get("weight"),
     }
+    # Surface preprocessor provenance on edges so a porting agent sees
+    # configuration-conditional call sites without digging into parquet columns.
+    if "preprocessor_dependent" in rel and _as_bool(rel.get("preprocessor_dependent")):
+        out["preprocessor_dependent"] = True
+        reasons = _reasons_list(rel.get("preprocessor_reasons"))
+        if reasons:
+            out["preprocessor_reasons"] = reasons
+    return out
 
 
 def _to_list(val: Any) -> List[Any]:
@@ -157,20 +206,61 @@ def pack(
     neighbors = get_neighbors(rels, str(ent_dict.get("id", "")), str(ent_dict.get("title", "")))
     texts = get_text_units(tus, ent, neighbors if neighbor_text else [])
 
+    entity_fields = {
+        k: _json_safe(v) for k, v in ent_dict.items()
+        if k in (
+            "id", "title", "type", "description", "source_file", "span",
+            "extractor", "confidence", "is_deterministic",
+            # C frontend honesty: tree-sitter cannot resolve the preprocessor.
+            "preprocessor_dependent", "preprocessor_reasons",
+        )
+    }
+    # Normalize reasons to plain str lists (parquet may yield ndarrays).
+    if "preprocessor_reasons" in entity_fields:
+        entity_fields["preprocessor_reasons"] = _reasons_list(entity_fields.get("preprocessor_reasons"))
+    if "preprocessor_dependent" in entity_fields:
+        entity_fields["preprocessor_dependent"] = _as_bool(entity_fields.get("preprocessor_dependent"))
+
     pack: Dict[str, Any] = {
         "symbol": ent_dict.get("title"),
         "purpose": purpose,
-        "entity": {
-            k: v for k, v in ent_dict.items()
-            if k in (
-                "id", "title", "type", "description", "source_file", "span",
-                "extractor", "confidence", "is_deterministic",
-                # C frontend honesty: tree-sitter cannot resolve the preprocessor.
-                "preprocessor_dependent", "preprocessor_reasons",
-            )
-        },
+        "entity": entity_fields,
         "neighbors": [compact_relationship(nr) for nr in neighbors[:30]],
     }
+
+    # Make preprocessor dependence impossible to miss: top-level warning +
+    # structured summary. Detection only — not macro expansion or types.
+    entity_pp = _as_bool(ent_dict.get("preprocessor_dependent"))
+    entity_reasons = _reasons_list(ent_dict.get("preprocessor_reasons"))
+    flagged_neighbor_calls = [
+        n for n in pack["neighbors"]
+        if str(n.get("type", "")) == "calls" and n.get("preprocessor_dependent")
+    ]
+    if entity_pp or flagged_neighbor_calls:
+        sample_reasons = entity_reasons[:10]
+        if not sample_reasons and flagged_neighbor_calls:
+            sample_reasons = _reasons_list(flagged_neighbor_calls[0].get("preprocessor_reasons"))[:10]
+        pack["preprocessor_warning"] = (
+            "PREPROCESSOR-DEPENDENT (tree-sitter C frontend): this symbol and/or "
+            "its call edges sit inside #if/#ifdef regions or involve function-like "
+            "macros. The extractor does NOT expand macros, evaluate conditionals, "
+            "or resolve typedef chains — labels are provenance only and do not "
+            f"demote is_deterministic. entity_flagged={entity_pp}; "
+            f"flagged_neighbor_calls={len(flagged_neighbor_calls)}; "
+            f"sample_reasons={sample_reasons}."
+        )
+        pack["preprocessor"] = {
+            "entity_dependent": entity_pp,
+            "entity_reasons": entity_reasons,
+            "flagged_neighbor_calls": len(flagged_neighbor_calls),
+            "flagged_call_targets": sorted({
+                str(n.get("target")) for n in flagged_neighbor_calls if n.get("target")
+            }),
+            "note": (
+                "Detection only (scripts/c_preprocessor.py). Not clang macro "
+                "expansion, include resolution, or type facts."
+            ),
+        }
 
     # Auto-detect module/subsystem pack
     is_module_pack = str(ent_dict.get("type", "")).lower() == "module"
@@ -266,15 +356,20 @@ def pack(
         })
 
     # Augment the pack we built earlier
+    provenance: Dict[str, Any] = {
+        "source_file": _json_safe(ent_dict.get("source_file")),
+        "span": _json_safe(ent_dict.get("span")),
+        "extractor": _json_safe(ent_dict.get("extractor")),
+        "confidence": _json_safe(ent_dict.get("confidence")),
+        "is_deterministic": _json_safe(ent_dict.get("is_deterministic")),
+    }
+    if "preprocessor_dependent" in ent_dict:
+        provenance["preprocessor_dependent"] = entity_pp
+        if entity_reasons:
+            provenance["preprocessor_reasons"] = entity_reasons
     pack.update({
         "text_units": packed_texts,
-        "provenance": {
-            "source_file": ent_dict.get("source_file"),
-            "span": ent_dict.get("span"),
-            "extractor": ent_dict.get("extractor"),
-            "confidence": ent_dict.get("confidence"),
-            "is_deterministic": ent_dict.get("is_deterministic"),
-        },
+        "provenance": provenance,
         "golden_contract_note": golden_note if golden_note else None,
         "behavior_contract": "examples/mini_game/tests/behavior_contract.json (load for machine-readable invariants and expected values per scenario)" if is_mini_game_graph else None,
         "usage_hint": "Use this pack + the original source of the listed files when prompting an LLM to port the symbol to Rust while preserving exact observable behavior on the golden inputs.",
@@ -300,13 +395,19 @@ def pack(
             if len(relevant) > 0:
                 uncertain = []
                 for _, o in relevant.iterrows():
-                    uncertain.append({
+                    entry: Dict[str, Any] = {
                         "source": str(o.get("source", "")),
                         "display_target": str(o.get("display_target", "")),
-                        "confidence": float(o.get("confidence", 0.0)),
+                        "confidence": float(o.get("confidence", 0.0) or 0.0),
                         "reason": str(o.get("reason", "")),
                         "provenance": f"{o.get('source_file', '')}:{o.get('span', '')}",
-                    })
+                    }
+                    if "preprocessor_dependent" in o.index and _as_bool(o.get("preprocessor_dependent")):
+                        entry["preprocessor_dependent"] = True
+                        reasons = _reasons_list(o.get("preprocessor_reasons"))
+                        if reasons:
+                            entry["preprocessor_reasons"] = reasons
+                    uncertain.append(entry)
                 pack["uncertain_calls"] = uncertain
                 pack["analysis_note"] = "Some call sites were tracked with low confidence or ambiguity (see uncertain_calls). Review during port."
         except Exception:

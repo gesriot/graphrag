@@ -39,7 +39,7 @@ The bootstrap captures the facts that matter for ownership analysis:
   `memcpy`/`memset`/`strlen` are weak observations, never core deterministic
   edges, so heap ownership is visible but not silently promoted.
 
-## Verified graph result (`byog_cjson`, snapshot `20260625-123603-a5400f50`)
+## Verified graph result (`byog_cjson`, snapshot `20260726-030425-ca3fc280`)
 The published graph also contains the co-located golden runner
 (`tests/parse/runner.c`) as package code, the same way `jsmn`/`inih` do:
 - 131 entities, 367 relationships, 131 text units, 125 call observations.
@@ -53,6 +53,14 @@ The published graph also contains the co-located golden runner
   deterministic calls; the remaining edges are the runner's own helpers.
 - Resolved entry chains: `cJSON_Parse -> cJSON_ParseWithOpts`,
   `cJSON_ParseWithLength -> cJSON_ParseWithLengthOpts`.
+- Preprocessor provenance (2026-07-26): stamped **in place** on this structural
+  snapshot (6/131 entities, 0/239 calls, 69/125 observations flagged). A full
+  reindex is **not** behaviour-preserving: `tests/parse/runner.c` grew mutation
+  helpers after this graph was built, so a fresh extract yields 145 entities /
+  495 calls while the library subgraph stays 125 entities / 188 calls. The
+  provenance commit deliberately did not fold that runner growth into the
+  published counts. Reindexing the library+mutation runner is a separate
+  decision.
 
 ## Regression
 - `examples/cjson/tests/test_cjson_extract.py` locks the struct graph, the

@@ -1,4 +1,4 @@
-use encoding_rs::Encoding;
+use encoding_rs::{EncoderResult, Encoding};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
@@ -351,6 +351,207 @@ pub struct CharsetMatch {
     pub submatches: Vec<CharsetMatch>,
 }
 
+/// Rejection reason for direct submatch insertion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddSubmatchError {
+    SameMatch,
+}
+
+/// Typed counterpart to Python's module-level `CliDetectionResult`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CliDetectionResult {
+    pub path: String,
+    pub unicode_path: Option<String>,
+    pub encoding: Option<String>,
+    pub encoding_aliases: Vec<String>,
+    pub alternative_encodings: Vec<String>,
+    pub language: String,
+    pub alphabets: Vec<String>,
+    pub has_sig_or_bom: bool,
+    pub chaos: f64,
+    pub coherence: f64,
+    pub is_preferred: bool,
+}
+
+impl CliDetectionResult {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        path: String,
+        encoding: Option<String>,
+        encoding_aliases: Vec<String>,
+        alternative_encodings: Vec<String>,
+        language: String,
+        alphabets: Vec<String>,
+        has_sig_or_bom: bool,
+        chaos: f64,
+        coherence: f64,
+        unicode_path: Option<String>,
+        is_preferred: bool,
+    ) -> Self {
+        Self {
+            path,
+            unicode_path,
+            encoding,
+            encoding_aliases,
+            alternative_encodings,
+            language,
+            alphabets,
+            has_sig_or_bom,
+            chaos,
+            coherence,
+            is_preferred,
+        }
+    }
+
+    /// Match Python `CliDetectionResult.to_json()` (`ensure_ascii=True`, indent 4).
+    pub fn to_json(&self) -> String {
+        let mut output = String::new();
+        output.push_str("{\n");
+        push_json_string_field(&mut output, "path", &self.path, true);
+        push_json_optional_string_field(&mut output, "encoding", self.encoding.as_deref(), true);
+        push_json_array_field(
+            &mut output,
+            "encoding_aliases",
+            &self.encoding_aliases,
+            true,
+        );
+        push_json_array_field(
+            &mut output,
+            "alternative_encodings",
+            &self.alternative_encodings,
+            true,
+        );
+        push_json_string_field(&mut output, "language", &self.language, true);
+        push_json_array_field(&mut output, "alphabets", &self.alphabets, true);
+        push_json_bool_field(&mut output, "has_sig_or_bom", self.has_sig_or_bom, true);
+        push_json_number_field(&mut output, "chaos", self.chaos, true);
+        push_json_number_field(&mut output, "coherence", self.coherence, true);
+        push_json_optional_string_field(
+            &mut output,
+            "unicode_path",
+            self.unicode_path.as_deref(),
+            true,
+        );
+        push_json_bool_field(&mut output, "is_preferred", self.is_preferred, false);
+        output.push('}');
+        output
+    }
+}
+
+fn push_json_string_field(output: &mut String, key: &str, value: &str, comma: bool) {
+    output.push_str("    ");
+    push_json_string(output, key);
+    output.push_str(": ");
+    push_json_string(output, value);
+    if comma {
+        output.push(',');
+    }
+    output.push('\n');
+}
+
+fn push_json_optional_string_field(
+    output: &mut String,
+    key: &str,
+    value: Option<&str>,
+    comma: bool,
+) {
+    output.push_str("    ");
+    push_json_string(output, key);
+    output.push_str(": ");
+    match value {
+        Some(value) => push_json_string(output, value),
+        None => output.push_str("null"),
+    }
+    if comma {
+        output.push(',');
+    }
+    output.push('\n');
+}
+
+fn push_json_array_field(output: &mut String, key: &str, values: &[String], comma: bool) {
+    output.push_str("    ");
+    push_json_string(output, key);
+    output.push_str(": ");
+    if values.is_empty() {
+        output.push_str("[]");
+    } else {
+        output.push_str("[\n");
+        for (index, value) in values.iter().enumerate() {
+            output.push_str("        ");
+            push_json_string(output, value);
+            if index + 1 != values.len() {
+                output.push(',');
+            }
+            output.push('\n');
+        }
+        output.push_str("    ]");
+    }
+    if comma {
+        output.push(',');
+    }
+    output.push('\n');
+}
+
+fn push_json_bool_field(output: &mut String, key: &str, value: bool, comma: bool) {
+    output.push_str("    ");
+    push_json_string(output, key);
+    output.push_str(if value { ": true" } else { ": false" });
+    if comma {
+        output.push(',');
+    }
+    output.push('\n');
+}
+
+fn push_json_number_field(output: &mut String, key: &str, value: f64, comma: bool) {
+    output.push_str("    ");
+    push_json_string(output, key);
+    output.push_str(": ");
+    if value.is_nan() {
+        output.push_str("NaN");
+    } else if value == f64::INFINITY {
+        output.push_str("Infinity");
+    } else if value == f64::NEG_INFINITY {
+        output.push_str("-Infinity");
+    } else if value.fract() == 0.0 {
+        output.push_str(&format!("{value:.1}"));
+    } else {
+        output.push_str(&value.to_string());
+    }
+    if comma {
+        output.push(',');
+    }
+    output.push('\n');
+}
+
+fn push_json_string(output: &mut String, value: &str) {
+    output.push('"');
+    for character in value.chars() {
+        match character {
+            '"' => output.push_str("\\\""),
+            '\\' => output.push_str("\\\\"),
+            '\u{08}' => output.push_str("\\b"),
+            '\u{0c}' => output.push_str("\\f"),
+            '\n' => output.push_str("\\n"),
+            '\r' => output.push_str("\\r"),
+            '\t' => output.push_str("\\t"),
+            character if character <= '\u{1f}' => {
+                output.push_str(&format!("\\u{:04x}", character as u32));
+            }
+            character if character <= '\u{7f}' => output.push(character),
+            character if character <= '\u{ffff}' => {
+                output.push_str(&format!("\\u{:04x}", character as u32));
+            }
+            character => {
+                let scalar = character as u32 - 0x1_0000;
+                let high = 0xd800 + (scalar >> 10);
+                let low = 0xdc00 + (scalar & 0x3ff);
+                output.push_str(&format!("\\u{high:04x}\\u{low:04x}"));
+            }
+        }
+    }
+    output.push('"');
+}
+
 pub(crate) fn canonical_encoding_name(cp_name: &str, strict: bool) -> Option<String> {
     let cp_name = cp_name.to_ascii_lowercase().replace('-', "_");
 
@@ -496,6 +697,24 @@ impl CharsetMatch {
         self.bom
     }
 
+    /// Add a distinct match as a directly owned submatch.
+    ///
+    /// Rust's static type makes Python's non-`CharsetMatch` rejection
+    /// inexpressible; same-match rejection follows Python's encoding plus
+    /// decoded-fingerprint equality rule.
+    pub fn add_submatch(&mut self, other: CharsetMatch) -> Result<(), AddSubmatchError> {
+        let same_match = self.encoding == other.encoding
+            && matches!(
+                (self.fingerprint(), other.fingerprint()),
+                (Some(left), Some(right)) if left == right
+            );
+        if same_match {
+            return Err(AddSubmatchError::SameMatch);
+        }
+        self.submatches.push(other);
+        Ok(())
+    }
+
     pub fn submatch(&self) -> &[CharsetMatch] {
         &self.submatches
     }
@@ -511,7 +730,22 @@ impl CharsetMatch {
         charsets
     }
 
+    /// Re-encode with Python `CharsetMatch.output(encoding)` replacement semantics.
     pub fn output(&self, encoding: &str) -> Option<Vec<u8>> {
+        self.output_impl(encoding, true)
+    }
+
+    /// Preserve the strict encoding operation used by the codec differential.
+    pub fn output_strict(&self, encoding: &str) -> Option<Vec<u8>> {
+        self.output_impl(encoding, false)
+    }
+
+    /// Rust's explicit counterpart to Python's zero-argument `output()`.
+    pub fn output_default(&self) -> Option<Vec<u8>> {
+        self.output("utf_8")
+    }
+
+    fn output_impl(&self, encoding: &str, replacement: bool) -> Option<Vec<u8>> {
         let mut decoded = self.decoded()?;
         let norm = encoding.to_ascii_lowercase().replace('-', "_");
         if let Some(patched) = self.patch_preemptive_declaration(&decoded, &norm) {
@@ -522,7 +756,11 @@ impl CharsetMatch {
         }
 
         if crate::python_codecs::is_charmap_encoding(&norm) {
-            return crate::python_codecs::encode_charmap_strict(&norm, &decoded);
+            return if replacement {
+                crate::python_codecs::encode_charmap_replace(&norm, &decoded)
+            } else {
+                crate::python_codecs::encode_charmap_strict(&norm, &decoded)
+            };
         }
 
         if let Some(bytes) = crate::python_codecs::encode_utf32_strict(&norm, &decoded) {
@@ -534,15 +772,27 @@ impl CharsetMatch {
         }
 
         if norm == "hz" {
-            return crate::python_codecs::encode_hz_strict(&decoded);
+            return if replacement {
+                crate::python_codecs::encode_hz_replace(&decoded)
+            } else {
+                crate::python_codecs::encode_hz_strict(&decoded)
+            };
         }
 
         if norm == "johab" {
-            return crate::korean_codecs::encode_johab_strict(&decoded);
+            return if replacement {
+                Some(crate::korean_codecs::encode_johab_replace(&decoded))
+            } else {
+                crate::korean_codecs::encode_johab_strict(&decoded)
+            };
         }
 
         if norm == "iso2022_kr" {
-            return crate::korean_codecs::encode_iso2022_kr_strict(&decoded);
+            return if replacement {
+                Some(crate::korean_codecs::encode_iso2022_kr_replace(&decoded))
+            } else {
+                crate::korean_codecs::encode_iso2022_kr_strict(&decoded)
+            };
         }
 
         let label = if let Some(l) = crate::encoding_label(&norm, false, &[]) {
@@ -555,15 +805,19 @@ impl CharsetMatch {
         } else {
             Encoding::for_label(norm.as_bytes())?
         };
-        let (bytes, _, _had_errors) = enc.encode(&decoded);
-        if _had_errors {
+        if replacement {
+            return encode_encoding_rs_replace(enc, &decoded);
+        }
+
+        let (bytes, _, had_errors) = enc.encode(&decoded);
+        if had_errors && !replacement {
             return None;
         }
         Some(bytes.into_owned())
     }
 
     pub fn output_utf8(&self) -> Option<Vec<u8>> {
-        self.output("utf_8")
+        self.output_default()
     }
 
     fn patch_preemptive_declaration(&self, decoded: &str, target_encoding: &str) -> Option<String> {
@@ -590,6 +844,37 @@ impl CharsetMatch {
         patched.push_str(&header[value_end..]);
         patched.push_str(tail);
         Some(patched)
+    }
+}
+
+/// `encoding_rs` replaces unmappable scalars with HTML numeric references.
+/// Python's `str.encode(..., "replace")` uses question marks instead, so use
+/// the no-replacement encoder and insert the Python replacement explicitly.
+fn encode_encoding_rs_replace(encoding: &'static Encoding, text: &str) -> Option<Vec<u8>> {
+    let mut encoder = encoding.new_encoder();
+    let mut output = Vec::with_capacity(text.len());
+    let mut remaining = text;
+
+    loop {
+        output.reserve(remaining.len().saturating_mul(4).saturating_add(16));
+        let (result, read) =
+            encoder.encode_from_utf8_to_vec_without_replacement(remaining, &mut output, true);
+        if read > remaining.len() || !remaining.is_char_boundary(read) {
+            return None;
+        }
+        remaining = &remaining[read..];
+
+        match result {
+            EncoderResult::InputEmpty => return Some(output),
+            EncoderResult::OutputFull => continue,
+            EncoderResult::Unmappable(_) => {
+                output.push(b'?');
+                if read == 0 {
+                    let character = remaining.chars().next()?;
+                    remaining = &remaining[character.len_utf8()..];
+                }
+            }
+        }
     }
 }
 

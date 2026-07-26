@@ -17,12 +17,12 @@ This is an experiment using the graphrag-code deterministic extraction + context
 - ✅ Legacy chardet-style wrapper: `detect_legacy(byte_str, should_rename_legacy)`, `detect_chardet_compatible(byte_str)` (defaults to rename=false for chardet names), `LegacyDetectionResult`; includes upstream `CHARDET_CORRESPONDENCE` and small-sample/BOM post-processing. Note: top-level `detect(&[u8]) -> Option<CharsetMatch>` is preserved as the simple modern best-match path (different from Python's `detect` which is the legacy entrypoint).
 - ✅ `CharsetMatch` surface slice:
   - `decoded()`
-  - `output_utf8()` and `output(target_encoding)`
+  - replacement-mode `output(target_encoding)`, explicit `output_default()`, and `output_strict(target_encoding)` for codec probes
   - preemptive declaration patching in `output()` for `encoding` / `charset` / `coding` headers
   - `alphabets()` and `byte_order_mark()`
   - `languages()`, `percent_chaos()`, `percent_coherence()`, `multi_byte_usage()`, `fingerprint()`
   - full Python-order `encoding_aliases()` table from `encodings.aliases`
-  - `submatch()`, `has_submatch()`, `could_be_from_charset()`
+  - `add_submatch()`, `submatch()`, `has_submatch()`, `could_be_from_charset()`
   - `CharsetMatches::append()` factors identical decoded payloads into submatches
   - `CharsetMatches::first()`, `len()`, `is_empty()`, `iter()`, indexed lookup, alias lookup, and borrowed iteration.
 - ✅ Python-compatible codec backend for the upstream `IANA_SUPPORTED` set:
@@ -84,7 +84,7 @@ Distinctions:
 - Expected xfails: 2 adversarial detector cases with unstable best-encoding tie-breaks (bom8_badcont, short_high), plus 2 low-level codec-policy cases (UTF-7 SIG/BOM policy vs raw, euc_jis_2004 extension vs encoding_rs). short_20 resolved. Documented in pytest files with stable assertions added for the detector xfails. Single-byte codecs exact; most MB via encoding_rs/custom Korean/HZ/UTF special handling; rare MB table variants documented.
 - Untested in default runs: broad random corpora and exhaustive multibyte variant tables beyond representative probes. 100k+ scale is covered by the opt-in harness (see below).
 
-API availability is itemized in `API_SURFACE_AUDIT.md`: it distinguishes covered typed APIs, deliberate exclusions (global logging and the same-name legacy `detect` behavior), Python-only mechanics, and surfaces simply not done (including direct submatch mutation, replacement-mode `output`, and non-root helper APIs).
+API availability is itemized in `API_SURFACE_AUDIT.md`: it distinguishes covered typed APIs (including `CliDetectionResult`, direct submatches, replacement/default output, and callable helper modules), deliberate exclusions (global logging and the same-name legacy `detect` behavior), and Python-only mechanics.
 
 ## Reproduce the porting rails
 1. `uv run python scripts/context_pack.py "api:from_bytes" --graph byog_charset_normalizer --full-text`

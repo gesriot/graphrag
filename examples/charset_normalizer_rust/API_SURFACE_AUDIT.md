@@ -17,9 +17,9 @@ covered API.
 The inventory was derived from the vendored source, rather than recalled:
 
 ```bash
-rg -n '^def |^class ' examples/charset_normalizer/{__init__,api,legacy,models,version}.py
+rg -n '^def |^class ' examples/charset_normalizer/{__init__,api,legacy,models,version,utils,cd,md}.py
 rg -n '^def |^class ' examples/charset_normalizer/cli/__main__.py
-rg -n '^pub (fn|struct|enum|const|type)' examples/charset_normalizer_rust/src/{lib,models}.rs
+rg -n '^pub (fn|struct|enum|const|type)' examples/charset_normalizer_rust/src/{lib,models,utils,cd,md}.rs
 ```
 
 The category has a deliberately narrow meaning:
@@ -70,8 +70,8 @@ The category has a deliberately narrow meaning:
 | `alphabets` | `alphabets() -> Vec<String>`. | Covered |
 | `could_be_from_charset` | `could_be_from_charset() -> Vec<String>`. | Covered |
 | `fingerprint` | `fingerprint() -> Option<u64>`. Hash width and process seeding are Rust-specific. | Covered (typed adaptation) |
-| `output(encoding="utf_8")` | `output(encoding: &str) -> Option<Vec<u8>>` and `output_utf8()`. Rust rejects non-encodable output; Python encodes with `"replace"`, and Rust has no zero-argument `output()`. | Simply not done — replacement-mode output and exact default-call surface are absent. |
-| `add_submatch(other)` | No direct public method; `CharsetMatches::append` performs its own deduplication/submatch factoring. | Simply not done — direct caller-controlled submatch mutation is absent. |
+| `output(encoding="utf_8")` | `output(encoding)` now follows Python replacement-mode encoding; `output_default()` is Rust's explicit zero-argument equivalent and `output_strict()` preserves the old fallible codec operation. Oracle cases cover ASCII/CP1252, Shift-JIS, Johab, ISO-2022-KR, and the UTF-8 default. The existing HZ backend is excluded from this claim: its `encoding`-crate GBK-like table encodes U+20AC where Python's HZ/GB2312 codec replaces it. An exact HZ replacement table would be a generated codec subsystem, not a missing method signature. | Covered (typed adaptation), with the HZ codec-table variance deliberately out of scope and recorded here. |
+| `add_submatch(other)` | `add_submatch(other) -> Result<(), AddSubmatchError>` appends a distinct owned match and rejects same encoding + decoded-fingerprint matches. | Covered (typed adaptation); Python's non-`CharsetMatch` runtime-type rejection is not applicable in a statically typed call. |
 | `__str__`, `__repr__` | `decoded()` returns the decoded string; no `Display`/`Debug` parity contract. | Not applicable — Python lazy string/repr semantics are object-model behavior. |
 | `__eq__`, `__lt__` | Rust derives structural `PartialEq`; sorting is internal to `CharsetMatches`. Python's string comparison and ranking protocol are not exposed. | Not applicable — Python operator protocol and cross-type equality have no direct typed equivalent. |
 
@@ -90,9 +90,10 @@ The category has a deliberately narrow meaning:
 | `first()` | `first() -> Option<&CharsetMatch>`. | Covered |
 
 `CliDetectionResult` is public from `charset_normalizer.models` but not a
-package-root export. The Rust CLI writes the equivalent JSON directly and does
-not expose a construction/`to_json()` result type. This is **simply not done**;
-it is reported rather than declared an intentional exclusion.
+package-root export. Rust now exposes `CliDetectionResult` with the same fields,
+constructor order, and `to_json()` layout (`ensure_ascii=True`, four-space
+indentation). The live oracle test compares an accented path, an astral Unicode
+path, arrays, booleans, and floating-point fields byte-for-byte.
 
 ## CLI flags
 
@@ -113,7 +114,7 @@ errors, JSON, stdin, and normalize/replace behavior.
 | `-t`, `--threshold` | supported. | Covered |
 | `--version` | supported. | Covered |
 | Rust-only hidden `--cp-isolation`, `--cp-exclusion` | extra test/harness controls, intentionally omitted from shared help text. | Deliberately out of scope — additive Rust extension, not a claimed Python flag. |
-| `cli.__main__.query_yes_no`, `FileType`, `cli_detect(argv)` | Rust has private CLI parsing/prompt/output implementation but no reusable equivalents. | Simply not done as a library API; these are CLI implementation helpers, not root exports. |
+| `cli.__main__.query_yes_no`, `FileType`, `cli_detect(argv)` | The `normalizer` binary implements the observable prompt, file validation, argument parsing, and exit-status behavior; existing CLI snapshots exercise it. Rust does not expose Python's argparse callback or a process-global `argv` function as a library API. | Not applicable — these are Python CLI-framework entry/callback mechanics, not an independently usable package API. |
 
 ## Non-root helper modules: audit boundary and outstanding work
 
@@ -124,31 +125,26 @@ this audit records their status rather than implying they are full-parity API.
 | Python non-root surface | Rust status | Category |
 | --- | --- | --- |
 | `cd.encoding_languages`, `cd.mb_encoding_languages`, `cd.alphabet_languages`, `cd.characters_popularity_compare`, `cd.alpha_unicode_split`, `cd.merge_coherence_ratios`, `cd.coherence_ratio` | Same-named `pub` functions, covered by the exhaustive CD oracle tests where applicable. | Covered (module-local helper surface) |
-| `cd.encoding_unicode_range`, `cd.unicode_range_languages`, `cd.get_target_features`, `cd.filter_alt_coherence_matches` | No corresponding public Rust function. | Simply not done |
+| `cd.encoding_unicode_range`, `cd.unicode_range_languages`, `cd.get_target_features`, `cd.filter_alt_coherence_matches` | Same-named public Rust functions; oracle checks cover Cyrillic/Latin ranges, French target features, and em-dash alternative filtering. | Covered (module-local helper surface) |
 | `md.unicode_range`, `md.remove_accent`, `md.is_suspiciously_successive_range`, `md.mess_ratio` | Same-named public Rust functions. | Covered (module-local helper surface) |
 | `md.CharInfo` and the `MessDetectorPlugin`/nine concrete plugin classes | Rust has concrete detector implementation structs but no Python subclass/override extension protocol. | Not applicable — Python inheritance/plugin extension semantics have no direct Rust equivalent. |
-| `utils.is_accentuated`, `remove_accent`, `unicode_range`, `is_latin`, `is_punctuation`, `is_symbol`, `is_emoticon`, `is_separator`, `is_case_variable`, `is_cjk`, `is_hiragana`, `is_katakana`, `is_hangul`, `is_thai`, `is_arabic`, `is_arabic_isolated_form`, `is_cjk_uncommon`, `is_unicode_range_secondary`, `is_unprintable` | The detector has private/internal equivalents in `md`/`cd`; the exposed `src/utils.rs` stubs are not faithful helper APIs. | Simply not done as callable helper parity |
-| `utils.any_specified_encoding`, `is_multi_byte_encoding`, `identify_sig_or_bom`, `should_strip_sig_or_bom`, `iana_name`, `cp_similarity`, `is_cp_similar`, `cut_sequence_chunks` | Detection has internal implementations where required, but the Python helper call surface is not faithfully exported; `utils::iana_name` is only a partial normalizer. | Simply not done as callable helper parity |
+| `utils.is_accentuated`, `remove_accent`, `unicode_range`, `is_latin`, `is_punctuation`, `is_symbol`, `is_emoticon`, `is_separator`, `is_case_variable`, `is_cjk`, `is_hiragana`, `is_katakana`, `is_hangul`, `is_thai`, `is_arabic`, `is_arabic_isolated_form`, `is_cjk_uncommon`, `is_unicode_range_secondary`, `is_unprintable` | Concrete public Rust helpers replace the former stubs. `remove_accent` returns `Result<char, RemoveAccentError>` because the Python reference can raise on compatibility decompositions. Oracle characters cover Latin, punctuation/symbols, CJK scripts, Arabic forms, controls, U+001A, U+FEFF, and the Python error case U+FEFB. | Covered (typed adaptation) |
+| `utils.any_specified_encoding`, `is_multi_byte_encoding`, `identify_sig_or_bom`, `should_strip_sig_or_bom`, `iana_name`, `cp_similarity`, `is_cp_similar`, `cut_sequence_chunks` | Concrete public Rust helpers now use `Option`, `Result`, and materialized `Vec<String>` rather than Python runtime dispatch/generator protocol. Oracle checks cover alias failure modes, multibyte classification, UTF BOMs, declared encodings, code-page similarity, and chunks. | Covered (typed adaptation) |
 | `utils.set_logging_handler` | See package-root row. | Deliberately out of scope |
 
 ## What this change closed, and what it does not claim
 
-This audit closes three inexpensive, behavioral package-surface gaps:
+This audit has now closed the former “simply not done” list. In addition to the
+earlier version/BOM/input-form work, the Rust surface supplies
+`CliDetectionResult`, direct owned submatches, Python-style replacement output
+with an explicit Rust default method, and the formerly stubbed `utils`/missing
+`cd` helpers. `tests/test_api_surface_parity.py` executes the vendored Python
+reference and the Rust `parity_probe` for every group.
 
-1. Python version metadata now has Rust names `VERSION_STRING` and `VERSION`.
-2. `CharsetMatch.byte_order_mark` now has a direct Rust accessor.
-3. Python's byte/reader/path binary-check use case is now fully represented by
-   typed Rust `is_binary_*` functions, including options/trace forms for readers
-   and paths.
-
-`tests/test_api_surface_parity.py` executes the vendored Python reference and
-the Rust `parity_probe` to compare all three. It covers UTF-8 BOM alias results,
-text and binary file reader/path classification, and both version forms.
-
-The port therefore covers the detector, typed input/option forms, legacy
-migration wrappers, model observation surface, and full shared CLI flags. It
-deliberately excludes global logger mutation and same-name Python legacy
-`detect` behavior, while clearly leaving the standalone CLI result type, direct
-submatch mutation, replacement-mode `output`, and non-root helper-module API
-completion as **not done**. It does not claim unbounded fuzzing or exhaustive
-multibyte codec-variant parity.
+The only reclassification is the Python CLI-framework trio
+`query_yes_no`/`FileType`/`cli_detect`: it is **not applicable** as a Rust
+library API because the `normalizer` binary already covers the observable CLI
+contract, while an argparse callback and process-global argv entry point have no
+independent typed consumer meaning. The port still deliberately excludes global
+logger mutation and same-name legacy `detect` behavior, and does not claim
+unbounded fuzzing or exhaustive multibyte codec-variant parity.

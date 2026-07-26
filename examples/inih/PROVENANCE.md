@@ -55,10 +55,13 @@ preprocessor-dependent facts as provenance (`preprocessor_dependent` /
 `preprocessor_reasons`) without demoting `is_deterministic` or changing audit
 pass rates. On inih it flags the `HANDLER` function-like macro observations and
 trusted calls inside `INI_ALLOW_MULTILINE` / related `#if` regions — the known
-failure mode from this PROVENANCE note. See also
+failure mode from this PROVENANCE note. A behaviour-preserving reindex
+published those columns into the live graph (counts unchanged: 19/54/38/35).
+Context packs for `ini:ini_parse_stream` now surface a top-level
+`preprocessor_warning`. See also
 `examples/inih/tests/test_c_preprocessor_flags.py`.
 
-## Verified graph result (`byog_inih`, snapshot `20260625-112030-39d0cdd0`)
+## Verified graph result (`byog_inih`, snapshot `20260726-030424-9e3862f6`)
 The published graph now also contains the co-located golden runner
 (`tests/parse/runner.c`) as package code, the same way `jsmn` indexes its runner:
 - 19 entities, 54 relationships, 19 text units, 35 call observations.

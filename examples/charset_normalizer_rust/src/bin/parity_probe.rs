@@ -3,8 +3,8 @@
 //! Does NOT modify the production CLI (main.rs) or core behavior.
 
 use charset_normalizer_rust::{
-    cd, from_bytes, is_binary_path_with_options, is_binary_reader, CharsetMatch, FromBytesOptions,
-    VERSION, VERSION_STRING,
+    cd, from_bytes, is_binary_path_with_options, is_binary_reader, utils, CharsetMatch,
+    CliDetectionResult, FromBytesOptions, VERSION, VERSION_STRING,
 };
 use std::env;
 use std::process::ExitCode;
@@ -41,16 +41,98 @@ fn to_hex(data: &[u8]) -> String {
     s
 }
 
+fn parse_scalar(value: &str) -> Result<char, String> {
+    let code_point = u32::from_str_radix(value, 16)
+        .map_err(|error| format!("invalid scalar hex '{}': {}", value, error))?;
+    char::from_u32(code_point).ok_or_else(|| format!("invalid Unicode scalar U+{code_point:04X}"))
+}
+
+fn output_match(source_encoding: &str, payload: Vec<u8>) -> CharsetMatch {
+    CharsetMatch {
+        encoding: source_encoding.to_string(),
+        language: None,
+        language_ratios: vec![],
+        chaos: 0.0,
+        coherence: 0.0,
+        bom: false,
+        raw: payload,
+        preemptive_declaration: None,
+        submatches: vec![],
+    }
+}
+
+fn emit_bool(value: bool) {
+    print!("{}", u8::from(value));
+}
+
+fn emit_char_helpers(character: char) {
+    let range = utils::unicode_range(character).unwrap_or("-");
+    print!("{range}");
+    for value in [
+        utils::is_accentuated(character),
+        utils::is_latin(character),
+        utils::is_punctuation(character),
+        utils::is_symbol(character),
+        utils::is_emoticon(character),
+        utils::is_separator(character),
+        utils::is_case_variable(character),
+        utils::is_cjk(character),
+        utils::is_hiragana(character),
+        utils::is_katakana(character),
+        utils::is_hangul(character),
+        utils::is_thai(character),
+        utils::is_arabic(character),
+        utils::is_arabic_isolated_form(character),
+        utils::is_cjk_uncommon(character),
+        utils::is_unprintable(character),
+    ] {
+        print!("\t");
+        emit_bool(value);
+    }
+    match utils::remove_accent(character) {
+        Ok(value) => println!("\t{:x}", value as u32),
+        Err(_) => println!("\tERR"),
+    }
+}
+
 fn emit_json_langs(langs: &[String]) {
     print!("[");
     for (i, l) in langs.iter().enumerate() {
         if i > 0 {
             print!(",");
         }
-        // langs are ascii letters/spaces/dash, safe to inline
-        print!("\"{}\"", l);
+        print!("\"{}\"", json_escape_ascii(l));
     }
     println!("]");
+}
+
+fn json_escape_ascii(value: &str) -> String {
+    let mut escaped = String::new();
+    for character in value.chars() {
+        match character {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            character if character <= '\u{1f}' => {
+                escaped.push_str(&format!("\\u{:04x}", character as u32));
+            }
+            character if character <= '\u{7f}' => escaped.push(character),
+            character if character <= '\u{ffff}' => {
+                escaped.push_str(&format!("\\u{:04x}", character as u32));
+            }
+            character => {
+                let scalar = character as u32 - 0x1_0000;
+                escaped.push_str(&format!(
+                    "\\u{:04x}\\u{:04x}",
+                    0xd800 + (scalar >> 10),
+                    0xdc00 + (scalar & 0x3ff)
+                ));
+            }
+        }
+    }
+    escaped
 }
 
 /// Emit a deliberately simple, tab-delimited detection observation for the
@@ -227,7 +309,7 @@ fn main() -> ExitCode {
                 preemptive_declaration: None,
                 submatches: vec![],
             };
-            match m.output(target) {
+            match m.output_strict(target) {
                 Some(b) => {
                     print!("OK:{}", to_hex(&b));
                 }
@@ -302,6 +384,286 @@ fn main() -> ExitCode {
                 ),
                 None => println!("NONE"),
             }
+        }
+        "api-output" => {
+            if args.len() < 5 {
+                eprintln!("usage: parity_probe api-output <source-encoding> <hexpayload> <target-encoding>");
+                return ExitCode::from(2);
+            }
+            let payload = match from_hex(&args[3]) {
+                Ok(payload) => payload,
+                Err(error) => {
+                    eprintln!("bad hex: {}", error);
+                    return ExitCode::from(2);
+                }
+            };
+            match output_match(&args[2], payload).output(&args[4]) {
+                Some(bytes) => println!("OK:{}", to_hex(&bytes)),
+                None => println!("ERR"),
+            }
+        }
+        "api-output-default" => {
+            if args.len() < 4 {
+                eprintln!("usage: parity_probe api-output-default <source-encoding> <hexpayload>");
+                return ExitCode::from(2);
+            }
+            let payload = match from_hex(&args[3]) {
+                Ok(payload) => payload,
+                Err(error) => {
+                    eprintln!("bad hex: {}", error);
+                    return ExitCode::from(2);
+                }
+            };
+            match output_match(&args[2], payload).output_default() {
+                Some(bytes) => println!("OK:{}", to_hex(&bytes)),
+                None => println!("ERR"),
+            }
+        }
+        "api-submatch" => {
+            if args.len() < 6 {
+                eprintln!("usage: parity_probe api-submatch <left-encoding> <left-hex> <right-encoding> <right-hex>");
+                return ExitCode::from(2);
+            }
+            let left = match from_hex(&args[3]) {
+                Ok(payload) => payload,
+                Err(error) => {
+                    eprintln!("bad left hex: {}", error);
+                    return ExitCode::from(2);
+                }
+            };
+            let right = match from_hex(&args[5]) {
+                Ok(payload) => payload,
+                Err(error) => {
+                    eprintln!("bad right hex: {}", error);
+                    return ExitCode::from(2);
+                }
+            };
+            let mut parent = output_match(&args[2], left);
+            let child = output_match(&args[4], right);
+            match parent.add_submatch(child) {
+                Ok(()) => println!("OK\t{}", parent.submatch().len()),
+                Err(error) => println!("ERR\t{:?}", error),
+            }
+        }
+        "cli-result-fixture" => {
+            let result = CliDetectionResult::new(
+                "input/é.txt".to_string(),
+                Some("cp1252".to_string()),
+                vec!["windows_1252".to_string()],
+                vec!["latin_1".to_string(), "iso8859_15".to_string()],
+                "French".to_string(),
+                vec!["Basic Latin".to_string(), "Latin-1 Supplement".to_string()],
+                true,
+                0.125,
+                1.0,
+                Some("output/😀.utf8".to_string()),
+                false,
+            );
+            println!("{}", result.to_json());
+        }
+        "helper-char" => {
+            if args.len() < 3 {
+                eprintln!("usage: parity_probe helper-char <scalar-hex>");
+                return ExitCode::from(2);
+            }
+            match parse_scalar(&args[2]) {
+                Ok(character) => emit_char_helpers(character),
+                Err(error) => {
+                    eprintln!("parity_probe: {}", error);
+                    return ExitCode::from(2);
+                }
+            }
+        }
+        "helper-iana" => {
+            if args.len() < 4 {
+                eprintln!("usage: parity_probe helper-iana <name> <strict-0-or-1>");
+                return ExitCode::from(2);
+            }
+            let strict = args[3] == "1";
+            match utils::iana_name(&args[2], strict) {
+                Ok(name) => println!("OK:{name}"),
+                Err(_) => println!("ERR"),
+            }
+        }
+        "helper-multibyte" => {
+            if args.len() < 3 {
+                eprintln!("usage: parity_probe helper-multibyte <name>");
+                return ExitCode::from(2);
+            }
+            println!("{}", u8::from(utils::is_multi_byte_encoding(&args[2])));
+        }
+        "helper-bom" => {
+            if args.len() < 3 {
+                eprintln!("usage: parity_probe helper-bom <hexpayload>");
+                return ExitCode::from(2);
+            }
+            let payload = match from_hex(&args[2]) {
+                Ok(payload) => payload,
+                Err(error) => {
+                    eprintln!("bad hex: {}", error);
+                    return ExitCode::from(2);
+                }
+            };
+            let (encoding, mark) = utils::identify_sig_or_bom(&payload);
+            let mark = if mark.is_empty() {
+                "-".to_string()
+            } else {
+                to_hex(&mark)
+            };
+            println!("{}\t{}", encoding.unwrap_or_else(|| "-".to_string()), mark);
+        }
+        "helper-strip" => {
+            if args.len() < 3 {
+                eprintln!("usage: parity_probe helper-strip <encoding>");
+                return ExitCode::from(2);
+            }
+            println!("{}", u8::from(utils::should_strip_sig_or_bom(&args[2])));
+        }
+        "helper-secondary" => {
+            if args.len() < 3 {
+                eprintln!("usage: parity_probe helper-secondary <unicode-range>");
+                return ExitCode::from(2);
+            }
+            println!("{}", u8::from(utils::is_unicode_range_secondary(&args[2])));
+        }
+        "helper-cp" => {
+            if args.len() < 4 {
+                eprintln!("usage: parity_probe helper-cp <left-encoding> <right-encoding>");
+                return ExitCode::from(2);
+            }
+            println!(
+                "{:.17}\t{}",
+                utils::cp_similarity(&args[2], &args[3]),
+                u8::from(utils::is_cp_similar(&args[2], &args[3]))
+            );
+        }
+        "helper-specified" => {
+            if args.len() < 4 {
+                eprintln!("usage: parity_probe helper-specified <hexpayload> <search-zone>");
+                return ExitCode::from(2);
+            }
+            let payload = match from_hex(&args[2]) {
+                Ok(payload) => payload,
+                Err(error) => {
+                    eprintln!("bad hex: {}", error);
+                    return ExitCode::from(2);
+                }
+            };
+            let search_zone = match args[3].parse::<usize>() {
+                Ok(value) => value,
+                Err(error) => {
+                    eprintln!("invalid search zone: {}", error);
+                    return ExitCode::from(2);
+                }
+            };
+            println!(
+                "{}",
+                utils::any_specified_encoding(&payload, search_zone)
+                    .unwrap_or_else(|| "-".to_string())
+            );
+        }
+        "helper-chunks" => {
+            if args.len() < 9 {
+                eprintln!("usage: parity_probe helper-chunks <encoding> <hexpayload> <start> <end> <size> <multibyte-0-or-1> <decoded-utf8-hex-or-->");
+                return ExitCode::from(2);
+            }
+            let payload = match from_hex(&args[3]) {
+                Ok(payload) => payload,
+                Err(error) => {
+                    eprintln!("bad hex: {}", error);
+                    return ExitCode::from(2);
+                }
+            };
+            let start = match args[4].parse::<usize>() {
+                Ok(value) => value,
+                Err(error) => {
+                    eprintln!("invalid start: {}", error);
+                    return ExitCode::from(2);
+                }
+            };
+            let end = match args[5].parse::<usize>() {
+                Ok(value) => value,
+                Err(error) => {
+                    eprintln!("invalid end: {}", error);
+                    return ExitCode::from(2);
+                }
+            };
+            let size = match args[6].parse::<usize>() {
+                Ok(value) => value,
+                Err(error) => {
+                    eprintln!("invalid size: {}", error);
+                    return ExitCode::from(2);
+                }
+            };
+            let decoded = if args[8] == "-" {
+                None
+            } else {
+                match from_hex(&args[8])
+                    .and_then(|bytes| String::from_utf8(bytes).map_err(|error| error.to_string()))
+                {
+                    Ok(value) => Some(value),
+                    Err(error) => {
+                        eprintln!("invalid decoded UTF-8: {}", error);
+                        return ExitCode::from(2);
+                    }
+                }
+            };
+            let chunks = utils::cut_sequence_chunks(
+                &payload,
+                &args[2],
+                start..end,
+                size,
+                false,
+                true,
+                &[],
+                args[7] == "1",
+                decoded.as_deref(),
+            );
+            println!(
+                "{}",
+                chunks
+                    .iter()
+                    .map(|chunk| to_hex(chunk.as_bytes()))
+                    .collect::<Vec<_>>()
+                    .join("|")
+            );
+        }
+        "cd-encoding-range" => {
+            if args.len() < 3 {
+                eprintln!("usage: parity_probe cd-encoding-range <iana>");
+                return ExitCode::from(2);
+            }
+            emit_json_langs(&cd::encoding_unicode_range(&args[2]));
+        }
+        "cd-range-languages" => {
+            if args.len() < 3 {
+                eprintln!("usage: parity_probe cd-range-languages <unicode-range>");
+                return ExitCode::from(2);
+            }
+            emit_json_langs(&cd::unicode_range_languages(&args[2]));
+        }
+        "cd-target-features" => {
+            if args.len() < 3 {
+                eprintln!("usage: parity_probe cd-target-features <language>");
+                return ExitCode::from(2);
+            }
+            let (accentuated, pure_latin) = cd::get_target_features(&args[2]);
+            println!("{}\t{}", u8::from(accentuated), u8::from(pure_latin));
+        }
+        "cd-filter-alt" => {
+            let result = cd::filter_alt_coherence_matches(vec![
+                ("English".to_string(), 0.2),
+                ("English—".to_string(), 0.8),
+                ("French".to_string(), 0.5),
+            ]);
+            println!(
+                "{}",
+                result
+                    .iter()
+                    .map(|(language, score)| format!("{}:{score:.17}", language))
+                    .collect::<Vec<_>>()
+                    .join("|")
+            );
         }
         other => {
             eprintln!("unknown subcommand: {}", other);

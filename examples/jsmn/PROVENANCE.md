@@ -36,7 +36,7 @@ bounded C→Rust port with `manual_fixes=0`.
 - External/undefined calls (`check`, `parse`, libc calls, macro-like calls) are
   preserved as `call_observations`, not promoted into core deterministic edges.
 
-Verified graph result (`byog_jsmn`, snapshot `20260625-080620-99b57ed4`):
+Verified graph result (`byog_jsmn`, snapshot `20260726-030424-d99a57f7`):
 - 32 entities, 72 relationships, 32 text units, 165 call observations.
 - Entity mix: 24 functions, 3 files, 3 typedefs, 1 enum, 1 struct.
 - Relationship mix: 43 `calls`, 29 `contains`.
@@ -45,12 +45,16 @@ Verified graph result (`byog_jsmn`, snapshot `20260625-080620-99b57ed4`):
 - Manual call-graph check: `jsmn_parse` resolves to
   `jsmn_alloc_token`, `jsmn_parse_string`, and `jsmn_parse_primitive`; helper
   calls such as `jsmn_fill_token` are also deterministic package calls.
+- Preprocessor provenance (2026-07-26 reindex, structure unchanged): 15/32
+  entities, 11/43 trusted calls, and 34/165 observations flagged
+  `preprocessor_dependent` (mostly `JSMN_HEADER` / `JSMN_STRICT` /
+  `JSMN_PARENT_LINKS` regions). Labels only — not macro expansion.
 
 ## Known frontend friction
 - tree-sitter-c reports 4 `ERROR` nodes around the `JSMN_API` macro on function
-  declarations/definitions, but the functions are still extracted. This is the
-  expected Phase 6 boundary: clang + `compile_commands.json` is needed later for
-  reliable macro/type facts.
+  declarations/definitions, but the functions are still extracted. Dependence is
+  now labelled on the published graph; clang + `compile_commands.json` is still
+  needed for reliable macro expansion and type facts.
 - Include relationships are not published yet. The bootstrap graph focuses on
   file/symbol entities, contains, deterministic internal calls, and external
   call observations.

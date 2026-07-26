@@ -6,7 +6,9 @@ pub mod models;
 mod python_codecs;
 pub mod utils;
 
-pub use models::{CharsetMatch, CharsetMatches, LegacyDetectionResult};
+pub use models::{
+    AddSubmatchError, CharsetMatch, CharsetMatches, CliDetectionResult, LegacyDetectionResult,
+};
 
 use std::collections::{HashMap, HashSet};
 
@@ -1275,7 +1277,7 @@ pub(crate) fn should_strip_sig_or_bom(iana_encoding: &str) -> bool {
     !matches!(iana_encoding, "utf_16" | "utf_32")
 }
 
-fn any_specified_encoding(sequences: &[u8]) -> Option<String> {
+pub(crate) fn any_specified_encoding(sequences: &[u8]) -> Option<String> {
     let search_zone = sequences.len().min(8192);
     let ascii_header: String = sequences[..search_zone]
         .iter()
@@ -1625,7 +1627,7 @@ pub(crate) fn encoding_label(
     }
 }
 
-fn is_multi_byte_encoding_name(name: &str) -> bool {
+pub(crate) fn is_multi_byte_encoding_name(name: &str) -> bool {
     matches!(
         name,
         "utf_8"
@@ -1999,7 +2001,8 @@ mod tests {
             preemptive_declaration: None,
             submatches: Vec::new(),
         };
-        assert!(m.output("cp1252").is_none());
+        assert!(m.output_strict("cp1252").is_none());
+        assert_eq!(m.output("cp1252"), Some(vec![b'?']));
     }
 
     #[test]
