@@ -6,7 +6,7 @@
       "kind": "current",
       "description": "Full examples pytest summary: passed + xfailed.",
       "expect": {
-        "passed": 504,
+        "passed": 506,
         "xfailed": 2
       },
       "source": {
@@ -18,17 +18,17 @@
       "docs": [
         {
           "path": "Plan.md",
-          "must_contain": "504 passed, 2 xfailed",
+          "must_contain": "506 passed, 2 xfailed",
           "role": "current"
         },
         {
           "path": "PHASE7_WRITEUP.md",
-          "must_contain": "504 passed, 2 xfailed",
+          "must_contain": "506 passed, 2 xfailed",
           "role": "current"
         },
         {
           "path": "examples/charset_normalizer_rust/tools/check_port.sh",
-          "must_contain": "Full examples run: 504 passed, 2 xfailed.",
+          "must_contain": "Full examples run: 506 passed, 2 xfailed.",
           "role": "current",
           "note": "The compatibility handoff prints this live suite summary; keep it aligned with the documented claim."
         }
@@ -136,6 +136,12 @@
           "path": "Plan.md",
           "must_contain": "78 functions plus 23 public constants/macros/limits/types;\n68 functions are covered, 6 require shared mutable/aliased storage (reference\nconstructors/adds and the const-key alias), and 4 require a process-global\nallocator/error-state policy",
           "role": "current"
+        },
+        {
+          "path": "PHASE7_WRITEUP.md",
+          "must_contain": "**78 public functions: 68\ncovered, 6 blocked by the current exclusive-`Box` representation, and 4\nprocess-global allocator/error-state exclusions**",
+          "role": "current",
+          "require_near": "### 1.6 Evidence-boundary update (2026-07-28)"
         }
       ]
     },
@@ -167,6 +173,18 @@
           "path": "examples/PORT_EVIDENCE.md",
           "must_contain": "`isodate`",
           "role": "current"
+        },
+        {
+          "path": "Plan.md",
+          "must_contain": "**9 profiles and 3 named source-only gaps**",
+          "role": "current",
+          "require_near": "**Evidence-boundary audit (2026-07-28):**"
+        },
+        {
+          "path": "PHASE7_WRITEUP.md",
+          "must_contain": "**9 port profiles and 3 named source-only gaps**",
+          "role": "current",
+          "require_near": "### 1.6 Evidence-boundary update (2026-07-28)"
         }
       ]
     },

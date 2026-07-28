@@ -196,6 +196,211 @@ def _registry_dict_inventory(d: ast.Dict) -> Dict[str, Any]:
         "slots": slots,
         "n_slots": len(slots),
         "n_extracted": sum(1 for s in slots if s["value_name"] is not None and s["key"] is not None),
+        "source": "dict_literal",
+    }
+
+
+def _is_classmethod_decorator(decorators: List[ast.AST]) -> bool:
+    for d in decorators:
+        if isinstance(d, ast.Name) and d.id == "classmethod":
+            return True
+        if isinstance(d, ast.Attribute) and d.attr == "classmethod":
+            return True
+    return False
+
+
+def _class_string_constants(class_node: ast.ClassDef) -> Dict[str, str]:
+    """``SYNTAX = 'simple'`` style class-body string constants."""
+    out: Dict[str, str] = {}
+    for stmt in class_node.body:
+        if isinstance(stmt, ast.Assign) and isinstance(stmt.value, ast.Constant):
+            if isinstance(stmt.value.value, str):
+                for t in stmt.targets:
+                    if isinstance(t, ast.Name):
+                        out[t.id] = stmt.value.value
+        elif (
+            isinstance(stmt, ast.AnnAssign)
+            and isinstance(stmt.target, ast.Name)
+            and isinstance(stmt.value, ast.Constant)
+            and isinstance(stmt.value.value, str)
+        ):
+            out[stmt.target.id] = stmt.value.value
+    return out
+
+
+def _register_method_spec(func: ast.AST, *, owner: str) -> Optional[Dict[str, Any]]:
+    """If ``func`` is a classmethod that does ``cls.REG[key] = subclass``, describe it.
+
+    Supports the common decorator-registration idiom::
+
+        @classmethod
+        def register_syntax(cls, subclass):
+            syntax = subclass.SYNTAX
+            cls.SYNTAXES[syntax] = subclass
+            return subclass
+
+    Returns ``{reg_attr, key_from_attr?, key_literal?}`` or None.
+    """
+    if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return None
+    if not _is_classmethod_decorator(func.decorator_list):
+        return None
+    args = [a.arg for a in func.args.args]
+    if len(args) < 2:
+        return None
+    cls_p, sub_p = args[0], args[1]
+
+    # Locals bound from subclass attributes: syntax = subclass.SYNTAX
+    local_from_sub: Dict[str, str] = {}
+    for node in ast.walk(func):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            t0 = node.targets[0]
+            if (
+                isinstance(t0, ast.Name)
+                and isinstance(node.value, ast.Attribute)
+                and isinstance(node.value.value, ast.Name)
+                and node.value.value.id == sub_p
+            ):
+                local_from_sub[t0.id] = node.value.attr
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and isinstance(node.value, ast.Attribute)
+            and isinstance(node.value.value, ast.Name)
+            and node.value.value.id == sub_p
+        ):
+            local_from_sub[node.target.id] = node.value.attr
+
+    for node in ast.walk(func):
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if not isinstance(target, ast.Subscript):
+            continue
+        base = target.value
+        if not (
+            isinstance(base, ast.Attribute)
+            and isinstance(base.value, ast.Name)
+            and base.value.id == cls_p
+        ):
+            continue
+        # Value written must be the subclass parameter.
+        if not (isinstance(node.value, ast.Name) and node.value.id == sub_p):
+            continue
+        reg_attr = base.attr
+        key_node = target.slice
+        # ast.Index wrapper only on very old Python; 3.9+ uses the inner node.
+        if isinstance(key_node, ast.Constant) and isinstance(key_node.value, str):
+            return {
+                "owner": owner,
+                "method": func.name,
+                "reg_attr": reg_attr,
+                "key_literal": key_node.value,
+                "key_from_attr": None,
+            }
+        if (
+            isinstance(key_node, ast.Attribute)
+            and isinstance(key_node.value, ast.Name)
+            and key_node.value.id == sub_p
+        ):
+            return {
+                "owner": owner,
+                "method": func.name,
+                "reg_attr": reg_attr,
+                "key_literal": None,
+                "key_from_attr": key_node.attr,
+            }
+        if isinstance(key_node, ast.Name) and key_node.id in local_from_sub:
+            return {
+                "owner": owner,
+                "method": func.name,
+                "reg_attr": reg_attr,
+                "key_literal": None,
+                "key_from_attr": local_from_sub[key_node.id],
+            }
+    return None
+
+
+def collect_decorator_registry_entries(
+    tree: ast.AST,
+) -> List[Dict[str, Any]]:
+    """Collect ``(owner, reg_attr, key, value_class)`` from class decorator registration.
+
+    Pattern::
+
+        class Base:
+            REG = {}
+            @classmethod
+            def register(cls, subclass):
+                cls.REG[subclass.KEY] = subclass
+                return subclass
+
+        @Base.register
+        class Impl(Base):
+            KEY = 'impl'
+    """
+    # owner.method -> register spec
+    methods: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for node in getattr(tree, "body", []) or []:
+        if not isinstance(node, ast.ClassDef):
+            continue
+        for stmt in node.body:
+            spec = _register_method_spec(stmt, owner=node.name)
+            if spec is not None:
+                methods[(node.name, stmt.name)] = spec  # type: ignore[arg-type]
+
+    entries: List[Dict[str, Any]] = []
+    for node in getattr(tree, "body", []) or []:
+        if not isinstance(node, ast.ClassDef):
+            continue
+        class_attrs = _class_string_constants(node)
+        for dec in node.decorator_list:
+            # @Owner.register_method  (not @Owner.register_method(args))
+            if not (
+                isinstance(dec, ast.Attribute) and isinstance(dec.value, ast.Name)
+            ):
+                continue
+            owner, method = dec.value.id, dec.attr
+            spec = methods.get((owner, method))
+            if spec is None:
+                continue
+            key: Optional[str] = spec.get("key_literal")
+            if key is None and spec.get("key_from_attr"):
+                key = class_attrs.get(spec["key_from_attr"])
+            if not key:
+                # Visible decorator but no concrete key — skip rather than guess.
+                continue
+            entries.append(
+                {
+                    "owner": owner,
+                    "reg_attr": spec["reg_attr"],
+                    "key": key,
+                    "value": node.name,
+                    "method": method,
+                    "line": int(getattr(node, "lineno", 0) or 0),
+                }
+            )
+    return entries
+
+
+def _decorator_inventory(entries: List[Tuple[str, str]]) -> Dict[str, Any]:
+    """Inventory shape for registries filled only by decorator registration."""
+    slots = [
+        {
+            "key": k,
+            "key_shape": "constant_str",
+            "value_shape": "Decorator",
+            "value_name": v,
+        }
+        for k, v in entries
+    ]
+    return {
+        "key_shapes": {"constant_str": len(entries)},
+        "value_shapes": {"Decorator": len(entries)},
+        "slots": slots,
+        "n_slots": len(entries),
+        "n_extracted": len(entries),
+        "source": "decorator_registration",
     }
 
 
@@ -286,6 +491,29 @@ def analyze_source_text(text: str, path: Path) -> FileAnalysis:
                     dnode = _registry_dict_from_value(stmt.value)
                     if dnode is not None and isinstance(stmt.target, ast.Name):
                         note_registry(stmt.target.id, dnode, node.name)
+
+    # Decorator registration: @Owner.register_method on a class whose body sets
+    # a string key, and register_method does cls.REG[key] = subclass.
+    # SYNTAXES = {} is empty so the dict-literal path never names members;
+    # this is how BaseSpec.SYNTAXES / SimpleSpec / NpmSpec become visible.
+    decorator_entries = collect_decorator_registry_entries(tree)
+
+    def note_decorator_entry(owner: str, reg_name: str, key: str, val_name: str) -> None:
+        registries.add(reg_name)
+        registries.add(f"{owner}.{reg_name}")
+        for table_key in (reg_name, f"{owner}.{reg_name}"):
+            bucket = registry_tables.setdefault(table_key, [])
+            pair = (key, val_name)
+            if pair not in bucket:
+                bucket.append(pair)
+
+    for dec_ent in decorator_entries:
+        note_decorator_entry(
+            dec_ent["owner"],
+            dec_ent["reg_attr"],
+            dec_ent["key"],
+            dec_ent["value"],
+        )
 
     fa.registries = set(registries)
     fa.registry_tables = registry_tables
@@ -592,6 +820,25 @@ def analyze_source_text(text: str, path: Path) -> FileAnalysis:
             self.generic_visit(node)
 
     Visitor().visit(tree)
+    # Decorator registration sites (on the registered class body line).
+    for dec_ent in decorator_entries:
+        line = int(dec_ent.get("line") or 0)
+        if line <= 0:
+            continue
+        sites.append(
+            DynamicSite(
+                file=str(path),
+                line=line,
+                end_line=line,
+                col=0,
+                kind="decorator_registration",
+                detail=(
+                    f"{dec_ent['owner']}.{dec_ent['method']}:"
+                    f"{dec_ent['reg_attr']}[{dec_ent['key']!r}]->{dec_ent['value']}"
+                ),
+                enclosing=str(dec_ent["value"]),
+            )
+        )
     fa.sites = sites
     return fa
 
@@ -1012,8 +1259,10 @@ def _module_for_source(package_dir: Path, file: Path) -> str:
 def collect_registry_defs(package_dir: Path) -> List[RegistryDef]:
     """Walk package sources and collect unique AST-detected registries.
 
-    Prefers ``Class.attr`` over bare ``attr`` when both are recorded so each
-    physical table is scored once.
+    Includes both dict-literal tables and decorator-registration tables
+    (``@Owner.register_*`` writing into ``cls.REG[key]``). Prefers
+    ``Class.attr`` over bare ``attr`` when both are recorded so each physical
+    table is scored once.
     """
     package_dir = package_dir.resolve()
     # key: (module, class_or_None, name) -> RegistryDef
@@ -1040,16 +1289,42 @@ def collect_registry_defs(package_dir: Path) -> List[RegistryDef]:
         except ValueError:
             continue
 
-        def note(name: str, dnode: ast.Dict, class_name: Optional[str] = None) -> None:
-            inv = _registry_dict_inventory(dnode)
-            entries = _registry_table_entries(dnode)
+        def note(
+            name: str,
+            *,
+            class_name: Optional[str],
+            entries: List[Tuple[str, str]],
+            inventory: Dict[str, Any],
+        ) -> None:
             key = (module, class_name, name)
+            prev = found.get(key)
+            if prev is None:
+                found[key] = RegistryDef(
+                    name=name,
+                    class_name=class_name,
+                    file=path,
+                    module=module,
+                    entries=list(entries),
+                    inventory=inventory,
+                )
+                return
+            # Merge: decorator fills can extend a prior table (or replace empty).
+            merged = list(prev.entries)
+            for pair in entries:
+                if pair not in merged:
+                    merged.append(pair)
+            if not prev.entries and entries:
+                inv = inventory
+            elif inventory.get("source") == "decorator_registration" and entries:
+                inv = _decorator_inventory(merged)
+            else:
+                inv = prev.inventory
             found[key] = RegistryDef(
                 name=name,
                 class_name=class_name,
                 file=path,
                 module=module,
-                entries=entries,
+                entries=merged,
                 inventory=inv,
             )
 
@@ -1058,22 +1333,58 @@ def collect_registry_defs(package_dir: Path) -> List[RegistryDef]:
                 dnode = _registry_dict_from_value(node.value)
                 if dnode is not None:
                     for n in _target_names(node.targets):
-                        note(n, dnode, None)
+                        note(
+                            n,
+                            class_name=None,
+                            entries=_registry_table_entries(dnode),
+                            inventory=_registry_dict_inventory(dnode),
+                        )
             elif isinstance(node, ast.AnnAssign) and node.value is not None:
                 dnode = _registry_dict_from_value(node.value)
                 if dnode is not None and isinstance(node.target, ast.Name):
-                    note(node.target.id, dnode, None)
+                    note(
+                        node.target.id,
+                        class_name=None,
+                        entries=_registry_table_entries(dnode),
+                        inventory=_registry_dict_inventory(dnode),
+                    )
             elif isinstance(node, ast.ClassDef):
                 for stmt in node.body:
                     if isinstance(stmt, ast.Assign):
                         dnode = _registry_dict_from_value(stmt.value)
                         if dnode is not None:
                             for n in _target_names(stmt.targets):
-                                note(n, dnode, node.name)
+                                note(
+                                    n,
+                                    class_name=node.name,
+                                    entries=_registry_table_entries(dnode),
+                                    inventory=_registry_dict_inventory(dnode),
+                                )
                     elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
                         dnode = _registry_dict_from_value(stmt.value)
                         if dnode is not None and isinstance(stmt.target, ast.Name):
-                            note(stmt.target.id, dnode, node.name)
+                            note(
+                                stmt.target.id,
+                                class_name=node.name,
+                                entries=_registry_table_entries(dnode),
+                                inventory=_registry_dict_inventory(dnode),
+                            )
+
+        # Decorator-filled tables (may be the only source of members).
+        by_table: Dict[Tuple[str, str], List[Tuple[str, str]]] = defaultdict(list)
+        for dec_ent in collect_decorator_registry_entries(tree):
+            owner = str(dec_ent["owner"])
+            reg = str(dec_ent["reg_attr"])
+            pair = (str(dec_ent["key"]), str(dec_ent["value"]))
+            if pair not in by_table[(owner, reg)]:
+                by_table[(owner, reg)].append(pair)
+        for (owner, reg), pairs in by_table.items():
+            note(
+                reg,
+                class_name=owner,
+                entries=pairs,
+                inventory=_decorator_inventory(pairs),
+            )
 
     # Prefer Class.attr over bare attr when both describe the same class table.
     bare_covered: Set[Tuple[str, str]] = set()
@@ -1081,7 +1392,9 @@ def collect_registry_defs(package_dir: Path) -> List[RegistryDef]:
         if cls is not None:
             bare_covered.add((mod, name))
     out: List[RegistryDef] = []
-    for (mod, cls, name), rd in sorted(found.items(), key=lambda kv: (kv[0][0], kv[0][1] or "", kv[0][2])):
+    for (mod, cls, name), rd in sorted(
+        found.items(), key=lambda kv: (kv[0][0], kv[0][1] or "", kv[0][2])
+    ):
         if cls is None and (mod, name) in bare_covered:
             continue
         out.append(rd)
@@ -1398,10 +1711,8 @@ def compare_registries_to_runtime(
         "import_failures": [],
         "ok": True,
     }
-    if not defs:
-        report["status"] = "no_registries"
-        report["message"] = "AST extractor found no callable-registry dict literals"
-        return report
+    # Even with zero AST defs we still run independent runtime discovery below —
+    # that is how decorator-only registries surface when detection misses them.
 
     # Shape tallies across all importable registries.
     shape_stats: Dict[str, Dict[str, int]] = defaultdict(

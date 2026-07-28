@@ -75,8 +75,13 @@ def test_injected_wrong_candidate_is_disagreement():
     )
 
 
-def test_lambda_and_call_registries_are_missed_not_omitted():
-    """Extractor cannot name lambda/Call values — oracle counts them as missed."""
+def test_lambda_tables_remain_missed_not_guessed():
+    """Lambda-valued registries: keys are visible, values have no honest name.
+
+    Naming "the one function a lambda body calls" would be a guess (bodies often
+    call methods on the bound object, format helpers, or multiple names). The
+    diagnostic leaves all 25 isodate entries as *missed*, not invented targets.
+    """
     iso = compare_registries_to_runtime(ROOT / "examples" / "isodate")
     assert iso["status"] == "ok"
     assert iso["disagreements"] == 0
@@ -84,8 +89,8 @@ def test_lambda_and_call_registries_are_missed_not_omitted():
     assert iso["missed"] == 25  # 15 STRF_DT_MAP + 10 STRF_D_MAP
     assert iso["entries_runtime"] == 25
     assert iso["coverage_of_runtime"] == 0.0
-    # Misses stay out of the agreement numerator (vacuous 100% on empty scored).
     assert iso["entries_scored"] == 0
+    assert iso["agreement_rate_scored"] is None  # nothing scored → n/a, not 1.0
     assert iso["by_value_shape"].get("Lambda", {}).get("missed") == 25
 
     # humanize's `_TRANSLATIONS` holds a NullTranslations *instance*, not a
@@ -194,22 +199,79 @@ def test_non_callable_tables_are_not_counted_as_missed_dispatch():
                 assert "type" not in row["runtime_value_kinds"], row
 
 
-def test_registries_the_extractor_never_saw_are_reported():
-    """Decorator-populated registries are invisible to a dict-literal extractor.
+def test_decorator_registry_is_detected_and_oracle_confirms():
+    """``@BaseSpec.register_syntax`` fills SYNTAXES; extractor + oracle agree 2/2.
 
-    `semantic_version:BaseSpec.SYNTAXES` starts as `{}` and is filled by
-    `@BaseSpec.register_syntax`; `SYNTAXES[syntax](expression)` is a real
-    dispatch site. Grading only AST-detected tables hid it entirely, the same
-    one-directional blind spot the port-evidence manifest had.
+    The table starts as ``{}`` so a dict-literal pass never names members. The
+    decorator path sees the class decorator, the register classmethod's
+    ``cls.SYNTAXES[key] = subclass`` write, and the class-body ``SYNTAX`` key.
     """
     report = compare_registries_to_runtime(ROOT / "examples" / "semantic_version")
+    assert report["disagreements"] == 0, report["disagreement_details"]
+    assert report["agreements"] == 2, report
+    assert report["missed"] == 0
+    assert report["coverage_of_runtime"] == 1.0
+    rows = {r["registry"]: r for r in report["registries"]}
+    assert "BaseSpec.SYNTAXES" in rows, rows
+    assert rows["BaseSpec.SYNTAXES"]["status"] == "compared"
+    assert rows["BaseSpec.SYNTAXES"]["agreements"] == 2
+    assert rows["BaseSpec.SYNTAXES"]["value_shapes"].get("Decorator") == 2
+    # No longer invisible — independent discovery must not still list it.
     found = {u["registry"] for u in report["undetected_registries"]}
-    assert "BaseSpec.SYNTAXES" in found, report["undetected_registries"]
-    assert report["undetected_entries"] >= 2, report
+    assert "BaseSpec.SYNTAXES" not in found, report["undetected_registries"]
 
-    # jsonpatch's registry *is* detected, so it must not appear as undetected.
     jp = compare_registries_to_runtime(ROOT / "examples" / "jsonpatch")
     assert jp["undetected_registries"] == [], jp["undetected_registries"]
+
+
+def test_wrong_decorator_inference_is_disagreement():
+    """A planted wrong decorator candidate must fail the oracle, not vanish."""
+    report = compare_registries_to_runtime(
+        ROOT / "examples" / "semantic_version",
+        extra_extracted={
+            "BaseSpec.SYNTAXES": [("simple", "NotSimpleSpec"), ("forged", "FakeSpec")]
+        },
+    )
+    assert report["ok"] is False
+    assert report["wrong_target"] >= 1
+    assert report["invented"] >= 1
+    kinds = {d["kind"] for d in report["disagreement_details"]}
+    assert "wrong_target" in kinds
+    assert "invented" in kinds
+
+
+def test_decorator_candidates_emitted_without_changing_edges():
+    """Candidates for BaseSpec.parse name SimpleSpec/NpmSpec; no new call edges."""
+    from mini_game_to_byog import build_byog_for_package  # type: ignore
+    from python_dynamic import annotate_byog  # type: ignore
+
+    data = build_byog_for_package(package_dir=ROOT / "examples" / "semantic_version")
+    n_calls = sum(1 for r in data["relationships"] if r.get("type") == "calls")
+    dets = [
+        bool(r.get("is_deterministic"))
+        for r in data["relationships"]
+        if r.get("type") == "calls"
+    ]
+    annotate_byog(data, ROOT / "examples" / "semantic_version")
+    assert sum(1 for r in data["relationships"] if r.get("type") == "calls") == n_calls
+    assert [
+        bool(r.get("is_deterministic"))
+        for r in data["relationships"]
+        if r.get("type") == "calls"
+    ] == dets
+    cands = [
+        o
+        for o in data["call_observations"]
+        if str(o.get("reason", "")).startswith("registry_candidate:SYNTAXES")
+    ]
+    targets = {str(o.get("display_target")) for o in cands}
+    assert any(t.endswith("SimpleSpec") for t in targets), targets
+    assert any(t.endswith("NpmSpec") for t in targets), targets
+    parse = next(
+        e for e in data["entities"] if str(e.get("title", "")).endswith("BaseSpec.parse")
+    )
+    assert parse.get("dynamic_dependent") is True
+    assert any("call_through_registry:SYNTAXES" in str(r) for r in (parse.get("dynamic_reasons") or []))
 
 
 def test_rates_over_an_empty_population_are_undefined_not_perfect():

@@ -20,9 +20,12 @@ with a **negative** finding on the headline capability claim. See
 
 ### 1.1 The pipeline (means)
 
-This project builds a **deterministic** code knowledge graph and uses it to drive
-**verified** ports. It is not a claim that generic LLM entity extraction over
-raw text recovers precise call structure. The intended path is:
+This project builds a **deterministically generated** code knowledge graph for
+the covered source languages/configurations and uses it in a verification-gated
+porting process. “Deterministic” describes the extractor inputs and rules, not
+complete static semantics or a proof that every high-confidence edge is correct.
+It is not a claim that generic LLM entity extraction over raw text recovers
+precise call structure. The intended path is:
 
 1. **Deterministic extraction** — tree-sitter (and language-specific AST
    resolution) for Python (`scripts/extract_python.py`, `scripts/index_python.py`)
@@ -61,7 +64,7 @@ A single product entry point over these scripts is `scripts/graphrag_code.py`
 
 The **north-star** in [Plan.md](Plan.md) is Python→Rust fidelity under
 verification, not “the graph made the model smarter.” Against that bar, the
-repo records a solid result:
+repo records bounded results under declared contracts:
 
 **Eight ports** are named in [Plan.md](Plan.md) as end-to-end validated with
 `overall_pass=True` and **0 recorded manual fixes**:
@@ -146,17 +149,49 @@ library).
 [Plan.md](Plan.md) §1 is careful: Microsoft GraphRAG is open source; the specific
 “code4llm” demo and internal code-processing infrastructure shown in talks are
 **not** publicly released (community issue closed as not planned). This project
-builds a **practical public equivalent pattern** — deterministic code graph +
-agents + verification — it does **not** claim to have reproduced the talk demo
-or any internal Microsoft system. Match that care when citing this work.
+implements a **public related pattern** — deterministic code graph + agents +
+verification — it does **not** claim to have reproduced the talk demo, its
+capabilities, or any internal Microsoft system. Match that care when citing this
+work.
 
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`504 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`506 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
-**Live re-check (2026-07-26):** `504 passed, 2 xfailed`.
+**Live re-check (2026-07-26):** `506 passed, 2 xfailed`.
+
+### 1.6 Evidence-boundary update (2026-07-28)
+
+This update supersedes any broader present-tense capability wording elsewhere in
+the plan. The runnable aggregate command is
+`uv run python scripts/port_eval.py --all-gates --full`. Its manifest is checked
+in both directions: every discovered Rust port has a profile and every source
+package with a golden contract is a port or named gap. It currently declares
+**9 port profiles and 3 named source-only gaps**; a gap is reported, not counted
+as a passing port.
+
+The current C evidence is stronger, but also narrower, than “safe Rust cannot
+do this.” cJSON's header-derived audit records **78 public functions: 68
+covered, 6 blocked by the current exclusive-`Box` representation, and 4
+process-global allocator/error-state exclusions**. Every one of the six has a
+reached C trace under ASan and a checked compiler candidate whose primary E0502
+span is the later C-observable mutation; the audit names the shared-node,
+shared-byte, or handle redesign that would close it. That proves the safe-borrow
+boundary of this representation, not an impossibility claim about Rust.
+
+Two other checks are evidence rather than rhetoric. The C preprocessor tests
+compare scored liveness labels with independent `cc`/`clang -E` output while
+keeping unknown regions out of the agreement count. The Python registry oracle
+imports the actual package in a subprocess: the tested Name-valued and
+decorator registrations must agree, a planted wrong candidate must disagree,
+and lambda-valued tables remain explicitly missed rather than guessed. Neither
+mechanism promotes a heuristic observation into a deterministic call edge.
+
+Together these gates prove traceability, bounded behavior, and fail-closed
+coverage for the named targets. They do not demonstrate a general graph-driven
+porting advantage over raw source.
 
 ---
 
@@ -196,6 +231,12 @@ Full tables, kits, and preregistration: [PHASE7_ABLATION.md](PHASE7_ABLATION.md)
 | **v2** | `humanize.number` (fresh, N=3) | Less prior, multi-formatter | Near-parity (medians **59/59** graph vs **58/59** raw); **no** capability or efficiency win |
 | **v3** | `isodate.parse_duration` (N=3, **GPT-5.6**) | High raw-assembly cost (8 modules), adequacy-clean | Medians **24/24** both arms; raw perfect ×3; **no** capability or efficiency win |
 
+**Interpretive correction (2026-07-28):** The preceding v1 row is a historical
+record of its early observation. The corrected protocol did not establish an
+efficiency win, so the closed-series conclusion is no measured graph advantage
+in accuracy or efficiency for the tested benchmark class. This correction does
+not alter the archived run record.
+
 **v3 detail (harness-measured scores)** — from
 [PHASE7_ABLATION.md](PHASE7_ABLATION.md):
 
@@ -215,17 +256,17 @@ Isolation evidence (`verify-fill`) clean on all six runs; artifacts under
 
 From the series conclusion in [PHASE7_ABLATION.md](PHASE7_ABLATION.md):
 
-**Any slice small enough to be a clean, adequacy-gated benchmark is also small
-enough for the raw package to fit in the model’s context.** Every target tried is
-on the order of a few thousand LOC (or less) with one obvious entry point.
-“Raw-assembly cost” was *locating and wiring* code the model can still read in
-full — not *being unable to see the code*. The regime where a code graph should
-matter for cold porting — closer to the large-codebase intuition in public
-talks — is when raw material **cannot** be handed over whole and must be triaged.
+**In this series, every slice small enough to be a clean, adequacy-gated
+benchmark was also small enough for the raw package to fit in the model’s
+context.** The targets tried are on the order of a few thousand LOC (or less)
+with one obvious entry point. “Raw-assembly cost” was *locating and wiring* code
+the model could still read in full — not *being unable to see the code*. This
+does not establish the same result for larger repositories or hard material
+budgets; it identifies the regime the closed experiment did not reach.
 
-So the negative result is not “the graph is useless.” It is: **on this
-experimental class, a capable model ports as well from raw as from a graph
-closure.**
+So the negative result is not “the graph is useless.” It is: **on these
+protocol runs, the graph arm did not improve the measured port outcome over the
+raw arm.**
 
 ### 2.4 The jsonpatch boundary (not a failed ablation — a documented frontier)
 
@@ -276,10 +317,10 @@ and comparing graph versions over time.
 
 ### 3.2 Golden-first porting as a process
 
-The gate order (license → golden from the **oracle language** → clean graph →
-port → `port_eval`) is what made the eight validated ports comparable. Failures
-show up as failed goldens or failed audits, not as “the model said it worked.”
-That process is independent of winning graph-vs-raw ablations.
+The common gate order (license → golden from the **oracle language** → clean
+graph → port → `port_eval`) gives the eight bounded port reports a comparable
+form. Failures show up as failed goldens or failed audits, not as “the model
+said it worked.” That process is independent of winning graph-vs-raw ablations.
 
 ### 3.3 Adequacy gating and material audits (ablation methodology)
 
@@ -321,20 +362,21 @@ is a different success metric from “cold agent scores higher.”
 ### 3.5 Context assembly for humans and tools
 
 Closure-scoped packs are a **focused view** of a slice: entry symbol, callees,
-data deps, snippets, weak observations. On v1’s largest multi-file target, that
-focus showed up as **less material and fewer tools** for near-parity scores
+data deps, snippets, weak observations. On v1’s largest multi-file target, the
+recorded run used less material and fewer tools for near-parity scores, but the
+corrected protocol did not establish an efficiency win
 ([PHASE7_ABLATION.md](PHASE7_ABLATION.md) v1 / corrected-v1). On smaller targets
 the same focus did not beat raw. Useful product interpretation: the graph is a
-**retrieval and scoping tool** for ports and reviews — not a free accuracy boost
-when the whole package already fits in context.
+**retrieval and scoping tool** for ports and reviews — not a measured accuracy
+or efficiency boost when the whole package already fits in context.
 
 ### 3.6 What remains a fair, non-inflated claim
 
 **Fair to claim:**
 
-- Deterministic graphs + goldens + `port_eval` can drive **repeatable,
-  high-fidelity, small-to-medium ports** (Python and bounded C) with recorded
-  zero-manual-fix runs.  
+- Deterministic graphs + goldens + `port_eval` have produced **repeatable,
+  high-fidelity results within declared port contracts** (Python and bounded C)
+  with recorded zero-manual-fix runs.
 - Graph audits and ablation adequacy/material checks catch **real defects**
   before numbers ship.  
 - The same rails produced **general extractor/packer improvements**.  
@@ -352,9 +394,9 @@ when the whole package already fits in context.
 
 ### 3.7 If you only remember three sentences
 
-1. **The rails work:** deterministic extraction, audited edges, golden-first
-   ports, and `port_eval` produced a string of verified ports with 0 recorded
-   manual fixes.  
+1. **The rails produce bounded evidence:** deterministic extraction, audited
+   edges, golden-first ports, and `port_eval` produced a string of verified
+   port reports with 0 recorded manual fixes.
 2. **The headline hypothesis failed (for this class):** four ablations did not
    show a graph accuracy (or, after v1, efficiency) win over raw source.  
 3. **The graph is still worth building** as auditability, provenance, adequacy
@@ -367,7 +409,7 @@ when the whole package already fits in context.
 
 | Check | Command | Result |
 |---|---|---|
-| Full examples suite | `PYTHONPATH=. uv run pytest examples -q` | **504 passed, 2 xfailed** |
+| Full examples suite | `PYTHONPATH=. uv run pytest examples -q` | **506 passed, 2 xfailed** |
 | sqlparse graph audit | `uv run python scripts/audit_call_edges.py --graph byog_sqlparse` | pass rate **1.0**, 0/0/0, **230** calls (current index; the frozen Phase 5 baseline snapshot has 229) |
 | cJSON graph audit | `uv run python scripts/audit_call_edges.py --graph byog_cjson` | pass rate **1.0**, 0/0/0, **495** calls (full graph incl. mutation runner; library-only is 188) |
 | cJSON port_eval | `uv run python scripts/port_eval.py --source examples/cjson --port examples/cjson_rust --graph byog_cjson` | **59** golden cases, `manual_fixes=0`, **OVERALL PASS=True** |
