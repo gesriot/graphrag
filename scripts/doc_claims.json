@@ -6,7 +6,7 @@
       "kind": "current",
       "description": "Full examples pytest summary: passed + xfailed.",
       "expect": {
-        "passed": 495,
+        "passed": 504,
         "xfailed": 2
       },
       "source": {
@@ -18,17 +18,17 @@
       "docs": [
         {
           "path": "Plan.md",
-          "must_contain": "495 passed, 2 xfailed",
+          "must_contain": "504 passed, 2 xfailed",
           "role": "current"
         },
         {
           "path": "PHASE7_WRITEUP.md",
-          "must_contain": "495 passed, 2 xfailed",
+          "must_contain": "504 passed, 2 xfailed",
           "role": "current"
         },
         {
           "path": "examples/charset_normalizer_rust/tools/check_port.sh",
-          "must_contain": "Full examples run: 495 passed, 2 xfailed.",
+          "must_contain": "Full examples run: 504 passed, 2 xfailed.",
           "role": "current",
           "note": "The compatibility handoff prints this live suite summary; keep it aligned with the documented claim."
         }
@@ -313,7 +313,10 @@
       "source": {
         "type": "graph_audit",
         "mode": "live",
-        "graph": "byog_cjson"
+        "graph": "output/port_gates/cjson/graph",
+        "fallback_graph": "byog_cjson",
+        "allow_missing": true,
+        "note": "Evidence-gate runs audit the fresh isolated cJSON graph before the repository-wide documentation test. A published graph is only a standalone-check fallback."
       },
       "docs": [
         {
@@ -336,8 +339,8 @@
     },
     {
       "id": "isodate_adequacy_v3",
-      "kind": "current",
-      "description": "isodate v3 parser-only adequacy gate.",
+      "kind": "frozen_snapshot",
+      "description": "isodate v3 parser-only adequacy gate recorded from the protected frozen experiment graph.",
       "expect": {
         "adequate": true,
         "closure_size": 16,

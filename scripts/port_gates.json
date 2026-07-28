@@ -150,6 +150,9 @@
       "id": "charset_normalizer",
       "source": "examples/charset_normalizer",
       "port": "examples/charset_normalizer_rust",
+      "after": [
+        "cjson"
+      ],
       "indexer": "python",
       "symbols": [
         "api:from_bytes",
@@ -189,6 +192,16 @@
             "examples",
             "-q",
             "--tb=no"
+          ]
+        },
+        {
+          "name": "documentation claims with frozen-source status",
+          "when": "full",
+          "successful_skip_marker": "PASS WITH SOURCE SKIPS",
+          "skip_reason": "protected frozen SQLParse/isodate sources are absent; their recorded prose was still checked",
+          "command": [
+            "{python}",
+            "scripts/check_doc_claims.py"
           ]
         },
         {

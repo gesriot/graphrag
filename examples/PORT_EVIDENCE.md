@@ -23,6 +23,53 @@ enables CJSON Miri and charset-normalizer's repository pytest. Add
 `--differential-full` for charset-normalizer's long live oracle sweep and
 `--scale` for its opt-in release-scale harness.
 
+## Clean-checkout behaviour
+
+The gate does not read or update published `byog_*` directories. Every port
+reindexes into ignored `output/port_gates/<profile>/graph`; the aggregate run
+orders cJSON before the repository-wide pytest so its regenerable documentation
+claim is audited from that fresh graph. Frozen SQLParse snapshots and the
+protected isodate ablation graph are deliberately not regenerated. When those
+large frozen artifacts are absent from a clean checkout, the documentation
+checker prints a named `SKIP` for each while still checking the recorded prose;
+it reports `PASS WITH SOURCE SKIPS`, never an unqualified pass.
+
+Bootstrap prerequisites are intentionally outside the gate: `uv` itself and
+the locked Python dependencies must already be available (or resolvable from a
+package mirror), and Cargo dependencies need a local cache, crates.io, or an
+equivalent configured registry. A fresh machine therefore needs network access
+unless those dependency caches are pre-populated. The C profiles additionally
+need a working C compiler. An absent compiler or nightly Miri component is an
+in-gate `SKIP`; a compiler or Miri installation that is present but broken is a
+`FAIL`. Miri is nightly/toolchain/platform dependent, so `--full` may honestly
+finish as `PASS WITH SKIPS` on a machine without that component.
+
+## CI policy
+
+Use the fast pre-commit evidence gate:
+
+```bash
+uv run python scripts/port_eval.py --all-gates
+```
+
+It runs every source contract, fresh graph/context-pack stage, and ordinary
+Rust `port_eval` stage. It intentionally does not run repository-wide pytest,
+cJSON Miri, charset-normalizer's exhaustive differential sweep, or its scale
+harness; it can therefore miss cross-example/documentation regressions,
+undefined-behaviour/aliasing regressions, and long-tail codec or performance
+divergences.
+
+Use the pre-release gate:
+
+```bash
+uv run python scripts/port_eval.py --all-gates --full --differential-full --scale
+```
+
+`--full` is the portable full-evidence tier (including the broad pytest suite
+and Miri when available). The two extra flags are deliberately explicit because
+they add the long live-oracle and scale checks rather than silently making every
+developer invocation expensive.
+
 The existing handoff commands remain supported:
 `examples/cjson/tools/check_port.sh --full` and
 `examples/charset_normalizer_rust/tools/check_port.sh --full`. They retain

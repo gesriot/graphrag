@@ -153,10 +153,10 @@ or any internal Microsoft system. Match that care when citing this work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`495 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`504 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
-**Live re-check (2026-07-26):** `495 passed, 2 xfailed`.
+**Live re-check (2026-07-26):** `504 passed, 2 xfailed`.
 
 ---
 
@@ -367,7 +367,7 @@ when the whole package already fits in context.
 
 | Check | Command | Result |
 |---|---|---|
-| Full examples suite | `PYTHONPATH=. uv run pytest examples -q` | **495 passed, 2 xfailed** |
+| Full examples suite | `PYTHONPATH=. uv run pytest examples -q` | **504 passed, 2 xfailed** |
 | sqlparse graph audit | `uv run python scripts/audit_call_edges.py --graph byog_sqlparse` | pass rate **1.0**, 0/0/0, **230** calls (current index; the frozen Phase 5 baseline snapshot has 229) |
 | cJSON graph audit | `uv run python scripts/audit_call_edges.py --graph byog_cjson` | pass rate **1.0**, 0/0/0, **495** calls (full graph incl. mutation runner; library-only is 188) |
 | cJSON port_eval | `uv run python scripts/port_eval.py --source examples/cjson --port examples/cjson_rust --graph byog_cjson` | **59** golden cases, `manual_fixes=0`, **OVERALL PASS=True** |

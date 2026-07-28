@@ -62,11 +62,33 @@ def _graph_counts(graph: str, snapshot: str | None) -> dict[str, int]:
     }
 
 
-def _graph_audit(graph: str) -> dict[str, Any]:
+def _has_complete_graph(root: Path) -> bool:
+    """Whether a graph root contains the three BYOG tables an audit needs."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from byog_graph import _resolve_output_base  # type: ignore
+
+    for candidate in (root, root / "output"):
+        base = _resolve_output_base(candidate)
+        if all((base / name).is_file() for name in (
+            "entities.parquet", "relationships.parquet", "text_units.parquet"
+        )):
+            return True
+    return False
+
+
+def _graph_audit(graph: str, fallback_graph: str | None = None) -> dict[str, Any]:
+    """Audit the published graph, or the fresh gate graph when none is present."""
     sys.path.insert(0, str(ROOT / "scripts"))
     from audit_call_edges import build_report  # type: ignore
 
-    report = build_report(ROOT / graph, sample=0)
+    candidates = [ROOT / graph]
+    if fallback_graph is not None:
+        candidates.append(ROOT / fallback_graph)
+    graph_root = next((path for path in candidates if _has_complete_graph(path)), None)
+    if graph_root is None:
+        rendered = ", ".join(str(path) for path in candidates)
+        raise FileNotFoundError(f"no complete graph artifact found: {rendered}")
+    report = build_report(graph_root, sample=0)
     return {
         "calls": int(report["total_calls"]),
         "pass_rate": float(report["structural"]["pass_rate"]),
@@ -152,6 +174,42 @@ def _port_gate_manifest() -> dict[str, int]:
     }
 
 
+def _frozen_source_missing(claim: dict[str, Any]) -> bool:
+    """Recognize an absent protected snapshot without masking a damaged one.
+
+    Clean clones deliberately do not include the large SQLParse snapshots or the
+    frozen isodate ablation graph.  A missing root/snapshot is therefore an
+    explicit skip.  Once a root or requested snapshot exists, normal derivation
+    is still required and any missing parquet or malformed data fails.
+    """
+    if claim.get("kind") != "frozen_snapshot":
+        return False
+    source = claim["source"]
+    stype = source["type"]
+    if stype == "graph_counts":
+        snapshot = source.get("snapshot")
+        if not isinstance(snapshot, str):
+            return False
+        return not (ROOT / source["graph"] / "snapshots" / snapshot).is_dir()
+    if stype == "ablation_adequacy":
+        return not (ROOT / source["graph"]).exists()
+    return False
+
+
+def _optional_source_missing(claim: dict[str, Any]) -> bool:
+    """Whether a manifest-declared regenerable source is unavailable locally."""
+    source = claim["source"]
+    if source.get("allow_missing") is not True:
+        return False
+    if source["type"] != "graph_audit":
+        return False
+    candidates = [ROOT / source["graph"]]
+    fallback = source.get("fallback_graph")
+    if isinstance(fallback, str):
+        candidates.append(ROOT / fallback)
+    return not any(_has_complete_graph(path) for path in candidates)
+
+
 def derive(claim: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
     """Return (derived_values or None, status) where status is live|traced|historical."""
     src = claim["source"]
@@ -179,7 +237,7 @@ def derive(claim: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
     if stype == "graph_counts":
         return _graph_counts(src["graph"], src.get("snapshot")), "live"
     if stype == "graph_audit":
-        return _graph_audit(src["graph"]), "live"
+        return _graph_audit(src["graph"], src.get("fallback_graph")), "live"
     if stype == "ablation_adequacy":
         return _ablation_adequacy(src["graph"], src["spec"]), "live"
     if stype == "cjson_api_surface":
@@ -259,14 +317,49 @@ def run_all() -> dict[str, Any]:
     manifest = json.loads(MANIFEST.read_text())
     results: list[dict[str, Any]] = []
     failures: list[str] = []
-    live = traced = historical = 0
+    live = traced = historical = frozen_unavailable = source_unavailable = 0
 
     for claim in manifest["claims"]:
+        skip_reason: str | None = None
+        if _frozen_source_missing(claim):
+            skip_reason = "protected frozen source is absent from this checkout"
+        elif _optional_source_missing(claim):
+            skip_reason = "regenerable source is absent; run its port gate to produce fresh evidence"
+        if skip_reason is not None:
+            doc_errs = check_docs(claim)
+            ok = not doc_errs
+            if not ok:
+                failures.extend(doc_errs)
+            if claim.get("kind") == "frozen_snapshot":
+                frozen_unavailable += 1
+            source_unavailable += 1
+            results.append(
+                {
+                    "id": claim["id"],
+                    "kind": claim.get("kind"),
+                    "status": "skipped",
+                    "ok": ok,
+                    "reason": skip_reason,
+                    "derived": None,
+                    "expect": claim.get("expect"),
+                    "errors": doc_errs,
+                }
+            )
+            continue
         try:
             derived, status = derive(claim)
         except Exception as e:
             failures.append(f"{claim['id']}: source error: {e}")
-            results.append({"id": claim["id"], "status": "error", "error": str(e)})
+            results.append(
+                {
+                    "id": claim["id"],
+                    "kind": claim.get("kind"),
+                    "status": "error",
+                    "ok": False,
+                    "error": str(e),
+                    "errors": [f"{claim['id']}: source error: {e}"],
+                }
+            )
             continue
 
         if status == "live":
@@ -300,6 +393,8 @@ def run_all() -> dict[str, Any]:
         "verified_live": live,
         "traced_only": traced,
         "historical_record": historical,
+        "frozen_source_skips": frozen_unavailable,
+        "source_skips": source_unavailable,
         "ok": not failures,
         "failures": failures,
         "results": results,
@@ -320,18 +415,25 @@ def main() -> None:
         print(
             f"doc claims: {report['n_claims']} total — "
             f"live={report['verified_live']} traced={report['traced_only']} "
-            f"historical={report['historical_record']}"
+            f"historical={report['historical_record']} "
+            f"source-skips={report['source_skips']} "
+            f"frozen-source-skips={report['frozen_source_skips']}"
         )
         for r in report["results"]:
-            flag = "OK " if r["ok"] else "FAIL"
+            flag = "SKIP" if r["status"] == "skipped" else ("OK " if r["ok"] else "FAIL")
             print(f"  [{flag}] {r['status']:11} {r['id']}")
+            if r.get("reason"):
+                print(f"         {r['reason']}")
             for e in r.get("errors") or []:
                 print(f"         {e}")
         if report["left_out"]:
             print("left out (by design):")
             for item in report["left_out"]:
                 print(f"  - {item['what']}: {item['why']}")
-        print("PASS" if report["ok"] else "FAIL")
+        if report["ok"] and report["source_skips"]:
+            print("PASS WITH SOURCE SKIPS")
+        else:
+            print("PASS" if report["ok"] else "FAIL")
     raise SystemExit(0 if report["ok"] else 1)
 
 

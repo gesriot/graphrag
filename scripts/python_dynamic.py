@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import ast
 import json
+import subprocess
 import sys
+import textwrap
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -107,20 +109,94 @@ def _registry_dict_from_value(node: ast.AST) -> Optional[ast.Dict]:
     return None
 
 
+def _ast_key_info(k: Optional[ast.AST]) -> Tuple[Optional[str], str]:
+    """Return (concrete_key_or_None, key_shape).
+
+    Only constant keys are concrete enough to compare to a runtime mapping.
+    Name/attribute keys (e.g. ``KIND_SHORTEQ``) are unresolvable without eval.
+    """
+    if k is None:  # ``{**spread}`` / dict unpack — not a key
+        return None, "unpack"
+    if isinstance(k, ast.Constant):
+        if isinstance(k.value, str):
+            return k.value, "constant_str"
+        if k.value is None:
+            return None, "constant_none"  # concrete None key; encoded separately
+        return str(k.value), "constant_other"
+    if isinstance(k, ast.Name):
+        return None, "name"
+    if isinstance(k, ast.Attribute):
+        return None, "attribute"
+    return None, type(k).__name__
+
+
+def _ast_value_shape(v: ast.AST) -> str:
+    if isinstance(v, ast.Name):
+        return "Name"
+    if isinstance(v, ast.Attribute):
+        return "Attribute"
+    if isinstance(v, ast.Lambda):
+        return "Lambda"
+    if isinstance(v, ast.Call):
+        return "Call"
+    if isinstance(v, ast.Constant):
+        return "Constant"
+    return type(v).__name__
+
+
 def _registry_table_entries(d: ast.Dict) -> List[Tuple[str, str]]:
-    """Extract (key, callee_name) pairs from a callable-registry dict literal."""
+    """Extract (key, callee_name) pairs from a callable-registry dict literal.
+
+    Only **constant keys** with **Name/Attribute values** are emitted — the
+    extractor cannot name lambdas or call results, and cannot resolve non-literal
+    keys. Those gaps are what the runtime oracle measures.
+    """
     entries: List[Tuple[str, str]] = []
     for k, v in zip(d.keys, d.values):
-        key_s = "?"
-        if isinstance(k, ast.Constant) and isinstance(k.value, str):
-            key_s = k.value
-        elif isinstance(k, ast.Constant):
-            key_s = str(k.value)
+        key_s, key_shape = _ast_key_info(k)
+        if key_shape == "constant_none":
+            key_s = "__None__"  # stable encoding for the None key
+        elif key_s is None:
+            continue  # non-literal key: unresolvable statically
         if isinstance(v, ast.Name):
             entries.append((key_s, v.id))
         elif isinstance(v, ast.Attribute):
             entries.append((key_s, v.attr))
     return entries
+
+
+def _registry_dict_inventory(d: ast.Dict) -> Dict[str, Any]:
+    """Full key/value shape inventory for oracle reporting (includes unextracted)."""
+    key_shapes: Dict[str, int] = defaultdict(int)
+    value_shapes: Dict[str, int] = defaultdict(int)
+    slots: List[Dict[str, Any]] = []
+    for k, v in zip(d.keys, d.values):
+        key_s, key_shape = _ast_key_info(k)
+        if key_shape == "constant_none":
+            key_s = "__None__"
+        vshape = _ast_value_shape(v)
+        key_shapes[key_shape] += 1
+        value_shapes[vshape] += 1
+        val_name: Optional[str] = None
+        if isinstance(v, ast.Name):
+            val_name = v.id
+        elif isinstance(v, ast.Attribute):
+            val_name = v.attr
+        slots.append(
+            {
+                "key": key_s,
+                "key_shape": key_shape,
+                "value_shape": vshape,
+                "value_name": val_name,  # only when Name/Attribute
+            }
+        )
+    return {
+        "key_shapes": dict(key_shapes),
+        "value_shapes": dict(value_shapes),
+        "slots": slots,
+        "n_slots": len(slots),
+        "n_extracted": sum(1 for s in slots if s["value_name"] is not None and s["key"] is not None),
+    }
 
 
 def _target_names(targets: List[ast.AST]) -> List[str]:
@@ -886,6 +962,766 @@ def _registry_candidate_observations(
     return emitted
 
 
+# ---------------------------------------------------------------------------
+# Runtime oracle — import real registry objects and score the AST extractor
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RegistryDef:
+    """One AST-detected callable-registry table with enough location to import it."""
+
+    name: str
+    class_name: Optional[str]
+    file: Path
+    module: str
+    entries: List[Tuple[str, str]]  # concrete key -> Name/Attribute value
+    inventory: Dict[str, Any]
+
+    @property
+    def qual_name(self) -> str:
+        if self.class_name:
+            return f"{self.class_name}.{self.name}"
+        return self.name
+
+    @property
+    def attr_path(self) -> str:
+        return self.qual_name
+
+
+def _import_layout(package_dir: Path) -> Tuple[Path, str]:
+    """Return (sys.path entry, package root name or \"\" for flat modules)."""
+    package_dir = package_dir.resolve()
+    if (package_dir / "__init__.py").is_file():
+        return package_dir.parent, package_dir.name
+    return package_dir, ""
+
+
+def _module_for_source(package_dir: Path, file: Path) -> str:
+    package_dir = package_dir.resolve()
+    file = file.resolve()
+    path_entry, root = _import_layout(package_dir)
+    rel = file.relative_to(package_dir)
+    if root:
+        if rel.name == "__init__.py":
+            return root
+        return root + "." + ".".join(rel.with_suffix("").parts)
+    return ".".join(rel.with_suffix("").parts)
+
+
+def collect_registry_defs(package_dir: Path) -> List[RegistryDef]:
+    """Walk package sources and collect unique AST-detected registries.
+
+    Prefers ``Class.attr`` over bare ``attr`` when both are recorded so each
+    physical table is scored once.
+    """
+    package_dir = package_dir.resolve()
+    # key: (module, class_or_None, name) -> RegistryDef
+    found: Dict[Tuple[str, Optional[str], str], RegistryDef] = {}
+
+    for path in sorted(package_dir.rglob("*.py")):
+        if any(part in {"__pycache__", ".venv", "venv", "target", "tests"} for part in path.parts):
+            continue
+        if path.name == "__init__.py" and path.parent == package_dir:
+            # still analyse package root __init__ for rare module-level tables
+            pass
+        elif path.name == "__init__.py":
+            pass
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue
+        try:
+            module = _module_for_source(package_dir, path)
+        except ValueError:
+            continue
+
+        def note(name: str, dnode: ast.Dict, class_name: Optional[str] = None) -> None:
+            inv = _registry_dict_inventory(dnode)
+            entries = _registry_table_entries(dnode)
+            key = (module, class_name, name)
+            found[key] = RegistryDef(
+                name=name,
+                class_name=class_name,
+                file=path,
+                module=module,
+                entries=entries,
+                inventory=inv,
+            )
+
+        for node in tree.body:
+            if isinstance(node, ast.Assign):
+                dnode = _registry_dict_from_value(node.value)
+                if dnode is not None:
+                    for n in _target_names(node.targets):
+                        note(n, dnode, None)
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                dnode = _registry_dict_from_value(node.value)
+                if dnode is not None and isinstance(node.target, ast.Name):
+                    note(node.target.id, dnode, None)
+            elif isinstance(node, ast.ClassDef):
+                for stmt in node.body:
+                    if isinstance(stmt, ast.Assign):
+                        dnode = _registry_dict_from_value(stmt.value)
+                        if dnode is not None:
+                            for n in _target_names(stmt.targets):
+                                note(n, dnode, node.name)
+                    elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+                        dnode = _registry_dict_from_value(stmt.value)
+                        if dnode is not None and isinstance(stmt.target, ast.Name):
+                            note(stmt.target.id, dnode, node.name)
+
+    # Prefer Class.attr over bare attr when both describe the same class table.
+    bare_covered: Set[Tuple[str, str]] = set()
+    for (mod, cls, name), _rd in found.items():
+        if cls is not None:
+            bare_covered.add((mod, name))
+    out: List[RegistryDef] = []
+    for (mod, cls, name), rd in sorted(found.items(), key=lambda kv: (kv[0][0], kv[0][1] or "", kv[0][2])):
+        if cls is None and (mod, name) in bare_covered:
+            continue
+        out.append(rd)
+    return out
+
+
+def _runtime_probe_script() -> str:
+    """Python source run in a subprocess: import attr path, dump mapping entries."""
+    return textwrap.dedent(
+        """
+        import importlib
+        import json
+        import sys
+        import types
+
+        path_entry, module, attr_path = sys.argv[1], sys.argv[2], sys.argv[3]
+        sys.path.insert(0, path_entry)
+
+        def encode_key(k):
+            if k is None:
+                return "__None__"
+            if isinstance(k, str):
+                return k
+            if isinstance(k, bool):
+                return "True" if k else "False"
+            if isinstance(k, (int, float)):
+                return str(k)
+            return "__repr__:" + repr(k)
+
+        def describe(v):
+            if isinstance(v, type):
+                return {
+                    "name": v.__name__,
+                    "kind": "type",
+                    "qualname": getattr(v, "__qualname__", v.__name__),
+                    "module": getattr(v, "__module__", ""),
+                }
+            if isinstance(v, types.FunctionType):
+                return {
+                    "name": v.__name__,
+                    "kind": "function",
+                    "qualname": getattr(v, "__qualname__", v.__name__),
+                    "module": getattr(v, "__module__", ""),
+                }
+            if callable(v) and hasattr(v, "__name__"):
+                return {
+                    "name": v.__name__,
+                    "kind": "callable",
+                    "qualname": getattr(v, "__qualname__", v.__name__),
+                    "module": getattr(v, "__module__", ""),
+                }
+            t = type(v)
+            return {
+                "name": t.__name__,
+                "kind": "instance",
+                "qualname": getattr(t, "__qualname__", t.__name__),
+                "module": getattr(t, "__module__", ""),
+            }
+
+        try:
+            mod = importlib.import_module(module)
+            obj = mod
+            for part in attr_path.split("."):
+                if not part:
+                    continue
+                obj = getattr(obj, part)
+            if not hasattr(obj, "items"):
+                print(json.dumps({
+                    "ok": False,
+                    "error": f"not a mapping: {type(obj).__name__}",
+                }))
+                raise SystemExit(0)
+            entries = {}
+            for k, v in obj.items():
+                entries[encode_key(k)] = describe(v)
+            print(json.dumps({"ok": True, "entries": entries, "n": len(entries)}))
+        except Exception as e:
+            print(json.dumps({
+                "ok": False,
+                "error": f"{type(e).__name__}: {e}",
+            }))
+        """
+    ).strip()
+
+
+def read_runtime_registry(
+    package_dir: Path,
+    module: str,
+    attr_path: str,
+    *,
+    timeout: float = 15.0,
+) -> Dict[str, Any]:
+    """Import ``module.attr_path`` in a subprocess and return its mapping entries.
+
+    Never imports in-process. On failure returns ``{ok: False, error: ...}``.
+    """
+    path_entry, _root = _import_layout(package_dir.resolve())
+    try:
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                _runtime_probe_script(),
+                str(path_entry),
+                module,
+                attr_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=str(path_entry),
+        )
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": f"timeout after {timeout}s importing {module}.{attr_path}"}
+    except OSError as e:
+        return {"ok": False, "error": f"OSError: {e}"}
+
+    stdout = (proc.stdout or "").strip()
+    if not stdout:
+        err = (proc.stderr or "").strip() or f"exit {proc.returncode}"
+        return {"ok": False, "error": f"empty probe output: {err}"}
+    # Probe prints one JSON object; tolerate trailing noise.
+    line = stdout.splitlines()[-1]
+    try:
+        data = json.loads(line)
+    except json.JSONDecodeError:
+        return {
+            "ok": False,
+            "error": f"probe returned non-JSON: {line[:200]!r}; stderr={(proc.stderr or '')[:200]!r}",
+        }
+    if not isinstance(data, dict):
+        return {"ok": False, "error": "probe returned non-object JSON"}
+    return data
+
+
+def _names_match(extracted: str, runtime: Dict[str, Any]) -> bool:
+    """True when the AST Name/Attribute matches the runtime object's name."""
+    rname = str(runtime.get("name") or "")
+    rqual = str(runtime.get("qualname") or "")
+    if extracted == rname:
+        return True
+    if extracted == rqual:
+        return True
+    if rqual.endswith("." + extracted):
+        return True
+    return False
+
+
+def _discovery_probe_script() -> str:
+    """Walk the package at runtime and report every dict-of-callables it holds."""
+    return textwrap.dedent(
+        """
+        import importlib, inspect, json, os, sys
+
+        path_entry, pkg_dir, pkg_root = sys.argv[1], sys.argv[2], sys.argv[3]
+        sys.path.insert(0, path_entry)
+
+        def as_mapping(value):
+            if isinstance(value, dict):
+                return value
+            if type(value).__name__ == "mappingproxy":
+                try:
+                    return dict(value)
+                except Exception:
+                    return None
+            return None
+
+        def is_registry(mapping):
+            return bool(mapping) and all(callable(v) for v in mapping.values())
+
+        modules = []
+        for root, dirs, files in os.walk(pkg_dir):
+            dirs[:] = [d for d in dirs if d not in {"tests", "__pycache__", ".git"}]
+            for f in files:
+                if f.endswith(".py") and f != "__init__.py":
+                    rel = os.path.relpath(os.path.join(root, f), pkg_dir)
+                    dotted = rel[:-3].replace(os.sep, ".")
+                    modules.append(pkg_root + "." + dotted if pkg_root else dotted)
+
+        found = {}
+        for name in modules:
+            try:
+                mod = importlib.import_module(name)
+            except Exception:
+                continue
+            for attr, value in vars(mod).items():
+                if attr.startswith("__"):
+                    continue
+                mapping = as_mapping(value)
+                if mapping is not None and is_registry(mapping):
+                    found[name + ":" + attr] = len(mapping)
+                if inspect.isclass(value):
+                    for cattr, cvalue in vars(value).items():
+                        if cattr.startswith("__"):
+                            continue
+                        cmap = as_mapping(cvalue)
+                        if cmap is not None and is_registry(cmap):
+                            found[name + ":" + attr + "." + cattr] = len(cmap)
+        print(json.dumps({"ok": True, "registries": found}))
+        """
+    ).strip()
+
+
+def discover_undetected_registries(
+    package_dir: Path,
+    defs: Sequence["RegistryDef"],
+    *,
+    timeout: float = 30.0,
+) -> List[Dict[str, Any]]:
+    """Runtime registries the AST extractor never detected at all.
+
+    The oracle can otherwise only grade tables the extractor already found, so a
+    registry it never sees is invisible rather than reported — the same
+    one-directional blind spot the port-evidence manifest had. The common Python
+    idiom this catches is decorator registration:
+    ``semantic_version:BaseSpec.SYNTAXES`` starts as ``{}`` and is filled by
+    ``@BaseSpec.register_syntax``, so no dict literal ever names its members,
+    yet ``SYNTAXES[syntax](expression)`` is a real dispatch site.
+    """
+    package_dir = Path(package_dir).resolve()
+    path_entry, _root = _import_layout(package_dir)
+    try:
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                _discovery_probe_script(),
+                str(path_entry),
+                str(package_dir),
+                _root,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=str(path_entry),
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return []
+    stdout = (proc.stdout or "").strip()
+    if not stdout:
+        return []
+    try:
+        data = json.loads(stdout.splitlines()[-1])
+    except json.JSONDecodeError:
+        return []
+    known = {rd.qual_name for rd in defs}
+    out: List[Dict[str, Any]] = []
+    for qualified, count in sorted((data.get("registries") or {}).items()):
+        module, _, attr = qualified.partition(":")
+        if attr in known:
+            continue
+        out.append(
+            {"registry": attr, "module": module, "runtime_entries": int(count)}
+        )
+    return out
+
+
+def compare_registries_to_runtime(
+    package_dir: Path,
+    *,
+    timeout: float = 15.0,
+    # Optional override for tests: inject extra extracted entries per qual name.
+    extra_extracted: Optional[Dict[str, List[Tuple[str, str]]]] = None,
+) -> Dict[str, Any]:
+    """Compare AST-inferred registry tables to real imported mapping objects.
+
+    Units are **registry entries** (key → target name):
+
+    * **agreement** — key in both; extracted Name/Attribute matches runtime
+      class/function ``__name__``.
+    * **disagreement** — extracted key missing at runtime, or wrong target name.
+    * **missed** — runtime key the extractor did not emit (lambda/Call values,
+      non-literal keys, or empty extraction). Counted and reported, **not**
+      folded into the agreement numerator.
+    * **unscored** — AST slots the extractor cannot decide (non-literal keys,
+      non-Name values) when we still want a shape breakdown; these are the same
+      population that drives *missed* once runtime keys are known.
+
+    Import runs in a **subprocess**. An import failure skips the package with a
+    named reason (not an empty registry agreement).
+
+    ``ok`` is True iff there are zero disagreements (misses do not fail the check).
+    """
+    package_dir = Path(package_dir).resolve()
+    defs = collect_registry_defs(package_dir)
+    report: Dict[str, Any] = {
+        "package": str(package_dir),
+        "status": "ok",
+        "skip_reason": None,
+        "registries": [],
+        "registries_total": len(defs),
+        "registries_import_ok": 0,
+        "registries_import_failed": 0,
+        "entries_runtime": 0,
+        "entries_extracted": 0,
+        "entries_scored": 0,
+        "agreements": 0,
+        "disagreements": 0,
+        "missed": 0,
+        "invented": 0,
+        "wrong_target": 0,
+        "by_value_shape": {},
+        # AST-detected tables whose runtime values are not callable at all, and
+        # genuine runtime registries the AST never detected. Both are kept out
+        # of the agreement numerator and out of `missed`.
+        "false_positive_tables": 0,
+        "false_positive_entries": 0,
+        "undetected_registries": [],
+        "undetected_entries": 0,
+        "agreement_rate_scored": None,
+        "coverage_of_runtime": None,
+        "disagreement_details": [],
+        "missed_samples": [],
+        "import_failures": [],
+        "ok": True,
+    }
+    if not defs:
+        report["status"] = "no_registries"
+        report["message"] = "AST extractor found no callable-registry dict literals"
+        return report
+
+    # Shape tallies across all importable registries.
+    shape_stats: Dict[str, Dict[str, int]] = defaultdict(
+        lambda: {
+            "ast_slots": 0,
+            "extracted": 0,
+            "runtime_entries": 0,
+            "agreements": 0,
+            "disagreements": 0,
+            "missed": 0,
+        }
+    )
+
+    agreements = 0
+    disagreements = 0
+    missed = 0
+    invented = 0
+    wrong_target = 0
+    n_runtime = 0
+    n_extracted = 0
+    details: List[Dict[str, Any]] = []
+    missed_samples: List[Dict[str, Any]] = []
+    reg_rows: List[Dict[str, Any]] = []
+    import_failures: List[Dict[str, Any]] = []
+    false_positives: List[Dict[str, Any]] = []
+    any_import_ok = False
+
+    extra_extracted = extra_extracted or {}
+
+    for rd in defs:
+        runtime = read_runtime_registry(
+            package_dir, rd.module, rd.attr_path, timeout=timeout
+        )
+        inv = rd.inventory
+        extracted_map = {k: v for k, v in rd.entries}
+        # Test/hook: inject or overwrite extracted pairs (e.g. a wrong candidate).
+        for ek, ev in extra_extracted.get(rd.qual_name, []):
+            extracted_map[ek] = ev
+
+        row: Dict[str, Any] = {
+            "registry": rd.qual_name,
+            "module": rd.module,
+            "file": str(rd.file),
+            "ast_slots": inv.get("n_slots", 0),
+            "extracted": len(extracted_map),
+            "value_shapes": inv.get("value_shapes", {}),
+            "key_shapes": inv.get("key_shapes", {}),
+        }
+
+        if not runtime.get("ok"):
+            report["registries_import_failed"] += 1
+            err = str(runtime.get("error") or "import failed")
+            row["status"] = "import_failed"
+            row["error"] = err
+            import_failures.append(
+                {"registry": rd.qual_name, "module": rd.module, "error": err}
+            )
+            reg_rows.append(row)
+            continue
+
+        any_import_ok = True
+        report["registries_import_ok"] += 1
+        rt_entries: Dict[str, Any] = runtime.get("entries") or {}
+
+        # The AST criterion is syntactic, so it also matches tables whose values
+        # are not callable at all — `charset:UNICODE_RANGES_COMBINED` is
+        # str -> range, `humanize:_TRANSLATIONS` holds a NullTranslations
+        # instance, `semantic_version:SpecItem.KIND_ALIASES` is str -> str.
+        # Runtime settles it. Counting those as *missed dispatch targets*
+        # inflated the headline: 350 of a reported 375 misses came from three
+        # tables that are not dispatch registries.
+        callable_kinds = {"type", "function", "callable"}
+        non_callable = [
+            key
+            for key, rt in rt_entries.items()
+            if str(rt.get("kind")) not in callable_kinds
+        ]
+        if rt_entries and len(non_callable) == len(rt_entries):
+            row["status"] = "not_a_callable_registry"
+            row["runtime_entries"] = len(rt_entries)
+            row["runtime_value_kinds"] = sorted(
+                {str(rt.get("kind")) for rt in rt_entries.values()}
+            )
+            report["false_positive_tables"] += 1
+            report["false_positive_entries"] += len(rt_entries)
+            false_positives.append(
+                {
+                    "registry": rd.qual_name,
+                    "module": rd.module,
+                    "runtime_entries": len(rt_entries),
+                    "runtime_value_kinds": row["runtime_value_kinds"],
+                }
+            )
+            reg_rows.append(row)
+            continue
+
+        row["status"] = "compared"
+        row["runtime_entries"] = len(rt_entries)
+        n_runtime += len(rt_entries)
+        n_extracted += len(extracted_map)
+
+        # Map runtime key -> dominant AST value shape (for breakdown).
+        slot_shape_by_key: Dict[str, str] = {}
+        for slot in inv.get("slots") or []:
+            k = slot.get("key")
+            if k is not None:
+                slot_shape_by_key[str(k)] = str(slot.get("value_shape") or "?")
+
+        for shape, n in (inv.get("value_shapes") or {}).items():
+            shape_stats[shape]["ast_slots"] += int(n)
+        for _k, _v in extracted_map.items():
+            # Extracted values are always Name/Attribute.
+            sh = slot_shape_by_key.get(_k, "Name")
+            shape_stats[sh]["extracted"] += 1
+
+        reg_agree = reg_disagree = reg_miss = 0
+
+        # Score extracted keys.
+        for key, val_name in extracted_map.items():
+            if key not in rt_entries:
+                reg_disagree += 1
+                invented += 1
+                disagreements += 1
+                shape = slot_shape_by_key.get(key, "Name")
+                shape_stats[shape]["disagreements"] += 1
+                rec = {
+                    "registry": rd.qual_name,
+                    "key": key,
+                    "kind": "invented",
+                    "extracted": val_name,
+                    "runtime": None,
+                }
+                details.append(rec)
+                continue
+            rt = rt_entries[key]
+            if _names_match(val_name, rt):
+                reg_agree += 1
+                agreements += 1
+                shape = slot_shape_by_key.get(key, "Name")
+                shape_stats[shape]["agreements"] += 1
+            else:
+                reg_disagree += 1
+                wrong_target += 1
+                disagreements += 1
+                shape = slot_shape_by_key.get(key, "Name")
+                shape_stats[shape]["disagreements"] += 1
+                details.append(
+                    {
+                        "registry": rd.qual_name,
+                        "key": key,
+                        "kind": "wrong_target",
+                        "extracted": val_name,
+                        "runtime": rt.get("name"),
+                        "runtime_kind": rt.get("kind"),
+                    }
+                )
+
+        # Missed runtime keys (not in extracted).
+        for key, rt in rt_entries.items():
+            shape_stats[slot_shape_by_key.get(key, rt.get("kind") or "?")][
+                "runtime_entries"
+            ] += 1
+            if key in extracted_map:
+                continue
+            reg_miss += 1
+            missed += 1
+            shape = slot_shape_by_key.get(key, rt.get("kind") or "?")
+            shape_stats[shape]["missed"] += 1
+            if len(missed_samples) < 40:
+                missed_samples.append(
+                    {
+                        "registry": rd.qual_name,
+                        "key": key,
+                        "runtime_name": rt.get("name"),
+                        "runtime_kind": rt.get("kind"),
+                        "ast_value_shape": slot_shape_by_key.get(key),
+                    }
+                )
+
+        row["agreements"] = reg_agree
+        row["disagreements"] = reg_disagree
+        row["missed"] = reg_miss
+        reg_rows.append(row)
+
+    report["registries"] = reg_rows
+    report["entries_runtime"] = n_runtime
+    report["entries_extracted"] = n_extracted
+    report["entries_scored"] = agreements + disagreements
+    report["agreements"] = agreements
+    report["disagreements"] = disagreements
+    report["missed"] = missed
+    report["invented"] = invented
+    report["wrong_target"] = wrong_target
+    report["by_value_shape"] = {k: dict(v) for k, v in sorted(shape_stats.items())}
+    report["disagreement_details"] = details[:40]
+    report["missed_samples"] = missed_samples
+    report["import_failures"] = import_failures
+    report["false_positives"] = false_positives
+    undetected = discover_undetected_registries(package_dir, defs, timeout=timeout)
+    report["undetected_registries"] = undetected
+    report["undetected_entries"] = sum(int(u["runtime_entries"]) for u in undetected)
+    scored = agreements + disagreements
+    # A rate over an empty population is not 100% — it is undefined. Printing
+    # 1.0 made packages where nothing was examined read as fully verified.
+    report["agreement_rate_scored"] = (agreements / scored) if scored else None
+    report["coverage_of_runtime"] = (agreements / n_runtime) if n_runtime else None
+    report["ok"] = disagreements == 0
+
+    if not any_import_ok and import_failures:
+        # Entire package unimportable — not an agreement.
+        report["status"] = "skipped"
+        report["skip_reason"] = import_failures[0]["error"]
+        report["ok"] = True  # skip is not a scoring failure
+        report["message"] = (
+            f"skipped: could not import registries ({len(import_failures)} failure(s)); "
+            f"first: {import_failures[0]['error']}"
+        )
+    elif not any_import_ok:
+        report["status"] = "skipped"
+        report["skip_reason"] = "no registries compared"
+        report["ok"] = True
+
+    return report
+
+
+def format_runtime_oracle_report(report: Dict[str, Any]) -> str:
+    lines = [
+        f"Python registry runtime oracle: {report.get('package')}",
+        f"  status                  : {report.get('status')}"
+        + (f" ({report.get('skip_reason')})" if report.get("skip_reason") else ""),
+        f"  registries (AST)        : {report.get('registries_total')} "
+        f"(import_ok={report.get('registries_import_ok')}, "
+        f"import_failed={report.get('registries_import_failed')})",
+        f"  entries runtime         : {report.get('entries_runtime')}",
+        f"  entries extracted       : {report.get('entries_extracted')}",
+        f"  scored (agree+disagree) : {report.get('entries_scored')}",
+        f"  agreements              : {report.get('agreements')}",
+        f"  disagreements           : {report.get('disagreements')} "
+        f"(invented={report.get('invented')}, wrong_target={report.get('wrong_target')})",
+        f"  missed (runtime only)   : {report.get('missed')}",
+        f"  false-positive tables   : {report.get('false_positive_tables')} "
+        f"({report.get('false_positive_entries')} entries; values not callable at runtime)",
+        f"  undetected registries   : {len(report.get('undetected_registries') or [])} "
+        f"({report.get('undetected_entries')} entries the AST never saw)",
+        "  agreement rate (scored) : "
+        + (
+            f"{100.0 * report['agreement_rate_scored']:.1f}%"
+            if report.get("agreement_rate_scored") is not None
+            else "n/a (nothing scored)"
+        ),
+        "  coverage of runtime     : "
+        + (
+            f"{100.0 * report['coverage_of_runtime']:.1f}%"
+            if report.get("coverage_of_runtime") is not None
+            else "n/a (no comparable runtime entries)"
+        ),
+        f"  ok (no disagreements)   : {report.get('ok')}",
+    ]
+    if report.get("by_value_shape"):
+        lines.append("  by AST value shape:")
+        for shape, st in (report["by_value_shape"] or {}).items():
+            lines.append(
+                f"    {shape}: ast_slots={st.get('ast_slots', 0)} "
+                f"extracted={st.get('extracted', 0)} "
+                f"agree={st.get('agreements', 0)} "
+                f"disagree={st.get('disagreements', 0)} "
+                f"missed={st.get('missed', 0)}"
+            )
+    if report.get("undetected_registries"):
+        lines.append("  undetected by the AST extractor (runtime discovery):")
+        for u in report["undetected_registries"]:
+            lines.append(
+                f"    {u.get('module')}:{u.get('registry')} runtime={u.get('runtime_entries')}"
+            )
+    if report.get("false_positives"):
+        lines.append("  detected but not callable registries at runtime:")
+        for f in report["false_positives"]:
+            lines.append(
+                f"    {f.get('registry')}: runtime={f.get('runtime_entries')} "
+                f"value_kinds={f.get('runtime_value_kinds')}"
+            )
+    if report.get("registries"):
+        lines.append("  per registry:")
+        for row in report["registries"]:
+            if row.get("status") == "import_failed":
+                lines.append(
+                    f"    {row.get('registry')}: IMPORT FAILED — {row.get('error')}"
+                )
+            else:
+                lines.append(
+                    f"    {row.get('registry')}: runtime={row.get('runtime_entries')} "
+                    f"extracted={row.get('extracted')} "
+                    f"agree={row.get('agreements')} "
+                    f"disagree={row.get('disagreements')} "
+                    f"missed={row.get('missed')} "
+                    f"shapes={row.get('value_shapes')}"
+                )
+    if report.get("disagreement_details"):
+        lines.append("  disagreements (sample):")
+        for d in report["disagreement_details"][:12]:
+            lines.append(
+                f"    {d.get('registry')}[{d.get('key')!r}] "
+                f"{d.get('kind')}: extracted={d.get('extracted')!r} "
+                f"runtime={d.get('runtime')!r}"
+            )
+    if report.get("missed_samples"):
+        lines.append("  missed (sample):")
+        for m in report["missed_samples"][:12]:
+            lines.append(
+                f"    {m.get('registry')}[{m.get('key')!r}] "
+                f"runtime={m.get('runtime_name')!r} kind={m.get('runtime_kind')} "
+                f"ast_shape={m.get('ast_value_shape')}"
+            )
+    lines.append(
+        "  note: missed entries stay out of the agreement numerator; "
+        "import failure skips (does not count as agreement)."
+    )
+    return "\n".join(lines)
+
+
 def format_report(summary: Dict[str, Any], *, totals: Optional[Dict[str, int]] = None) -> str:
     lines = [
         f"Python dynamic-dispatch blind-spot report: {summary.get('package')}",
@@ -956,12 +1792,32 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         help="analyse a published BYOG snapshot instead of a fresh extraction",
     )
     ap.add_argument("--json", action="store_true")
+    ap.add_argument(
+        "--vs-runtime",
+        action="store_true",
+        help=(
+            "compare AST-inferred registry tables to real imported mapping "
+            "objects (subprocess import; does not modify graphs)"
+        ),
+    )
     args = ap.parse_args(argv)
+
+    pkg = args.package.resolve()
+
+    if args.vs_runtime:
+        report = compare_registries_to_runtime(pkg)
+        if args.json:
+            print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+        else:
+            print(format_runtime_oracle_report(report))
+        # Skip is success; scoring failure is disagreements > 0.
+        if report.get("status") == "skipped":
+            raise SystemExit(0)
+        raise SystemExit(0 if report.get("ok") else 1)
 
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from mini_game_to_byog import build_byog_for_package  # type: ignore
 
-    pkg = args.package.resolve()
     if args.graph is not None:
         data = _load_published_byog(args.graph.resolve())
         source_desc = f"published graph {args.graph}"

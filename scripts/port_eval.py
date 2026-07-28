@@ -31,6 +31,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -48,6 +49,7 @@ def _run(
     cmd: List[str], cwd: Path, timeout: int = 600, env: Optional[Dict[str, str]] = None
 ) -> Dict[str, Any]:
     """Run a command, capturing status + output tail (never raises on non-zero)."""
+    started = time.monotonic()
     try:
         proc = subprocess.run(
             cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout,
@@ -55,15 +57,26 @@ def _run(
             env=None if env is None else {**os.environ, **env},
         )
     except FileNotFoundError:
-        return {"status": "skipped", "reason": f"{cmd[0]} not found", "cmd": " ".join(cmd)}
+        return {
+            "status": "skipped",
+            "reason": f"{cmd[0]} not found",
+            "cmd": " ".join(cmd),
+            "elapsed_seconds": round(time.monotonic() - started, 3),
+        }
     except subprocess.TimeoutExpired:
-        return {"status": "fail", "reason": "timeout", "cmd": " ".join(cmd)}
+        return {
+            "status": "fail",
+            "reason": "timeout",
+            "cmd": " ".join(cmd),
+            "elapsed_seconds": round(time.monotonic() - started, 3),
+        }
     tail = (proc.stdout + proc.stderr).strip().splitlines()[-20:]
     return {
         "status": "ok" if proc.returncode == 0 else "fail",
         "returncode": proc.returncode,
         "cmd": " ".join(cmd),
         "output_tail": tail,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
     }
 
 
@@ -364,7 +377,51 @@ def load_gate_manifest(path: Path) -> Dict[str, Dict[str, Any]]:
             f"{unlisted_sources}. Declare each as a port or as a named gap; "
             "silently omitting one hides a target from the evidence report."
         )
+
+    for ident, entry in gates.items():
+        after = entry.get("after", [])
+        if not isinstance(after, list) or not all(isinstance(dep, str) for dep in after):
+            raise ValueError(f"{path}: profile {ident!r} has invalid 'after' dependencies")
+        if len(after) != len(set(after)):
+            raise ValueError(f"{path}: profile {ident!r} repeats an 'after' dependency")
+        missing = sorted(set(after) - set(gates))
+        if missing:
+            raise ValueError(
+                f"{path}: profile {ident!r} depends on unknown profile(s): {missing}"
+            )
+        if ident in after:
+            raise ValueError(f"{path}: profile {ident!r} cannot depend on itself")
     return gates
+
+
+def _order_gate_ids(selected: List[str], gates: Dict[str, Dict[str, Any]]) -> List[str]:
+    """Topologically order selected profiles while preserving manifest order.
+
+    Dependencies are used only for aggregate runs.  A named ``--gate`` remains
+    a focused diagnostic command, so it does not unexpectedly run neighbouring
+    profiles merely because one full-suite check consumes their fresh output.
+    """
+    wanted = set(selected)
+    ordered: List[str] = []
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(ident: str) -> None:
+        if ident in visited:
+            return
+        if ident in visiting:
+            raise ValueError(f"port-gate dependency cycle includes {ident!r}")
+        visiting.add(ident)
+        for dep in gates[ident].get("after", []):
+            if dep in wanted:
+                visit(dep)
+        visiting.remove(ident)
+        visited.add(ident)
+        ordered.append(ident)
+
+    for ident in selected:
+        visit(ident)
+    return ordered
 
 
 def _tool_probe(tool: str) -> Dict[str, Any]:
@@ -461,6 +518,16 @@ def _run_declared_check(
         raise ValueError(f"{name}: cwd must stay within the repository")
     result = _run(_expand_gate_command(command), cwd, env=declared_env)
     result["name"] = name
+    successful_skip_marker = check.get("successful_skip_marker")
+    if successful_skip_marker is not None:
+        if not isinstance(successful_skip_marker, str) or not successful_skip_marker:
+            raise ValueError(f"{name}: successful_skip_marker must be a non-empty string")
+        output = "\n".join(result.get("output_tail", []))
+        if result["status"] == "ok" and successful_skip_marker in output:
+            result["status"] = "skipped"
+            result["reason"] = str(
+                check.get("skip_reason", "command passed with declared source skips")
+            )
     # pytest reports a deliberately skipped optional tool with exit code zero.
     # Preserve that in the aggregate status instead of silently calling it full coverage.
     output = "\n".join(result.get("output_tail", []))
@@ -469,6 +536,14 @@ def _run_declared_check(
 
 
 def _index_gate(gate: Dict[str, Any], graph: Path) -> Dict[str, Any]:
+    if gate["indexer"] == "c":
+        compiler = _tool_probe("c_compiler")
+        if compiler["status"] != "ok":
+            return {
+                "name": "c graph index",
+                **compiler,
+                "elapsed_seconds": 0.0,
+            }
     source = ROOT / gate["source"]
     if gate["indexer"] == "python":
         command = [
@@ -511,8 +586,14 @@ def run_declared_gate(
     """Run one complete port profile; never turn a broken present tool into a skip."""
     ident = str(gate["id"])
     if gate.get("kind", "port") == "gap":
-        return {"id": ident, "status": "gap", "gap": gate["gap"]}
+        return {
+            "id": ident,
+            "status": "gap",
+            "gap": gate["gap"],
+            "timing": {"total_seconds": 0.0},
+        }
 
+    started = time.monotonic()
     result: Dict[str, Any] = {"id": ident, "status": "pass", "checks": []}
     for check in gate.get("checks", []):
         check_result = _run_declared_check(
@@ -529,6 +610,7 @@ def run_declared_gate(
     result["tool_probes"] = {"cargo": cargo, "rustc": rustc}
     skip_rust = any(probe["status"] == "skipped" for probe in (cargo, rustc))
     if index_result["status"] == "ok":
+        port_eval_started = time.monotonic()
         try:
             result["port_eval"] = build_eval_report(
                 source=ROOT / gate["source"],
@@ -545,6 +627,7 @@ def run_declared_gate(
             )
         except (OSError, RuntimeError, ValueError) as error:
             result["port_eval_error"] = str(error)
+        result["port_eval_seconds"] = round(time.monotonic() - port_eval_started, 3)
 
     failed_checks = [check for check in result["checks"] if check["status"] == "fail"]
     broken_tools = [
@@ -552,16 +635,34 @@ def run_declared_gate(
     ]
     if index_result["status"] == "fail" or failed_checks or broken_tools or "port_eval_error" in result:
         result["status"] = "fail"
-    elif not skip_rust and result.get("port_eval", {}).get("overall_pass") is not True:
+    elif (
+        index_result["status"] != "skipped"
+        and not skip_rust
+        and result.get("port_eval", {}).get("overall_pass") is not True
+    ):
         # This includes a corrupt golden: cargo test fails inside port_eval and
         # the gate must exit non-zero instead of merely printing a false report.
         result["status"] = "fail"
     else:
-        skipped = skip_rust or any(
+        skipped = index_result["status"] == "skipped" or skip_rust or any(
             check["status"] == "skipped" or check.get("reported_skip", False)
             for check in result["checks"]
         )
         result["status"] = "pass_with_skips" if skipped else "pass"
+
+    checks_seconds = sum(float(check.get("elapsed_seconds", 0.0)) for check in result["checks"])
+    index_seconds = float(index_result.get("elapsed_seconds", 0.0))
+    port_eval_seconds = float(result.get("port_eval_seconds", 0.0))
+    total_seconds = round(time.monotonic() - started, 3)
+    result["timing"] = {
+        "checks_seconds": round(checks_seconds, 3),
+        "index_seconds": round(index_seconds, 3),
+        "port_eval_seconds": round(port_eval_seconds, 3),
+        # Tool probes and report setup are deliberately included rather than
+        # disappearing from the wall-clock number.
+        "other_seconds": round(max(0.0, total_seconds - checks_seconds - index_seconds - port_eval_seconds), 3),
+        "total_seconds": total_seconds,
+    }
     return result
 
 
@@ -595,6 +696,16 @@ def print_declared_gate_result(result: Dict[str, Any]) -> None:
         )
     if "port_eval_error" in result:
         print(f"  FAIL: port_eval setup — {result['port_eval_error']}")
+    timing = result.get("timing")
+    if timing:
+        print(
+            "  TIMING: "
+            f"checks={timing.get('checks_seconds', 0.0):.3f}s "
+            f"index={timing.get('index_seconds', 0.0):.3f}s "
+            f"port_eval={timing.get('port_eval_seconds', 0.0):.3f}s "
+            f"other={timing.get('other_seconds', 0.0):.3f}s "
+            f"total={timing.get('total_seconds', 0.0):.3f}s"
+        )
     print(f"  RESULT: {result['status'].upper()}")
 
 
@@ -655,6 +766,13 @@ def main(
         if not selected:
             typer.secho("no port gates selected", fg=typer.colors.RED, err=True)
             raise typer.Exit(2)
+        if all_gates:
+            try:
+                selected = _order_gate_ids(selected, gates)
+            except ValueError as error:
+                typer.secho(f"port-gate manifest error: {error}", fg=typer.colors.RED, err=True)
+                raise typer.Exit(2) from error
+        aggregate_started = time.monotonic()
         reports = [
             run_declared_gate(
                 gates[ident], full=full, scale=scale, differential_full=differential_full
@@ -663,6 +781,17 @@ def main(
         ]
         for report in reports:
             print_declared_gate_result(report)
+        aggregate_seconds = time.monotonic() - aggregate_started
+        timed_profiles = [
+            f"{report['id']}={report['timing']['total_seconds']:.3f}s"
+            for report in reports
+            if report["status"] != "gap" and "timing" in report
+        ]
+        if timed_profiles:
+            print(
+                "PORT EVIDENCE TIMING: "
+                f"wall={aggregate_seconds:.3f}s; profiles=" + ", ".join(timed_profiles)
+            )
         failed = [report["id"] for report in reports if report["status"] == "fail"]
         skipped = [report["id"] for report in reports if report["status"] == "pass_with_skips"]
         gaps = [report["id"] for report in reports if report["status"] == "gap"]

@@ -92,6 +92,41 @@ operation classes for `JsonPatch._get_operation`. Recall is deliberately narrow
 tables elsewhere (`isodate:STRF_DT_MAP`, `humanize:_TRANSLATIONS`) yield no
 candidates rather than guesses.
 
+**Runtime oracle (2026-07-26; corrected 2026-07-28):**
+`scripts/python_dynamic.py --vs-runtime` imports each registry in a
+**subprocess** and compares keys/target names to the extracted table. Import
+failure is a named skip (not empty-registry agreement). Three populations are
+kept out of the agreement numerator *and* out of each other:
+
+| package | registry | runtime | extracted | agree | disagree | missed | classification |
+|---|---|---:|---:|---:|---:|---:|---|
+| `jsonpatch` | `JsonPatch.operations` | 6 | 6 | 6 | 0 | 0 | Name values, fully resolved |
+| `isodate` | `STRF_DT_MAP`, `STRF_D_MAP` | 25 | 0 | 0 | 0 | 25 | Lambda values — genuinely missed |
+| `humanize` | `_TRANSLATIONS` | 1 | — | — | — | — | not a callable registry |
+| `semantic_version` | `SpecItem.KIND_ALIASES` | 2 | — | — | — | — | not a callable registry |
+| `charset_normalizer` | `UNICODE_RANGES_COMBINED` | 347 | — | — | — | — | not a callable registry |
+| `semantic_version` | `BaseSpec.SYNTAXES` | 2 | — | — | — | — | **undetected by the AST** |
+
+The first measurement reported "375 missed" — but the AST criterion is
+syntactic, and **350 of those 375 came from three tables whose runtime values
+are not callable at all**: `UNICODE_RANGES_COMBINED` is `str -> range`,
+`_TRANSLATIONS` holds a `NullTranslations` instance, `KIND_ALIASES` is
+`str -> str`. Those are false-positive detections, not missed dispatch targets.
+The genuine miss is isodate's 25 lambdas, which the extractor cannot name.
+
+The oracle also only graded tables the extractor had already found, so a
+registry it never detected was invisible rather than reported — the same
+one-directional blind spot the port-evidence manifest had. Independent runtime
+discovery now walks the package and reports those: `semantic_version`'s
+`BaseSpec.SYNTAXES` starts as `{}` and is filled by `@BaseSpec.register_syntax`,
+so no dict literal ever names its members, yet `SYNTAXES[syntax](expression)`
+is a real dispatch site. Decorator registration is a common Python idiom and the
+extractor sees none of it.
+
+Rates over an empty population are reported as `n/a`, not 100%: a package where
+nothing was comparable is unmeasured, not verified. A wrong injected candidate
+is a disagreement.
+
 ## Graph-frontier step-1 outcome (tractable edges added; boundary confirmed)
 Per the agreed plan, the tractable/static-fact resolver edges were added and each
 was measured against `scripts/ablation_specs/jsonpatch_adequacy.json`:
