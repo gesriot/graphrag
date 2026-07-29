@@ -131,6 +131,40 @@ False-positive history: an earlier measurement reported "375 missed"; 350 of
 those came from non-callable tables (`range`, `NullTranslations`, `str→str`).
 The probe already recorded value `kind` — runtime settles what is a registry.
 
+**Call-graph oracle (2026-07-28):** `scripts/call_graph_oracle.py` is the first
+measurement of whether published `calls` edges are *observed*, not merely
+structurally clean. It loads edges from the **published** snapshot, runs the
+package golden contract in a subprocess under `sys.setprofile`, and reports
+three disjoint counts (no single agreement numerator):
+
+| package | graph rows / unique | observed | confirmed | missed | unconfirmed | graph coverage | observed recall |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `jsonpatch` (25 apply goldens) | 104 / 84 | 33 | 8 | 25 | 76 | 9.5% | 24.2% |
+| `mini_lang` (all golden_*.json) | 69 / 52 | 36 | 32 | 4 | 20 | 61.5% | 88.9% |
+| `humanize` (59 `golden_number.json` cases) | 80 / 42 | 9 | 9 | 0 | 33 | 21.4% | 100% |
+
+* **missed** = observed during the contract with no graph edge (extractor gap;
+  on jsonpatch these are dominated by registry dispatch:
+  `JsonPatch.apply → *Operation.apply`).
+* **unconfirmed** = graph edge never hit by this contract (coverage, not a
+  defect — DiffBuilder, CLI, and error-only paths stay unconfirmed under apply).
+* `audit_call_edges` pass_rate 1.0 is unchanged and still means *structurally*
+  clean; this oracle is the first number for *observed* fraction.
+
+A deleted published edge shows as missed; a fabricated edge shows as
+unconfirmed — verified end to end against a copied graph on disk, not only
+against the scoring function. Tracing overhead is negligible on these packages
+(<2s).
+
+Each run reports the corpus it actually executed (`workload cases executed`),
+because the first version did not. `run_humanize_number` looked for the golden
+at `tests/golden_number.json` while it lives at
+`tests/number/golden_number.json`, so it silently substituted an eight-call
+hand-written smoke set; its case loop also read `fn`/`function`/`name` while the
+golden uses `func`, so a found golden would still have executed zero cases. The
+figures above are from the real 59-case golden, and a missing corpus is now a
+named skip rather than a substitution.
+
 ## Graph-frontier step-1 outcome (tractable edges added; boundary confirmed)
 Per the agreed plan, the tractable/static-fact resolver edges were added and each
 was measured against `scripts/ablation_specs/jsonpatch_adequacy.json`:
