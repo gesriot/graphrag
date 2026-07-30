@@ -442,6 +442,34 @@ def trace_contract_calls(
 # ---------------------------------------------------------------------------
 
 
+def _normalize_endpoint(title: str, entity_titles: Optional[Set[str]] = None) -> str:
+    """Align constructor frames with class entities (``Cls.__init__`` → ``Cls``).
+
+    The tracer already strips these suffixes on observed frames; applying the
+    same rule to published graph endpoints keeps confirmed/missed honest when
+    the graph stores ``PatchOperation.__init__ → JsonPointer`` and the trace
+    reports ``PatchOperation → JsonPointer``.
+    """
+    titles = entity_titles or set()
+    for suffix in (".__init__", ".__new__", ".__call__"):
+        if title.endswith(suffix):
+            base = title[: -len(suffix)]
+            if not titles or base in titles:
+                return base
+    return title
+
+
+def _normalize_edge_set(
+    edges: Set[Edge], entity_titles: Optional[Set[str]] = None
+) -> Set[Edge]:
+    out: Set[Edge] = set()
+    for a, b in edges:
+        na, nb = _normalize_endpoint(a, entity_titles), _normalize_endpoint(b, entity_titles)
+        if na and nb and na != nb:
+            out.add((na, nb))
+    return out
+
+
 def score_call_edges(
     graph_edges: Set[Edge],
     observed: Set[Edge],
@@ -449,19 +477,23 @@ def score_call_edges(
     n_call_rows: Optional[int] = None,
     n_observed_raw: Optional[int] = None,
     unmapped_samples: Optional[List[Dict[str, Any]]] = None,
+    entity_titles: Optional[Set[str]] = None,
 ) -> Dict[str, Any]:
     """Score unique directed edges: confirmed / missed / unconfirmed.
 
     Pure function — no I/O. Used by the oracle and by plant tests that mutate
-    the edge set without re-tracing.
+    the edge set without re-tracing. Endpoints are constructor-normalized so
+    graph ``Cls.__init__`` matches observed ``Cls``.
     """
-    confirmed = sorted(observed & graph_edges)
-    missed = sorted(observed - graph_edges)
-    unconfirmed = sorted(graph_edges - observed)
+    g = _normalize_edge_set(graph_edges, entity_titles)
+    o = _normalize_edge_set(observed, entity_titles)
+    confirmed = sorted(o & g)
+    missed = sorted(o - g)
+    unconfirmed = sorted(g - o)
     return {
         "n_graph_call_rows": int(n_call_rows if n_call_rows is not None else len(graph_edges)),
-        "n_graph_calls": len(graph_edges),
-        "n_observed_mapped": len(observed),
+        "n_graph_calls": len(g),
+        "n_observed_mapped": len(o),
         "n_observed_raw": int(
             n_observed_raw if n_observed_raw is not None else len(observed)
         ),
@@ -476,12 +508,8 @@ def score_call_edges(
         "unmapped_samples": list(unmapped_samples or [])[:40],
         # Informational only — unconfirmed is coverage, not a defect; missed is
         # an extractor gap. Neither is folded into a single agreement score.
-        "coverage_of_graph": (
-            (len(confirmed) / len(graph_edges)) if graph_edges else None
-        ),
-        "recall_of_observed": (
-            (len(confirmed) / len(observed)) if observed else None
-        ),
+        "coverage_of_graph": (len(confirmed) / len(g)) if g else None,
+        "recall_of_observed": (len(confirmed) / len(o)) if o else None,
     }
 
 
@@ -542,6 +570,7 @@ def compare_call_edges_to_trace(
             trace.get("n_observed_raw") or len(trace.get("observed_raw") or [])
         ),
         unmapped_samples=list(trace.get("unmapped_samples") or []),
+        entity_titles=titles,
     )
     report.update(scored)
     # Carry through what the workload actually executed, so a run that drove

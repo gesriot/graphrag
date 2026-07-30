@@ -227,10 +227,41 @@ def publish_byog_snapshot(
     return snap_dir
 
 
+def pinned_snapshot_ids(out_root: Path) -> set[str]:
+    """Snapshot ids this graph must keep because a doc claim verifies them.
+
+    `scripts/doc_claims.json` records `frozen_snapshot` claims against specific
+    snapshot ids. Those are evidence, not cache: once retention deletes one the
+    number it backed can never be re-derived, because the code that produced it
+    has moved on.
+    """
+    manifest = Path(__file__).resolve().parent / "doc_claims.json"
+    if not manifest.is_file():
+        return set()
+    try:
+        claims = json.loads(manifest.read_text()).get("claims") or []
+    except (OSError, json.JSONDecodeError):
+        return set()
+    graph_name = Path(out_root).resolve().name
+    pinned: set[str] = set()
+    for claim in claims:
+        source = claim.get("source") or {}
+        snapshot = source.get("snapshot")
+        if not isinstance(snapshot, str):
+            continue
+        if Path(str(source.get("graph") or "")).name == graph_name:
+            pinned.add(snapshot)
+    return pinned
+
+
 def cleanup_old_snapshots(out_root: Path, keep_last: int = 5) -> int:
     """Delete old snapshot directories, keeping at most the most recent `keep_last`.
 
     - Always reads `current` first and protects that snapshot (never deletes it).
+    - Also protects any snapshot a `frozen_snapshot` doc claim pins. Routine
+      retention destroyed the sqlparse phase-5 baseline once: two reindexes
+      published two new snapshots, the sixth-oldest fell off, and the claim that
+      verified it degraded to an "absent source" skip that read as a pass.
     - `keep_last` is clamped to at least 1 because current must be retained.
     - Keeps current plus the newest remaining snapshots up to the total limit.
     - Snapshot dirs are sorted by name (timestamped names sort chronologically).
@@ -242,6 +273,8 @@ def cleanup_old_snapshots(out_root: Path, keep_last: int = 5) -> int:
     snapshots_dir = out_root / "snapshots"
     if not snapshots_dir.exists():
         return 0
+
+    pinned = pinned_snapshot_ids(out_root)
 
     current_file = out_root / "current"
     current_id: Optional[str] = None
@@ -265,6 +298,11 @@ def cleanup_old_snapshots(out_root: Path, keep_last: int = 5) -> int:
         current_dir = snapshots_dir / current_id
         if current_dir.exists():
             keep.add(current_dir)
+
+    for snapshot_id in pinned:
+        pinned_dir = snapshots_dir / snapshot_id
+        if pinned_dir.exists():
+            keep.add(pinned_dir)
 
     slots_left = max(0, keep_last - len(keep))
     if slots_left > 0:

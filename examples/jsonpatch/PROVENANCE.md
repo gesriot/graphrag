@@ -135,21 +135,42 @@ The probe already recorded value `kind` — runtime settles what is a registry.
 measurement of whether published `calls` edges are *observed*, not merely
 structurally clean. It loads edges from the **published** snapshot, runs the
 package golden contract in a subprocess under `sys.setprofile`, and reports
-three disjoint counts (no single agreement numerator):
+three disjoint counts (no single agreement numerator).
 
-| package | graph rows / unique | observed | confirmed | missed | unconfirmed | graph coverage | observed recall |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| `jsonpatch` (25 apply goldens) | 104 / 84 | 33 | 8 | 25 | 76 | 9.5% | 24.2% |
-| `mini_lang` (all golden_*.json) | 69 / 52 | 36 | 32 | 4 | 20 | 61.5% | 88.9% |
-| `humanize` (59 `golden_number.json` cases) | 80 / 42 | 9 | 9 | 0 | 33 | 21.4% | 100% |
+**Before cross-module import resolution** (oracle baseline):
 
-* **missed** = observed during the contract with no graph edge (extractor gap;
-  on jsonpatch these are dominated by registry dispatch:
-  `JsonPatch.apply → *Operation.apply`).
-* **unconfirmed** = graph edge never hit by this contract (coverage, not a
-  defect — DiffBuilder, CLI, and error-only paths stay unconfirmed under apply).
-* `audit_call_edges` pass_rate 1.0 is unchanged and still means *structurally*
-  clean; this oracle is the first number for *observed* fraction.
+| package | graph rows / unique | observed | confirmed | missed | unconfirmed |
+|---|---:|---:|---:|---:|---:|
+| `jsonpatch` (25 apply goldens) | 104 / 84 | 33 | 8 | 25 | 76 |
+| `mini_lang` | 69 / 52 | 36 | 32 | 4 | 20 |
+| `humanize` (59 cases) | 80 / 42 | 9 | 9 | 0 | 33 |
+
+Of jsonpatch's 25 misses, eleven were cross-module `jsonpatch:* → jsonpointer:*`
+— a static `from jsonpointer import JsonPointer` binding the graph did not
+follow (PROVENANCE has named this modelling gap since the closure-coverage
+finding).
+
+**After** resolving imported names through parameter defaults + `self` attrs
+(`pointer_cls=JsonPointer` → `self.pointer_cls(...)` → `self.pointer.to_last`):
+
+| package | graph rows / unique | observed | confirmed | missed | unconfirmed | notes |
+|---|---:|---:|---:|---:|---:|---|
+| `jsonpatch` | **122 / 94** | 33 | **21** | **12** | 73 | confirmed +13, missed −13 |
+| `mini_lang` | 100 / 57 | 36 | 35 | 1 | 22 | small graph densified |
+| `humanize` | 124 / 42 | 9 | 9 | 0 | 33 | unique pairs unchanged |
+
+Remaining jsonpatch misses: six `JsonPatch.apply → *Operation.apply`, the
+`_ops`/`_get_operation` chain, two `→ PatchOperation` construction paths, one
+ambiguous `MoveOperation.apply → JsonPointer.to_last` (`from_ptr` assigned in an
+if/else where one arm is not a constructor — left unresolved, not guessed), and
+`JsonPointer → unescape` inside jsonpointer. Cross-module residual: **1** (was 11).
+
+`audit_call_edges` on reindexed graphs: pass_rate **1.0**, 0 anomalies, 0
+dangling (jsonpatch / sqlparse / semantic_version / humanize / mini_lang).
+Adequacy from `apply_patch` still stalls at the registry (must-reach operations
+not reached) — that is dynamic dispatch, not the import gap; starting from
+`RemoveOperation.apply` the closure now enters `jsonpointer:JsonPointer.to_last`
+/ `walk` / `get_part`.
 
 A deleted published edge shows as missed; a fabricated edge shows as
 unconfirmed — verified end to end against a copied graph on disk, not only

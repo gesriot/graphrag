@@ -174,6 +174,26 @@ def _port_gate_manifest() -> dict[str, int]:
     }
 
 
+def _oracle_residuals() -> dict[str, int]:
+    """Derive the four-oracle residual table through its public summary adapter."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from oracle_summary import build_report  # type: ignore
+
+    report = build_report()
+    if not report.get("ok"):
+        raise RuntimeError("combined oracle summary did not report a successful measurement")
+    residuals = report["residuals"]
+    return {
+        "c_preprocessor_unknown": int(residuals["c_preprocessor_unknown"]),
+        "c_preprocessor_vacuous": int(residuals["c_preprocessor_vacuous"]),
+        "python_registry_missed": int(residuals["python_registry_missed"]),
+        "call_graph_missed": int(residuals["call_graph_missed"]),
+        "call_graph_unconfirmed": int(residuals["call_graph_unconfirmed"]),
+        "cjson_ownership_blocked": int(residuals["cjson_ownership_blocked"]),
+        "cjson_global_state_excluded": int(residuals["cjson_global_state_excluded"]),
+    }
+
+
 def _frozen_source_missing(claim: dict[str, Any]) -> bool:
     """Recognize an absent protected snapshot without masking a damaged one.
 
@@ -244,6 +264,8 @@ def derive(claim: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
         return _cjson_api_surface(), "live"
     if stype == "port_gate_manifest":
         return _port_gate_manifest(), "live"
+    if stype == "oracle_residuals":
+        return _oracle_residuals(), "live"
     if mode == "traced":
         return None, "traced"
     raise ValueError(f"unknown source type {stype!r} for claim {claim['id']}")

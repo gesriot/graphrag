@@ -46,6 +46,7 @@ long differential and scale checks.
 | The project design, research inputs, and future frontier | [Plan.md](Plan.md) | The roadmap and design decisions; treat its current-status language as bounded by the write-up. |
 | The results and their interpretation | [PHASE7_WRITEUP.md](PHASE7_WRITEUP.md) | What the ports and closed ablation series support, including the negative result. |
 | Why current prose says exactly what it says | [docs/EVIDENCE_AUDIT_20260728.md](docs/EVIDENCE_AUDIT_20260728.md) | A dated claim → evidence → edit ledger, with runnable checks. |
+| The shared oracle discipline and live residuals | [docs/ORACLE_CONTRACT.md](docs/ORACLE_CONTRACT.md) | The independent-oracle rules, their regression scars, the compliance review, and one combined command. |
 | Raw ablation protocol and results | [PHASE7_ABLATION.md](PHASE7_ABLATION.md) | The closed experiment record; read it for tables or preregistration detail, not as a mutable how-to. |
 | One target's source, scope, and exceptions | Its `examples/*/PROVENANCE.md` below | The local contract and provenance. cJSON and charset-normalizer also have separate mechanical API audits. |
 

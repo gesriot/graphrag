@@ -2018,7 +2018,10 @@ def compare_liveness_to_compiler(
         "regions_vacuous": n_vacuous,
         "empty_body_regions": empty_bodies,
         "agreement_evidence": dict(by_evidence),
-        "agreement_rate_scored": (len(agreements) / n_scored) if n_scored else 1.0,
+        # A zero-sized judged population is not perfect agreement. Keep the
+        # value undefined so a package with nothing comparable cannot read as
+        # fully verified.
+        "agreement_rate_scored": (len(agreements) / n_scored) if n_scored else None,
         "unknown_macro_families": dict(
             sorted(family_counter.items(), key=lambda kv: (-kv[1], kv[0]))
         ),
@@ -2070,7 +2073,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             print(f"  agreements            : {report['agreements']} "
                   f"{report.get('agreement_evidence') or ''}")
             print(f"  disagreements         : {report['disagreements']}")
-            print(f"  agreement rate (scored): {100.0 * report['agreement_rate_scored']:.1f}%")
+            rate = report["agreement_rate_scored"]
+            print(
+                "  agreement rate (scored): "
+                + (f"{100.0 * rate:.1f}%" if rate is not None else "n/a (nothing scored)")
+            )
             print(f"  unknown macro families: {report['unknown_macro_families']}")
             if report["disagreement_details"]:
                 print("  disagreements (sample):")

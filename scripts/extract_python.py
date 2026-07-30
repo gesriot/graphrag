@@ -750,6 +750,10 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
     local_classes: set[str] = set(class_methods.keys())
     factory_methods: set[tuple[str, str]] = set()
     property_methods: set[tuple[str, str]] = set()  # (Class, name) decorated @property
+    # Qualified names of @property / @x.setter / @x.deleter bodies. Import-ctor
+    # edges from these collide when getter and setter share a title
+    # (MoveOperation.from_key), which trips span_outside_caller in the audit.
+    property_accessor_qnames: set[str] = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.ClassDef):
             continue
@@ -759,6 +763,13 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
             decos = item.decorator_list
             if any(isinstance(d, ast.Name) and d.id in ("property", "cached_property") for d in decos):
                 property_methods.add((node.name, item.name))
+            is_prop_accessor = any(
+                (isinstance(d, ast.Name) and d.id in ("property", "cached_property"))
+                or (isinstance(d, ast.Attribute) and d.attr in ("setter", "getter", "deleter"))
+                for d in decos
+            )
+            if is_prop_accessor:
+                property_accessor_qnames.add(f"{node.name}.{item.name}")
             if not any(isinstance(d, ast.Name) and d.id == "classmethod" for d in decos):
                 continue
             for sub in ast.walk(item):
@@ -884,6 +895,119 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                     f"{enclosing_function_name(node)} reads imported module data {dotted} -> {resolved_display}",
                 )
 
+    # -----------------------------------------------------------------
+    # Cross-module imported types via parameter defaults + self attrs.
+    # Pattern: `from jsonpointer import JsonPointer` plus
+    #   def __init__(self, ..., pointer_cls=JsonPointer):
+    #       self.pointer_cls = pointer_cls
+    #       self.pointer = self.pointer_cls(path)
+    #   def apply(self, obj):
+    #       self.pointer.to_last(obj)
+    # Each step is a static fact once the default is an imported (or same-file)
+    # class name. Ambiguous multi-ctor cases still leave no hint.
+    # -----------------------------------------------------------------
+    # qualified func -> param -> "module:Class" type title
+    func_param_types: Dict[str, Dict[str, str]] = defaultdict(dict)
+
+    def _function_qname(fn: ast.AST) -> str:
+        lineno = getattr(fn, "lineno", -1)
+        end = getattr(fn, "end_lineno", lineno)
+        # Prefer exact span match for this function (not a nested child).
+        for name, start, stop in function_spans:
+            if start == lineno and stop == end:
+                return name
+        return enclosing_function_name(fn)
+
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        qname = _function_qname(node)
+        args = list(node.args.args)  # includes self/cls
+        defaults = list(node.args.defaults)
+        # defaults align to the last N positional args
+        if not defaults:
+            continue
+        paired = list(zip(args[-len(defaults) :], defaults))
+        for arg, default in paired:
+            if not isinstance(default, ast.Name):
+                continue
+            hint = constructor_type_hint(default.id)
+            if hint:
+                func_param_types[qname][arg.arg] = hint
+
+    # class simple name -> attr -> type title (imported or local class entity)
+    class_attr_types: Dict[str, Dict[str, str]] = defaultdict(dict)
+    # class simple name -> base simple names (same-file only)
+    class_bases: Dict[str, List[str]] = defaultdict(list)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        for b in node.bases:
+            if isinstance(b, ast.Name):
+                class_bases[node.name].append(b.id)
+
+    def _lookup_class_attr_type(class_name: str, attr: str, *, _seen: set | None = None) -> str | None:
+        """Resolve self.<attr>'s static type, walking same-file bases."""
+        _seen = _seen or set()
+        simple = class_name.split(".")[-1]
+        if simple in _seen:
+            return None
+        _seen.add(simple)
+        if attr in class_attr_types.get(simple, {}):
+            return class_attr_types[simple][attr]
+        for base in class_bases.get(simple, []):
+            found = _lookup_class_attr_type(base, attr, _seen=_seen)
+            if found:
+                return found
+        return None
+
+    def _type_from_call_func(func: ast.AST, enclosing: str) -> str | None:
+        """Type produced by calling func(...) when statically known."""
+        dotted = get_dotted_name(func)
+        if not dotted:
+            return None
+        # bare ImportedClass(...) / LocalClass(...)
+        if "." not in dotted:
+            return constructor_type_hint(dotted)
+        # self.pointer_cls(...) / cls.pointer_cls(...)
+        root, _, rest = dotted.partition(".")
+        if root in ("self", "cls") and rest and "." not in rest:
+            if enclosing in class_for_method:
+                return _lookup_class_attr_type(class_for_method[enclosing], rest)
+        return constructor_type_hint(dotted)
+
+    # First pass: self.attr = <known type source>
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        targets = list(node.targets) if isinstance(node, ast.Assign) else [node.target]
+        value = node.value
+        if value is None:
+            continue
+        enclosing = enclosing_function_name(node)
+        if enclosing == "unknown" or enclosing not in class_for_method:
+            continue
+        class_name = class_for_method[enclosing].split(".")[-1]
+        for target in targets:
+            if not (
+                isinstance(target, ast.Attribute)
+                and isinstance(target.value, ast.Name)
+                and target.value.id in ("self", "cls")
+            ):
+                continue
+            attr = target.attr
+            effective: str | None = None
+            if isinstance(value, ast.Name):
+                # self.pointer_cls = pointer_cls  (param with imported default)
+                if value.id in func_param_types.get(enclosing, {}):
+                    effective = func_param_types[enclosing][value.id]
+                else:
+                    effective = constructor_type_hint(value.id)
+            elif isinstance(value, ast.Call):
+                effective = _type_from_call_func(value.func, enclosing)
+            if effective:
+                class_attr_types[class_name][attr] = effective
+
     # Collect assign events with lineno for reassignment guards + ambiguity tiers.
     # Use the *actual enclosing function* (qualified) for the assignment node (via lineno).
     # Multiple distinct constructors for the same var (if branches, rebinds between
@@ -923,19 +1047,34 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                     if ctor_name.lower() in ("list", "dict", "set"):
                         container_kind = ctor_name.lower()
             is_constructor = isinstance(value, ast.Call) and container_kind is None
+            enclosing = enclosing_function_name(node)
             for target in targets:
+                # Track self.attr = Ctor(...) as class_attr type (second chance after param pass).
+                if (
+                    isinstance(target, ast.Attribute)
+                    and isinstance(target.value, ast.Name)
+                    and target.value.id in ("self", "cls")
+                    and enclosing in class_for_method
+                    and is_constructor
+                    and value is not None
+                ):
+                    class_name = class_for_method[enclosing].split(".")[-1]
+                    t = _type_from_call_func(value.func, enclosing)
+                    if t:
+                        class_attr_types[class_name][target.attr] = t
                 if isinstance(target, ast.Name):
                     var = target.id
-                    enclosing = enclosing_function_name(node)
                     if enclosing == "unknown":
                         continue
                     effective: str | None = None
                     if container_kind:
                         effective = f"container:{container_kind}"
-                    elif is_constructor:
-                        constructor = get_dotted_name(value.func)
-                        if constructor:
-                            effective = constructor_type_hint(constructor)
+                    elif is_constructor and value is not None:
+                        effective = _type_from_call_func(value.func, enclosing)
+                        if effective is None:
+                            constructor = get_dotted_name(value.func)
+                            if constructor:
+                                effective = constructor_type_hint(constructor)
                     contradicts_annotation = value is not None and isinstance(value, ast.Constant)
                     if effective is None and type_from_annot and not contradicts_annotation:
                         # annotation provides the type (bare "x: Demo" or unresolved call result).
@@ -964,17 +1103,83 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                 if caller in class_for_method:
                     class_name = class_for_method[caller]
                     simple_class = class_name.split(".")[-1]
+                    method_bare = caller.split(".")[-1] if "." in caller else caller
+                    source_title = f"{Path(path).stem}:{class_name}.{method_bare}"
+                    is_direct = base_dotted in ("self", "cls")
+                    is_known_same_class_method = attr in class_methods.get(simple_class, set())
+
+                    # self.pointer_cls(...) where pointer_cls holds an imported type
+                    # → constructor of that type (not a same-class method).
+                    if is_direct:
+                        stored_type = _lookup_class_attr_type(simple_class, attr)
+                        if stored_type:
+                            # Skip property getter/setter bodies: they share a
+                            # title with their pair and create audit span clashes.
+                            if caller not in property_accessor_qnames:
+                                relationships.append(
+                                    {
+                                        "id": f"rel:call:{class_name}.{method_bare}:import-ctor:{attr}:{getattr(node, 'lineno', 0)}",
+                                        "source": source_title,
+                                        "target": stored_type,
+                                        "type": "calls",
+                                        "description": (
+                                            f"{class_name}.{method_bare} constructs {stored_type} "
+                                            f"via self.{attr} (imported type default)"
+                                        ),
+                                        "weight": 0.80,
+                                        "text_unit_ids": [f"tu:file:{path.name}"],
+                                        "human_readable_id": len(relationships) + 1,
+                                        "source_file": str(path),
+                                        "span": f"{getattr(node, 'lineno', 0)}",
+                                        "extractor": "tree-sitter-python+ast",
+                                        "confidence": 0.80,
+                                        "is_deterministic": True,
+                                        "resolved_target_hint": stored_type,
+                                    }
+                                )
+                            continue
+
+                    # self.pointer.to_last(...) where self.pointer's type is known
+                    # (e.g. jsonpointer:JsonPointer from the assignment above).
+                    if (
+                        not is_direct
+                        and base_dotted.count(".") == 1
+                        and root_base in ("self", "cls")
+                    ):
+                        obj_attr = base_dotted.split(".", 1)[1]
+                        obj_type = _lookup_class_attr_type(simple_class, obj_attr)
+                        if obj_type:
+                            hint = f"{obj_type}.{attr}"
+                            relationships.append(
+                                {
+                                    "id": f"rel:call:{class_name}.{method_bare}:typed-self:{obj_attr}.{attr}:{getattr(node, 'lineno', 0)}",
+                                    "source": source_title,
+                                    "target": hint,
+                                    "type": "calls",
+                                    "description": (
+                                        f"{class_name}.{method_bare} calls {base_dotted}.{attr} "
+                                        f"(self.{obj_attr}: {obj_type})"
+                                    ),
+                                    "weight": 0.80,
+                                    "text_unit_ids": [f"tu:file:{path.name}"],
+                                    "human_readable_id": len(relationships) + 1,
+                                    "source_file": str(path),
+                                    "span": f"{getattr(node, 'lineno', 0)}",
+                                    "extractor": "tree-sitter-python+ast",
+                                    "confidence": 0.80,
+                                    "is_deterministic": True,
+                                    "resolved_target_hint": hint,
+                                }
+                            )
+                            continue
+
                     # Direct self.method()/cls.method() is strong. Chained
                     # self.foo.method()/cls.foo.method() is still useful for
                     # singleton/cache patterns (sqlparse's
                     # cls._default_instance.default_initialization()), but only
                     # promote it if the called attr is actually a method on the
                     # same class.
-                    is_direct = base_dotted in ("self", "cls")
-                    is_known_same_class_method = attr in class_methods.get(simple_class, set())
                     if is_direct or is_known_same_class_method:
-                        method_bare = caller.split(".")[-1] if "." in caller else caller
-                        source_title = f"{Path(path).stem}:{class_name}.{method_bare}"
                         hint = f"{Path(path).stem}:{class_name}.{attr}"
                         relationships.append(
                             {
@@ -1181,10 +1386,10 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                 relationships.append(rel)
 
     # Chained-constructor method calls: `Cls(args).method(...)` -> `Cls.method`.
-    # The receiver type is known statically (a class defined in this file with
-    # that method), so this is a deterministic call edge the dotted-name detector
-    # misses (its receiver is a Call, not a Name chain). Example: jsonpatch's
-    # `AddOperation({...}).apply(obj)` -> `AddOperation.apply`.
+    # Same-file classes are verified against class_methods; imported classes
+    # (``from jsonpointer import JsonPointer``; ``JsonPointer(p).to_last(o)``)
+    # are resolved optimistically — the bridge drops the edge if the target
+    # entity is absent.
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -1196,13 +1401,19 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
             continue
         cls_name = inner.id
         attr = func.attr
-        if cls_name not in class_methods or attr not in class_methods[cls_name]:
+        if cls_name in class_methods:
+            if attr not in class_methods[cls_name]:
+                continue
+            hint = f"{Path(path).stem}:{cls_name}.{attr}"
+        elif cls_name in import_map:
+            orig = import_orig.get(cls_name, cls_name)
+            hint = f"{module_title(import_map[cls_name])}:{orig}.{attr}"
+        else:
             continue
         caller = enclosing_function_name(node)
         if caller == "unknown":
             continue
         caller_kind = "method" if caller in class_for_method else "fn"
-        hint = f"{Path(path).stem}:{cls_name}.{attr}"
         relationships.append(
             {
                 "id": f"rel:call:{caller}:{attr}:ctorchain:{node.lineno}:{node.col_offset}",
@@ -1238,14 +1449,22 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
         """Resolve `Cls.member` to an entity title for a same-file OR imported
         class. Same-file is verified against class_methods; an imported class is
         resolved optimistically via import_map (the bridge drops the edge if the
-        target entity does not exist, so no dangling)."""
+        target entity does not exist, so no dangling).
+
+        Imported constructors target the *class* entity (``jsonpointer:JsonPointer``)
+        rather than ``.__init__``, matching how the call-graph oracle maps
+        constructor frames and how Name-import edges already look.
+        """
         if cls_name in local_classes:
             if member in class_methods.get(cls_name, set()):
                 return f"{Path(path).stem}:{cls_name}.{member}"
             return None
         if cls_name in import_map:
             orig = import_orig.get(cls_name, cls_name)
-            return f"{module_title(import_map[cls_name])}:{orig}.{member}"
+            mod = module_title(import_map[cls_name])
+            if member == "__init__":
+                return f"{mod}:{orig}"
+            return f"{mod}:{orig}.{member}"
         return None
 
     def _emit_member_edge(node: ast.AST, cls_name: str, member: str, tag: str) -> None:
@@ -1281,6 +1500,35 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
             return name if (name in local_classes or name in import_map) else None
         return None
 
+    def _type_title_of_expr(expr: ast.AST, enclosing: str) -> str | None:
+        """Static type title of an expression when known without guessing."""
+        # Name with a single tracked ctor type in this function.
+        if isinstance(expr, ast.Name):
+            events = sorted(assign_events.get(enclosing, []), key=lambda x: x[0])
+            last = None
+            distinct: set[str] = set()
+            saw_none = False
+            for _l, v, t in events:
+                if v != expr.id:
+                    continue
+                last = t
+                if t is None:
+                    saw_none = True
+                elif not str(t).startswith("container:") and not str(t).startswith("ambiguous:"):
+                    distinct.add(t)
+            if last and not saw_none and len(distinct) == 1:
+                return next(iter(distinct))
+            if last and not str(last).startswith("container:") and not saw_none and len(distinct) <= 1:
+                return last
+            return constructor_type_hint(expr.id)
+        # self.attr with class_attr_types
+        dotted = get_dotted_name(expr)
+        if dotted and dotted.count(".") == 1:
+            root, attr = dotted.split(".", 1)
+            if root in ("self", "cls") and enclosing in class_for_method:
+                return _lookup_class_attr_type(class_for_method[enclosing], attr)
+        return None
+
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             if node.func.id in local_classes or node.func.id in import_map:
@@ -1297,6 +1545,44 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                 cls = _ctor_class(node.operand)
                 if cls:
                     _emit_member_edge(node, cls, dunder, "unaryop")
+        elif isinstance(node, ast.Compare):
+            # self.pointer == from_ptr → JsonPointer.__eq__ when left is typed.
+            enclosing = enclosing_function_name(node)
+            if enclosing == "unknown":
+                continue
+            left_type = _type_title_of_expr(node.left, enclosing)
+            if not left_type:
+                continue
+            for op in node.ops:
+                if isinstance(op, (ast.Eq, ast.NotEq)):
+                    member = "__eq__" if isinstance(op, ast.Eq) else "__ne__"
+                    hint = f"{left_type}.{member}"
+                    caller_kind = "method" if enclosing in class_for_method else "fn"
+                    relationships.append(
+                        {
+                            "id": (
+                                f"rel:call:{enclosing}:{left_type}.{member}:compare:"
+                                f"{getattr(node,'lineno',0)}:{getattr(node,'col_offset',0)}"
+                            ),
+                            "source": make_id(caller_kind, enclosing, str(path)),
+                            "target": hint,
+                            "type": "calls",
+                            "description": (
+                                f"{enclosing} uses {left_type}.{member} "
+                                f"(compare on typed receiver)"
+                            ),
+                            "weight": 0.8,
+                            "text_unit_ids": [f"tu:file:{path.name}"],
+                            "human_readable_id": len(relationships) + 1,
+                            "source_file": str(path),
+                            "span": f"{getattr(node,'lineno',0)}:{getattr(node,'col_offset',0)}",
+                            "extractor": "tree-sitter-python+ast",
+                            "confidence": 0.8,
+                            "is_deterministic": True,
+                            "resolved_target_hint": hint,
+                        }
+                    )
+                    break
 
 
 def _try_jedi_adapter(source: bytes, path: Path) -> List[Dict[str, Any]]:

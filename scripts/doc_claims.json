@@ -6,7 +6,7 @@
       "kind": "current",
       "description": "Full examples pytest summary: passed + xfailed.",
       "expect": {
-        "passed": 515,
+        "passed": 521,
         "xfailed": 2
       },
       "source": {
@@ -18,17 +18,17 @@
       "docs": [
         {
           "path": "Plan.md",
-          "must_contain": "515 passed, 2 xfailed",
+          "must_contain": "521 passed, 2 xfailed",
           "role": "current"
         },
         {
           "path": "PHASE7_WRITEUP.md",
-          "must_contain": "515 passed, 2 xfailed",
+          "must_contain": "521 passed, 2 xfailed",
           "role": "current"
         },
         {
           "path": "examples/charset_normalizer_rust/tools/check_port.sh",
-          "must_contain": "Full examples run: 515 passed, 2 xfailed.",
+          "must_contain": "Full examples run: 521 passed, 2 xfailed.",
           "role": "current",
           "note": "The compatibility handoff prints this live suite summary; keep it aligned with the documented claim."
         }
@@ -146,6 +146,51 @@
       ]
     },
     {
+      "id": "oracle_residuals",
+      "kind": "current",
+      "description": "Residual categories from the four independent evidence oracles, derived by their thin summary adapter rather than copied from prose.",
+      "expect": {
+        "c_preprocessor_unknown": 0,
+        "c_preprocessor_vacuous": 9,
+        "python_registry_missed": 25,
+        "call_graph_missed": 12,
+        "call_graph_unconfirmed": 73,
+        "cjson_ownership_blocked": 6,
+        "cjson_global_state_excluded": 4
+      },
+      "source": {
+        "type": "oracle_residuals",
+        "mode": "live",
+        "note": "Runs scripts/oracle_summary.py's adapter, which invokes each native oracle and fails if a required comparator cannot produce its own report."
+      },
+      "docs": [
+        {
+          "path": "docs/ORACLE_CONTRACT.md",
+          "must_contain": "**9 vacuous** regions; 0 unknown",
+          "role": "current",
+          "require_near": "## Current residuals"
+        },
+        {
+          "path": "docs/ORACLE_CONTRACT.md",
+          "must_contain": "**25 missed** isodate lambda entries",
+          "role": "current",
+          "require_near": "## Current residuals"
+        },
+        {
+          "path": "docs/ORACLE_CONTRACT.md",
+          "must_contain": "**12 missed** observed jsonpatch edges; **73 unconfirmed** graph edges",
+          "role": "current",
+          "require_near": "## Current residuals"
+        },
+        {
+          "path": "docs/ORACLE_CONTRACT.md",
+          "must_contain": "**6 ownership-blocked** calls; **4 process-global exclusions**",
+          "role": "current",
+          "require_near": "## Current residuals"
+        }
+      ]
+    },
+    {
       "id": "port_gate_coverage",
       "kind": "current",
       "description": "Declared port-evidence profiles and named source-only gaps in scripts/port_gates.json.",
@@ -255,7 +300,7 @@
     },
     {
       "id": "sqlparse_graph_phase5_baseline",
-      "kind": "frozen_snapshot",
+      "kind": "historical",
       "description": "sqlparse BYOG Phase 5 frozen baseline (pre uses_data expansion).",
       "expect": {
         "entities": 243,
@@ -263,10 +308,9 @@
         "calls": 229
       },
       "source": {
-        "type": "graph_counts",
-        "mode": "live",
-        "graph": "byog_sqlparse",
-        "snapshot": "20260618-151436-ad7b5954"
+        "type": "none",
+        "mode": "traced",
+        "note": "Recorded number only. The snapshot 20260618-151436-ad7b5954 that verified it was destroyed by routine keep_last=5 retention on 2026-07-28 when a cross-module resolver change republished byog_sqlparse twice. It cannot be regenerated: the extractor has moved on and today's index yields different counts. byog_graph.pinned_snapshot_ids now protects snapshots that doc claims pin, so this cannot recur."
       },
       "docs": [
         {

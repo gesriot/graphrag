@@ -34,7 +34,16 @@ for the complete manifest and tool-skip policy.
    pipeline) to port end-to-end with a differential SQL corpus.
 
 ## Scale audit result
-- Snapshot: `byog_sqlparse/snapshots/20260618-151436-ad7b5954`.
+- Snapshot: `byog_sqlparse/snapshots/20260618-151436-ad7b5954` — **no longer
+  on disk.** Routine `keep_last=5` retention deleted it on 2026-07-28 when a
+  cross-module resolver change republished `byog_sqlparse` twice and this
+  snapshot became the sixth-oldest. It cannot be regenerated: the extractor
+  has moved on and today's index of the same source yields different counts
+  (279 calls). The numbers below are therefore a recorded historical result,
+  and `scripts/doc_claims.json` carries the claim as `kind: historical`
+  rather than a live derivation. `byog_graph.pinned_snapshot_ids` now
+  protects every snapshot a doc claim pins, so retention cannot destroy
+  another one.
 - Size: 4,146 Python LOC across 21 modules (`engine/` + `filters/` included).
 - Graph: 243 entities, 454 relationships, 242 text units, 253 call observations.
 - Resolved call audit: 229 calls, structural pass rate 1.0, 0 anomalies,

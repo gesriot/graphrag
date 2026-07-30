@@ -14,6 +14,7 @@ Run: uv run python -m pytest examples/cjson/tests/test_c_liveness_vs_compiler.py
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -147,6 +148,38 @@ def test_unknown_not_scored_as_agreement():
     # Platform residual is real without builtins.
     assert report["regions_unknown"] > 0
     assert report["unknown_macro_families"]
+
+
+@pytest.mark.skipif(_cc() is None, reason="no C compiler available")
+def test_empty_scored_population_is_undefined_not_perfect(tmp_path: Path):
+    """No comparable regions must print as n/a, never 100% agreement.
+
+    The registry oracle previously caught this exact reporting error.  A C
+    package with no conditionals makes the liveness oracle's judged population
+    empty and exercises the same boundary directly.
+    """
+    source = tmp_path / "empty.c"
+    source.write_text("int answer(void) { return 42; }\n", encoding="utf-8")
+    compiler = _cc()
+    assert compiler is not None  # skip marker above establishes this invariant.
+    (tmp_path / "compile_commands.json").write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "command": f"{compiler} -c empty.c",
+                    "file": str(source),
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    report = compare_liveness_to_compiler(tmp_path, compiler=compiler)
+    assert report["regions_scored"] == 0
+    assert report["agreements"] == 0
+    assert report["disagreements"] == 0
+    assert report["agreement_rate_scored"] is None
 
 
 @pytest.mark.skipif(_cc() is None, reason="no C compiler available")
