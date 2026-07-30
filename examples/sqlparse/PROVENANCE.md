@@ -38,8 +38,10 @@ for the complete manifest and tool-skip policy.
   on disk.** Routine `keep_last=5` retention deleted it on 2026-07-28 when a
   cross-module resolver change republished `byog_sqlparse` twice and this
   snapshot became the sixth-oldest. It cannot be regenerated: the extractor
-  has moved on and today's index of the same source yields different counts
-  (279 calls). The numbers below are therefore a recorded historical result,
+  has moved on. The prior 2026-07-28 replay yielded 279 calls; the
+  2026-07-30 direct-initializer reindex yields 289 entities, 1,339
+  relationships, and 291 calls. The numbers below are therefore a recorded
+  historical result,
   and `scripts/doc_claims.json` carries the claim as `kind: historical`
   rather than a live derivation. `byog_graph.pinned_snapshot_ids` now
   protects every snapshot a doc claim pins, so retention cannot destroy
@@ -78,28 +80,55 @@ repository root. The SQLParse profile runs the same source-only check; it reads
 no published `byog_*` graph and makes an empty candidate population fail rather
 than report a `0/0` pass.
 
+## Initializer public-API runtime audit (2026-07-30)
+
+The bridge formerly skipped every `__init__.py`, which made the public
+`sqlparse.split` entry point absent from the graph. The replacement is narrow:
+index an initializer only when it directly defines a public function, async
+function, or class; do not manufacture alias entities for bare re-exports.
+`scripts/init_api_runtime_audit.py` discovers the Python targets from
+`scripts/port_gates.json`, imports every initializer in a clean subprocess, and
+compares its runtime public names with entities from a fresh graph. Its
+fail-closed contract is only for direct definitions, while re-exports remain a
+separate visible population rather than being silently declared covered.
+
+The current runtime census is **9** Python targets, **8** targets with an
+initializer, and **11** initializer modules. They expose **117** public names:
+**4** direct definitions are **4 present / 0 missing**, with **0 runtime
+errors**; the remaining **113** are re-exports (**2** happen to have a
+same-titled implementation entity, **111** do not have an alias entity). All
+four direct definitions are SQLParse root APIs: `format`, `parse`,
+`parsestream`, and `split`. The SQLParse profile runs the same audit. A
+re-export-only initializer is intentionally not a graph API alias; representing
+one would require a separate alias-edge policy, not duplicate definition nodes.
+Indexing all re-exports as definitions would create **2** same-title collisions
+and require **111** new alias nodes across the target set, without adding a
+source-body owner for those names. The narrow rule therefore retains executable
+entry points while leaving alias semantics as an explicit future decision.
+
 ## SQLParse call-graph observation (2026-07-30)
 
-`uv run python scripts/call_graph_oracle.py --package sqlparse` now profiles the
-same source corpus consumed by the Rust contract: **40** lexer cases and **25** split
-cases, validating each Python result before tracing. Against the current local
-published graph it reports **14 confirmed**, **8 missed**, and **123 unconfirmed** edges
-from **22 mapped** observed pairs (**28 raw**); the nested `engine.filter_stack` module
-frames are mapped by relative module title rather than silently dropped to their
-basename. This is a call-only coverage measurement, not a precision rate and
-not an extractor reindex: the eight misses are visible residuals, while the 123
-unconfirmed graph edges were not exercised by this 65-case workload.
+`uv run python scripts/call_graph_oracle.py --package sqlparse` profiles the
+same source corpus consumed by the Rust contract: **40** lexer cases and **25**
+split cases, validating each Python result before tracing. Against the current
+local published graph it reports **16 confirmed**, **9 missed**, and **132
+unconfirmed** edges from **25 mapped** observed pairs (**28 raw**); the nested
+`engine.filter_stack` module frames are mapped by relative module title rather
+than silently dropped to their basename. This is a call-only coverage
+measurement, not a precision rate and not an extractor reindex: the misses are
+visible residuals, while the unconfirmed graph edges were not exercised by this
+65-case workload.
 
-The six observed pairs that stay **unmapped** (28 raw → 22 mapped) are reported
-with the side that failed to resolve, not dropped. They are two known shapes:
-the public entry point `sqlparse:split`, which has no entity at all because the
-index skips `__init__.py` (the graph caveat recorded above), and
-`<locals>.<genexpr>` frames, which are not entities either. The low 10.2%
-coverage of the graph therefore partly reflects that the traced workload enters
-through a symbol the graph does not contain — the concrete pipeline symbols it
-delegates to *are* present and are what the 14 confirmed edges cover.
+Indexing the four direct initializer APIs moves the observed mapping from 22/28
+to **25/28** and confirms `sqlparse:split → FilterStack` plus
+`sqlparse:split → FilterStack.run`. The remaining three unmapped raw pairs are
+all `<locals>.<genexpr>` frames, which have no graph entity. The scoreable
+population also exposes one previously invisible miss,
+`sqlparse:split → sql.TokenList.__str__`; that is why confirmed rises by two
+while misses rise from eight to nine. No comparison was narrowed to improve the
+number.
 
-The eight misses are a different shape from JSONPatch's registry residuals:
+The nine misses are a different shape from JSONPatch's registry residuals:
 operator-protocol dispatch (`_TokenType.__contains__`, `__getattr__`,
 `TokenList.__str__`) and cross-module instance-method calls through the filter
 stack. Measuring a second package was worth it for that alone — JSONPatch's
@@ -148,6 +177,7 @@ Rust port status:
    fmt/check/golden_test/run all ok, 65 golden cases across lex + split, and
    `manual_fixes=0`.
 
-Graph caveat: the generic index currently does not expose `__init__.py`'s
-top-level `split` as an entity, so the context-pack evidence uses the concrete
-pipeline symbols above rather than `__init__:split`.
+Graph boundary: direct public definitions in an initializer are entities under
+their package title (`sqlparse:split`), so the selected port target is now in
+the graph. Bare initializer re-exports are deliberately not duplicate alias
+entities; the runtime audit above reports that residual population explicitly.

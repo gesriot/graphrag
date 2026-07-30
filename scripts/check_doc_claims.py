@@ -234,6 +234,30 @@ def _inherited_member_runtime_audit() -> dict[str, int]:
     }
 
 
+def _initializer_api_runtime_audit() -> dict[str, int]:
+    """Derive initializer API coverage from runtime names and fresh graph titles."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from init_api_runtime_audit import build_report  # type: ignore
+
+    report = build_report()
+    if not report.get("ok"):
+        raise RuntimeError("initializer API runtime audit reported a missing direct definition")
+    totals = report["totals"]
+    return {
+        "python_targets": int(totals["python_targets"]),
+        "targets_with_initializer": int(totals["targets_with_initializer"]),
+        "initializer_modules": int(totals["initializer_modules"]),
+        "public_names": int(totals["public_names"]),
+        "direct_definitions": int(totals["direct_definitions"]),
+        "direct_present": int(totals["direct_present"]),
+        "direct_missing": int(totals["direct_missing"]),
+        "reexports": int(totals["reexports"]),
+        "reexport_present": int(totals["reexport_present"]),
+        "reexport_missing": int(totals["reexport_missing"]),
+        "runtime_errors": int(totals["runtime_errors"]),
+    }
+
+
 def _call_graph_oracle(package: str) -> dict[str, int]:
     """Derive a named local-graph call-oracle measurement without a fallback."""
     sys.path.insert(0, str(ROOT / "scripts"))
@@ -331,6 +355,8 @@ def derive(claim: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
         return _oracle_residuals(), "live"
     if stype == "inherited_member_runtime_audit":
         return _inherited_member_runtime_audit(), "live"
+    if stype == "initializer_api_runtime_audit":
+        return _initializer_api_runtime_audit(), "live"
     if stype == "call_graph_oracle":
         return _call_graph_oracle(src["package"]), "live"
     if mode == "traced":

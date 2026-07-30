@@ -64,7 +64,7 @@ Port profiles create only the disposable output below; they do not consume a pub
 
 These commands rebuild disposable output and document why a current reindex is not a replay of the named local snapshot:
 
-- Current reindex for `sqlparse_graph_current_index`, `sqlparse_graph_phase5_baseline`: entities=283, relationships=624, calls=279 (different from the recorded snapshot).
+- Current reindex for `sqlparse_graph_current_index`, `sqlparse_graph_phase5_baseline`: entities=289, relationships=1339, calls=291 (different from the recorded snapshot).
 
 ```bash
 uv run python scripts/index_python.py --package examples/sqlparse --graph output/evidence_durability/sqlparse_replay

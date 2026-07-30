@@ -19,6 +19,7 @@ Then (with key later):
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import sys
@@ -100,9 +101,30 @@ def build_byog_for_package(use_advanced: bool = False, package_dir: Path | None 
     all_relationships: List[Dict[str, Any]] = []
     all_text_units: List[Dict[str, Any]] = []
 
+    def indexable_initializer(path: Path) -> bool:
+        """Whether an initializer defines an API symbol rather than re-exporting.
+
+        Re-export-only ``__init__.py`` modules deliberately stay out of the
+        graph: adding a second root entity for every imported symbol would make
+        aliases look like duplicate definitions. A direct public function or
+        class is different—it is an executable entry point and needs a graph
+        entity (for example ``sqlparse:split``). Runtime audit coverage lives
+        in ``scripts/init_api_runtime_audit.py``.
+        """
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except (OSError, SyntaxError) as exc:
+            raise RuntimeError(f"cannot parse initializer {path}: {exc}") from exc
+        return any(
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            and not node.name.startswith("_")
+            for node in tree.body
+        )
+
     py_files = sorted(
         p for p in pkg_dir.rglob("*.py")
-        if "tests" not in p.parts and p.name != "__init__.py"
+        if "tests" not in p.parts
+        and (p.name != "__init__.py" or indexable_initializer(p))
     )
 
     human_id = 0
@@ -126,6 +148,12 @@ def build_byog_for_package(use_advanced: bool = False, package_dir: Path | None 
         except ValueError:
             rel = py_file.name
         without_suffix = Path(rel).with_suffix("")
+        if py_file.name == "__init__.py":
+            # Root ``__init__.py`` exposes ``package:entry``; nested package
+            # initializers expose ``subpkg:entry``. ``__init__:entry`` cannot
+            # join runtime profiler frames or a consumer's import path.
+            parents = without_suffix.parts[:-1]
+            return ".".join(parents) if parents else pkg_dir.name
         return ".".join(without_suffix.parts)
 
     # ===================== PASS 1: collect entities + titles =====================

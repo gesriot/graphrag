@@ -135,6 +135,14 @@
             "scripts/inherited_member_runtime_audit.py",
             "--check"
           ]
+        },
+        {
+          "name": "Initializer public-API runtime audit (all Python targets)",
+          "command": [
+            "{python}",
+            "scripts/init_api_runtime_audit.py",
+            "--check"
+          ]
         }
       ]
     },

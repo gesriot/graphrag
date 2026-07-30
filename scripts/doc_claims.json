@@ -6,7 +6,7 @@
       "kind": "current",
       "description": "Full examples pytest summary: passed + xfailed.",
       "expect": {
-        "passed": 548,
+        "passed": 550,
         "xfailed": 2
       },
       "source": {
@@ -18,17 +18,17 @@
       "docs": [
         {
           "path": "Plan.md",
-          "must_contain": "548 passed, 2 xfailed",
+          "must_contain": "550 passed, 2 xfailed",
           "role": "current"
         },
         {
           "path": "PHASE7_WRITEUP.md",
-          "must_contain": "548 passed, 2 xfailed",
+          "must_contain": "550 passed, 2 xfailed",
           "role": "current"
         },
         {
           "path": "examples/charset_normalizer_rust/tools/check_port.sh",
-          "must_contain": "Full examples run: 548 passed, 2 xfailed.",
+          "must_contain": "Full examples run: 550 passed, 2 xfailed.",
           "role": "current",
           "note": "The compatibility handoff prints this live suite summary; keep it aligned with the documented claim."
         }
@@ -299,16 +299,53 @@
       ]
     },
     {
+      "id": "initializer_api_runtime_audit",
+      "kind": "current",
+      "description": "Manifest-derived Python initializer public APIs checked against fresh graph entities and imported runtime bindings.",
+      "expect": {
+        "python_targets": 9,
+        "targets_with_initializer": 8,
+        "initializer_modules": 11,
+        "public_names": 117,
+        "direct_definitions": 4,
+        "direct_present": 4,
+        "direct_missing": 0,
+        "reexports": 113,
+        "reexport_present": 2,
+        "reexport_missing": 111,
+        "runtime_errors": 0
+      },
+      "source": {
+        "type": "initializer_api_runtime_audit",
+        "mode": "live",
+        "note": "Discovers Python targets from port_gates.json, imports every vendored initializer in a clean subprocess, and compares runtime public names to fresh extractor titles. It fails only for missing direct initializer definitions or runtime errors; bare re-export aliases are an explicitly reported non-alias boundary."
+      },
+      "docs": [
+        {
+          "path": "examples/sqlparse/PROVENANCE.md",
+          "must_contain": "**4** direct definitions are **4 present / 0 missing**, with **0 runtime\nerrors**; the remaining **113** are re-exports (**2** happen to have a\nsame-titled implementation entity, **111** do not have an alias entity).",
+          "role": "current",
+          "require_near": "## Initializer public-API runtime audit (2026-07-30)"
+        },
+        {
+          "path": "Plan.md",
+          "must_contain": "four direct\ndefinitions are all present; 113 re-exports are reported separately rather\nthan inflated into duplicate graph entities.",
+          "role": "current",
+          "require_near": "**Initializer API closure (2026-07-30):**"
+        }
+      ]
+    },
+    {
       "id": "sqlparse_call_graph_oracle",
       "kind": "current",
       "description": "SQLParse lex/split golden workload observed against the current local published call graph.",
       "expect": {
-        "graph_call_rows": 280,
-        "observed_mapped": 22,
+        "graph_call_rows": 291,
+        "observed_mapped": 25,
         "observed_raw": 28,
-        "confirmed": 14,
-        "missed": 8,
-        "unconfirmed": 123,
+        "confirmed": 16,
+        "missed": 9,
+        "unconfirmed": 132,
         "lex_cases": 40,
         "split_cases": 25
       },
@@ -321,13 +358,13 @@
       "docs": [
         {
           "path": "examples/sqlparse/PROVENANCE.md",
-          "must_contain": "**14 confirmed**, **8 missed**, and **123 unconfirmed** edges\nfrom **22 mapped** observed pairs (**28 raw**)",
+          "must_contain": "**16 confirmed**, **9 missed**, and **132\nunconfirmed** edges from **25 mapped** observed pairs (**28 raw**)",
           "role": "current",
           "require_near": "## SQLParse call-graph observation (2026-07-30)"
         },
         {
           "path": "examples/sqlparse/PROVENANCE.md",
-          "must_contain": "**40** lexer cases and **25** split\ncases",
+          "must_contain": "**40** lexer cases and **25**\nsplit cases",
           "role": "current",
           "require_near": "## SQLParse call-graph observation (2026-07-30)"
         }
@@ -421,9 +458,9 @@
             "indexer": "python",
             "output": "output/evidence_durability/sqlparse_replay",
             "observed": {
-              "entities": 283,
-              "relationships": 624,
-              "calls": 279
+              "entities": 289,
+              "relationships": 1339,
+              "calls": 291
             }
           }
         }
@@ -471,9 +508,9 @@
           "indexer": "python",
           "output": "output/evidence_durability/sqlparse_replay",
           "observed": {
-            "entities": 283,
-            "relationships": 624,
-            "calls": 279
+            "entities": 289,
+            "relationships": 1339,
+            "calls": 291
           }
         }
       },
