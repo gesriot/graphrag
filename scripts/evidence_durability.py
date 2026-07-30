@@ -185,14 +185,25 @@ def claim_durability(claim: Mapping[str, Any], root: Path = ROOT) -> dict[str, A
         }
 
     if stype == "ablation_adequacy" and graph_name is not None:
+        if kind == "frozen_snapshot":
+            return {
+                "claim": claim_id,
+                "tier": "local-frozen-snapshot",
+                "replay": "not reproducible from Git",
+                "artifact": graph_name,
+                "snapshot": snapshot,
+                "present": _artifact_path(graph_name, snapshot, root).is_dir(),
+                "detail": "Protected closed-experiment graph; the archive is intentionally not regenerated.",
+                "replay_probe": probe,
+            }
         return {
             "claim": claim_id,
-            "tier": "local-frozen-snapshot",
-            "replay": "not reproducible from Git",
+            "tier": "local-published-graph",
+            "replay": "reindex can produce new current evidence, not this snapshot identity",
             "artifact": graph_name,
             "snapshot": snapshot,
             "present": _artifact_path(graph_name, snapshot, root).is_dir(),
-            "detail": "Protected closed-experiment graph; the archive is intentionally not regenerated.",
+            "detail": "Mutable adequacy measurement from a published local graph.",
             "replay_probe": probe,
         }
 

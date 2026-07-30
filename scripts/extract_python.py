@@ -739,6 +739,9 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
     class_methods: Dict[str, set[str]] = defaultdict(set)
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
+            # Retain a class with no direct methods: it can still inherit a
+            # same-file member, which is a real dispatch target.
+            class_methods[node.name]
             for item in node.body:
                 if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     class_methods[node.name].add(item.name)
@@ -1262,6 +1265,98 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                     "confidence": 0.95,
                     "is_deterministic": True,
                     "resolved_target_hint": f"{Path(path).stem}:{parent}",
+                }
+            )
+
+    def _same_file_mro(simple_class: str, active: set[str] | None = None) -> list[str] | None:
+        """Return a C3 linearization when every non-builtin base is local.
+
+        An inherited-member edge asserts which declaration Python will execute,
+        so partial MRO knowledge is not enough.  Builtin bases terminate the
+        local portion; an imported/unknown base or inconsistent local MRO emits
+        no member edges rather than guessing an override winner.
+        """
+        active = active or set()
+        if simple_class in active:
+            return None
+        active = active | {simple_class}
+        direct = [
+            base for base in class_bases.get(simple_class, []) if base not in _BUILTIN_BASES
+        ]
+        if any(base not in local_classes for base in direct):
+            return None
+        parent_mros: list[list[str]] = []
+        for base in direct:
+            parent_mro = _same_file_mro(base, active)
+            if parent_mro is None:
+                return None
+            parent_mros.append(parent_mro)
+        sequences = [mro[:] for mro in parent_mros] + [direct[:]]
+        linearized = [simple_class]
+        while any(sequences):
+            candidate = next(
+                (
+                    sequence[0]
+                    for sequence in sequences
+                    if sequence and not any(sequence[0] in other[1:] for other in sequences)
+                ),
+                None,
+            )
+            if candidate is None:
+                return None
+            linearized.append(candidate)
+            for sequence in sequences:
+                if sequence and sequence[0] == candidate:
+                    sequence.pop(0)
+        return linearized
+
+    # Inherited-member rule: a reached subclass may expose one *effective*
+    # same-file base member for every direct member it does not override.  The
+    # edge is ``inherits``, not ``calls``: it records dispatch identity without
+    # claiming a source-level call happened.  This is deliberately narrower
+    # than class expansion — a reached class never pulls in its own members,
+    # only the declarations it inherits.  Unknown/cross-module MROs are left
+    # unresolved, and a subclass declaration always suppresses the base edge.
+    class_lines = {
+        node.name: getattr(node, "lineno", 0)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ClassDef)
+    }
+    source_module = Path(path).stem
+    for child in sorted(local_classes):
+        linearized = _same_file_mro(child)
+        if linearized is None or len(linearized) < 2:
+            continue
+        child_members = class_methods.get(child, set())
+        inherited_members: dict[str, str] = {}
+        for defining_class in linearized[1:]:
+            for member in sorted(class_methods.get(defining_class, set())):
+                if member not in child_members and member not in inherited_members:
+                    inherited_members[member] = defining_class
+        for member, defining_class in inherited_members.items():
+            target = f"{source_module}:{defining_class}.{member}"
+            relationships.append(
+                {
+                    "id": (
+                        f"rel:inherits-member:{child}:{defining_class}.{member}:"
+                        f"{class_lines.get(child, 0)}"
+                    ),
+                    "source": f"{source_module}:{child}",
+                    "target": target,
+                    "type": "inherits",
+                    "description": (
+                        f"{child} inherits unoverridden member "
+                        f"{defining_class}.{member} (same-file C3 MRO; not a call)"
+                    ),
+                    "weight": 0.95,
+                    "text_unit_ids": [f"tu:file:{path.name}"],
+                    "human_readable_id": len(relationships) + 1,
+                    "source_file": str(path),
+                    "span": f"{class_lines.get(child, 0)}",
+                    "extractor": "tree-sitter-python+ast",
+                    "confidence": 0.95,
+                    "is_deterministic": True,
+                    "resolved_target_hint": target,
                 }
             )
 

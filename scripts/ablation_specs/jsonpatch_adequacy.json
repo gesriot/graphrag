@@ -1,4 +1,7 @@
 {
+  "_intentionally_unreached": {
+    "jsonpatch:PatchOperation.apply": "PatchOperation.apply is abstract for this slice: each of the six registry operation classes declares its own apply. The inherited-member rule must not create a base-member edge when a subclass overrides it; test_inherited_member_edges.py proves that negative case."
+  },
   "roots": ["jsonpatch:apply_patch"],
   "must_reach": [
     "jsonpatch:apply_patch",
@@ -10,7 +13,6 @@
     "jsonpatch:JsonPatch._get_operation",
     "jsonpatch:PatchOperation",
     "jsonpatch:PatchOperation.__init__",
-    "jsonpatch:PatchOperation.apply",
     "jsonpatch:PatchOperation.path",
     "jsonpatch:PatchOperation.key",
     "jsonpatch:AddOperation",

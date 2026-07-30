@@ -220,6 +220,29 @@ the `PatchOperation` class itself through `inherits`, but does not expand a clas
 to its methods — `contains` is deliberately not a closure edge. `must_exclude`
 remains clean.
 
+**Inherited-member closure (2026-07-30).** A class still does not expand to its
+own members. The extractor now emits an `inherits` relationship from a subclass
+to the *effective same-file C3-MRO base declaration* for each direct base member
+the subclass does not override. It is a deterministic type/dispatch fact, not a
+`calls` edge. The regression plant adds an override and proves the matching
+base-member relationship disappears; incomplete or cross-module MROs emit no
+member relationship.
+
+That reaches `PatchOperation.path` and `.key` through the operation classes.
+`PatchOperation.apply` is deliberately **not** promoted: all six registry
+operation classes declare their own `apply`, so no runtime dispatch can execute
+the abstract base implementation. It remains named under
+`_intentionally_unreached` in `jsonpatch_adequacy.json`, where the reason and
+negative regression live rather than being silently removed.
+
+The current mutable graph is now adequate: **closure 41**, **36/36** must-reach,
+and **0 leaked**. The call oracle remains 30 confirmed / 3 missed / 83
+unconfirmed across 162 `calls` rows, exactly because the new relationships are
+`inherits` facts and this golden never executes the base `apply`; the three
+observed-call misses remain the honest `_ops`, `map`, and `from_ptr` residuals.
+`audit_call_edges` remains pass_rate 1.0 with zero anomalies, dangling targets,
+and semantic suspicions.
+
 `audit_call_edges` on the reindexed jsonpatch graph: pass_rate **1.0**, 0
 anomalies, 0 dangling, **162** calls. Every mutable published graph was
 reindexed for this step and `published_graph_health.py --check` reports 11

@@ -41,13 +41,26 @@ def test_inventory_derives_frozen_lost_and_oracle_consumers():
     }
     assert artifacts["byog_isodate"]["claim_uses"][0]["tier"] == "local-frozen-snapshot"
     assert artifacts["byog_jsonpatch"]["oracle_uses"] == ["jsonpatch"]
-    jsonpatch_claim = artifacts["byog_jsonpatch"]["claim_uses"][0]
+    jsonpatch_claim = next(
+        use
+        for use in artifacts["byog_jsonpatch"]["claim_uses"]
+        if use["claim"] == "oracle_residuals"
+    )
     assert jsonpatch_claim["claim"] == "oracle_residuals"
     assert jsonpatch_claim["tier"] == "local-published-oracle-input"
     assert jsonpatch_claim["replay"] == (
         "not reproducible from Git; reindex changes the call-oracle baseline"
     )
     assert jsonpatch_claim["present"] is (ROOT / "byog_jsonpatch").is_dir()
+    adequacy_claim = next(
+        use
+        for use in artifacts["byog_jsonpatch"]["claim_uses"]
+        if use["claim"] == "jsonpatch_adequacy_current"
+    )
+    assert adequacy_claim["tier"] == "local-published-graph"
+    assert adequacy_claim["replay"] == (
+        "reindex can produce new current evidence, not this snapshot identity"
+    )
     assert artifacts["byog_jsonpatch"]["health"] == [
         {"id": "jsonpatch", "mode": "mutable", "reason": None}
     ]

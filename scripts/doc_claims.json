@@ -6,7 +6,7 @@
       "kind": "current",
       "description": "Full examples pytest summary: passed + xfailed.",
       "expect": {
-        "passed": 542,
+        "passed": 544,
         "xfailed": 2
       },
       "source": {
@@ -18,17 +18,17 @@
       "docs": [
         {
           "path": "Plan.md",
-          "must_contain": "542 passed, 2 xfailed",
+          "must_contain": "544 passed, 2 xfailed",
           "role": "current"
         },
         {
           "path": "PHASE7_WRITEUP.md",
-          "must_contain": "542 passed, 2 xfailed",
+          "must_contain": "544 passed, 2 xfailed",
           "role": "current"
         },
         {
           "path": "examples/charset_normalizer_rust/tools/check_port.sh",
-          "must_contain": "Full examples run: 542 passed, 2 xfailed.",
+          "must_contain": "Full examples run: 544 passed, 2 xfailed.",
           "role": "current",
           "note": "The compatibility handoff prints this live suite summary; keep it aligned with the documented claim."
         }
@@ -230,6 +230,33 @@
           "must_contain": "**9 port profiles and 3 named source-only gaps**",
           "role": "current",
           "require_near": "### 1.6 Evidence-boundary update (2026-07-28)"
+        }
+      ]
+    },
+    {
+      "id": "jsonpatch_adequacy_current",
+      "kind": "current",
+      "description": "Current JSONPatch apply-slice adequacy under the precise same-file inherited-member rule.",
+      "expect": {
+        "adequate": true,
+        "closure_size": 41,
+        "must_reach_total": 36,
+        "must_reach_missing": 0,
+        "must_exclude_leaked": 0
+      },
+      "source": {
+        "type": "ablation_adequacy",
+        "mode": "live",
+        "graph": "byog_jsonpatch",
+        "spec": "scripts/ablation_specs/jsonpatch_adequacy.json",
+        "note": "The mutable current graph is health-checked against the extractor by the full aggregate gate. PatchOperation.apply is deliberately named outside must_reach because all six operation classes override it."
+      },
+      "docs": [
+        {
+          "path": "examples/jsonpatch/PROVENANCE.md",
+          "must_contain": "**closure 41**, **36/36** must-reach,\nand **0 leaked**",
+          "role": "current",
+          "require_near": "Inherited-member closure (2026-07-30)"
         }
       ]
     },

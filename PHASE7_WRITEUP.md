@@ -157,7 +157,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`542 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`544 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 **Live re-check (2026-07-26):** `538 passed, 2 xfailed`.
@@ -281,6 +281,15 @@ patterns (`map(self._get_operation, …)`, registry instantiation, polymorphic
 measure the closure gap, not material quality. That is an honest limit of a
 static call-graph approach without dataflow/points-to analysis.
 
+**Post-closure update (2026-07-30; does not alter the historical ablation
+record):** the current source-only JSONPatch graph reaches the scoped
+`apply_patch` adequacy contract through static registry and same-file
+inherited-member facts. The member rule is intentionally narrow: it follows
+only an effective base declaration that the subclass does not override, and it
+does not turn inheritance into a call edge or claim general points-to analysis.
+No Rust port or new graph-vs-raw experiment follows from this maintenance
+measurement; the closed-series conclusion above is unchanged.
+
 ### 2.5 Why there is no v4
 
 Decided explicitly in [PHASE7_ABLATION.md](PHASE7_ABLATION.md) (“Series closed”):
@@ -391,8 +400,10 @@ or efficiency boost when the whole package already fits in context.
 - That graph context measurably beats raw source for cold agents on clean
   benchmark slices.  
 - That this work reproduces the Microsoft talk demo or internal infrastructure.  
-- That dynamic-dispatch-heavy architectures are adequacy-clean under a static
-  call graph (jsonpatch stands as the counterexample).  
+- That a calls-only static graph is sufficient for dynamic-dispatch-heavy
+  architectures. JSONPatch required explicit static registry and same-file MRO
+  facts for its scoped closure; that does not demonstrate general dynamic
+  dispatch or points-to completeness.
 - That the approach is production-ready for million-line C/C++ migration.
 
 ### 3.7 If you only remember three sentences
