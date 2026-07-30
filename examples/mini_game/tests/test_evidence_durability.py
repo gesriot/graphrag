@@ -38,9 +38,11 @@ def test_inventory_derives_frozen_lost_and_oracle_consumers():
     } == {
         ("sqlparse_graph_current_index", "local-frozen-snapshot", "20260625-154143-8ce62d57"),
         ("sqlparse_graph_phase5_baseline", "historical-record", "20260618-151436-ad7b5954"),
+        ("sqlparse_call_graph_oracle", "local-published-oracle-input", None),
     }
     assert artifacts["byog_isodate"]["claim_uses"][0]["tier"] == "local-frozen-snapshot"
     assert artifacts["byog_jsonpatch"]["oracle_uses"] == ["jsonpatch"]
+    assert artifacts["byog_sqlparse"]["oracle_uses"] == ["sqlparse"]
     jsonpatch_claim = next(
         use
         for use in artifacts["byog_jsonpatch"]["claim_uses"]

@@ -197,6 +197,66 @@ def _oracle_residuals() -> dict[str, int]:
     }
 
 
+def _inherited_member_runtime_audit() -> dict[str, int]:
+    """Derive the cross-package inherited-member result from imported runtime."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from inherited_member_runtime_audit import build_report  # type: ignore
+
+    report = build_report()
+    if not report.get("ok"):
+        raise RuntimeError("inherited-member runtime audit reported a mismatch or no candidates")
+    packages = {str(row["package"]): row for row in report["packages"]}
+    try:
+        sqlparse = packages["sqlparse"]
+        semantic_version = packages["semantic_version"]
+    except KeyError as exc:
+        raise RuntimeError(f"runtime audit omitted required package: {exc}") from exc
+    totals = report["totals"]
+    return {
+        "sqlparse_candidates": int(sqlparse["candidates"]),
+        "sqlparse_confirmed": int(sqlparse["confirmed"]),
+        "semantic_version_candidates": int(semantic_version["candidates"]),
+        "semantic_version_confirmed": int(semantic_version["confirmed"]),
+        "total_candidates": int(totals["candidates"]),
+        "total_confirmed": int(totals["confirmed"]),
+        "mismatches": int(totals["mismatches"]),
+        "errors": int(totals["errors"]),
+        "sqlparse_multiple_inheritance": int(
+            sqlparse["runtime_shapes"]["multiple_inheritance_candidates"]
+        ),
+        "sqlparse_slotted_children": int(
+            sqlparse["runtime_shapes"]["slotted_child_candidates"]
+        ),
+        "sqlparse_properties": int(sqlparse["runtime_shapes"]["property_candidates"]),
+        "semantic_version_slotted_children": int(
+            semantic_version["runtime_shapes"]["slotted_child_candidates"]
+        ),
+    }
+
+
+def _call_graph_oracle(package: str) -> dict[str, int]:
+    """Derive a named local-graph call-oracle measurement without a fallback."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from call_graph_oracle import compare_named_package  # type: ignore
+
+    report = compare_named_package(package)
+    if report.get("status") != "ok":
+        raise RuntimeError(
+            f"call oracle for {package} did not run: {report.get('skip_reason') or report}"
+        )
+    workloads = dict(report.get("workload_cases") or [])
+    return {
+        "graph_call_rows": int(report["n_graph_call_rows"]),
+        "observed_mapped": int(report["n_observed_mapped"]),
+        "observed_raw": int(report["n_observed_raw"]),
+        "confirmed": int(report["confirmed"]),
+        "missed": int(report["missed"]),
+        "unconfirmed": int(report["unconfirmed"]),
+        "lex_cases": int(workloads.get("tests/lex/golden_lex.json", 0)),
+        "split_cases": int(workloads.get("tests/split/golden_split.json", 0)),
+    }
+
+
 def _frozen_source_missing(claim: dict[str, Any]) -> bool:
     """Recognize an absent protected snapshot without masking a damaged one.
 
@@ -269,6 +329,10 @@ def derive(claim: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
         return _port_gate_manifest(), "live"
     if stype == "oracle_residuals":
         return _oracle_residuals(), "live"
+    if stype == "inherited_member_runtime_audit":
+        return _inherited_member_runtime_audit(), "live"
+    if stype == "call_graph_oracle":
+        return _call_graph_oracle(src["package"]), "live"
     if mode == "traced":
         return None, "traced"
     raise ValueError(f"unknown source type {stype!r} for claim {claim['id']}")

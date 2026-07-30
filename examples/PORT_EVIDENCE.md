@@ -105,7 +105,7 @@ complete port set rather than another copy of either shell script.
 | `mini_lang` | Python golden contract → fresh Python graph/context packs → Rust contract | Complete Rust port |
 | `jsmn` | C oracle contract → fresh C graph/context packs → Rust contract | Complete Rust port |
 | `inih` | C oracle contract → fresh C graph/context packs → Rust contract | Complete Rust port |
-| `sqlparse` | Python split/lex contract → fresh Python graph/context packs → Rust contract | Complete Rust port |
+| `sqlparse` | Python split/lex contract → inherited-member runtime audit → fresh Python graph/context packs → Rust contract | Complete Rust port; a separate local-graph call oracle measures the 65-case source corpus |
 | `semantic_version` | Python Version/SimpleSpec/NpmSpec contracts → graph/context packs → Rust contracts | Complete Rust port |
 | `diff_match_patch` | Python diff/match/patch contracts → graph/context packs → Rust contracts | Complete Rust port |
 | `charset_normalizer` | Rust/Python parity suite, live differential, graph/context packs, Rust contract | Complete bounded Rust port; extra sweeps are opt-in |

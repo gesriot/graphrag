@@ -127,6 +127,14 @@
             "examples/sqlparse/tests/test_split_contract.py",
             "-q"
           ]
+        },
+        {
+          "name": "Inherited-member runtime audit (SQLParse + semantic_version)",
+          "command": [
+            "{python}",
+            "scripts/inherited_member_runtime_audit.py",
+            "--check"
+          ]
         }
       ]
     },

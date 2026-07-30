@@ -89,6 +89,26 @@ def test_mini_lang_oracle_has_high_observed_recall():
     assert report["missed"] >= 0  # may be small but never hidden
 
 
+def test_sqlparse_oracle_runs_the_full_lex_and_split_corpus():
+    """Nested-module frames must map to their published graph titles."""
+    report = compare_named_package("sqlparse")
+    assert report["status"] == "ok", report.get("skip_reason")
+    assert report["n_workload_cases"] == 65
+    assert dict(report["workload_cases"]) == {
+        "tests/lex/golden_lex.json": 40,
+        "tests/split/golden_split.json": 25,
+    }
+    # Without the relative nested-module mapping, only 11 pairs mapped and
+    # FilterStack frames appeared as ``filter_stack:*`` unmapped samples.
+    assert report["n_observed_mapped"] >= 22, report
+    assert report["confirmed"] >= 14, report
+    assert any(
+        edge["caller"] == "engine.filter_stack:FilterStack.run"
+        and edge["callee"] == "lexer:tokenize"
+        for edge in report["confirmed_edges"]
+    ), report["confirmed_edges"]
+
+
 def test_deleted_edge_shows_as_missed_fabricated_as_unconfirmed():
     """Plant both directions without rewriting the snapshot."""
     full = compare_call_edges_to_trace(

@@ -38,7 +38,7 @@ Nothing caught it, and the reason is in the table below: every port profile rebu
 | `byog_mini_lang` | call oracle: `mini_lang` | present locally (ignored) | published oracle input; reindex creates a new baseline, not this snapshot | mutable — full aggregate health check (`mini_lang`) | — |
 | `byog_semver` | call oracle: `semantic_version` | present locally (ignored) | published oracle input; reindex creates a new baseline, not this snapshot | mutable — full aggregate health check (`semantic_version`) | — |
 | `byog_smoke` | — | present locally (ignored) | document reference only; no registered live consumer | not declared; inventory-only | `PHASE0_STATUS.md` |
-| `byog_sqlparse` | `sqlparse_graph_current_index` (local-frozen-snapshot) @ `20260625-154143-8ce62d57`<br>`sqlparse_graph_phase5_baseline` (historical-record) @ `20260618-151436-ad7b5954` | root present; historical snapshot absent | not reproducible from Git | mutable — full aggregate health check (`sqlparse`) | `PHASE5_REPORT.md`, `PHASE7_ABLATION.md`, `PHASE7_WRITEUP.md`, `examples/sqlparse/PROVENANCE.md` |
+| `byog_sqlparse` | `sqlparse_call_graph_oracle` (local-published-oracle-input)<br>`sqlparse_graph_current_index` (local-frozen-snapshot) @ `20260625-154143-8ce62d57`<br>`sqlparse_graph_phase5_baseline` (historical-record) @ `20260618-151436-ad7b5954`<br>call oracle: `sqlparse` | root present; historical snapshot absent | not reproducible from Git | mutable — full aggregate health check (`sqlparse`) | `PHASE5_REPORT.md`, `PHASE7_ABLATION.md`, `PHASE7_WRITEUP.md`, `examples/sqlparse/PROVENANCE.md` |
 | `byog_tool_eval` | — | present locally (ignored) | unregistered local artifact | not declared; inventory-only | — |
 
 ## Source-gate artifacts

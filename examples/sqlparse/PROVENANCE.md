@@ -56,6 +56,55 @@ Interpretation: the first real multi-package graph scale probe is clean. The
 measured bottleneck was not resolver precision but audit noise from a legacy
 semantic-suspicion heuristic. End-to-end scaled porting remains unproven.
 
+## Inherited-member runtime audit (2026-07-30)
+
+The generic same-file inherited-member extractor rule was checked outside the
+JSONPatch package that motivated it. A fresh extractor run supplies its complete
+candidate population; a separate Python process imports the vendored package
+and verifies that the declared base is in `Child.__mro__` and is the first class
+whose `__dict__` owns the member. This is runtime evidence, not a second AST
+walk.
+
+The result is **671/671** SQLParse and **57/57** semantic-version inherited-member facts; **728/728** total, with **0 mismatches** and **0 runtime errors**. SQLParse's
+population includes **66** multiple-inheritance facts, **6** slotted-child facts, and **18** properties; semantic-version contributes **24** slotted-child facts. The
+companion regression plants a C3 diamond, a `super()` override, a property, and
+`__slots__`; it also plants a class-level assignment shadowing a base method and
+asserts that the runtime oracle reports the extractor edge as a mismatch. The
+latter shape was absent from the two measured populations, so this is a scoped
+zero-error result, not a claim that the AST rule models assignment shadowing.
+
+Run `uv run python scripts/inherited_member_runtime_audit.py --check` from the
+repository root. The SQLParse profile runs the same source-only check; it reads
+no published `byog_*` graph and makes an empty candidate population fail rather
+than report a `0/0` pass.
+
+## SQLParse call-graph observation (2026-07-30)
+
+`uv run python scripts/call_graph_oracle.py --package sqlparse` now profiles the
+same source corpus consumed by the Rust contract: **40** lexer cases and **25** split
+cases, validating each Python result before tracing. Against the current local
+published graph it reports **14 confirmed**, **8 missed**, and **123 unconfirmed** edges
+from **22 mapped** observed pairs (**28 raw**); the nested `engine.filter_stack` module
+frames are mapped by relative module title rather than silently dropped to their
+basename. This is a call-only coverage measurement, not a precision rate and
+not an extractor reindex: the eight misses are visible residuals, while the 123
+unconfirmed graph edges were not exercised by this 65-case workload.
+
+The six observed pairs that stay **unmapped** (28 raw → 22 mapped) are reported
+with the side that failed to resolve, not dropped. They are two known shapes:
+the public entry point `sqlparse:split`, which has no entity at all because the
+index skips `__init__.py` (the graph caveat recorded above), and
+`<locals>.<genexpr>` frames, which are not entities either. The low 10.2%
+coverage of the graph therefore partly reflects that the traced workload enters
+through a symbol the graph does not contain — the concrete pipeline symbols it
+delegates to *are* present and are what the 14 confirmed edges cover.
+
+The eight misses are a different shape from JSONPatch's registry residuals:
+operator-protocol dispatch (`_TokenType.__contains__`, `__getattr__`,
+`TokenList.__str__`) and cross-module instance-method calls through the filter
+stack. Measuring a second package was worth it for that alone — JSONPatch's
+30/3/83 is not representative.
+
 ## Split behavior contract — gate step 2
 - Golden file: `tests/split/golden_split.json`.
 - Contract test: `tests/test_split_contract.py`.

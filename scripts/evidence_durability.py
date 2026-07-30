@@ -263,6 +263,32 @@ def claim_durability(claim: Mapping[str, Any], root: Path = ROOT) -> dict[str, A
             "replay_probe": probe,
         }
 
+    if stype == "call_graph_oracle":
+        # The named oracle's own contract registry supplies the graph; do not
+        # duplicate a package-to-artifact map in the durability inventory.
+        package = source.get("package")
+        if not isinstance(package, str) or not package:
+            raise ValueError(f"{claim_id}: call_graph_oracle needs a package")
+        sys.path.insert(0, str(ROOT / "scripts"))
+        from call_graph_oracle import known_contracts  # type: ignore
+
+        contract = known_contracts().get(package)
+        if contract is None:
+            raise ValueError(f"{claim_id}: unknown call-oracle package {package!r}")
+        artifact = _graph_name(str(contract.graph_dir))
+        if artifact is None:
+            raise ValueError(f"{claim_id}: call-oracle graph is not a byog_* artifact")
+        return {
+            "claim": claim_id,
+            "tier": "local-published-oracle-input",
+            "replay": "not reproducible from Git; reindex changes the call-oracle baseline",
+            "artifact": artifact,
+            "snapshot": None,
+            "present": _artifact_path(artifact, None, root).is_dir(),
+            "detail": "Named call-oracle measurement reads its current local published graph.",
+            "replay_probe": probe,
+        }
+
     return {
         "claim": claim_id,
         "tier": "git-derived",

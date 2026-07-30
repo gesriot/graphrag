@@ -70,6 +70,12 @@ def known_contracts() -> Dict[str, PackageContract]:
             graph_dir=ROOT / "byog_mini_lang",
             workload="mini_lang_golden",
         ),
+        "sqlparse": PackageContract(
+            name="sqlparse",
+            package_dir=ROOT / "examples" / "sqlparse",
+            graph_dir=ROOT / "byog_sqlparse",
+            workload="sqlparse_golden",
+        ),
         "humanize": PackageContract(
             name="humanize",
             package_dir=ROOT / "examples" / "humanize",
@@ -178,7 +184,15 @@ def _trace_probe_script() -> str:
                     mod_guess = ".".join(parts)
             # Prefer a prefix that actually appears on graph entities.
             stem = parts[-1] if parts else package_dir.name
-            candidates = [mod_guess, stem, package_dir.name]
+            # Published graph titles use a path relative to the indexed
+            # package (``engine.filter_stack``), while Python reports the full
+            # import name (``sqlparse.engine.filter_stack``). Retain both
+            # before falling back to a basename: otherwise a nested frame is
+            # silently unmapped even though its graph entity exists.
+            relative_dotted = ".".join(rel.with_suffix("").parts)
+            if rel.name == "__init__.py":
+                relative_dotted = ".".join(rel.with_suffix("").parts[:-1])
+            candidates = [mod_guess, relative_dotted, stem, package_dir.name]
             chosen = None
             for c in candidates:
                 if c in prefixes:
@@ -293,6 +307,53 @@ def _trace_probe_script() -> str:
                         pass
                 _workload_cases.append((gf.name, len(data["cases"])))
 
+        def run_sqlparse_golden():
+            # Use the same two source corpus files the Rust port consumes. This
+            # is a tracer workload, but re-checking each expected result makes
+            # a changed/malformed golden fail rather than profile a substitute.
+            sys.path.insert(0, str(package_dir.parent))
+            import sqlparse  # noqa: WPS433
+            from sqlparse import lexer  # noqa: WPS433
+
+            tests = package_dir / "tests"
+            corpus = (
+                (tests / "lex", "tokens"),
+                (tests / "split", "result"),
+            )
+            for directory, expected_key in corpus:
+                files = sorted(directory.glob("golden_*.json"))
+                if not files:
+                    raise RuntimeError(
+                        f"sqlparse {directory.relative_to(package_dir)} has no golden_*.json; "
+                        "refusing to profile a substitute workload"
+                    )
+                for gf in files:
+                    data = json.loads(gf.read_text())
+                    cases = data.get("cases")
+                    if not isinstance(cases, list) or not cases:
+                        raise RuntimeError(f"sqlparse golden {gf} has no executable cases")
+                    for index, case in enumerate(cases):
+                        sql = case.get("sql")
+                        if not isinstance(sql, str):
+                            raise RuntimeError(f"sqlparse golden {gf} case {index} has no SQL input")
+                        if expected_key == "tokens":
+                            got = [[list(ttype), value] for ttype, value in lexer.tokenize(sql)]
+                        else:
+                            strip = case.get("strip_semicolon")
+                            if not isinstance(strip, bool):
+                                raise RuntimeError(
+                                    f"sqlparse split golden {gf} case {index} has no boolean strip_semicolon"
+                                )
+                            got = sqlparse.split(sql, strip_semicolon=strip)
+                        if got != case.get(expected_key):
+                            raise RuntimeError(
+                                f"sqlparse golden mismatch in {gf.name} case {index}; "
+                                "refusing to profile a corpus that no longer matches its oracle"
+                            )
+                    _workload_cases.append(
+                        (str(gf.relative_to(package_dir)), len(cases))
+                    )
+
         def run_humanize_number():
             sys.path.insert(0, str(package_dir.parent))  # import humanize package
             # Prefer package dir on path so vendored humanize wins.
@@ -350,6 +411,7 @@ def _trace_probe_script() -> str:
         runners = {
             "jsonpatch_apply": run_jsonpatch_apply,
             "mini_lang_golden": run_mini_lang_golden,
+            "sqlparse_golden": run_sqlparse_golden,
             "humanize_number": run_humanize_number,
             "semantic_version_golden": run_semantic_version_golden,
         }
@@ -685,6 +747,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         workload = "jsonpatch_apply"
         if pkg.name == "mini_lang":
             workload = "mini_lang_golden"
+        elif pkg.name == "sqlparse":
+            workload = "sqlparse_golden"
         elif pkg.name == "humanize":
             workload = "humanize_number"
         elif pkg.name == "semantic_version":
