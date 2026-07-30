@@ -6,7 +6,7 @@
       "kind": "current",
       "description": "Full examples pytest summary: passed + xfailed.",
       "expect": {
-        "passed": 521,
+        "passed": 538,
         "xfailed": 2
       },
       "source": {
@@ -18,17 +18,17 @@
       "docs": [
         {
           "path": "Plan.md",
-          "must_contain": "521 passed, 2 xfailed",
+          "must_contain": "538 passed, 2 xfailed",
           "role": "current"
         },
         {
           "path": "PHASE7_WRITEUP.md",
-          "must_contain": "521 passed, 2 xfailed",
+          "must_contain": "538 passed, 2 xfailed",
           "role": "current"
         },
         {
           "path": "examples/charset_normalizer_rust/tools/check_port.sh",
-          "must_contain": "Full examples run: 521 passed, 2 xfailed.",
+          "must_contain": "Full examples run: 538 passed, 2 xfailed.",
           "role": "current",
           "note": "The compatibility handoff prints this live suite summary; keep it aligned with the documented claim."
         }
@@ -153,15 +153,15 @@
         "c_preprocessor_unknown": 0,
         "c_preprocessor_vacuous": 9,
         "python_registry_missed": 25,
-        "call_graph_missed": 12,
-        "call_graph_unconfirmed": 73,
+        "call_graph_missed": 6,
+        "call_graph_unconfirmed": 79,
         "cjson_ownership_blocked": 6,
         "cjson_global_state_excluded": 4
       },
       "source": {
         "type": "oracle_residuals",
         "mode": "live",
-        "note": "Runs scripts/oracle_summary.py's adapter, which invokes each native oracle and fails if a required comparator cannot produce its own report."
+        "note": "Runs scripts/oracle_summary.py's adapter, which invokes each native oracle and fails if a required comparator cannot produce its own report. Its call-observation child reads the published byog_jsonpatch baseline; absence is a failure, never a fresh-graph substitution."
       },
       "docs": [
         {
@@ -178,7 +178,7 @@
         },
         {
           "path": "docs/ORACLE_CONTRACT.md",
-          "must_contain": "**12 missed** observed jsonpatch edges; **73 unconfirmed** graph edges",
+          "must_contain": "**6 missed** observed jsonpatch edges; **79 unconfirmed** graph edges",
           "role": "current",
           "require_near": "## Current residuals"
         },
@@ -310,7 +310,23 @@
       "source": {
         "type": "none",
         "mode": "traced",
-        "note": "Recorded number only. The snapshot 20260618-151436-ad7b5954 that verified it was destroyed by routine keep_last=5 retention on 2026-07-28 when a cross-module resolver change republished byog_sqlparse twice. It cannot be regenerated: the extractor has moved on and today's index yields different counts. byog_graph.pinned_snapshot_ids now protects snapshots that doc claims pin, so this cannot recur."
+        "note": "Recorded number only. The snapshot 20260618-151436-ad7b5954 that verified it was destroyed by routine keep_last=5 retention on 2026-07-28 when a cross-module resolver change republished byog_sqlparse twice. It cannot be regenerated: the extractor has moved on and today's index yields different counts. byog_graph.pinned_snapshot_ids now protects snapshots that doc claims pin, so this cannot recur.",
+        "evidence_artifact": {
+          "graph": "byog_sqlparse",
+          "snapshot": "20260618-151436-ad7b5954",
+          "state": "lost",
+          "detail": "Destroyed by keep_last=5 retention on 2026-07-28; the current extractor produces a different graph, so the Phase 5 baseline is a historical record rather than replayable evidence.",
+          "replay_probe": {
+            "package": "examples/sqlparse",
+            "indexer": "python",
+            "output": "output/evidence_durability/sqlparse_replay",
+            "observed": {
+              "entities": 283,
+              "relationships": 624,
+              "calls": 279
+            }
+          }
+        }
       },
       "docs": [
         {
@@ -349,7 +365,17 @@
         "type": "graph_counts",
         "mode": "live",
         "graph": "byog_sqlparse",
-        "snapshot": "20260625-154143-8ce62d57"
+        "snapshot": "20260625-154143-8ce62d57",
+        "replay_probe": {
+          "package": "examples/sqlparse",
+          "indexer": "python",
+          "output": "output/evidence_durability/sqlparse_replay",
+          "observed": {
+            "entities": 283,
+            "relationships": 624,
+            "calls": 279
+          }
+        }
       },
       "docs": [
         {

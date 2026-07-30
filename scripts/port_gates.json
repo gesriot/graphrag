@@ -205,6 +205,15 @@
           ]
         },
         {
+          "name": "generated local-evidence durability inventory",
+          "when": "full",
+          "command": [
+            "{python}",
+            "scripts/evidence_durability.py",
+            "--check"
+          ]
+        },
+        {
           "name": "full seeded Python-oracle differential",
           "when": "differential-full",
           "command": [

@@ -8,10 +8,13 @@ non-literal name, calls through subscripts / ``dict.get``, polymorphic method
 calls on receivers derived from those lookups, ``__getattr__`` hooks, and
 ``importlib`` dynamic imports.
 
-Flags are **provenance labels**, not demotions: they do not change
-``is_deterministic`` or remove/add edges, so ``audit_call_edges`` pass rates
-stay unchanged. Consumers (context packs, humans) can tell the difference
-between "this function calls nothing else" and "callees are chosen at runtime".
+Flags are **provenance labels**, not demotions of existing edges: they do not
+flip ``is_deterministic`` on prior relationships. **Registry promotion** (see
+``_registry_dispatch_edges``) may *add* non-deterministic ``calls`` edges for
+statically named table members at labelled dispatch sites — never for
+lambda/Call-valued or runtime-only discoveries. Consumers can tell unique
+static callees from multi-target registry dispatch via confidence and
+``is_deterministic=False``.
 
 No type-checker dependency — source text + ``ast`` only.
 """
@@ -937,12 +940,20 @@ def reasons_for_span(
     return reasons
 
 
+# Confidence for *promoted* registry-dispatch call edges. Lower than a unique
+# static Name call (~0.85–0.95), higher than a bare observation (0.35).
+# is_deterministic is always False: which table member runs is not static.
+REGISTRY_DISPATCH_CONFIDENCE = 0.75
+
+
 def annotate_byog(
     data: Dict[str, List[Dict[str, Any]]], package_dir: Path
 ) -> Dict[str, Any]:
     """Stamp dynamic-dispatch provenance onto entities, relationships, observations.
 
-    Does **not** flip ``is_deterministic`` or drop/add edges.
+    May **add** ``calls`` edges for statically named registry-dispatch targets
+    (see ``_registry_dispatch_edges``). Does not flip ``is_deterministic`` on
+    pre-existing edges and does not drop edges.
     """
     pa = analyze_package(package_dir)
     summary: Dict[str, Any] = {
@@ -1012,8 +1023,9 @@ def annotate_byog(
                     }
                 )
 
-    # Drop prior heuristic registry-candidate observations so re-annotation is
-    # idempotent (observations may grow; calls edges must not).
+    # Drop prior registry-candidate observations *and* prior registry-dispatch
+    # call edges so re-annotation is idempotent (observations may grow; other
+    # call edges must not accumulate duplicates of our promotions).
     existing_obs = [
         o
         for o in (data.get("call_observations") or [])
@@ -1023,6 +1035,17 @@ def annotate_byog(
         )
     ]
     data["call_observations"] = existing_obs
+    data["relationships"] = [
+        r
+        for r in (data.get("relationships") or [])
+        if not (
+            str(r.get("type", "")) == "calls"
+            and (
+                str(r.get("extractor", "")) == "python_dynamic_registry"
+                or str(r.get("description", "")).startswith("registry_dispatch:")
+            )
+        )
+    ]
 
     for o in data.get("call_observations") or []:
         reasons = reasons_for_span(
@@ -1052,9 +1075,9 @@ def annotate_byog(
                     }
                 )
 
-    # Cheap, high-value gap fill: name static registry members as weak
-    # observations (never as calls edges). A porting agent can then see *which*
-    # implementations the dispatch could reach, still labelled non-deterministic.
+    # Registry dispatch: same static facts as candidates, but *promoted* to
+    # calls edges under the rule in ``_registry_dispatch_edges``. Observations
+    # remain for context packs (dispatch_candidates).
     candidate_obs = _registry_candidate_observations(data, pa)
     summary["registry_candidates_emitted"] = len(candidate_obs)
     data.setdefault("call_observations", []).extend(candidate_obs)
@@ -1073,6 +1096,15 @@ def annotate_byog(
                     "reasons": o.get("dynamic_reasons"),
                 }
             )
+
+    dispatch_edges = _registry_dispatch_edges(data, pa)
+    summary["registry_dispatch_edges_emitted"] = len(dispatch_edges)
+    data.setdefault("relationships", []).extend(dispatch_edges)
+    for r in dispatch_edges:
+        summary["calls_flagged"] += 1
+        # Not trusted/deterministic — promotion rule forbids that.
+        sf = Path(str(r.get("source_file", ""))).name or "?"
+        summary["by_file"][sf]["calls"] += 1
 
     summary["by_file"] = dict(summary["by_file"])
     summary["registry_tables"] = {k: list(v) for k, v in pa.registry_tables.items()}
@@ -1098,16 +1130,27 @@ def _tables_for_class(pa: PackageAnalysis, class_name: str) -> List[Tuple[str, L
     return out
 
 
-def _registry_candidate_observations(
+def _iter_registry_dispatch_targets(
     data: Dict[str, List[Dict[str, Any]]], pa: PackageAnalysis
 ) -> List[Dict[str, Any]]:
-    """Emit weak observations naming static registry members as possible callees.
+    """Static registry-dispatch targets shared by observations and call edges.
 
-    Never creates ``calls`` relationships. Confidence stays low; reason is
-    ``registry_candidate:…`` so consumers can tell these are heuristic.
+    **Promotion rule (the only path that may mint a registry ``calls`` edge):**
+
+    1. The registry table is extracted *statically* with a concrete key and a
+       Name/Attribute value (dict-literal Name values or decorator registration).
+       Lambda/Call-valued tables never qualify — they have no honest callee name.
+    2. The dispatch site is an entity on the same class, statically labelled with
+       ``registry_lookup`` / ``call_through_registry`` / ``call_through_dynamic_name:cls``
+       and/or ``polymorphic_call`` / ``registry_derived_iter`` for that site.
+    3. The target entity title already exists in the graph (no invented symbols).
+
+    Runtime ``--vs-runtime`` confirmation of the table (e.g. jsonpatch 6/6)
+    *justifies* this policy; extract time uses only (1–3), so promotion cannot
+    invent members the AST did not name. Unconfirmed guesses (runtime-only
+    discoveries, ambiguous receivers) are never promoted.
     """
     entity_titles = {str(e.get("title", "")) for e in data.get("entities") or []}
-    # module prefix per source file stem from existing titles (jsonpatch:…)
     module_by_class: Dict[str, str] = {}
     for t in entity_titles:
         if ":" not in t:
@@ -1132,7 +1175,6 @@ def _registry_candidate_observations(
         if not tables:
             continue
 
-        # polymorphic_call:operation.apply<…> → dispatched method name "apply"
         poly_methods: List[str] = []
         has_registry_lookup = any(
             r.startswith("registry_lookup:")
@@ -1144,42 +1186,48 @@ def _registry_candidate_observations(
         for r in reasons:
             if r.startswith("polymorphic_call:"):
                 has_poly = True
-                # polymorphic_call:operation.apply<registry_derived_iter:_ops>
                 body = r[len("polymorphic_call:") :]
                 head = body.split("<", 1)[0]
                 if "." in head:
                     poly_methods.append(head.split(".", 1)[1])
             if r.startswith("registry_derived_iter:"):
-                has_poly = True  # iteration feeds polymorphic apply in same method
+                has_poly = True
 
         if not has_poly and not has_registry_lookup:
             continue
 
         mod = module_by_class.get(cls, title.split(":")[0] if ":" in title else "")
         for reg_name, entries in tables:
+            # entries are only Name/Attribute values with concrete keys
+            # (see _registry_table_entries / decorator registration).
             for key, val_name in entries:
                 if has_poly and poly_methods:
                     targets = [f"{val_name}.{pm}" for pm in poly_methods]
                 elif has_poly and not poly_methods:
-                    # registry-derived iterator without a parsed method: still
-                    # name the classes (agent can open .apply themselves)
                     targets = [val_name]
                 else:
-                    # pure registry lookup / construct: candidate is the class/func
                     targets = [val_name]
 
                 for disp in targets:
-                    # Prefer fully-qualified entity titles when they exist.
                     fq = f"{mod}:{disp}" if mod else disp
                     display = fq if fq in entity_titles else (
-                        f"{mod}:{val_name}" if (mod and f"{mod}:{val_name}" in entity_titles and "." not in disp)
+                        f"{mod}:{val_name}"
+                        if (mod and f"{mod}:{val_name}" in entity_titles and "." not in disp)
                         else disp
                     )
-                    # If Class.method entity exists, use that title as display_target.
                     if "." in disp and mod and f"{mod}:{disp}" in entity_titles:
                         display = f"{mod}:{disp}"
-                    elif mod and f"{mod}:{val_name}" in entity_titles and has_registry_lookup and not has_poly:
+                    elif (
+                        mod
+                        and f"{mod}:{val_name}" in entity_titles
+                        and has_registry_lookup
+                        and not has_poly
+                    ):
                         display = f"{mod}:{val_name}"
+
+                    # Rule (3): refuse targets that are not graph entities.
+                    if display not in entity_titles:
+                        continue
 
                     dedup = (title, display, reg_name)
                     if dedup in seen:
@@ -1188,25 +1236,104 @@ def _registry_candidate_observations(
                     emitted.append(
                         {
                             "source": title,
-                            "display_target": display,
-                            "confidence": 0.35,
-                            "reason": f"registry_candidate:{reg_name}[{key!r}]->{display}",
+                            "target": display,
+                            "reg_name": reg_name,
+                            "key": key,
+                            "cls": cls,
                             "source_file": e.get("source_file", ""),
                             "span": e.get("span", ""),
-                            "extractor": "python_dynamic",
-                            "description": (
-                                f"{title} may dispatch via static registry "
-                                f"{cls}.{reg_name}[{key!r}] to {display} "
-                                f"(heuristic candidate; not a resolved call edge)"
-                            ),
-                            "dynamic_dependent": True,
-                            "dynamic_reasons": [
-                                f"registry_candidate:{reg_name}",
-                                f"registry_key:{key}",
-                            ],
                         }
                     )
     return emitted
+
+
+def _registry_candidate_observations(
+    data: Dict[str, List[Dict[str, Any]]], pa: PackageAnalysis
+) -> List[Dict[str, Any]]:
+    """Emit weak observations naming static registry members as possible callees.
+
+    Confidence stays low; reason is ``registry_candidate:…``. Call edges for the
+    same pairs are emitted separately by ``_registry_dispatch_edges``.
+    """
+    emitted: List[Dict[str, Any]] = []
+    for item in _iter_registry_dispatch_targets(data, pa):
+        title = item["source"]
+        display = item["target"]
+        reg_name = item["reg_name"]
+        key = item["key"]
+        cls = item["cls"]
+        emitted.append(
+            {
+                "source": title,
+                "display_target": display,
+                "confidence": 0.35,
+                "reason": f"registry_candidate:{reg_name}[{key!r}]->{display}",
+                "source_file": item["source_file"],
+                "span": item["span"],
+                "extractor": "python_dynamic",
+                "description": (
+                    f"{title} may dispatch via static registry "
+                    f"{cls}.{reg_name}[{key!r}] to {display} "
+                    f"(static table member; also promoted to a non-deterministic calls edge)"
+                ),
+                "dynamic_dependent": True,
+                "dynamic_reasons": [
+                    f"registry_candidate:{reg_name}",
+                    f"registry_key:{key}",
+                ],
+            }
+        )
+    return emitted
+
+
+def _registry_dispatch_edges(
+    data: Dict[str, List[Dict[str, Any]]], pa: PackageAnalysis
+) -> List[Dict[str, Any]]:
+    """Promote statically named registry members to ``calls`` edges.
+
+    See ``_iter_registry_dispatch_targets`` for the promotion rule. Edges are
+    always ``is_deterministic=False`` and use extractor
+    ``python_dynamic_registry`` so re-annotation can replace them cleanly.
+    """
+    edges: List[Dict[str, Any]] = []
+    existing = {
+        (str(r.get("source")), str(r.get("target")))
+        for r in (data.get("relationships") or [])
+        if str(r.get("type", "")) == "calls"
+    }
+    for item in _iter_registry_dispatch_targets(data, pa):
+        src, tgt = item["source"], item["target"]
+        if (src, tgt) in existing:
+            continue
+        existing.add((src, tgt))
+        reg_name, key, cls = item["reg_name"], item["key"], item["cls"]
+        edges.append(
+            {
+                "source": src,
+                "target": tgt,
+                "type": "calls",
+                "description": (
+                    f"registry_dispatch:{cls}.{reg_name}[{key!r}]->{tgt} "
+                    f"(static Name table member at labelled dispatch site; "
+                    f"is_deterministic=False — which member runs is runtime)"
+                ),
+                "weight": REGISTRY_DISPATCH_CONFIDENCE,
+                "text_unit_ids": [],
+                "human_readable_id": 0,
+                "source_file": item["source_file"],
+                "span": item["span"],
+                "extractor": "python_dynamic_registry",
+                "confidence": REGISTRY_DISPATCH_CONFIDENCE,
+                "is_deterministic": False,
+                "dynamic_dependent": True,
+                "dynamic_reasons": [
+                    f"registry_dispatch:{reg_name}",
+                    f"registry_key:{key}",
+                ],
+                "resolved_target_hint": tgt,
+            }
+        )
+    return edges
 
 
 # ---------------------------------------------------------------------------

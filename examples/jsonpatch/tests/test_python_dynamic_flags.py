@@ -46,8 +46,9 @@ def test_jsonpatch_registry_dispatch_is_detected():
     assert obs, "expected unresolved observation for operation.apply"
     assert all(o.get("dynamic_dependent") for o in obs)
 
-    # Registry candidates name *which* implementations dispatch may reach —
-    # weak observations only, never promoted to calls edges.
+    # Registry members are named as observations *and* promoted to non-deterministic
+    # calls edges (static Name table + labelled dispatch site). See promotion rule
+    # in scripts/python_dynamic.py::_iter_registry_dispatch_targets.
     cands = [
         o
         for o in data["call_observations"]
@@ -65,15 +66,26 @@ def test_jsonpatch_registry_dispatch_is_detected():
     ):
         assert need in targets, (need, targets)
     assert all(float(o.get("confidence", 1)) < 0.6 for o in cands)
-    assert not any(
-        r.get("type") == "calls"
+    promoted = [
+        r
+        for r in data["relationships"]
+        if r.get("type") == "calls"
         and r.get("source") == "jsonpatch:JsonPatch.apply"
         and "Operation.apply" in str(r.get("target"))
-        for r in data["relationships"]
-    ), "registry candidates must not become calls edges"
+        and r.get("extractor") == "python_dynamic_registry"
+    ]
+    assert len(promoted) == 6, promoted
+    assert all(r.get("is_deterministic") is False for r in promoted)
+    assert all(float(r.get("confidence", 0)) == 0.75 for r in promoted)
 
     # Labels do not demote trusted edges elsewhere.
-    trusted = [r for r in data["relationships"] if r.get("type") == "calls" and r.get("is_deterministic")]
+    trusted = [
+        r
+        for r in data["relationships"]
+        if r.get("type") == "calls"
+        and r.get("is_deterministic")
+        and r.get("extractor") != "python_dynamic_registry"
+    ]
     assert trusted, "sanity: graph still has trusted calls"
     for r in trusted:
         # dynamic flag may be true or false; is_deterministic must be untouched by annotation

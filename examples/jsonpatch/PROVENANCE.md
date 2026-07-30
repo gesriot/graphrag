@@ -155,22 +155,57 @@ finding).
 
 | package | graph rows / unique | observed | confirmed | missed | unconfirmed | notes |
 |---|---:|---:|---:|---:|---:|---|
-| `jsonpatch` | **122 / 94** | 33 | **21** | **12** | 73 | confirmed +13, missed −13 |
+| `jsonpatch` | 122 / 94 | 33 | 21 | 12 | 73 | confirmed +13, missed −13 |
 | `mini_lang` | 100 / 57 | 36 | 35 | 1 | 22 | small graph densified |
 | `humanize` | 124 / 42 | 9 | 9 | 0 | 33 | unique pairs unchanged |
 
-Remaining jsonpatch misses: six `JsonPatch.apply → *Operation.apply`, the
-`_ops`/`_get_operation` chain, two `→ PatchOperation` construction paths, one
-ambiguous `MoveOperation.apply → JsonPointer.to_last` (`from_ptr` assigned in an
-if/else where one arm is not a constructor — left unresolved, not guessed), and
-`JsonPointer → unescape` inside jsonpointer. Cross-module residual: **1** (was 11).
+Cross-module residual after that step: **1** (`MoveOperation.apply →
+JsonPointer.to_last`, if/else `from_ptr` — left unresolved). The other eleven
+cross-module edges were trace-confirmed.
 
-`audit_call_edges` on reindexed graphs: pass_rate **1.0**, 0 anomalies, 0
-dangling (jsonpatch / sqlparse / semantic_version / humanize / mini_lang).
-Adequacy from `apply_patch` still stalls at the registry (must-reach operations
-not reached) — that is dynamic dispatch, not the import gap; starting from
-`RemoveOperation.apply` the closure now enters `jsonpointer:JsonPointer.to_last`
-/ `walk` / `get_part`.
+**Registry-dispatch promotion (2026-07-30):** the six
+`JsonPatch.apply → *Operation.apply` targets (and six
+`_get_operation → *Operation` constructs) are **statically named** Name values
+in `JsonPatch.operations`, and the dispatch sites are labelled. Runtime
+`--vs-runtime` already agreed 6/6 on that table — that *justifies* promotion;
+extract time still requires the static Name binding so lambda/runtime-only
+members can never become edges.
+
+| rule field | value |
+|---|---|
+| When | static registry entry (Name/Attribute value + concrete key) **and** labelled dispatch site on the same class **and** target entity exists |
+| confidence | **0.75** |
+| `is_deterministic` | **False** (which member runs is runtime) |
+| extractor | `python_dynamic_registry` (idempotent replace on re-stamp) |
+| Never | lambda/Call-valued tables; runtime-only discoveries; missing entity titles |
+
+Oracle **after promotion** (published graph, 25 apply goldens):
+
+| | confirmed | missed | unconfirmed | calls rows |
+|---|---:|---:|---:|---:|
+| post-import | 21 | 12 | 73 | 122 |
+| **post-registry promote** | **27** | **6** | 79 | **134** |
+
+The six `.apply` edges moved missed → confirmed. Remaining six misses:
+`apply → _ops` (property edge, not `calls`), `_ops → _get_operation` (map of
+method), `{Copy,Move}.apply → PatchOperation` / `_get_operation → PatchOperation`
+(superclass construction), and the if/else `from_ptr → to_last`.
+
+Adequacy (`jsonpatch_adequacy.json` from `apply_patch`, calls+property):
+
+| | reached | must_reach missing |
+|---|---:|---:|
+| before promotion | 8 | 29 / 37 |
+| **after** | **31** | **7 / 37** |
+
+Still missing: `PatchOperation` (+ `__init__` / `apply` / `path` / `key`) as a
+superclass not linked by `calls`, and `jsonpointer:JsonPointer.__init__` /
+`unescape`. Operation `.apply` methods and jsonpointer `to_last`/`walk`/`get_part`
+are now on the closure. `must_exclude` still clean.
+
+`audit_call_edges` on the reindexed jsonpatch graph: pass_rate **1.0**, 0
+anomalies, 0 dangling, **134** calls. Other packages were **not** reindexed for
+this step (sqlparse pin `20260625-154143-8ce62d57` retained).
 
 A deleted published edge shows as missed; a fabricated edge shows as
 unconfirmed — verified end to end against a copied graph on disk, not only

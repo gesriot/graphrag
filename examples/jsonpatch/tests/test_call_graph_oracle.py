@@ -48,23 +48,28 @@ def test_jsonpatch_oracle_runs_and_separates_directions():
     assert "confirmed" in report and "missed" in report and "unconfirmed" in report
     assert report["confirmed"] + report["missed"] == report["n_observed_mapped"]
     assert report["confirmed"] + report["unconfirmed"] == report["n_graph_calls"]
-    # Cross-module gap closed on the apply path: confirmed rose, missed fell.
-    # Pre-fix: confirmed=8 missed=25; post import-resolution: ≥18 confirmed, ≤15 missed.
-    assert report["confirmed"] >= 18, report
-    assert report["missed"] <= 15, report
+    # Cross-module + registry-dispatch promotion: confirmed rose, missed fell.
+    # Pre-cross-module: 8/25; post-import: ~21/12; post-registry-promote: ≥27/≤6.
+    assert report["confirmed"] >= 27, report
+    assert report["missed"] <= 6, report
     conf_pairs = {(e["caller"], e["callee"]) for e in report["confirmed_edges"]}
     assert any(
         c.startswith("jsonpatch:") and t.startswith("jsonpointer:")
         for c, t in conf_pairs
     ), conf_pairs
-    # Dynamic dispatch under apply is still among misses (registry, not import).
-    missed_pairs = {
-        (e["caller"], e["callee"]) for e in report["missed_edges"]
-    }
-    assert any(
-        c == "jsonpatch:JsonPatch.apply" and "Operation.apply" in t
-        for c, t in missed_pairs
-    ), missed_pairs
+    # Registry .apply targets are now confirmed calls, not misses.
+    for op in (
+        "AddOperation",
+        "RemoveOperation",
+        "ReplaceOperation",
+        "MoveOperation",
+        "TestOperation",
+        "CopyOperation",
+    ):
+        assert (
+            "jsonpatch:JsonPatch.apply",
+            f"jsonpatch:{op}.apply",
+        ) in conf_pairs, conf_pairs
     # Unconfirmed includes code the apply golden never reaches (e.g. DiffBuilder).
     unc = {(e["caller"], e["callee"]) for e in report["unconfirmed_edges"]}
     assert any("DiffBuilder" in a or "DiffBuilder" in b for a, b in unc), unc

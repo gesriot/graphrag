@@ -25,14 +25,26 @@ enables CJSON Miri and charset-normalizer's repository pytest. Add
 
 ## Clean-checkout behaviour
 
-The gate does not read or update published `byog_*` directories. Every port
-reindexes into ignored `output/port_gates/<profile>/graph`; the aggregate run
-orders cJSON before the repository-wide pytest so its regenerable documentation
-claim is audited from that fresh graph. Frozen SQLParse snapshots and the
-protected isodate ablation graph are deliberately not regenerated. When those
-large frozen artifacts are absent from a clean checkout, the documentation
-checker prints a named `SKIP` for each while still checking the recorded prose;
-it reports `PASS WITH SOURCE SKIPS`, never an unqualified pass.
+The **port-profile stages** do not read or update published `byog_*`
+directories. Every profile reindexes into ignored
+`output/port_gates/<profile>/graph`; the aggregate run orders cJSON before the
+repository-wide pytest so its regenerable documentation claim is audited from
+that fresh graph. The full documentation-claim check additionally invokes the
+combined oracle summary, whose JSONPatch call-observation residual deliberately
+reads the published local `byog_jsonpatch` baseline. If that baseline is absent,
+the live residual claim fails rather than substituting a fresh graph. Frozen
+SQLParse snapshots and the protected isodate ablation graph are deliberately
+not regenerated. When those frozen artifacts are absent from a clean checkout,
+the documentation checker prints a named `SKIP` for each while still checking
+the recorded prose; it reports `PASS WITH SOURCE SKIPS`, never an unqualified
+pass.
+
+[`docs/EVIDENCE_DURABILITY.md`](../docs/EVIDENCE_DURABILITY.md) is the
+manifest-derived inventory of every local published graph reference: it names
+which claims/oracles need a local artifact, which measurements the gate can
+rebuild, and which records are historical rather than replayable. The full gate
+also runs its `--check` mode, so a stale inventory is a failure rather than a
+reader-only warning.
 
 Bootstrap prerequisites are intentionally outside the gate: `uv` itself and
 the locked Python dependencies must already be available (or resolvable from a

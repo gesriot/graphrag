@@ -56,7 +56,7 @@ historical report. They are boundaries to inspect, not evidence of a clean pass.
 | --- | --- | --- |
 | C preprocessor liveness | **9 vacuous** regions; 0 unknown | Directive-only branches that neither line survival nor unique macro attribution can judge. They are outside the agreement rate. |
 | Python registry | **25 missed** isodate lambda entries | The runtime callable values exist, but their lambda bodies have no honest single callee name; they remain unguessed. |
-| Call-graph observation | **12 missed** observed jsonpatch edges; **73 unconfirmed** graph edges | The active published graph confirms cross-module imports better than the older 25-miss snapshot, but registry/polymorphic calls remain missed. Unconfirmed edges are not exercised by this workload, not proven wrong. |
+| Call-graph observation | **6 missed** observed jsonpatch edges; **79 unconfirmed** graph edges | Registry Name-table members at labelled dispatch sites are promoted to non-deterministic `calls` edges; the six remaining misses are property/`map`/superclass/`from_ptr` gaps. Unconfirmed edges are not exercised by this workload, not proven wrong. |
 | cJSON API surface | **6 ownership-blocked** calls; **4 process-global exclusions** | The six need aliased/shared mutable storage under the observed C traces; the four need allocator/error-state policy. Neither is silently deferred. |
 
 The older jsonpatch table with 25 missed edges remains a dated baseline in its

@@ -21,8 +21,11 @@ import importlib.util
 import re
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 from typing import Any
+
+from evidence_durability import claim_durability
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = Path(__file__).resolve().parent / "doc_claims.json"
@@ -340,8 +343,25 @@ def run_all() -> dict[str, Any]:
     results: list[dict[str, Any]] = []
     failures: list[str] = []
     live = traced = historical = frozen_unavailable = source_unavailable = 0
+    durability_tiers: Counter[str] = Counter()
 
     for claim in manifest["claims"]:
+        try:
+            durability = claim_durability(claim)
+        except (TypeError, ValueError) as error:
+            failures.append(f"{claim.get('id', '<unknown>')}: durability metadata error: {error}")
+            results.append(
+                {
+                    "id": claim.get("id", "<unknown>"),
+                    "kind": claim.get("kind"),
+                    "status": "error",
+                    "ok": False,
+                    "error": str(error),
+                    "errors": [str(error)],
+                }
+            )
+            continue
+        durability_tiers[str(durability["tier"])] += 1
         skip_reason: str | None = None
         if _frozen_source_missing(claim):
             skip_reason = "protected frozen source is absent from this checkout"
@@ -362,6 +382,7 @@ def run_all() -> dict[str, Any]:
                     "status": "skipped",
                     "ok": ok,
                     "reason": skip_reason,
+                    "durability": durability,
                     "derived": None,
                     "expect": claim.get("expect"),
                     "errors": doc_errs,
@@ -379,6 +400,7 @@ def run_all() -> dict[str, Any]:
                     "status": "error",
                     "ok": False,
                     "error": str(e),
+                    "durability": durability,
                     "errors": [f"{claim['id']}: source error: {e}"],
                 }
             )
@@ -403,6 +425,7 @@ def run_all() -> dict[str, Any]:
                 "kind": claim.get("kind"),
                 "status": status,
                 "ok": ok,
+                "durability": durability,
                 "derived": derived,
                 "expect": claim.get("expect"),
                 "errors": doc_errs + exp_errs,
@@ -417,6 +440,7 @@ def run_all() -> dict[str, Any]:
         "historical_record": historical,
         "frozen_source_skips": frozen_unavailable,
         "source_skips": source_unavailable,
+        "durability_tiers": dict(sorted(durability_tiers.items())),
         "ok": not failures,
         "failures": failures,
         "results": results,
@@ -441,9 +465,21 @@ def main() -> None:
             f"source-skips={report['source_skips']} "
             f"frozen-source-skips={report['frozen_source_skips']}"
         )
+        print(
+            "evidence durability: "
+            + ", ".join(
+                f"{tier}={count}" for tier, count in report["durability_tiers"].items()
+            )
+        )
         for r in report["results"]:
             flag = "SKIP" if r["status"] == "skipped" else ("OK " if r["ok"] else "FAIL")
             print(f"  [{flag}] {r['status']:11} {r['id']}")
+            durability = r.get("durability")
+            if isinstance(durability, dict):
+                print(
+                    f"         evidence={durability['tier']}; "
+                    f"replay={durability['replay']}"
+                )
             if r.get("reason"):
                 print(f"         {r['reason']}")
             for e in r.get("errors") or []:

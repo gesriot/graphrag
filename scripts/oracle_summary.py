@@ -23,6 +23,9 @@ from typing import Any, Sequence
 
 
 ROOT = Path(__file__).resolve().parents[1]
+# The summary owns this selection; durability reporting imports it instead of
+# duplicating a package name while classifying the aggregate doc claim.
+CALL_GRAPH_ORACLE_PACKAGE = "jsonpatch"
 
 
 class OracleRunError(RuntimeError):
@@ -122,7 +125,7 @@ def build_report() -> dict[str, Any]:
             sys.executable,
             str(ROOT / "scripts" / "call_graph_oracle.py"),
             "--package",
-            "jsonpatch",
+            CALL_GRAPH_ORACLE_PACKAGE,
             "--json",
         ],
     )

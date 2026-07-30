@@ -377,7 +377,9 @@ def pack(
             "note": (
                 "Detection only (scripts/python_dynamic.py). Registry member names "
                 "may appear as weak dispatch_candidates / uncertain_calls with "
-                "reason registry_candidate:* — heuristic, not resolved call edges."
+                "reason registry_candidate:* — static table members; also promoted "
+                "to non-deterministic calls edges (is_deterministic=False) when "
+                "the dispatch site is labelled."
             ),
         }
 

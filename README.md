@@ -32,6 +32,9 @@ uv run python scripts/port_eval.py --all-gates --full
 
 It rebuilds disposable graphs under `output/port_gates/`, runs each declared
 source contract and Rust port evaluation, and reports named source-only gaps.
+Some live diagnostic and frozen-record checks deliberately need published local
+graph evidence; the durability inventory names each one and whether absence is
+a failure or an explicit skip.
 An unavailable optional tool or an opt-in check not requested produces an
 explicit `SKIP`; an installed tool that fails makes the gate fail. See [the gate guide](examples/PORT_EVIDENCE.md)
 for clean-machine prerequisites, the fast/pre-release split, and the opt-in
@@ -47,6 +50,7 @@ long differential and scale checks.
 | The results and their interpretation | [PHASE7_WRITEUP.md](PHASE7_WRITEUP.md) | What the ports and closed ablation series support, including the negative result. |
 | Why current prose says exactly what it says | [docs/EVIDENCE_AUDIT_20260728.md](docs/EVIDENCE_AUDIT_20260728.md) | A dated claim → evidence → edit ledger, with runnable checks. |
 | The shared oracle discipline and live residuals | [docs/ORACLE_CONTRACT.md](docs/ORACLE_CONTRACT.md) | The independent-oracle rules, their regression scars, the compliance review, and one combined command. |
+| Whether a graph-backed claim survives a clean checkout | [docs/EVIDENCE_DURABILITY.md](docs/EVIDENCE_DURABILITY.md) | The manifest-derived split between disposable gate output, local frozen snapshots, published oracle inputs, and historical records. |
 | Raw ablation protocol and results | [PHASE7_ABLATION.md](PHASE7_ABLATION.md) | The closed experiment record; read it for tables or preregistration detail, not as a mutable how-to. |
 | One target's source, scope, and exceptions | Its `examples/*/PROVENANCE.md` below | The local contract and provenance. cJSON and charset-normalizer also have separate mechanical API audits. |
 
