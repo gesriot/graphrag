@@ -9,6 +9,7 @@ A graph can be valuable evidence without being durable evidence.  The portfolio 
 - A current claim may use a disposable gate graph when the gate rebuilds it before the claim check.  It must not silently fall back to a published snapshot without saying so.
 - A frozen claim names its exact local snapshot and is protected from local retention, but is **not reproducible from Git alone**.  A clean checkout may report an explicit source skip while still checking the historical prose.
 - A live claim that invokes a published call-oracle graph is not a source skip: if that local baseline is absent, its check fails rather than substituting a fresh graph.
+- A mutable published graph is **current-local evidence**.  It remains distinct from a frozen snapshot: the full aggregate gate compares it with the current extractor, and a present stale graph fails rather than becoming a historical record.  The current `oracle_residuals` JSONPatch baseline follows this rule; it is not a frozen historical number.
 - A historical record is never presented as live verification.  If its source snapshot has gone, the record retains the number and the loss is named here.
 - Proposed durability rule for future frozen claims: before a frozen snapshot becomes load-bearing, publish a content-addressed archive outside this ignored workspace and record its digest and retrieval location in the claim manifest.  This repository has no authority to create that external archive in this change.
 
@@ -16,33 +17,33 @@ A graph can be valuable evidence without being durable evidence.  The portfolio 
 
 Availability is not the only way a local graph stops being evidence: it can also fall behind the code that generates it.  On 2026-07-30 two semantic extractor changes — the cross-module import resolver, then registry-dispatch promotion — turned out to have been published to some graphs and not others, leaving four published roots disagreeing with a fresh index by 2 to 72 calls (`byog_semver` 185/187, `byog_mini_game` 16/27, `byog_dmp` 55/60, `byog_charset_normalizer` 110/182).
 
-Nothing caught it, and the reason is in the table below: every port profile rebuilds a disposable graph under `output/port_gates/`, so the gates stayed green while the published artifacts drifted, and most of these roots are classified here as document-reference-only or unregistered — no live consumer to notice.  The four were reindexed, and `examples/mini_game/tests/test_graph_extractor_drift.py` now fails when a published Python graph and the current extractor disagree.
+Nothing caught it, and the reason is in the table below: every port profile rebuilds a disposable graph under `output/port_gates/`, so the gates stayed green while the published artifacts drifted.  The full aggregate gate now runs `scripts/published_graph_health.py --check`: it compares every declared mutable published graph's structural entities, relationships, and text units with the current extractor without rewriting the artifact.  An absent local root is an explicit health skip; a present stale `current` snapshot is a failure.
 
 `byog_isodate` is exempt by design: it is pinned to the older extractor because it backs the closed experiment's `isodate_adequacy_v3` claim (closure 16).  A fresh index yields 61 calls against its 48, and that difference is the point of freezing it.
 
 ## Published local artifacts
 
-| Artifact | Consumers derived from manifests/registry | Availability | Replay classification | Markdown references |
+| Artifact | Consumers derived from manifests/registry | Availability | Replay classification | Local-health policy | Markdown references |
 | --- | --- | --- | --- | --- |
-| `byog_charset_normalizer` | — | present locally (ignored) | document reference only; no registered live consumer | `PHASE7_ABLATION.md`, `Plan.md`, `examples/charset_normalizer_rust/PORT_STATUS.md`, `examples/charset_normalizer_rust/README.md`, `examples/charset_normalizer_rust/packs/README.md` |
-| `byog_cjson` | `cjson_graph_calls` (disposable-gate-output) | present locally (ignored) | claim is replayed from fresh gate output; this root is fallback only | `PHASE7_WRITEUP.md`, `Plan.md`, `examples/cjson/PROVENANCE.md` |
-| `byog_dmp` | — | present locally (ignored) | unregistered local artifact | — |
-| `byog_generic_test` | — | present locally (ignored) | unregistered local artifact | — |
-| `byog_humanize` | call oracle: `humanize` | present locally (ignored) | published oracle input; reindex creates a new baseline, not this snapshot | `examples/humanize/PROVENANCE.md` |
-| `byog_inih` | — | present locally (ignored) | document reference only; no registered live consumer | `Plan.md`, `examples/inih/PROVENANCE.md` |
-| `byog_isodate` | `isodate_adequacy_v3` (local-frozen-snapshot) | present locally (ignored) | not reproducible from Git | `PHASE7_ISODATE_V3_PREREG.md`, `PHASE7_WRITEUP.md`, `examples/isodate/PROVENANCE.md` |
-| `byog_jsmn` | — | present locally (ignored) | document reference only; no registered live consumer | `Plan.md`, `examples/jsmn/PROVENANCE.md` |
-| `byog_jsonpatch` | `oracle_residuals` (local-published-oracle-input)<br>call oracle: `jsonpatch` | present locally (ignored) | published oracle input; reindex creates a new baseline, not this snapshot | `examples/PORT_EVIDENCE.md`, `examples/jsonpatch/PROVENANCE.md` |
-| `byog_mini_game` | — | present locally (ignored) | document reference only; no registered live consumer | `PHASE0_STATUS.md` |
-| `byog_mini_lang` | call oracle: `mini_lang` | present locally (ignored) | published oracle input; reindex creates a new baseline, not this snapshot | — |
-| `byog_semver` | call oracle: `semantic_version` | present locally (ignored) | published oracle input; reindex creates a new baseline, not this snapshot | — |
-| `byog_smoke` | — | present locally (ignored) | document reference only; no registered live consumer | `PHASE0_STATUS.md` |
-| `byog_sqlparse` | `sqlparse_graph_current_index` (local-frozen-snapshot) @ `20260625-154143-8ce62d57`<br>`sqlparse_graph_phase5_baseline` (historical-record) @ `20260618-151436-ad7b5954` | root present; historical snapshot absent | not reproducible from Git | `PHASE5_REPORT.md`, `PHASE7_ABLATION.md`, `PHASE7_WRITEUP.md`, `examples/sqlparse/PROVENANCE.md` |
-| `byog_tool_eval` | — | present locally (ignored) | unregistered local artifact | — |
+| `byog_charset_normalizer` | — | present locally (ignored) | declared mutable local evidence; no direct current claim | mutable — full aggregate health check (`charset_normalizer`) | `PHASE7_ABLATION.md`, `Plan.md`, `examples/charset_normalizer_rust/PORT_STATUS.md`, `examples/charset_normalizer_rust/README.md`, `examples/charset_normalizer_rust/packs/README.md` |
+| `byog_cjson` | `cjson_graph_calls` (disposable-gate-output) | present locally (ignored) | claim is replayed from fresh gate output; this root is fallback only | mutable — full aggregate health check (`cjson`) | `PHASE7_WRITEUP.md`, `Plan.md`, `examples/cjson/PROVENANCE.md` |
+| `byog_dmp` | — | present locally (ignored) | declared mutable local evidence; no direct current claim | mutable — full aggregate health check (`diff_match_patch`) | — |
+| `byog_generic_test` | — | present locally (ignored) | unregistered local artifact | not declared; inventory-only | — |
+| `byog_humanize` | call oracle: `humanize` | present locally (ignored) | published oracle input; reindex creates a new baseline, not this snapshot | mutable — full aggregate health check (`humanize`) | `examples/humanize/PROVENANCE.md` |
+| `byog_inih` | — | present locally (ignored) | declared mutable local evidence; no direct current claim | mutable — full aggregate health check (`inih`) | `Plan.md`, `examples/inih/PROVENANCE.md` |
+| `byog_isodate` | `isodate_adequacy_v3` (local-frozen-snapshot) | present locally (ignored) | not reproducible from Git | frozen exemption — Closed ablation_v3 experiment evidence uses an intentionally older extractor and is never health-reindexed. | `PHASE7_ISODATE_V3_PREREG.md`, `PHASE7_WRITEUP.md`, `examples/PORT_EVIDENCE.md`, `examples/isodate/PROVENANCE.md` |
+| `byog_jsmn` | — | present locally (ignored) | declared mutable local evidence; no direct current claim | mutable — full aggregate health check (`jsmn`) | `Plan.md`, `examples/jsmn/PROVENANCE.md` |
+| `byog_jsonpatch` | `oracle_residuals` (local-published-oracle-input)<br>call oracle: `jsonpatch` | present locally (ignored) | published oracle input; reindex creates a new baseline, not this snapshot | mutable — full aggregate health check (`jsonpatch`) | `docs/ORACLE_CONTRACT.md`, `examples/PORT_EVIDENCE.md`, `examples/jsonpatch/PROVENANCE.md` |
+| `byog_mini_game` | — | present locally (ignored) | declared mutable local evidence; no direct current claim | mutable — full aggregate health check (`mini_game`) | `PHASE0_STATUS.md` |
+| `byog_mini_lang` | call oracle: `mini_lang` | present locally (ignored) | published oracle input; reindex creates a new baseline, not this snapshot | mutable — full aggregate health check (`mini_lang`) | — |
+| `byog_semver` | call oracle: `semantic_version` | present locally (ignored) | published oracle input; reindex creates a new baseline, not this snapshot | mutable — full aggregate health check (`semantic_version`) | — |
+| `byog_smoke` | — | present locally (ignored) | document reference only; no registered live consumer | not declared; inventory-only | `PHASE0_STATUS.md` |
+| `byog_sqlparse` | `sqlparse_graph_current_index` (local-frozen-snapshot) @ `20260625-154143-8ce62d57`<br>`sqlparse_graph_phase5_baseline` (historical-record) @ `20260618-151436-ad7b5954` | root present; historical snapshot absent | not reproducible from Git | mutable — full aggregate health check (`sqlparse`) | `PHASE5_REPORT.md`, `PHASE7_ABLATION.md`, `PHASE7_WRITEUP.md`, `examples/sqlparse/PROVENANCE.md` |
+| `byog_tool_eval` | — | present locally (ignored) | unregistered local artifact | not declared; inventory-only | — |
 
-## Gate artifacts
+## Source-gate artifacts
 
-The gate manifest has no profile that reads a published `byog_*` directory. Port profiles create only the disposable output below; gap rows make their lack of a Rust-port gate explicit.
+Port profiles create only the disposable output below; they do not consume a published `byog_*` graph.  The distinct full aggregate local-health stage above is what checks mutable published graphs.  Gap rows make their lack of a Rust-port gate explicit.
 
 | Profile | Declared graph output | Durability |
 | --- | --- | --- |
@@ -74,4 +75,5 @@ uv run python scripts/index_python.py --package examples/sqlparse --graph output
 
 - `disposable output` can be deleted: run the corresponding port gate again.
 - `published oracle input` is required to replay that exact call-observation comparison; reindexing is useful, but changes the baseline under comparison.
+- `mutable — full aggregate health check` means the graph is local current evidence: run `uv run python scripts/port_eval.py --all-gates --full` with the artifact present before relying on it.
 - `local-frozen-snapshot` and `historical record` are the durable-evidence risk.  The former survives local retention only; the latter is already a record whose original artifact is unavailable.

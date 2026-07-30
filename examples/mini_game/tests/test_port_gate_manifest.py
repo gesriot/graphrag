@@ -18,7 +18,10 @@ import pytest
 
 ROOT = Path(__file__).parents[3]
 sys.path.insert(0, str(ROOT / "scripts"))
-from port_eval import load_gate_manifest as load_port_gates  # type: ignore
+from port_eval import (  # type: ignore
+    load_aggregate_checks,
+    load_gate_manifest as load_port_gates,
+)
 
 MANIFEST = ROOT / "scripts" / "port_gates.json"
 
@@ -32,6 +35,11 @@ def _write(tmp_path: Path, data: dict) -> Path:
 def test_shipped_manifest_loads():
     gates = load_port_gates(MANIFEST)
     assert gates, "manifest must declare gates"
+    assert all("published_graph" in gate for gate in gates.values())
+    aggregate = load_aggregate_checks(MANIFEST)
+    assert [(check["name"], check.get("when")) for check in aggregate] == [
+        ("published mutable-graph health", "full")
+    ]
 
 
 def test_every_rust_port_has_a_profile():

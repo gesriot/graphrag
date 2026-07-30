@@ -186,26 +186,44 @@ Oracle **after promotion** (published graph, 25 apply goldens):
 | post-import | 21 | 12 | 73 | 122 |
 | **post-registry promote** | **27** | **6** | 79 | **134** |
 
-The six `.apply` edges moved missed → confirmed. Remaining six misses:
-`apply → _ops` (property edge, not `calls`), `_ops → _get_operation` (map of
-method), `{Copy,Move}.apply → PatchOperation` / `_get_operation → PatchOperation`
-(superclass construction), and the if/else `from_ptr → to_last`.
+The six `.apply` edges moved missed → confirmed.
 
-Adequacy (`jsonpatch_adequacy.json` from `apply_patch`, calls+property):
+**Inheritance and constructor bodies (2026-07-30).** Rather than overload
+`calls` a second time, same-file inheritance is carried by a dedicated
+`inherits` relationship (`AST ClassDef` bases, `is_deterministic=True`,
+confidence 0.95), which `ablation.CLOSURE_EDGES` already traverses. Separately,
+an imported-type construction now targets both the class and its `__init__`, so
+the closure can enter the constructor body, and registry promotion follows the
+same-file MRO: the six operation classes define no `__init__` of their own
+(`AddOperation.__init__ is PatchOperation.__init__`), so `cls(operation)` earns
+one inherited-constructor edge — 13 promoted edges, not 12.
+
+| | confirmed | missed | unconfirmed | call rows |
+|---|---:|---:|---:|---:|
+| post-registry promote | 27 | 6 | 79 | 134 |
+| **post-inherits + ctor body** | **30** | **3** | 83 | **162** |
+
+Remaining three misses are the honest residuals: `apply → _ops` (a property
+read, not a call), `_ops → _get_operation` (through `map`), and the if/else
+`from_ptr → to_last`.
+
+Adequacy (`jsonpatch_adequacy.json` from `apply_patch`):
 
 | | reached | must_reach missing |
 |---|---:|---:|
 | before promotion | 8 | 29 / 37 |
-| **after** | **31** | **7 / 37** |
+| after promotion | 31 | 7 / 37 |
+| **after inherits + ctor body** | **35** | **3 / 37** |
 
-Still missing: `PatchOperation` (+ `__init__` / `apply` / `path` / `key`) as a
-superclass not linked by `calls`, and `jsonpointer:JsonPointer.__init__` /
-`unescape`. Operation `.apply` methods and jsonpointer `to_last`/`walk`/`get_part`
-are now on the closure. `must_exclude` still clean.
+Still missing: `PatchOperation.apply` / `.path` / `.key`. The closure now reaches
+the `PatchOperation` class itself through `inherits`, but does not expand a class
+to its methods — `contains` is deliberately not a closure edge. `must_exclude`
+remains clean.
 
 `audit_call_edges` on the reindexed jsonpatch graph: pass_rate **1.0**, 0
-anomalies, 0 dangling, **134** calls. Other packages were **not** reindexed for
-this step (sqlparse pin `20260625-154143-8ce62d57` retained).
+anomalies, 0 dangling, **162** calls. Every mutable published graph was
+reindexed for this step and `published_graph_health.py --check` reports 11
+PASS + 1 frozen exemption; the sqlparse pin `20260625-154143-8ce62d57` survived.
 
 A deleted published edge shows as missed; a fabricated edge shows as
 unconfirmed — verified end to end against a copied graph on disk, not only

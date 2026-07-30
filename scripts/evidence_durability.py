@@ -294,6 +294,7 @@ def _new_artifact(name: str, root: Path) -> dict[str, Any]:
         "present": (root / name).is_dir(),
         "claim_uses": [],
         "oracle_uses": [],
+        "health": [],
         "documents": [],
         "discovered_only": False,
     }
@@ -354,6 +355,21 @@ def build_inventory(
     for package, name in _call_oracle_contracts():
         get(name)["oracle_uses"].append(package)
 
+    # The same gate manifest declares which published roots are mutable local
+    # evidence and which are deliberately frozen.  This is separate from a
+    # port profile's disposable graph output: the aggregate full gate compares
+    # mutable roots with the current extractor without rewriting them.
+    for ident, gate in gates.items():
+        published = gate["published_graph"]
+        name = str(published["path"])
+        get(name)["health"].append(
+            {
+                "id": ident,
+                "mode": str(published["mode"]),
+                "reason": published.get("reason"),
+            }
+        )
+
     for name, paths in documents.items():
         get(name)["documents"] = paths
 
@@ -364,11 +380,13 @@ def build_inventory(
     for artifact in artifacts.values():
         artifact["claim_uses"].sort(key=lambda row: str(row["claim"]))
         artifact["oracle_uses"].sort()
+        artifact["health"].sort(key=lambda row: str(row["id"]))
         artifact["documents"].sort()
         artifact["discovered_only"] = bool(
             artifact["discovered_only"]
             and not artifact["claim_uses"]
             and not artifact["oracle_uses"]
+            and not artifact["health"]
             and not artifact["documents"]
         )
 
@@ -430,9 +448,25 @@ def _replay_class(item: Mapping[str, Any]) -> str:
         return "claim is replayed from fresh gate output; this root is fallback only"
     if item["oracle_uses"]:
         return "published oracle input; reindex creates a new baseline, not this snapshot"
+    if item["health"]:
+        return "declared mutable local evidence; no direct current claim"
     if item["discovered_only"]:
         return "unregistered local artifact"
     return "document reference only; no registered live consumer"
+
+
+def _health_class(item: Mapping[str, Any]) -> str:
+    declarations = item["health"]
+    if not declarations:
+        return "not declared; inventory-only"
+    if any(declaration["mode"] == "frozen" for declaration in declarations):
+        reason = next(
+            (str(declaration["reason"]) for declaration in declarations if declaration.get("reason")),
+            "deliberately frozen",
+        )
+        return f"frozen exemption — {reason}"
+    profiles = ", ".join(f"`{declaration['id']}`" for declaration in declarations)
+    return f"mutable — full aggregate health check ({profiles})"
 
 
 def _probe_command(probe: Mapping[str, Any], root: Path) -> list[str]:
@@ -538,6 +572,11 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         "source skip while still checking the historical prose.",
         "- A live claim that invokes a published call-oracle graph is not a source skip: if that "
         "local baseline is absent, its check fails rather than substituting a fresh graph.",
+        "- A mutable published graph is **current-local evidence**.  It remains distinct from "
+        "a frozen snapshot: the full aggregate gate compares it with the current extractor, "
+        "and a present stale graph fails rather than becoming a historical record.  The "
+        "current `oracle_residuals` JSONPatch baseline follows this rule; it is not a frozen "
+        "historical number.",
         "- A historical record is never presented as live verification.  If its source snapshot "
         "has gone, the record retains the number and the loss is named here.",
         "- Proposed durability rule for future frozen claims: before a frozen snapshot becomes "
@@ -557,11 +596,11 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         "",
         "Nothing caught it, and the reason is in the table below: every port profile "
         "rebuilds a disposable graph under `output/port_gates/`, so the gates stayed "
-        "green while the published artifacts drifted, and most of these roots are "
-        "classified here as document-reference-only or unregistered — no live consumer "
-        "to notice.  The four were reindexed, and "
-        "`examples/mini_game/tests/test_graph_extractor_drift.py` now fails when a "
-        "published Python graph and the current extractor disagree.",
+        "green while the published artifacts drifted.  The full aggregate gate now runs "
+        "`scripts/published_graph_health.py --check`: it compares every declared mutable "
+        "published graph's structural entities, relationships, and text units with the "
+        "current extractor without rewriting the artifact.  An absent local root is an "
+        "explicit health skip; a present stale `current` snapshot is a failure.",
         "",
         "`byog_isodate` is exempt by design: it is pinned to the older extractor "
         "because it backs the closed experiment's `isodate_adequacy_v3` claim "
@@ -570,7 +609,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         "",
         "## Published local artifacts",
         "",
-        "| Artifact | Consumers derived from manifests/registry | Availability | Replay classification | Markdown references |",
+        "| Artifact | Consumers derived from manifests/registry | Availability | Replay classification | Local-health policy | Markdown references |",
         "| --- | --- | --- | --- | --- |",
     ]
     for item in report["artifacts"]:
@@ -580,22 +619,24 @@ def render_markdown(report: Mapping[str, Any]) -> str:
             consumers.append("—")
         docs = ", ".join(f"`{path}`" for path in item["documents"]) or "—"
         lines.append(
-            "| `{artifact}` | {consumers} | {availability} | {replay} | {docs} |".format(
+            "| `{artifact}` | {consumers} | {availability} | {replay} | {health} | {docs} |".format(
                 artifact=item["artifact"],
                 consumers="<br>".join(consumers),
                 availability=_availability(item),
                 replay=_replay_class(item),
+                health=_health_class(item),
                 docs=docs,
             )
         )
 
     lines += [
         "",
-        "## Gate artifacts",
+        "## Source-gate artifacts",
         "",
-        "The gate manifest has no profile that reads a published `byog_*` directory. "
-        "Port profiles create only the disposable output below; gap rows make their lack of "
-        "a Rust-port gate explicit.",
+        "Port profiles create only the disposable output below; they do not consume a "
+        "published `byog_*` graph.  The distinct full aggregate local-health stage above "
+        "is what checks mutable published graphs.  Gap rows make their lack of a Rust-port "
+        "gate explicit.",
         "",
         "| Profile | Declared graph output | Durability |",
         "| --- | --- | --- |",
@@ -645,6 +686,9 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         "- `disposable output` can be deleted: run the corresponding port gate again.",
         "- `published oracle input` is required to replay that exact call-observation comparison; "
         "reindexing is useful, but changes the baseline under comparison.",
+        "- `mutable — full aggregate health check` means the graph is local current evidence: "
+        "run `uv run python scripts/port_eval.py --all-gates --full` with the artifact present "
+        "before relying on it.",
         "- `local-frozen-snapshot` and `historical record` are the durable-evidence risk.  The "
         "former survives local retention only; the latter is already a record whose original "
         "artifact is unavailable.",

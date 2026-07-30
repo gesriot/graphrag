@@ -48,6 +48,19 @@ def test_inventory_derives_frozen_lost_and_oracle_consumers():
         "not reproducible from Git; reindex changes the call-oracle baseline"
     )
     assert jsonpatch_claim["present"] is (ROOT / "byog_jsonpatch").is_dir()
+    assert artifacts["byog_jsonpatch"]["health"] == [
+        {"id": "jsonpatch", "mode": "mutable", "reason": None}
+    ]
+    assert artifacts["byog_isodate"]["health"] == [
+        {
+            "id": "isodate",
+            "mode": "frozen",
+            "reason": (
+                "Closed ablation_v3 experiment evidence uses an intentionally older "
+                "extractor and is never health-reindexed."
+            ),
+        }
+    ]
 
     # byog_graph is the implementation module, not an ignored artifact.  A
     # Markdown search that cannot tell those apart creates a phantom risk row.
@@ -95,6 +108,12 @@ def test_inventory_moves_when_gate_manifest_gains_a_declared_gap(tmp_path: Path)
         {
             "id": "durability_gate_probe",
             "kind": "gap",
+            "source": "examples/mini_game",
+            "indexer": "python",
+            "published_graph": {
+                "path": "byog_durability_gate_probe",
+                "mode": "mutable",
+            },
             "gap": "test-only manifest coverage probe",
         }
     )

@@ -322,6 +322,38 @@ def load_gate_manifest(path: Path) -> Dict[str, Dict[str, Any]]:
             raise ValueError(f"{path}: {ident}: gap entries need a named gap")
         gates[ident] = entry
 
+    # Published graphs are not port-gate inputs: source profiles deliberately
+    # rebuild disposable graphs.  They are nevertheless shipped local evidence,
+    # so each declared source target must state whether its corresponding
+    # published root is mutable (and health-checked) or frozen (and why).  This
+    # keeps the health population in the same fail-closed manifest as the port
+    # population; a new source target cannot quietly miss both.
+    published_paths: Dict[str, str] = {}
+    for ident, entry in gates.items():
+        source = entry.get("source")
+        indexer = entry.get("indexer")
+        published = entry.get("published_graph")
+        if not isinstance(source, str) or not source:
+            raise ValueError(f"{path}: {ident}: missing source for published-graph declaration")
+        if indexer not in {"python", "c"}:
+            raise ValueError(f"{path}: {ident}: missing/invalid indexer for published-graph declaration")
+        if not isinstance(published, dict):
+            raise ValueError(f"{path}: {ident}: missing published_graph declaration")
+        graph_path = published.get("path")
+        mode = published.get("mode")
+        if not isinstance(graph_path, str) or not graph_path.startswith("byog_"):
+            raise ValueError(f"{path}: {ident}: published_graph.path must name a byog_* root")
+        if mode not in {"mutable", "frozen"}:
+            raise ValueError(f"{path}: {ident}: published_graph.mode must be mutable or frozen")
+        if mode == "frozen" and not isinstance(published.get("reason"), str):
+            raise ValueError(f"{path}: {ident}: frozen published graph needs a reason")
+        prior = published_paths.get(graph_path)
+        if prior is not None:
+            raise ValueError(
+                f"{path}: published graph {graph_path!r} is declared by both {prior!r} and {ident!r}"
+            )
+        published_paths[graph_path] = ident
+
     cargo_ports = {
         str(cargo.parent.relative_to(ROOT))
         for cargo in (ROOT / "examples").glob("*_rust/Cargo.toml")
@@ -392,6 +424,38 @@ def load_gate_manifest(path: Path) -> Dict[str, Dict[str, Any]]:
         if ident in after:
             raise ValueError(f"{path}: profile {ident!r} cannot depend on itself")
     return gates
+
+
+def load_aggregate_checks(path: Path) -> List[Dict[str, Any]]:
+    """Load the small declarative checks that apply to an aggregate gate only."""
+    data = json.loads(path.read_text())
+    checks = data.get("aggregate_checks", [])
+    if not isinstance(checks, list):
+        raise ValueError(f"{path}: aggregate_checks must be a list")
+    loaded: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for check in checks:
+        if not isinstance(check, dict):
+            raise ValueError(f"{path}: each aggregate check must be an object")
+        name = check.get("name")
+        if not isinstance(name, str) or not name:
+            raise ValueError(f"{path}: aggregate check needs a non-empty name")
+        if name in seen:
+            raise ValueError(f"{path}: duplicate aggregate check {name!r}")
+        seen.add(name)
+        command = check.get("command")
+        if not isinstance(command, list) or not command or not all(
+            isinstance(part, str) for part in command
+        ):
+            raise ValueError(f"{path}: aggregate check {name!r} needs a non-empty command list")
+        tools = check.get("tools", [])
+        if not isinstance(tools, list) or not all(isinstance(tool, str) for tool in tools):
+            raise ValueError(f"{path}: aggregate check {name!r} has invalid tools")
+        when = check.get("when", "always")
+        if when not in {"always", "full", "scale", "differential-full"}:
+            raise ValueError(f"{path}: aggregate check {name!r} has invalid when={when!r}")
+        loaded.append(check)
+    return loaded
 
 
 def _order_gate_ids(selected: List[str], gates: Dict[str, Dict[str, Any]]) -> List[str]:
@@ -751,10 +815,10 @@ def main(
     if gate or all_gates:
         if graph is not None:
             raise typer.BadParameter("--graph cannot be combined with --gate/--all-gates")
+        manifest_path = gate_manifest if gate_manifest.is_absolute() else ROOT / gate_manifest
         try:
-            gates = load_gate_manifest(
-                gate_manifest if gate_manifest.is_absolute() else ROOT / gate_manifest
-            )
+            gates = load_gate_manifest(manifest_path)
+            aggregate_checks = load_aggregate_checks(manifest_path) if all_gates else []
         except (OSError, ValueError, json.JSONDecodeError) as error:
             typer.secho(f"port-gate manifest error: {error}", fg=typer.colors.RED, err=True)
             raise typer.Exit(2) from error
@@ -779,8 +843,21 @@ def main(
             )
             for ident in selected
         ]
+        aggregate_results = [
+            _run_declared_check(
+                check, full=full, scale=scale, differential_full=differential_full
+            )
+            for check in aggregate_checks
+        ]
         for report in reports:
             print_declared_gate_result(report)
+        if aggregate_results:
+            print("== aggregate evidence ==")
+            for check in aggregate_results:
+                suffix = f" — {check['reason']}" if check.get("reason") else ""
+                print(f"  {check['status'].upper()}: {check['name']}{suffix}")
+                if check["status"] == "fail":
+                    print("    " + "\n    ".join(check.get("output_tail", [])[-5:]))
         aggregate_seconds = time.monotonic() - aggregate_started
         timed_profiles = [
             f"{report['id']}={report['timing']['total_seconds']:.3f}s"
@@ -793,7 +870,17 @@ def main(
                 f"wall={aggregate_seconds:.3f}s; profiles=" + ", ".join(timed_profiles)
             )
         failed = [report["id"] for report in reports if report["status"] == "fail"]
+        failed.extend(
+            f"aggregate:{check['name']}"
+            for check in aggregate_results
+            if check["status"] == "fail"
+        )
         skipped = [report["id"] for report in reports if report["status"] == "pass_with_skips"]
+        skipped.extend(
+            f"aggregate:{check['name']}"
+            for check in aggregate_results
+            if check["status"] == "skipped" or check.get("reported_skip", False)
+        )
         gaps = [report["id"] for report in reports if report["status"] == "gap"]
         if failed:
             print(f"PORT EVIDENCE: FAIL ({', '.join(failed)})")

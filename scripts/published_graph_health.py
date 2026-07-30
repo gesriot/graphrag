@@ -1,0 +1,303 @@
+#!/usr/bin/env python
+"""Check that mutable published BYOG graphs still match their extractor.
+
+Source port profiles intentionally build disposable graphs under
+``output/port_gates``.  This companion check protects the different thing a
+published ``byog_*`` root represents: local, queryable evidence.  It never
+writes a published root.
+
+The population comes from ``published_graph`` declarations in
+``scripts/port_gates.json``.  Mutable roots are compared with a fresh in-memory
+extraction; frozen roots are reported as exemptions and not opened.  A missing
+mutable root is an explicit local-artifact skip.  A root that exists but has a
+stale or malformed ``current`` snapshot is a failure.
+
+Usage:
+
+    uv run python scripts/published_graph_health.py --check
+    uv run python scripts/published_graph_health.py --json
+"""
+from __future__ import annotations
+
+import argparse
+import collections
+import json
+import math
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Iterable, Mapping
+
+import pandas as pd
+
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_MANIFEST = ROOT / "scripts" / "port_gates.json"
+
+# These are semantic graph fields, deliberately excluding publication-only
+# payload such as a file entity's full snippet or rich liveness explanation.
+# They cover identity, containment/call targets, confidence, and the dynamic/C
+# provenance labels that have previously caused published-artifact drift.
+TABLE_FIELDS: dict[str, tuple[str, ...]] = {
+    "entities": (
+        "id",
+        "title",
+        "type",
+        "source_file",
+        "span",
+        "confidence",
+        "is_deterministic",
+        "dynamic_dependent",
+        "preprocessor_dependent",
+    ),
+    "relationships": (
+        "id",
+        "source",
+        "target",
+        "type",
+        "confidence",
+        "is_deterministic",
+        "dynamic_dependent",
+        "preprocessor_dependent",
+        "resolved_target_hint",
+    ),
+    "text_units": ("id", "title", "source_file", "entity_id"),
+}
+
+
+@dataclass(frozen=True)
+class PublishedGraphSpec:
+    """One published graph's source and deliberate mutability policy."""
+
+    ident: str
+    source: Path
+    graph: str
+    indexer: str
+    mode: str
+    reason: str | None = None
+
+
+def load_specs(manifest: Path = DEFAULT_MANIFEST) -> list[PublishedGraphSpec]:
+    """Load the fail-closed published-graph declarations from the gate manifest."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from port_eval import load_gate_manifest  # type: ignore
+
+    gates = load_gate_manifest(manifest)
+    specs: list[PublishedGraphSpec] = []
+    for ident, entry in gates.items():
+        declared = entry["published_graph"]
+        specs.append(
+            PublishedGraphSpec(
+                ident=ident,
+                source=Path(str(entry["source"])),
+                graph=str(declared["path"]),
+                indexer=str(entry["indexer"]),
+                mode=str(declared["mode"]),
+                reason=(str(declared["reason"]) if declared.get("reason") is not None else None),
+            )
+        )
+    return specs
+
+
+def _normalize(value: Any) -> Any:
+    """Normalize Python/Parquet storage variants into one JSON value."""
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if hasattr(value, "tolist") and not isinstance(value, (str, bytes)):
+        return _normalize(value.tolist())
+    if isinstance(value, Mapping):
+        return {str(key): _normalize(item) for key, item in sorted(value.items())}
+    if isinstance(value, (list, tuple)):
+        return [_normalize(item) for item in value]
+    if isinstance(value, float) and math.isnan(value):
+        return None
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+def _signature(rows: Iterable[Mapping[str, Any]], fields: tuple[str, ...]) -> collections.Counter[str]:
+    """Return a multiset so duplicate structural relationships remain visible."""
+    return collections.Counter(
+        json.dumps(
+            {field: _normalize(row.get(field)) for field in fields},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        for row in rows
+    )
+
+
+def _fresh_data(spec: PublishedGraphSpec, root: Path) -> dict[str, list[dict[str, Any]]]:
+    source = (root / spec.source).resolve()
+    if spec.indexer == "python":
+        sys.path.insert(0, str(root / "scripts"))
+        from mini_game_to_byog import build_byog_for_package  # type: ignore
+
+        return build_byog_for_package(package_dir=source)
+    if spec.indexer == "c":
+        sys.path.insert(0, str(root / "scripts"))
+        from c_preprocessor import annotate_byog  # type: ignore
+        from extract_c import build_c_byog  # type: ignore
+
+        data = build_c_byog(source)
+        # Published C graphs use the portable no-compiler liveness policy.
+        annotate_byog(data, source, use_compiler_builtins=False, graph_dir=None)
+        return data
+    raise ValueError(f"{spec.ident}: unknown indexer {spec.indexer!r}")
+
+
+def _published_data(graph_root: Path) -> tuple[str, dict[str, list[dict[str, Any]]]]:
+    pointer = graph_root / "current"
+    if not pointer.is_file():
+        raise FileNotFoundError(f"missing current pointer: {pointer}")
+    snapshot = pointer.read_text(encoding="utf-8").strip()
+    if not snapshot:
+        raise ValueError(f"empty current pointer: {pointer}")
+    base = graph_root / "snapshots" / snapshot
+    if not base.is_dir():
+        raise FileNotFoundError(f"current snapshot not found: {base}")
+    data: dict[str, list[dict[str, Any]]] = {}
+    for table in TABLE_FIELDS:
+        path = base / f"{table}.parquet"
+        if not path.is_file():
+            raise FileNotFoundError(f"current snapshot missing {table}: {path}")
+        data[table] = pd.read_parquet(path).to_dict("records")
+    return snapshot, data
+
+
+def check_spec(
+    spec: PublishedGraphSpec,
+    *,
+    root: Path = ROOT,
+    graph_root: Path | None = None,
+) -> dict[str, Any]:
+    """Check one spec without modifying any published artifact."""
+    if spec.mode == "frozen":
+        return {
+            "id": spec.ident,
+            "graph": spec.graph,
+            "status": "exempt",
+            "reason": spec.reason,
+        }
+    if spec.mode != "mutable":
+        raise ValueError(f"{spec.ident}: unsupported published graph mode {spec.mode!r}")
+
+    published_root = graph_root if graph_root is not None else root / spec.graph
+    if not published_root.exists():
+        return {
+            "id": spec.ident,
+            "graph": spec.graph,
+            "status": "skipped",
+            "reason": "published mutable graph is absent locally",
+        }
+
+    try:
+        snapshot, published = _published_data(published_root)
+        fresh = _fresh_data(spec, root)
+    except (OSError, ValueError, KeyError) as error:
+        return {
+            "id": spec.ident,
+            "graph": spec.graph,
+            "status": "fail",
+            "reason": str(error),
+        }
+
+    mismatches: dict[str, dict[str, int]] = {}
+    for table, fields in TABLE_FIELDS.items():
+        expected = _signature(fresh[table], fields)
+        actual = _signature(published[table], fields)
+        missing = int(sum((expected - actual).values()))
+        extra = int(sum((actual - expected).values()))
+        if missing or extra:
+            mismatches[table] = {
+                "fresh_rows": int(sum(expected.values())),
+                "published_rows": int(sum(actual.values())),
+                "missing_from_published": missing,
+                "extra_in_published": extra,
+            }
+    if mismatches:
+        return {
+            "id": spec.ident,
+            "graph": spec.graph,
+            "snapshot": snapshot,
+            "status": "fail",
+            "reason": "published graph disagrees with current extractor",
+            "mismatches": mismatches,
+        }
+    return {
+        "id": spec.ident,
+        "graph": spec.graph,
+        "snapshot": snapshot,
+        "status": "pass",
+    }
+
+
+def build_report(manifest: Path = DEFAULT_MANIFEST, root: Path = ROOT) -> dict[str, Any]:
+    """Check every declared root; only absent mutable artifacts may skip."""
+    specs = load_specs(manifest)
+    results = [check_spec(spec, root=root) for spec in specs]
+    failed = [result for result in results if result["status"] == "fail"]
+    skipped = [result for result in results if result["status"] == "skipped"]
+    return {
+        "manifest": str(manifest),
+        "results": results,
+        "mutable": sum(spec.mode == "mutable" for spec in specs),
+        "frozen": sum(spec.mode == "frozen" for spec in specs),
+        "failed": len(failed),
+        "skipped": len(skipped),
+        "ok": not failed,
+    }
+
+
+def format_report(report: Mapping[str, Any]) -> str:
+    lines = ["Published graph health (mutable local artifacts compared with current extractor)"]
+    for result in report["results"]:
+        suffix = f" — {result.get('reason')}" if result.get("reason") else ""
+        snapshot = f" @ {result['snapshot']}" if result.get("snapshot") else ""
+        lines.append(f"  [{result['status'].upper()}] {result['id']}: {result['graph']}{snapshot}{suffix}")
+        for table, mismatch in result.get("mismatches", {}).items():
+            lines.append(
+                f"    {table}: fresh={mismatch['fresh_rows']} published={mismatch['published_rows']} "
+                f"missing={mismatch['missing_from_published']} extra={mismatch['extra_in_published']}"
+            )
+    lines.append(
+        f"  declared mutable={report['mutable']} frozen-exempt={report['frozen']} "
+        f"local-skips={report['skipped']}"
+    )
+    if not report["ok"]:
+        lines.append("RESULT: FAIL")
+    elif report["skipped"]:
+        lines.append("PASS WITH LOCAL ARTIFACT SKIPS")
+    else:
+        lines.append("PASS")
+    return "\n".join(lines)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--check", action="store_true", help="check all declared published graphs")
+    parser.add_argument("--json", action="store_true", help="emit the full machine-readable report")
+    parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
+    args = parser.parse_args(argv)
+    if not args.check and not args.json:
+        parser.error("choose --check or --json")
+    try:
+        report = build_report(args.manifest)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        print(f"published graph health: FAIL\n{error}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+    else:
+        print(format_report(report))
+    return 0 if report["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

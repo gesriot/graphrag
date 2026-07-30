@@ -11,6 +11,10 @@
       "source": "examples/mini_game",
       "port": "examples/mini_game_rust",
       "indexer": "python",
+      "published_graph": {
+        "path": "byog_mini_game",
+        "mode": "mutable"
+      },
       "symbols": [
         "sim:run_simulation",
         "physics:update_player",
@@ -34,6 +38,10 @@
       "source": "examples/mini_lang",
       "port": "examples/mini_lang_rust",
       "indexer": "python",
+      "published_graph": {
+        "path": "byog_mini_lang",
+        "mode": "mutable"
+      },
       "checks": [
         {
           "name": "Python golden contract",
@@ -52,6 +60,10 @@
       "source": "examples/jsmn",
       "port": "examples/jsmn_rust",
       "indexer": "c",
+      "published_graph": {
+        "path": "byog_jsmn",
+        "mode": "mutable"
+      },
       "checks": [
         {
           "name": "C graph and golden-oracle contract",
@@ -75,6 +87,10 @@
       "source": "examples/inih",
       "port": "examples/inih_rust",
       "indexer": "c",
+      "published_graph": {
+        "path": "byog_inih",
+        "mode": "mutable"
+      },
       "checks": [
         {
           "name": "C graph and golden-oracle contract",
@@ -97,6 +113,10 @@
       "source": "examples/sqlparse",
       "port": "examples/sqlparse_rust",
       "indexer": "python",
+      "published_graph": {
+        "path": "byog_sqlparse",
+        "mode": "mutable"
+      },
       "checks": [
         {
           "name": "Python golden contract",
@@ -115,6 +135,10 @@
       "source": "examples/semantic_version",
       "port": "examples/semantic_version_rust",
       "indexer": "python",
+      "published_graph": {
+        "path": "byog_semver",
+        "mode": "mutable"
+      },
       "checks": [
         {
           "name": "Python golden contracts",
@@ -133,6 +157,10 @@
       "source": "examples/diff_match_patch",
       "port": "examples/diff_match_patch_rust",
       "indexer": "python",
+      "published_graph": {
+        "path": "byog_dmp",
+        "mode": "mutable"
+      },
       "checks": [
         {
           "name": "Python golden contracts",
@@ -154,6 +182,10 @@
         "cjson"
       ],
       "indexer": "python",
+      "published_graph": {
+        "path": "byog_charset_normalizer",
+        "mode": "mutable"
+      },
       "symbols": [
         "api:from_bytes",
         "__main__:cli_detect"
@@ -241,6 +273,10 @@
       "source": "examples/cjson",
       "port": "examples/cjson_rust",
       "indexer": "c",
+      "published_graph": {
+        "path": "byog_cjson",
+        "mode": "mutable"
+      },
       "symbols": [
         "runner:trace_step",
         "cJSON:cJSON_Delete",
@@ -292,17 +328,49 @@
     {
       "id": "jsonpatch",
       "kind": "gap",
+      "source": "examples/jsonpatch",
+      "indexer": "python",
+      "published_graph": {
+        "path": "byog_jsonpatch",
+        "mode": "mutable"
+      },
       "gap": "The RFC 6902 apply contract is source-only (25 golden cases, published byog_jsonpatch graph); no Rust port exists. Retired as the v2 ablation target after the closure boundary in PROVENANCE.md, and kept as the registry-dispatch diagnostic case rather than a port."
     },
     {
       "id": "humanize",
       "kind": "gap",
+      "source": "examples/humanize",
+      "indexer": "python",
+      "published_graph": {
+        "path": "byog_humanize",
+        "mode": "mutable"
+      },
       "gap": "The bounded Python number-formatting contract exists, but there is no Rust port directory or Rust golden consumer; no port evidence can be claimed."
     },
     {
       "id": "isodate",
       "kind": "gap",
+      "source": "examples/isodate",
+      "indexer": "python",
+      "published_graph": {
+        "path": "byog_isodate",
+        "mode": "frozen",
+        "reason": "Closed ablation_v3 experiment evidence uses an intentionally older extractor and is never health-reindexed."
+      },
       "gap": "The duration contract is source-only; no Rust port exists. Its archived ablation_v3 graph/experiment is deliberately not indexed or run by this gate."
+    }
+  ],
+  "aggregate_checks": [
+    {
+      "name": "published mutable-graph health",
+      "when": "full",
+      "successful_skip_marker": "PASS WITH LOCAL ARTIFACT SKIPS",
+      "skip_reason": "one or more mutable published graphs are absent locally; source-evidence profiles still ran from Git",
+      "command": [
+        "{python}",
+        "scripts/published_graph_health.py",
+        "--check"
+      ]
     }
   ]
 }

@@ -1109,34 +1109,49 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                     is_known_same_class_method = attr in class_methods.get(simple_class, set())
 
                     # self.pointer_cls(...) where pointer_cls holds an imported type
-                    # → constructor of that type (not a same-class method).
+                    # → constructor body (Class.__init__), not a same-class method.
+                    # Target is ``.__init__`` so the calls closure can enter the
+                    # class body (e.g. JsonPointer.__init__ → unescape). The
+                    # call-graph oracle normalizes ``.__init__`` ↔ class.
                     if is_direct:
                         stored_type = _lookup_class_attr_type(simple_class, attr)
                         if stored_type:
                             # Skip property getter/setter bodies: they share a
                             # title with their pair and create audit span clashes.
                             if caller not in property_accessor_qnames:
-                                relationships.append(
-                                    {
-                                        "id": f"rel:call:{class_name}.{method_bare}:import-ctor:{attr}:{getattr(node, 'lineno', 0)}",
-                                        "source": source_title,
-                                        "target": stored_type,
-                                        "type": "calls",
-                                        "description": (
-                                            f"{class_name}.{method_bare} constructs {stored_type} "
-                                            f"via self.{attr} (imported type default)"
-                                        ),
-                                        "weight": 0.80,
-                                        "text_unit_ids": [f"tu:file:{path.name}"],
-                                        "human_readable_id": len(relationships) + 1,
-                                        "source_file": str(path),
-                                        "span": f"{getattr(node, 'lineno', 0)}",
-                                        "extractor": "tree-sitter-python+ast",
-                                        "confidence": 0.80,
-                                        "is_deterministic": True,
-                                        "resolved_target_hint": stored_type,
-                                    }
-                                )
+                                # Class entity (type identity) + __init__ (body entry).
+                                # Both needed: oracle normalizes them together;
+                                # adequacy lists each as a distinct must-reach.
+                                for tag_suffix, ctor_target in (
+                                    ("class", stored_type),
+                                    ("init", f"{stored_type}.__init__"),
+                                ):
+                                    relationships.append(
+                                        {
+                                            "id": (
+                                                f"rel:call:{class_name}.{method_bare}:"
+                                                f"import-ctor-{tag_suffix}:{attr}:"
+                                                f"{getattr(node, 'lineno', 0)}"
+                                            ),
+                                            "source": source_title,
+                                            "target": ctor_target,
+                                            "type": "calls",
+                                            "description": (
+                                                f"{class_name}.{method_bare} constructs "
+                                                f"{ctor_target} via self.{attr} "
+                                                f"(imported type default)"
+                                            ),
+                                            "weight": 0.80,
+                                            "text_unit_ids": [f"tu:file:{path.name}"],
+                                            "human_readable_id": len(relationships) + 1,
+                                            "source_file": str(path),
+                                            "span": f"{getattr(node, 'lineno', 0)}",
+                                            "extractor": "tree-sitter-python+ast",
+                                            "confidence": 0.80,
+                                            "is_deterministic": True,
+                                            "resolved_target_hint": ctor_target,
+                                        }
+                                    )
                             continue
 
                     # self.pointer.to_last(...) where self.pointer's type is known
@@ -1200,11 +1215,79 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
                             }
                         )
 
+    # -----------------------------------------------------------------
+    # Inheritance edges (NOT calls). Adequacy closure already lists
+    # ``inherits`` in CLOSURE_EDGES; without these the type is empty forever.
+    #
+    # Rule: for ``class Child(Parent):`` where Parent is a class defined in
+    # *this file* (not a builtin like ``object``), emit
+    #   Child --inherits--> Parent
+    # with is_deterministic=True. Cross-module bases are left unresolved
+    # (import aliasing / re-exports would be a guess). This is a type-graph
+    # fact, not a call — do not overload ``calls``.
+    # -----------------------------------------------------------------
+    _BUILTIN_BASES = {
+        "object", "type", "Exception", "BaseException", "dict", "list", "set",
+        "tuple", "str", "int", "float", "bool", "bytes", "set", "frozenset",
+        "enum", "Enum", "IntEnum", "ABC", "ABCMeta",
+    }
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        child = node.name
+        if child not in local_classes:
+            continue
+        for b in node.bases:
+            if not isinstance(b, ast.Name):
+                continue  # skip pkg.Base / generics — not a bare same-file name
+            parent = b.id
+            if parent in _BUILTIN_BASES or parent not in local_classes:
+                continue
+            relationships.append(
+                {
+                    "id": f"rel:inherits:{child}:{parent}:{getattr(node, 'lineno', 0)}",
+                    "source": f"{Path(path).stem}:{child}",
+                    "target": f"{Path(path).stem}:{parent}",
+                    "type": "inherits",
+                    "description": (
+                        f"{child} inherits {parent} "
+                        f"(AST ClassDef base; not a calls edge)"
+                    ),
+                    "weight": 0.95,
+                    "text_unit_ids": [f"tu:file:{path.name}"],
+                    "human_readable_id": len(relationships) + 1,
+                    "source_file": str(path),
+                    "span": f"{getattr(node, 'lineno', 0)}",
+                    "extractor": "tree-sitter-python+ast",
+                    "confidence": 0.95,
+                    "is_deterministic": True,
+                    "resolved_target_hint": f"{Path(path).stem}:{parent}",
+                }
+            )
+
+    def _nearest_defining_class(simple_class: str, member: str, *, kind: str) -> str | None:
+        """Walk same-file MRO for a class that defines ``member``.
+
+        kind='method' looks in class_methods; kind='property' looks in property_methods.
+        """
+        seen: set[str] = set()
+        stack = [simple_class]
+        while stack:
+            cur = stack.pop(0)
+            if cur in seen:
+                continue
+            seen.add(cur)
+            if kind == "method" and member in class_methods.get(cur, set()):
+                return cur
+            if kind == "property" and (cur, member) in property_methods:
+                return cur
+            stack.extend(class_bases.get(cur, []))
+        return None
+
     # Property bridge: a method reading self.<name>/cls.<name> where <name> is an
-    # @property on the same class is, semantically, a call to the property getter.
-    # Emit a distinct `property` edge (NOT `calls`) so the closure can cross
-    # property reads without inflating call counts or audit precision. Only Load
-    # reads of real @property members of the enclosing class qualify.
+    # @property on the same class *or a same-file base* is a property edge
+    # (NOT ``calls``). Inherited properties resolve to the defining base
+    # (RemoveOperation reading self.path → PatchOperation.path).
     seen_property_edges: set[tuple[str, str]] = set()
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load)):
@@ -1217,22 +1300,26 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
             continue
         class_name = class_for_method[caller]
         simple_class = class_name.split(".")[-1]
-        if (simple_class, node.attr) not in property_methods:
+        defining = _nearest_defining_class(simple_class, node.attr, kind="property")
+        if defining is None:
             continue
         method_bare = caller.split(".")[-1] if "." in caller else caller
         source_title = f"{Path(path).stem}:{class_name}.{method_bare}"
-        hint = f"{Path(path).stem}:{class_name}.{node.attr}"
+        hint = f"{Path(path).stem}:{defining}.{node.attr}"
         dedupe = (source_title, hint)
         if dedupe in seen_property_edges:
             continue
         seen_property_edges.add(dedupe)
         relationships.append(
             {
-                "id": f"rel:property:{class_name}.{method_bare}:{node.attr}:{getattr(node, 'lineno', 0)}",
+                "id": f"rel:property:{class_name}.{method_bare}:{defining}.{node.attr}:{getattr(node, 'lineno', 0)}",
                 "source": source_title,
                 "target": hint,
                 "type": "property",
-                "description": f"{class_name}.{method_bare} reads @property {class_name}.{node.attr}",
+                "description": (
+                    f"{class_name}.{method_bare} reads @property {defining}.{node.attr}"
+                    + (" (inherited)" if defining != simple_class else "")
+                ),
                 "weight": 0.85,
                 "text_unit_ids": [f"tu:file:{path.name}"],
                 "human_readable_id": len(relationships) + 1,
@@ -1446,16 +1533,23 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
     _unaryop_dunder = {ast.USub: "__neg__", ast.UAdd: "__pos__"}
 
     def _class_member_hint(cls_name: str, member: str) -> str | None:
-        """Resolve `Cls.member` to an entity title for a same-file OR imported
-        class. Same-file is verified against class_methods; an imported class is
-        resolved optimistically via import_map (the bridge drops the edge if the
-        target entity does not exist, so no dangling).
+        """Resolve `Cls.member` to an entity title for a same-file OR imported class.
 
-        Imported constructors target the *class* entity (``jsonpointer:JsonPointer``)
-        rather than ``.__init__``, matching how the call-graph oracle maps
-        constructor frames and how Name-import edges already look.
+        Same-file members are verified against class_methods. Imported classes
+        are optimistic (bridge drops if the target entity is absent).
+
+        Constructors: target ``Cls.__init__`` when Cls defines it; if Cls has no
+        own ``__init__``, walk same-file bases and target the defining base's
+        ``__init__`` (what the frame actually runs). Imported classes use
+        ``Mod:Cls.__init__``; the call-graph oracle normalizes ``.__init__`` ↔
+        class for scoring, so observation matching still holds.
         """
         if cls_name in local_classes:
+            if member == "__init__":
+                defining = _nearest_defining_class(cls_name, "__init__", kind="method")
+                if defining is None:
+                    return None
+                return f"{Path(path).stem}:{defining}.__init__"
             if member in class_methods.get(cls_name, set()):
                 return f"{Path(path).stem}:{cls_name}.{member}"
             return None
@@ -1463,7 +1557,7 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
             orig = import_orig.get(cls_name, cls_name)
             mod = module_title(import_map[cls_name])
             if member == "__init__":
-                return f"{mod}:{orig}"
+                return f"{mod}:{orig}.__init__"
             return f"{mod}:{orig}.{member}"
         return None
 
@@ -1475,24 +1569,35 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
         if caller == "unknown":
             return
         caller_kind = "method" if caller in class_for_method else "fn"
-        relationships.append(
-            {
-                "id": f"rel:call:{caller}:{cls_name}.{member}:{tag}:{getattr(node,'lineno',0)}:{getattr(node,'col_offset',0)}",
-                "source": make_id(caller_kind, caller, str(path)),
-                "target": hint,
-                "type": "calls",
-                "description": f"{caller} uses {cls_name}.{member} ({tag})",
-                "weight": 0.8,
-                "text_unit_ids": [f"tu:file:{path.name}"],
-                "human_readable_id": len(relationships) + 1,
-                "source_file": str(path),
-                "span": f"{getattr(node,'lineno',0)}:{getattr(node,'col_offset',0)}",
-                "extractor": "tree-sitter-python+ast",
-                "confidence": 0.8,
-                "is_deterministic": True,
-                "resolved_target_hint": hint,
-            }
-        )
+        targets = [hint]
+        # Construction: also name the class entity when the body target is __init__
+        # so the type identity stays on the closure (spec lists both).
+        if member == "__init__" and hint.endswith(".__init__"):
+            class_title = hint[: -len(".__init__")]
+            if class_title not in targets:
+                targets.append(class_title)
+        for ti, tgt in enumerate(targets):
+            relationships.append(
+                {
+                    "id": (
+                        f"rel:call:{caller}:{cls_name}.{member}:{tag}{ti}:"
+                        f"{getattr(node,'lineno',0)}:{getattr(node,'col_offset',0)}"
+                    ),
+                    "source": make_id(caller_kind, caller, str(path)),
+                    "target": tgt,
+                    "type": "calls",
+                    "description": f"{caller} uses {tgt} ({tag}; via {cls_name})",
+                    "weight": 0.8,
+                    "text_unit_ids": [f"tu:file:{path.name}"],
+                    "human_readable_id": len(relationships) + 1,
+                    "source_file": str(path),
+                    "span": f"{getattr(node,'lineno',0)}:{getattr(node,'col_offset',0)}",
+                    "extractor": "tree-sitter-python+ast",
+                    "confidence": 0.8,
+                    "is_deterministic": True,
+                    "resolved_target_hint": tgt,
+                }
+            )
 
     def _ctor_class(expr: ast.AST) -> str | None:
         if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Name):

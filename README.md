@@ -32,9 +32,10 @@ uv run python scripts/port_eval.py --all-gates --full
 
 It rebuilds disposable graphs under `output/port_gates/`, runs each declared
 source contract and Rust port evaluation, and reports named source-only gaps.
-Some live diagnostic and frozen-record checks deliberately need published local
-graph evidence; the durability inventory names each one and whether absence is
-a failure or an explicit skip.
+`--full` additionally health-checks each mutable published local graph against
+the current extractor without rewriting it. Some live diagnostic and
+frozen-record checks deliberately need local graph evidence; the durability
+inventory names each one and whether absence is a failure or an explicit skip.
 An unavailable optional tool or an opt-in check not requested produces an
 explicit `SKIP`; an installed tool that fails makes the gate fail. See [the gate guide](examples/PORT_EVIDENCE.md)
 for clean-machine prerequisites, the fast/pre-release split, and the opt-in

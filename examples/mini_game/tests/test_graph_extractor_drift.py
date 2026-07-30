@@ -1,22 +1,13 @@
-"""A published graph must match what the current extractor produces.
+"""Published mutable graphs must match their current extractor.
 
-A semantic extractor change applied to some published graphs and not others
-leaves the rest silently stale. Both happened: the cross-module import resolver
-(`e83eee8`) was published to four graphs and not the others, and the
-registry-dispatch promotion was published only to `byog_jsonpatch`. Nothing
-noticed, because every gate reindexes fresh into `output/port_gates/` and never
-reads the published artifact — so gates stayed green while `byog_semver`,
-`byog_mini_game`, `byog_dmp` and `byog_charset_normalizer` disagreed with the
-code that generated them by 2 to 72 calls.
-
-`byog_isodate` is exempt and must stay exempt: it is the frozen graph behind the
-closed ablation experiment's adequacy claim, deliberately pinned to the older
-extractor.
-
-Run: uv run python -m pytest examples/mini_game/tests/test_graph_extractor_drift.py -q
+The extractor-drift incident was possible because source profiles rebuilt fresh
+``output/port_gates`` graphs while the published local roots were never read.
+This test exercises the same manifest-derived health check used by the full
+portfolio gate.  It deliberately does not reindex or alter any ``byog_*`` root.
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -25,56 +16,62 @@ import pytest
 
 ROOT = Path(__file__).parents[3]
 sys.path.insert(0, str(ROOT / "scripts"))
-from mini_game_to_byog import build_byog_for_package  # type: ignore
 
-# package directory -> published graph root
-LIVE_PYTHON_GRAPHS = {
-    "mini_game": "byog_mini_game",
-    "mini_lang": "byog_mini_lang",
-    "jsonpatch": "byog_jsonpatch",
-    "sqlparse": "byog_sqlparse",
-    "semantic_version": "byog_semver",
-    "diff_match_patch": "byog_dmp",
-    "humanize": "byog_humanize",
-    "charset_normalizer": "byog_charset_normalizer",
-}
-
-# Frozen on purpose: backs `isodate_adequacy_v3` and the closed experiment.
-FROZEN_GRAPHS = {"byog_isodate"}
+from byog_graph import publish_byog_snapshot  # type: ignore
+from published_graph_health import (  # type: ignore
+    PublishedGraphSpec,
+    _fresh_data,
+    check_spec,
+    load_specs,
+)
 
 
-def _published_calls(graph_root: Path) -> int:
-    snapshot = (graph_root / "current").read_text().strip()
-    rels = pd.read_parquet(graph_root / "snapshots" / snapshot / "relationships.parquet")
-    return int((rels["type"].astype(str) == "calls").sum())
+SPECS = load_specs()
+MUTABLE_SPECS = [spec for spec in SPECS if spec.mode == "mutable"]
+FROZEN_SPECS = [spec for spec in SPECS if spec.mode == "frozen"]
 
 
-@pytest.mark.parametrize("package,graph_name", sorted(LIVE_PYTHON_GRAPHS.items()))
-def test_published_graph_matches_current_extractor(package: str, graph_name: str):
-    graph_root = ROOT / graph_name
-    if not (graph_root / "current").is_file():
-        pytest.skip(f"{graph_name} not published locally")
-    fresh = build_byog_for_package(package_dir=ROOT / "examples" / package)
-    fresh_calls = sum(1 for r in fresh["relationships"] if r.get("type") == "calls")
-    published_calls = _published_calls(graph_root)
-    assert fresh_calls == published_calls, (
-        f"{graph_name} has {published_calls} calls but the current extractor "
-        f"produces {fresh_calls}. Reindex it "
-        f"(scripts/index_python.py --package examples/{package} --graph {graph_name}) "
-        "so the published artifact matches the code that generates it."
-    )
+@pytest.mark.parametrize("spec", MUTABLE_SPECS, ids=lambda spec: spec.ident)
+def test_published_graph_matches_current_extractor(spec: PublishedGraphSpec):
+    result = check_spec(spec)
+    # A clean checkout has no published local artifact, which is an explicit
+    # health-stage skip.  A present stale/malformed root is never a skip.
+    assert result["status"] in {"pass", "skipped"}, result
 
 
-def test_frozen_graphs_are_excluded_deliberately():
-    """The exemption list is explicit, and every entry is really frozen."""
-    assert FROZEN_GRAPHS == {"byog_isodate"}
-    assert not (FROZEN_GRAPHS & set(LIVE_PYTHON_GRAPHS.values()))
-    import json
-
+def test_frozen_graphs_are_declared_deliberately():
+    """The single exemption is config-derived and anchored to the frozen claim."""
+    assert [(spec.ident, spec.graph) for spec in FROZEN_SPECS] == [("isodate", "byog_isodate")]
+    assert FROZEN_SPECS[0].reason
+    # A frozen root is evidence of the closed experiment, not current extractor
+    # output: health must not open, mutate, or attempt to replace it.
+    assert check_spec(FROZEN_SPECS[0], graph_root=ROOT / "does-not-exist")["status"] == "exempt"
     manifest = json.loads((ROOT / "scripts" / "doc_claims.json").read_text())
     frozen_claim_graphs = {
-        Path(str(c["source"].get("graph") or "")).name
-        for c in manifest["claims"]
-        if c.get("kind") == "frozen_snapshot"
+        Path(str(claim["source"].get("graph") or "")).name
+        for claim in manifest["claims"]
+        if claim.get("kind") == "frozen_snapshot"
     }
     assert "byog_isodate" in frozen_claim_graphs, frozen_claim_graphs
+
+
+def test_stale_current_snapshot_fails_health_check(tmp_path: Path):
+    """A present graph pointing at stale content is a fail, not an artifact skip."""
+    spec = next(candidate for candidate in MUTABLE_SPECS if candidate.ident == "mini_game")
+    fresh = _fresh_data(spec, ROOT)
+    stale_relationships = list(fresh["relationships"])
+    stale_relationships.pop()
+    graph = tmp_path / "byog_mini_game"
+    publish_byog_snapshot(
+        pd.DataFrame(fresh["entities"]),
+        pd.DataFrame(stale_relationships),
+        pd.DataFrame(fresh["text_units"]),
+        graph,
+        "health-test",
+        source_root=(ROOT / spec.source).resolve(),
+    )
+
+    result = check_spec(spec, graph_root=graph)
+    assert result["status"] == "fail", result
+    assert result["reason"] == "published graph disagrees with current extractor"
+    assert result["mismatches"]["relationships"]["missing_from_published"] == 1

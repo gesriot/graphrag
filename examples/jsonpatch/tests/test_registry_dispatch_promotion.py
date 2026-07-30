@@ -84,7 +84,20 @@ def test_promotion_idempotent_on_reannotate():
         for r in data["relationships"]
         if r.get("extractor") == "python_dynamic_registry"
     )
-    assert n1 == n2 == 12  # 6 apply + 6 class constructs from _get_operation
+    # 6 `.apply` targets + 6 class constructs from `_get_operation` + the
+    # inherited constructor `PatchOperation.__init__`. The six operation classes
+    # define no `__init__` of their own (verified: `AddOperation.__init__ is
+    # PatchOperation.__init__`), so `cls(operation)` runs the base one — an MRO
+    # fact from the same file, not a guess.
+    assert n1 == n2 == 13
+    inherited = [
+        r
+        for r in data["relationships"]
+        if r.get("extractor") == "python_dynamic_registry"
+        and str(r.get("target")).endswith("PatchOperation.__init__")
+    ]
+    assert len(inherited) == 1, inherited
+    assert inherited[0]["is_deterministic"] is False
 
 
 def test_no_promote_without_dispatch_site_label(tmp_path: Path):

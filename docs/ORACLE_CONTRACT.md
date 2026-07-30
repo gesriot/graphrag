@@ -56,10 +56,14 @@ historical report. They are boundaries to inspect, not evidence of a clean pass.
 | --- | --- | --- |
 | C preprocessor liveness | **9 vacuous** regions; 0 unknown | Directive-only branches that neither line survival nor unique macro attribution can judge. They are outside the agreement rate. |
 | Python registry | **25 missed** isodate lambda entries | The runtime callable values exist, but their lambda bodies have no honest single callee name; they remain unguessed. |
-| Call-graph observation | **6 missed** observed jsonpatch edges; **79 unconfirmed** graph edges | Registry Name-table members at labelled dispatch sites are promoted to non-deterministic `calls` edges; the six remaining misses are property/`map`/superclass/`from_ptr` gaps. Unconfirmed edges are not exercised by this workload, not proven wrong. |
+| Call-graph observation | **3 missed** observed jsonpatch edges; **83 unconfirmed** graph edges | Registry Name-table members at labelled dispatch sites are promoted to non-deterministic `calls` edges, and same-file inheritance is carried by a separate `inherits` type rather than overloading `calls`. The three remaining misses are the `_ops` property read, `_ops → _get_operation` through `map`, and the if/else `from_ptr`. Unconfirmed edges are not exercised by this workload, not proven wrong. |
 | cJSON API surface | **6 ownership-blocked** calls; **4 process-global exclusions** | The six need aliased/shared mutable storage under the observed C traces; the four need allocator/error-state policy. Neither is silently deferred. |
 
 The older jsonpatch table with 25 missed edges remains a dated baseline in its
 provenance record. The combined command intentionally reports the active
-published graph instead. If these numbers move, update this table and its
-live documentation claim together.
+**current-local** published graph instead: it is not a frozen historical
+snapshot, and the full portfolio gate health-checks a present `byog_jsonpatch`
+against the current extractor before that evidence is relied on. If the local
+baseline is absent, the residual claim fails rather than substituting a fresh
+graph. If these numbers move, update this table and its live documentation
+claim together.

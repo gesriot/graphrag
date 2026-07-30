@@ -63,6 +63,9 @@ class FileAnalysis:
     # bare or Class.attr registry name -> ordered (key, value_name) entries
     # from the static dict literal (e.g. operations['add'] -> AddOperation).
     registry_tables: Dict[str, List[Tuple[str, str]]] = field(default_factory=dict)
+    # same-file MRO facts for registry construct → inherited __init__
+    class_bases: Dict[str, List[str]] = field(default_factory=dict)
+    class_methods: Dict[str, Set[str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -73,6 +76,8 @@ class PackageAnalysis:
     kinds: Dict[str, int] = field(default_factory=dict)
     # merged Class.attr / bare -> entries (last file wins; rare conflict)
     registry_tables: Dict[str, List[Tuple[str, str]]] = field(default_factory=dict)
+    class_bases: Dict[str, List[str]] = field(default_factory=dict)
+    class_methods: Dict[str, Set[str]] = field(default_factory=dict)
 
 
 def _is_callable_registry_dict(d: ast.Dict) -> bool:
@@ -520,6 +525,18 @@ def analyze_source_text(text: str, path: Path) -> FileAnalysis:
 
     fa.registries = set(registries)
     fa.registry_tables = registry_tables
+    # Same-file inheritance / methods for inherited-constructor promotion.
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        fa.class_bases[node.name] = [
+            b.id for b in node.bases if isinstance(b, ast.Name)
+        ]
+        methods: Set[str] = set()
+        for item in node.body:
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                methods.add(item.name)
+        fa.class_methods[node.name] = methods
 
     def is_registry_expr(expr: ast.AST) -> Optional[str]:
         """If expr loads a known registry, return a short name for the reason tag."""
@@ -871,6 +888,8 @@ def analyze_package(package_dir: Path) -> PackageAnalysis:
         for s in fa.sites:
             kinds[s.kind] += 1
         pa.registry_tables.update(fa.registry_tables)
+        pa.class_bases.update(fa.class_bases)
+        pa.class_methods.update(fa.class_methods)
     pa.n_sites = n_sites
     pa.kinds = dict(kinds)
     return pa
@@ -1301,38 +1320,70 @@ def _registry_dispatch_edges(
         for r in (data.get("relationships") or [])
         if str(r.get("type", "")) == "calls"
     }
+    entity_titles = {str(e.get("title", "")) for e in data.get("entities") or []}
+
+    def _inherited_init_title(class_title: str) -> Optional[str]:
+        """If class_title is Mod:Cls with no own __init__, return Mod:Base.__init__."""
+        if ":" not in class_title or "." in class_title.split(":", 1)[1]:
+            return None  # already a method title
+        mod, bare = class_title.split(":", 1)
+        if "__init__" in (pa.class_methods.get(bare) or set()):
+            return f"{mod}:{bare}.__init__"
+        # Walk same-file bases recorded on the package analysis.
+        seen: Set[str] = set()
+        stack = list(pa.class_bases.get(bare) or [])
+        while stack:
+            cur = stack.pop(0)
+            if cur in seen:
+                continue
+            seen.add(cur)
+            if "__init__" in (pa.class_methods.get(cur) or set()):
+                cand = f"{mod}:{cur}.__init__"
+                return cand if cand in entity_titles else None
+            stack.extend(pa.class_bases.get(cur) or [])
+        return None
+
     for item in _iter_registry_dispatch_targets(data, pa):
         src, tgt = item["source"], item["target"]
-        if (src, tgt) in existing:
-            continue
-        existing.add((src, tgt))
         reg_name, key, cls = item["reg_name"], item["key"], item["cls"]
-        edges.append(
-            {
-                "source": src,
-                "target": tgt,
-                "type": "calls",
-                "description": (
-                    f"registry_dispatch:{cls}.{reg_name}[{key!r}]->{tgt} "
-                    f"(static Name table member at labelled dispatch site; "
-                    f"is_deterministic=False — which member runs is runtime)"
-                ),
-                "weight": REGISTRY_DISPATCH_CONFIDENCE,
-                "text_unit_ids": [],
-                "human_readable_id": 0,
-                "source_file": item["source_file"],
-                "span": item["span"],
-                "extractor": "python_dynamic_registry",
-                "confidence": REGISTRY_DISPATCH_CONFIDENCE,
-                "is_deterministic": False,
-                "dynamic_dependent": True,
-                "dynamic_reasons": [
-                    f"registry_dispatch:{reg_name}",
-                    f"registry_key:{key}",
-                ],
-                "resolved_target_hint": tgt,
-            }
-        )
+        targets = [tgt]
+        # Construct path: also name the inherited __init__ the frame actually runs
+        # (RemoveOperation() → PatchOperation.__init__).
+        extra = _inherited_init_title(tgt)
+        if extra and extra not in targets:
+            targets.append(extra)
+        for tgt_one in targets:
+            if (src, tgt_one) in existing:
+                continue
+            if tgt_one not in entity_titles:
+                continue
+            existing.add((src, tgt_one))
+            edges.append(
+                {
+                    "source": src,
+                    "target": tgt_one,
+                    "type": "calls",
+                    "description": (
+                        f"registry_dispatch:{cls}.{reg_name}[{key!r}]->{tgt_one} "
+                        f"(static Name table member at labelled dispatch site; "
+                        f"is_deterministic=False — which member runs is runtime)"
+                    ),
+                    "weight": REGISTRY_DISPATCH_CONFIDENCE,
+                    "text_unit_ids": [],
+                    "human_readable_id": 0,
+                    "source_file": item["source_file"],
+                    "span": item["span"],
+                    "extractor": "python_dynamic_registry",
+                    "confidence": REGISTRY_DISPATCH_CONFIDENCE,
+                    "is_deterministic": False,
+                    "dynamic_dependent": True,
+                    "dynamic_reasons": [
+                        f"registry_dispatch:{reg_name}",
+                        f"registry_key:{key}",
+                    ],
+                    "resolved_target_hint": tgt_one,
+                }
+            )
     return edges
 
 
