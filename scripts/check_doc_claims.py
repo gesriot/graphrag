@@ -258,6 +258,46 @@ def _initializer_api_runtime_audit() -> dict[str, int]:
     }
 
 
+def _reexport_reachability_audit() -> dict[str, int]:
+    """Derive the static-binding and traced-target residual populations."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from reexport_reachability_audit import build_report  # type: ignore
+
+    report = build_report()
+    if not report.get("ok"):
+        raise RuntimeError("re-export reachability audit reported a runtime or trace failure")
+    totals = report["totals"]
+    return {
+        "reexports": int(totals["reexports"]),
+        "target_resolved": int(totals["target_resolved"]),
+        "target_ambiguous": int(totals["target_ambiguous"]),
+        "target_initializer_not_indexed": int(totals["target_initializer_not_indexed"]),
+        "target_no_source_identity": int(totals["target_no_source_identity"]),
+        "initializer_modules": int(totals["initializer_modules"]),
+        "exporting_initializer_module_entities": int(
+            totals["exporting_initializer_module_entities"]
+        ),
+        "exporting_initializer_module_nodes_needed": int(
+            totals["exporting_initializer_module_nodes_needed"]
+        ),
+        "identity_export_edges_if_modules_added": int(
+            totals["identity_export_edges_if_modules_added"]
+        ),
+        "traced_reexports": int(totals["traced_reexports"]),
+        "untraced_reexports": int(totals["untraced_reexports"]),
+        "resolved_targets_observed": int(totals["resolved_targets_observed"]),
+        "traced_workloads": int(totals["traced_workloads"]),
+        "traced_cases": int(totals["traced_cases"]),
+        "humanize_observed_targets": int(totals["humanize_observed_targets"]),
+        "semantic_version_observed_targets": int(
+            totals["semantic_version_observed_targets"]
+        ),
+        "sqlparse_observed_targets": int(totals["sqlparse_observed_targets"]),
+        "runtime_errors": int(totals["runtime_errors"]),
+        "trace_errors": int(totals["trace_errors"]),
+    }
+
+
 def _call_graph_oracle(package: str) -> dict[str, int]:
     """Derive a named local-graph call-oracle measurement without a fallback."""
     sys.path.insert(0, str(ROOT / "scripts"))
@@ -357,6 +397,8 @@ def derive(claim: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
         return _inherited_member_runtime_audit(), "live"
     if stype == "initializer_api_runtime_audit":
         return _initializer_api_runtime_audit(), "live"
+    if stype == "reexport_reachability_audit":
+        return _reexport_reachability_audit(), "live"
     if stype == "call_graph_oracle":
         return _call_graph_oracle(src["package"]), "live"
     if mode == "traced":

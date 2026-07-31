@@ -391,9 +391,19 @@ def _trace_probe_script() -> str:
             sys.path.insert(0, str(package_dir.parent))
             sys.path.insert(0, str(package_dir))
             import semantic_version as sv  # noqa: WPS433
-            for gf in sorted((package_dir / "tests").glob("golden_*.json")):
+            golden_files = sorted((package_dir / "tests").glob("golden_*.json"))
+            if not golden_files:
+                raise RuntimeError(
+                    "semantic_version has no golden_*.json workload; refusing to profile a substitute"
+                )
+            for gf in golden_files:
                 data = json.loads(gf.read_text())
-                for c in data.get("cases") or []:
+                cases = data.get("cases")
+                if not isinstance(cases, list) or not cases:
+                    raise RuntimeError(
+                        f"semantic_version golden {gf} has no executable cases"
+                    )
+                for c in cases:
                     try:
                         # common shapes: compare / coerce / match
                         if "version" in c and "op" not in c:
@@ -407,6 +417,7 @@ def _trace_probe_script() -> str:
                                 spec.match(sv.Version(c["version"]))
                     except Exception:
                         pass
+                _workload_cases.append((str(gf.relative_to(package_dir)), len(cases)))
 
         runners = {
             "jsonpatch_apply": run_jsonpatch_apply,

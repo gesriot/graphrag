@@ -106,6 +106,40 @@ and require **111** new alias nodes across the target set, without adding a
 source-body owner for those names. The narrow rule therefore retains executable
 entry points while leaving alias semantics as an explicit future decision.
 
+## Re-export identity and trace reachability (2026-07-30)
+
+The **113** names called “re-exports” by the direct-initializer audit are not
+one uniform static fact. `scripts/reexport_reachability_audit.py` imports every
+initializer in a clean process, maps a binding's runtime source identity to a
+fresh entity title, then traces each registered golden workload. **73** bindings
+resolve uniquely to an existing defining entity; **2** target the skipped
+`sqlparse.engine` / `sqlparse.filters` initializers; and **38** are public
+scalar values with no source identity to express as an alias edge. There are
+**0** ambiguous or outside-package identities.
+
+An `exports` relationship is therefore deliberately not added in this change.
+To emit the identity facts without duplicate aliases would first require **8**
+initializer-module nodes for export sources (only SQLParse's root one exists
+today), then at most **75** identity edges; the 38 scalar values would still
+need a different data model. Nothing currently consumes that relationship: the call oracle maps a
+profile frame to the defining code title after attribute lookup, context packs
+do not start from a non-existent `package.name` alias entity, and closure must
+not be widened (its edge list is deliberately out of scope here).
+
+The trace result is an upper bound, not evidence that callers used a package
+alias. Four registered workloads execute **194** golden cases: they give a
+measured workload to **50** of the 113 bindings, and **11** resolved defining
+targets appear in their profile frames (6 humanize, 3 semantic-version, 2
+SQLParse-engine). The other
+**63** bindings have no registered call workload and are explicitly
+**unmeasured**, not assumed unreachable. SQLParse's three remaining unmapped
+raw pairs are all local generator-expression frames; none names a package alias.
+An `exports` edge would therefore leave the call-oracle mapper unchanged.
+
+This is a measured static-namespace boundary rather than a claim that export
+relationships are useless in general. Add them only with a consumer that can
+query or traverse package aliases and an oracle that observes the lookup path.
+
 ## SQLParse call-graph observation (2026-07-30)
 
 `uv run python scripts/call_graph_oracle.py --package sqlparse` profiles the

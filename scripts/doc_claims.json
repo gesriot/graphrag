@@ -6,7 +6,7 @@
       "kind": "current",
       "description": "Full examples pytest summary: passed + xfailed.",
       "expect": {
-        "passed": 550,
+        "passed": 552,
         "xfailed": 2
       },
       "source": {
@@ -18,17 +18,17 @@
       "docs": [
         {
           "path": "Plan.md",
-          "must_contain": "550 passed, 2 xfailed",
+          "must_contain": "552 passed, 2 xfailed",
           "role": "current"
         },
         {
           "path": "PHASE7_WRITEUP.md",
-          "must_contain": "550 passed, 2 xfailed",
+          "must_contain": "552 passed, 2 xfailed",
           "role": "current"
         },
         {
           "path": "examples/charset_normalizer_rust/tools/check_port.sh",
-          "must_contain": "Full examples run: 550 passed, 2 xfailed.",
+          "must_contain": "Full examples run: 552 passed, 2 xfailed.",
           "role": "current",
           "note": "The compatibility handoff prints this live suite summary; keep it aligned with the documented claim."
         }
@@ -332,6 +332,63 @@
           "must_contain": "four direct\ndefinitions are all present; 113 re-exports are reported separately rather\nthan inflated into duplicate graph entities.",
           "role": "current",
           "require_near": "**Initializer API closure (2026-07-30):**"
+        }
+      ]
+    },
+    {
+      "id": "reexport_reachability_audit",
+      "kind": "current",
+      "description": "Runtime source identities and registered golden traces for initializer public bindings that are not direct functions/classes.",
+      "expect": {
+        "reexports": 113,
+        "target_resolved": 73,
+        "target_ambiguous": 0,
+        "target_initializer_not_indexed": 2,
+        "target_no_source_identity": 38,
+        "initializer_modules": 11,
+        "exporting_initializer_module_entities": 1,
+        "exporting_initializer_module_nodes_needed": 8,
+        "identity_export_edges_if_modules_added": 75,
+        "traced_reexports": 50,
+        "untraced_reexports": 63,
+        "resolved_targets_observed": 11,
+        "traced_workloads": 4,
+        "traced_cases": 194,
+        "humanize_observed_targets": 6,
+        "semantic_version_observed_targets": 3,
+        "sqlparse_observed_targets": 2,
+        "runtime_errors": 0,
+        "trace_errors": 0
+      },
+      "source": {
+        "type": "reexport_reachability_audit",
+        "mode": "live",
+        "note": "Imports every manifest-discovered initializer in a clean subprocess, maps runtime source identity to fresh graph entities, and runs each registered golden-workload trace. A traced defining target is an upper bound on alias use because sys.setprofile observes code objects after attribute lookup. Missing workloads are reported as unmeasured, never as zero reachability."
+      },
+      "docs": [
+        {
+          "path": "examples/sqlparse/PROVENANCE.md",
+          "must_contain": "**73** bindings\nresolve uniquely to an existing defining entity; **2** target the skipped\n`sqlparse.engine` / `sqlparse.filters` initializers; and **38** are public\nscalar values with no source identity",
+          "role": "current",
+          "require_near": "## Re-export identity and trace reachability (2026-07-30)"
+        },
+        {
+          "path": "examples/sqlparse/PROVENANCE.md",
+          "must_contain": "would first require **8**\ninitializer-module nodes for export sources (only SQLParse's root one exists\ntoday), then at most **75** identity edges",
+          "role": "current",
+          "require_near": "## Re-export identity and trace reachability (2026-07-30)"
+        },
+        {
+          "path": "Plan.md",
+          "must_contain": "73 have a unique\nexisting defining entity, 2 target skipped initializer modules, and 38 are\nscalar values with no source identity.",
+          "role": "current",
+          "require_near": "**Re-export namespace boundary (2026-07-30):**"
+        },
+        {
+          "path": "examples/sqlparse/PROVENANCE.md",
+          "must_contain": "Four registered workloads execute **194** golden cases: they give a\nmeasured workload to **50** of the 113 bindings, and **11** resolved defining\ntargets appear in their profile frames (6 humanize, 3 semantic-version, 2\nSQLParse-engine). The other\n**63** bindings have no registered call workload",
+          "role": "current",
+          "require_near": "## Re-export identity and trace reachability (2026-07-30)"
         }
       ]
     },

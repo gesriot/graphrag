@@ -212,6 +212,10 @@ def test_workload_reports_the_corpus_it_actually_executed():
         "jsonpatch": ("golden_apply.json", 25),
         "mini_lang": ("golden_arithmetic.json", 12),
         "humanize": ("golden_number.json", 59),
+        # The semantic runner once executed its golden files but omitted their
+        # counts, reporting a deceptive 0-case measurement. Keep a concrete
+        # file/count assertion so that regression cannot hide again.
+        "semantic_version": ("tests/golden_coerce.json", 4),
     }
     for pkg, (golden_name, at_least) in expected.items():
         report = compare_named_package(pkg)

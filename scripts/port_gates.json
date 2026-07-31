@@ -143,6 +143,14 @@
             "scripts/init_api_runtime_audit.py",
             "--check"
           ]
+        },
+        {
+          "name": "Re-export identity and trace-reachability audit (all Python targets)",
+          "command": [
+            "{python}",
+            "scripts/reexport_reachability_audit.py",
+            "--check"
+          ]
         }
       ]
     },

@@ -119,8 +119,20 @@ definitions are all present; 113 re-exports are reported separately rather
 than inflated into duplicate graph entities. The `sqlparse.split` target named
 by the Rust port is therefore an actual graph entity, not merely a module API
 outside the graph. See `examples/sqlparse/PROVENANCE.md` for the census and
-call-oracle effect. The current full-suite expectation is **550 passed, 2 xfailed**;
+call-oracle effect. The current full-suite expectation is **552 passed, 2 xfailed**;
 this 2026-07-30 update supersedes the earlier 2026-07-26 gate snapshot.
+
+**Re-export namespace boundary (2026-07-30):** the 113 non-direct initializer
+bindings are now measured separately from direct definitions: 73 have a unique
+existing defining entity, 2 target skipped initializer modules, and 38 are
+scalar values with no source identity. Four golden traces give a measured workload to 50 bindings
+over 194 cases and execute 11 defining targets; 63 bindings have no registered
+trace and remain explicitly unmeasured. The graph deliberately adds neither
+duplicate alias entities nor `exports` relationships: doing the latter would
+first add 8 initializer-module nodes for export sources and at most 75 identity edges, but has no
+current call-oracle, context-pack, or closure consumer. The three unmapped
+SQLParse pairs are generator-expression frames, not aliases. This is a
+documented static-namespace boundary, not an impossibility claim.
 
 ## 2. High-Level Architecture (Replicable Version)
 
