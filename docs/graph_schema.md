@@ -164,6 +164,22 @@ logs. Standalone `c_clang_ast_audit.py` / `c_clang_call_audit.py` /
 their own run. Confidence boundaries and independent `clang_signatures` /
 `clang_calls` manifest blocks are unchanged (no combined capture block).
 
+#### C symbol identity (tree-sitter extractor)
+
+C symbol entities (`function` / `struct` / `enum` / `typedef`) share the
+collision-safe module key policy documented above. **Cross-kind collision
+within one module key:** when two or more of those kinds use the same bare C
+name, every colliding kind is titled `module_key:entity_kind:name` (no
+arbitrary legacy winner). Non-colliding symbols keep `module_key:name`.
+Same-kind redeclarations are deduplicated by `(module_key, kind, name)` —
+never by rendered title alone. Symbol entities also carry an authoritative
+`symbol_name` field (bare C name) so consumers need not re-parse qualified
+titles. `contains` relationship IDs stay `rel:contains:module_key:name` unless
+the module/name pair is cross-kind colliding, in which case they use
+`rel:contains:module_key:entity_kind:name`. Call edges still connect only
+function entities and keep historical call IDs when no function participates
+in a cross-kind collision.
+
 #### Type-declaration audit (diagnostic only — no graph overlay yet)
 
 `scripts/c_clang_type_audit.py` compares configured Clang type declarations

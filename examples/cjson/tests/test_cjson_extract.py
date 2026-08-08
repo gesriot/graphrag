@@ -34,9 +34,12 @@ def _graph():
 def test_struct_graph_and_slice_functions():
     data = _graph()
     titles = {e["title"] for e in data["entities"]}
-    # struct graph: the node struct and the internal parse/print buffers.
-    for struct in ("cJSON:cJSON", "cJSON:parse_buffer", "cJSON:printbuffer"):
-        assert struct in titles, f"missing struct entity {struct}"
+    # struct/typedef graph: named complete structs are kind-qualified when they
+    # collide with same-name typedefs; anonymous-struct typedefs stay legacy.
+    assert "cJSON:struct:cJSON" in titles  # named complete struct
+    assert "cJSON:typedef:cJSON" in titles  # matching typedef alias
+    for name in ("cJSON:parse_buffer", "cJSON:printbuffer", "cJSON:error"):
+        assert name in titles, f"missing typedef entity {name}"
     # ownership-slice API surface.
     for fn in (
         "cJSON:cJSON_Parse",

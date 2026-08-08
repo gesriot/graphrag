@@ -1123,7 +1123,12 @@ def collect_tree_sitter_calls(
         if str(e.get("type")) != "function":
             continue
         title = str(e.get("title") or "")
-        name = title.rsplit(":", 1)[-1] if title else ""
+        raw_name = e.get("symbol_name")
+        name = (
+            raw_name.strip()
+            if isinstance(raw_name, str) and raw_name.strip()
+            else title.rsplit(":", 1)[-1] if title else ""
+        )
         sf = str(e.get("source_file") or "")
         p = Path(sf)
         if not p.is_absolute():

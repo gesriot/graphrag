@@ -710,7 +710,14 @@ def test_live_inih_type_audit_counts(tmp_path: Path):
     assert c["matched"] == 1
     assert c["tree_sitter_only"] == 0
     assert c["out_of_compile_db_scope"] == 0
+    # Function-pointer typedefs in ini.h (ini_handler, ini_reader) are not
+    # extracted as tree-sitter type_definition entities — honest clang_only.
     assert c["clang_only"] == 2
+    assert {row["name"] for row in report["clang_only"]} == {
+        "ini_handler",
+        "ini_reader",
+    }
+    assert all(row["entity_kind"] == "typedef" for row in report["clang_only"])
     assert c["ambiguous"] == 0
     assert c["macro_location_unsupported"] == 0
     assert c["anonymous_declarations"] == 1
@@ -743,10 +750,11 @@ def test_live_cjson_type_audit_counts():
     assert not any(pkg.rglob("*.o"))
     assert not any(pkg.rglob("*.ast"))
     c = report["counts"]
-    assert c["matched"] == 7
+    # After kind-aware extractor titles: 7 typedefs + 3 named complete structs.
+    assert c["matched"] == 10
     assert c["tree_sitter_only"] == 0
     assert c["out_of_compile_db_scope"] == 0
-    assert c["clang_only"] == 3  # named complete structs without TS struct entity
+    assert c["clang_only"] == 0
     assert c["ambiguous"] == 0
     assert c["macro_location_unsupported"] == 0
     assert c["anonymous_declarations"] == 3
@@ -755,8 +763,14 @@ def test_live_cjson_type_audit_counts():
     matched_names = {m["name"] for m in report["matched"]}
     assert "cJSON" in matched_names
     assert "error" in matched_names
-    clang_only_kinds = {r["entity_kind"] for r in report["clang_only"]}
-    assert clang_only_kinds == {"struct"}
+    matched_structs = {
+        m["name"] for m in report["matched"] if m["entity_kind"] == "struct"
+    }
+    assert matched_structs == {"cJSON", "cJSON_Hooks", "internal_hooks"}
+    matched_typedefs = {
+        m["name"] for m in report["matched"] if m["entity_kind"] == "typedef"
+    }
+    assert "cJSON" in matched_typedefs  # distinct from struct cJSON
 
 
 @pytest.mark.skipif(_cc() is None, reason="no C compiler on PATH")

@@ -143,20 +143,30 @@ explicit skip and the final status says `PASS WITH SKIPS`.
   AST dump per compile entry for this package’s single-entry compile DB). No
   disk AST cache; standalone audit CLIs remain available; confidence
   boundaries and independent manifest blocks are unchanged.
+- **C symbol identity (tree-sitter extractor, kind-aware titles):** within one
+  module key, when `function` / `struct` / `enum` / `typedef` share a bare
+  name, every colliding kind is titled `module_key:entity_kind:name` (no
+  silent title-only winner). Non-colliding symbols keep `module_key:name`.
+  **Source-derived full-graph counts after this correction:** 148 entities /
+  640 relationships / **495** calls (call IDs and function endpoints
+  unchanged). Intentional delta vs historical published full-graph counts
+  (145 / 637 / 495): three named complete struct entities
+  (`cJSON:struct:cJSON`, `cJSON:struct:cJSON_Hooks`,
+  `cJSON:struct:internal_hooks`) plus matching `contains` edges; colliding
+  typedefs use `cJSON:typedef:…` titles. Historical published snapshot rows
+  in the table below remain historical.
 - **Clang AST type-declaration audit (diagnostic only, no graph mutation):**
   `scripts/c_clang_type_audit.py --package examples/cjson` compares package-
   local named complete structs, named complete enums, and typedefs to
   tree-sitter `struct` / `enum` / `typedef` entities. Identity is
   kind + path + name + exact start line/column (never bare title). Measured
-  on this host under the default compile DB (counts may move with
-  toolchain/config): matched=7 (all typedefs), clang_only=3 (named complete
-  structs without a distinct tree-sitter `struct` entity because the
-  extractor collapses same-title struct+typedef to one entity),
+  on this host under the default compile DB after the kind-aware extractor
+  fix: matched=10 (7 typedefs + 3 named complete structs), clang_only=0,
   anonymous_declarations=3, outside_package_declarations=212 (each row keeps
   its resolved outside source path; different headers are not collapsed),
   tree_sitter_only=0, ambiguous=0, macro_location_unsupported=0,
   unsupported_declarations=0, out_of_compile_db_scope=0. **No** `uses_type`
-  edges, type fields, `index_c` flag, or default-graph/manifest change.
+  edges, Clang type fields, `index_c` flag, or overlay.
   `--fail-on-mismatch` fails only on tree_sitter_only / clang_only /
   ambiguous / macro residuals — not on anonymous/outside-package alone.
   Not layout/ABI, type-use analysis, points-to, C++, or multi-config.
@@ -168,9 +178,9 @@ misparses. The audit is clean on the first index — the largest and most
 pointer-heavy C target so far passes the same rails unchanged.
 
 The bootstrap captures the facts that matter for ownership analysis:
-- **Struct graph:** the node struct and the internal buffers are entities. (They
-  appear as `typedef` entities because cJSON uses the `typedef struct {..} T;`
-  idiom; the typedef name is the captured title.)
+- **Struct graph:** named complete structs and typedefs are both entities when
+  they share a C name (kind-qualified titles). Anonymous-struct typedefs
+  (`error` / `parse_buffer` / `printbuffer`) remain typedef-only.
 - **Recursive ownership/traversal:** `cJSON_Delete`, `cJSON_Compare`, and
   `cJSON_Duplicate_rec` are captured as deterministic self-edges — the recursive
   free/compare/duplicate that define cJSON's tree ownership.
@@ -184,15 +194,17 @@ Two figures matter; do not mix them:
 
 | scope | entities | relationships | calls | observations | when to quote |
 |---|---:|---:|---:|---:|---|
-| **Full graph (current)** — library + golden runner including mutation/builder helpers | 145 | 637 | **495** | 144 | live audit, `port_eval` graph stage, `doc_claims` `cjson_graph_calls` |
-| **Library subgraph** — `cJSON.c` / `cJSON.h` only (`cJSON:` titles; cJSON→cJSON calls) | 125 | — | **188** | — | ownership/API claims about the ported library itself |
+| **Full graph (source-derived, kind-aware titles)** — library + golden runner | **148** | **640** | **495** | 144 | live extract/`build_c_byog`, type audit, post-identity-fix claims |
+| **Full graph (historical published snapshot `20260726-040744-fcee0a70`)** | 145 | 637 | **495** | 144 | frozen snapshot identity; do not rewrite |
+| **Library subgraph** — `cJSON.c` / `cJSON.h` only (cJSON→cJSON calls) | — | — | **188** | — | ownership/API claims about the ported library itself |
 | **Pre-mutation-runner snapshot** (historical; e.g. `20260625-123603` / provenance-stamped `20260726-030425`) | 131 | 367 | **239** | 125 | bootstrap and pre-mutation evidence; ownership slice before mutation traces landed |
 
-The published current graph co-indexes `tests/parse/runner.c` the same way `jsmn`/`inih` do, now including the mutation-scenario helpers:
-- Entity mix: 135 functions (116 library + 19 runner), 7 typedefs (`cJSON`,
-  `cJSON_Hooks`, `cJSON_bool`, `parse_buffer`, `printbuffer`, `internal_hooks`,
-  `error`), 3 files (cJSON.c, cJSON.h, runner.c).
-- Relationship mix: 495 `calls`, 142 `contains`.
+The source-derived full graph co-indexes `tests/parse/runner.c` the same way `jsmn`/`inih` do, now including the mutation-scenario helpers:
+- Entity mix: 135 functions (116 library + 19 runner), 10 type entities
+  (7 typedefs + 3 named complete structs with kind-qualified titles where they
+  collide with same-name typedefs), 3 files (cJSON.c, cJSON.h, runner.c).
+- Relationship mix: 495 `calls`, 145 `contains` (historical published snapshot
+  had 142 `contains` before the three struct entities).
 - `audit_call_edges`: 495 calls, structural pass rate 1.0, 0 anomalies,
   0 dangling targets, 0 semantic suspicions.
 - Of the 495 calls, 188 are library-internal (cJSON→cJSON) and 307 have a

@@ -71,10 +71,16 @@ Context packs for `ini:ini_parse_stream` now surface a top-level
 ## Verified graph result (`byog_inih`, snapshot `20260726-030424-9e3862f6`)
 The published graph now also contains the co-located golden runner
 (`tests/parse/runner.c`) as package code, the same way `jsmn` indexes its runner:
-- 19 entities, 54 relationships, 19 text units, 35 call observations.
+- **Source-derived and historical published counts remain 19 entities, 54
+  relationships, 19 text units, 35 call observations** (no cross-kind
+  title collision in this package; function call IDs unchanged).
 - Entity mix: 15 functions (10 library + 5 runner), 3 files, 1 typedef
   (`ini_parse_string_ctx`).
 - Relationship mix: 38 `calls`, 16 `contains`.
+- **Type-declaration audit residual (measured):** `clang_only=2` are the
+  header function-pointer typedefs `ini_handler` / `ini_reader` in `ini.h`
+  (not extracted as tree-sitter `type_definition` entities) — not silent
+  struct/typedef title collapse.
 - `audit_call_edges`: 38 calls, structural pass rate 1.0, 0 anomalies,
   0 dangling targets, 0 semantic suspicions.
 - The **library** subgraph (ini.c/ini.h) is 13 entities and 17 deterministic

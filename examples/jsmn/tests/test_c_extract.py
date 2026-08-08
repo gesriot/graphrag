@@ -28,8 +28,10 @@ def test_jsmn_functions_and_call_graph():
         "jsmn:jsmn_parse_primitive",
     ):
         assert fn in titles, f"missing function entity {fn}"
-    # structs/enums extracted
-    assert "jsmn:jsmn_parser" in titles
+    # structs/enums extracted; jsmn_parser collides with same-name typedef so
+    # both kinds use kind-qualified titles.
+    assert "jsmn:struct:jsmn_parser" in titles
+    assert "jsmn:typedef:jsmn_parser" in titles
     assert "jsmn:jsmnerr" in titles
 
     calls = {

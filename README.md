@@ -143,3 +143,11 @@ All three CLIs remain available (each captures once internally). They are
 **Clang only** (`cc` accepted only when `--version` proves Clang/Apple Clang).
 None is points-to analysis, layout/ABI proof, multi-config coverage, or
 production C/C++ completeness.
+
+**C symbol identity (tree-sitter extractor):** within one collision-safe module
+key, when two or more of `function` / `struct` / `enum` / `typedef` share a
+bare C name, every colliding kind uses the qualified title
+`module_key:entity_kind:name` (for example `cJSON:struct:cJSON` and
+`cJSON:typedef:cJSON`). Non-colliding symbols keep the legacy
+`module_key:name`. This is a deterministic extractor correction for silent
+title-only collapse — not a Clang overlay and not a `uses_type` graph.

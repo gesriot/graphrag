@@ -14,23 +14,34 @@ the eventual route for macro/include/type accuracy. This bootstrap stays
 conservative: only calls whose callee is a function defined in the package become
 deterministic CALLS edges. Same-file definitions win when duplicate C function
 names exist; otherwise ambiguous or external calls stay observations.
+
+Symbol identity
+---------------
+Within one collision-safe module key, declarations collide when they share a
+bare C name but differ in graph entity kind among function/struct/enum/typedef.
+Non-colliding symbols keep the legacy title ``module_key:name``. Colliding
+kinds all use ``module_key:entity_kind:name`` (no silent title-only winner).
+Same-kind redeclarations are deduplicated by ``(module_key, kind, name)``.
 """
 
 from __future__ import annotations
 
 import hashlib
 import re
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from tree_sitter import Language, Node, Parser  # type: ignore
 import tree_sitter_c as tsc  # type: ignore
 
 from c_identities import (  # type: ignore
     build_module_key_map,
+    build_symbol_title_map,
+    contains_relationship_id,
     file_entity_title,
     list_indexed_c_files,
-    symbol_entity_title,
+    module_name_is_cross_kind_collision,
 )
 
 _LANG = Language(tsc.language())
@@ -218,37 +229,125 @@ def _named_type(node: Node) -> Optional[str]:
     return None
 
 
+@dataclass(frozen=True)
+class _SymbolCandidate:
+    """One discovered symbol declaration before title assignment."""
+
+    module_key: str
+    entity_kind: str
+    name: str
+    node: Node
+
+
+def _discover_symbol_candidates(
+    root: Node,
+    *,
+    module_key: str,
+) -> List[_SymbolCandidate]:
+    """Walk one TU AST and collect symbol candidates (no title assignment)."""
+    out: List[_SymbolCandidate] = []
+    for n in _walk(root):
+        name: Optional[str] = None
+        etype: Optional[str] = None
+        if n.type == "function_definition":
+            nm = _func_name(n)
+            if nm:
+                name, etype = nm, "function"
+        elif n.type == "struct_specifier":
+            nm = _named_type(n)
+            if nm:
+                name, etype = nm, "struct"
+        elif n.type == "enum_specifier":
+            nm = _named_type(n)
+            if nm:
+                name, etype = nm, "enum"
+        elif n.type == "type_definition":
+            td = [c for c in n.children if c.type == "type_identifier"]
+            if td:
+                nm = td[-1].text.decode()
+                if nm and nm not in _C_KEYWORDS:
+                    name, etype = nm, "typedef"
+        if name is None or etype is None:
+            continue
+        out.append(
+            _SymbolCandidate(
+                module_key=module_key,
+                entity_kind=etype,
+                name=name,
+                node=n,
+            )
+        )
+    return out
+
+
 def build_c_byog(package_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
     package_dir = Path(package_dir).resolve()
-    files = list_indexed_c_files(package_dir)
+    # Do not rely on the discovery helper's current ordering contract here:
+    # emission order affects human-readable IDs and same-kind representative
+    # selection, so make that order explicit at the extraction boundary.
+    files = sorted(
+        list_indexed_c_files(package_dir),
+        # Path's historical ordering is component-wise, which intentionally
+        # puts ``tests/parse/runner.c`` before the sibling ``tests.c``.
+        key=lambda path: path.relative_to(package_dir).parts,
+    )
     module_keys = build_module_key_map(package_dir, files)
     parser = _parser()
-    parsed = []
-    defined_funcs: Dict[str, List[str]] = {}  # bare name -> [module_key:name, ...]
+    parsed: List[Tuple[Path, bytes, Any, str, List[_SymbolCandidate]]] = []
 
-    # Pass 1: parse + collect package-wide function definitions.
+    # Pass 1: parse every file and pre-scan symbol candidates so cross-kind
+    # title qualification is complete before any entity is emitted.
+    all_candidates: List[_SymbolCandidate] = []
     for path in files:
         src = path.read_bytes()
         tree = parser.parse(src)
         module_key = module_keys[path]
-        for fn in _collect_functions(tree.root_node):
-            name = _func_name(fn)
-            if name:
-                title = symbol_entity_title(module_key, name)
-                defined_funcs.setdefault(name, [])
-                if title not in defined_funcs[name]:
-                    defined_funcs[name].append(title)
-        parsed.append((path, src, tree, module_key))
+        candidates = _discover_symbol_candidates(
+            tree.root_node,
+            module_key=module_key,
+        )
+        all_candidates.extend(candidates)
+        parsed.append((path, src, tree, module_key, candidates))
+
+    # Unique (module_key, kind, name) keys for the title map only.
+    unique_keys = sorted(
+        {
+            (c.module_key, c.entity_kind, c.name)
+            for c in all_candidates
+        }
+    )
+    title_map = build_symbol_title_map(unique_keys)
+
+    # Package-wide function titles for call resolution (bare name -> titles).
+    defined_funcs: Dict[str, List[str]] = {}
+    for module_key, entity_kind, name in unique_keys:
+        if entity_kind != "function":
+            continue
+        title = title_map[(module_key, "function", name)]
+        defined_funcs.setdefault(name, [])
+        if title not in defined_funcs[name]:
+            defined_funcs[name].append(title)
+    for name in defined_funcs:
+        defined_funcs[name] = sorted(defined_funcs[name])
 
     entities: List[Dict[str, Any]] = []
     relationships: List[Dict[str, Any]] = []
     text_units: List[Dict[str, Any]] = []
     observations: List[Dict[str, Any]] = []
     hid = 0
+    # Same-kind dedup uses the semantic key, never the rendered title alone.
+    seen_symbol_keys: Set[Tuple[str, str, str]] = set()
 
     def add_entity(
-        title: str, etype: str, node: Node, src: bytes, path: Path, module_key: str
-    ):
+        title: str,
+        etype: str,
+        node: Node,
+        src: bytes,
+        path: Path,
+        module_key: str,
+        *,
+        symbol_name: Optional[str] = None,
+    ) -> str:
         nonlocal hid
         hid += 1
         # Entity id embeds the full title (not a lossy slug) so punctuation in
@@ -260,7 +359,7 @@ def build_c_byog(package_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
         tu_id = f"tu:{module_key}:{_slug(title)}"
         doc_id = f"doc:{module_key}"
         snippet = _text(src, node)
-        entities.append({
+        ent: Dict[str, Any] = {
             "id": ent_id,
             "title": title,
             "type": etype,
@@ -275,7 +374,11 @@ def build_c_byog(package_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
             "is_deterministic": True,
             "document_ids": [doc_id],
             "covariate_ids": [],
-        })
+        }
+        if symbol_name is not None:
+            # Authoritative bare C name; do not re-parse rendered titles.
+            ent["symbol_name"] = symbol_name
+        entities.append(ent)
         text_units.append({
             "id": tu_id,
             "human_readable_id": hid,
@@ -297,12 +400,23 @@ def build_c_byog(package_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
     rid = 0
 
     def add_contains(
-        file_id: str, target_title: str, module_key: str, name: str
-    ):
+        file_id: str,
+        target_title: str,
+        module_key: str,
+        name: str,
+        *,
+        entity_kind: str,
+        cross_kind_collision: bool,
+    ) -> None:
         nonlocal rid
         rid += 1
         relationships.append({
-            "id": f"rel:contains:{module_key}:{name}",
+            "id": contains_relationship_id(
+                module_key,
+                name,
+                entity_kind=entity_kind,
+                cross_kind_collision=cross_kind_collision,
+            ),
             "source": file_id,
             "target": target_title,
             "type": "contains",
@@ -319,44 +433,57 @@ def build_c_byog(package_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
             "covariate_ids": [],
         })
 
-    # Pass 2: entities + calls per file.
-    for path, src, tree, module_key in parsed:
+    # Pass 2: emit entities in historical file + AST walk order so non-colliding
+    # packages keep stable human_readable_id sequences and relationship order.
+    for path, src, tree, module_key, candidates in parsed:
         file_title = file_entity_title(path, module_key)
         file_id = add_entity(
             file_title, "file", tree.root_node, src, path, module_key
         )
 
-        seen_titles: set[str] = set()
-        for n in _walk(tree.root_node):
-            title = etype = name = None
-            if n.type == "function_definition":
-                nm = _func_name(n)
-                if nm:
-                    name, etype, title = nm, "function", symbol_entity_title(module_key, nm)
-            elif n.type == "struct_specifier":
-                nm = _named_type(n)
-                if nm:
-                    name, etype, title = nm, "struct", symbol_entity_title(module_key, nm)
-            elif n.type == "enum_specifier":
-                nm = _named_type(n)
-                if nm:
-                    name, etype, title = nm, "enum", symbol_entity_title(module_key, nm)
-            elif n.type == "type_definition":
-                td = [c for c in n.children if c.type == "type_identifier"]
-                if td:
-                    nm = td[-1].text.decode()
-                    name, etype, title = nm, "typedef", symbol_entity_title(module_key, nm)
-            if title and title not in seen_titles:
-                seen_titles.add(title)
-                add_entity(title, etype, n, src, path, module_key)
-                add_contains(file_id, title, module_key, name)
+        # Reuse the exact pass-1 discoveries. Keeping one recognition path is
+        # important because title qualification was computed from this set.
+        for candidate in candidates:
+            name = candidate.name
+            etype = candidate.entity_kind
+            n = candidate.node
+            sem_key = (module_key, etype, name)
+            if sem_key in seen_symbol_keys:
+                continue
+            if sem_key not in title_map:
+                raise ValueError(f"missing C symbol title for {sem_key!r}")
+            seen_symbol_keys.add(sem_key)
+            title = title_map[sem_key]
+            colliding = module_name_is_cross_kind_collision(
+                title_map, module_key, name
+            )
+            add_entity(
+                title,
+                etype,
+                n,
+                src,
+                path,
+                module_key,
+                symbol_name=name,
+            )
+            add_contains(
+                file_id,
+                title,
+                module_key,
+                name,
+                entity_kind=etype,
+                cross_kind_collision=colliding,
+            )
 
         # calls: attribute each call_expression to its enclosing function.
         for fn in _collect_functions(tree.root_node):
             caller = _func_name(fn)
             if not caller:
                 continue
-            caller_title = symbol_entity_title(module_key, caller)
+            caller_key = (module_key, "function", caller)
+            if caller_key not in title_map:
+                continue
+            caller_title = title_map[caller_key]
             for n in _walk(fn):
                 if n.type != "call_expression":
                     continue
@@ -365,9 +492,10 @@ def build_c_byog(package_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
                     continue  # function-pointer / member calls: out of bootstrap scope
                 callee = callee_node.text.decode()
                 candidates = defined_funcs.get(callee, [])
-                same_file_candidate = symbol_entity_title(module_key, callee)
+                same_file_key = (module_key, "function", callee)
+                same_file_candidate = title_map.get(same_file_key)
                 resolved_target = None
-                if same_file_candidate in candidates:
+                if same_file_candidate is not None and same_file_candidate in candidates:
                     resolved_target = same_file_candidate
                 elif len(candidates) == 1:
                     resolved_target = candidates[0]
@@ -410,6 +538,35 @@ def build_c_byog(package_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
                     })
 
     _disambiguate_duplicate_relationship_ids(relationships)
+
+    # Uniqueness invariants (fail closed rather than publish ambiguous IDs).
+    for field_name, values in (
+        ("entity id", [e["id"] for e in entities]),
+        ("entity title", [e["title"] for e in entities]),
+        ("text-unit id", [t["id"] for t in text_units]),
+        ("relationship id", [r["id"] for r in relationships]),
+    ):
+        if len(values) != len(set(values)):
+            dupes = sorted({v for v in values if values.count(v) > 1})[:5]
+            raise ValueError(f"duplicate C {field_name}s after extraction: {dupes}")
+
+    title_set = {e["title"] for e in entities}
+    id_set = {e["id"] for e in entities}
+    for rel in relationships:
+        src, tgt = str(rel.get("source")), str(rel.get("target"))
+        if rel.get("type") == "contains":
+            # Historical shape: contains.source is the file entity id.
+            if src not in id_set or tgt not in title_set:
+                raise ValueError(
+                    f"C contains relationship {rel.get('id')!r} has non-resolving "
+                    f"endpoints {src!r} -> {tgt!r}"
+                )
+        elif src not in title_set or tgt not in title_set:
+            raise ValueError(
+                f"C relationship {rel.get('id')!r} has non-resolving endpoints "
+                f"{src!r} -> {tgt!r}"
+            )
+
     data = {
         "entities": entities,
         "relationships": relationships,

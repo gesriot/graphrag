@@ -674,7 +674,12 @@ def collect_tree_sitter_types(package_dir: Path) -> List[TreeSitterTypeEntity]:
         if etype not in {"struct", "enum", "typedef"}:
             continue
         title = str(e.get("title") or "")
-        name = title.rsplit(":", 1)[-1] if title else ""
+        # Prefer authoritative symbol_name; never re-parse qualified titles alone.
+        raw_name = e.get("symbol_name")
+        if isinstance(raw_name, str) and raw_name.strip():
+            name = raw_name.strip()
+        else:
+            name = title.rsplit(":", 1)[-1] if title else ""
         sf = str(e.get("source_file") or "")
         try:
             p = Path(sf)
