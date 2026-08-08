@@ -34,6 +34,34 @@ We extend with code-specific columns (present on both entities and relationships
 - defines
 - tests (test entity → symbol under test)
 
+### Optional C compiler TU dependency overlay (`depends_on`)
+
+When `scripts/index_c.py --compiler-dependencies` is enabled (default **off**),
+the tree-sitter-c graph gains flattened file→file `depends_on` edges from each
+`compile_commands.json` translation unit to package-local `.c`/`.h` paths the
+configured compiler reports under dependency-generation mode (`-M`, followed
+by strict package-path filtering so package-local `-isystem` headers remain
+visible while system/outside-package paths do not).
+
+| Field | Value |
+| --- | --- |
+| `type` | `depends_on` (never `includes`) |
+| `source` / `target` | Existing file-entity titles from `extract_c` (`{stem}:{filename}`) |
+| `fact_kind` | `translation_unit_dependency` |
+| `extractor` | `c-compiler-deps` |
+| `confidence` / `is_deterministic` | `1.0` / `true` **only** relative to the recorded toolchain + `compile_commands.json` (not pure syntax, not a direct `#include` claim) |
+| Provenance | `compiler_path`, `compiler_id`, `compile_commands_digest` |
+| Description | States that the edge is compiler/configuration-derived and may be transitive |
+
+**Out of scope for this overlay:** clang AST type resolution, direct-include
+provenance, multi-config coverage, system/outside-package headers, and
+production C/C++ completeness. Default indexing leaves published graph counts
+unchanged (overlay off). Snapshot manifests record a `compiler_dependencies`
+block (`mode`, compiler identity, configuration digest, fact count, TU count).
+The adapter currently supports GNU/Clang dependency flags on `clang`, `cc`, or
+`gcc` entries; compiler wrappers, response-file expansion, and MSVC are outside
+this increment and fail rather than silently selecting another toolchain.
+
 ## Example Row (entities)
 ```json
 {

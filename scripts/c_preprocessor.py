@@ -1542,6 +1542,149 @@ def _load_compile_command_entries(package_dir: Path) -> List[Dict[str, Any]]:
     return entries if isinstance(entries, list) else []
 
 
+def resolve_compile_entry_cwd(entry: Dict[str, Any], package_dir: Path) -> Path:
+    """Resolve the working directory for one compile_commands entry.
+
+    Absolute paths are preserved so a missing recorded directory fails at the
+    compiler boundary rather than silently running elsewhere. Relative paths
+    are tried from the process CWD and from ``package_dir``; repo-relative
+    entries whose suffix names ``package_dir`` resolve to the package itself.
+    """
+    directory = entry.get("directory") or str(package_dir)
+    cwd_raw = Path(directory)
+    package_dir = Path(package_dir).resolve()
+    if cwd_raw.is_absolute():
+        return cwd_raw.resolve()
+    if cwd_raw.exists():
+        return cwd_raw.resolve()
+    package_relative = (package_dir / cwd_raw).resolve()
+    if package_relative.exists():
+        return package_relative
+    parts = cwd_raw.parts
+    if parts and tuple(package_dir.parts[-len(parts) :]) == parts:
+        return package_dir
+    # The checked-in compile databases use repo-relative package paths. If the
+    # repository CWD is unavailable, the package root is their honest fallback.
+    return package_dir
+
+
+def compile_entry_argv(entry: Dict[str, Any]) -> List[str]:
+    """Return the complete compile argv, preferring the structured form."""
+    import shlex
+
+    arguments = entry.get("arguments")
+    if isinstance(arguments, list) and arguments:
+        return [str(a) for a in arguments]
+    raw_cmd = entry.get("command") or ""
+    return shlex.split(str(raw_cmd)) if raw_cmd else []
+
+
+def split_compile_entry_args(entry: Dict[str, Any]) -> List[str]:
+    """Return compile argv tokens without the original compiler token.
+
+    Prefers ``arguments`` when present; otherwise ``shlex.split``s ``command``.
+    """
+    args = compile_entry_argv(entry)
+    # Drop the original compiler token; callers rebuild with their mode flag.
+    if args and not args[0].startswith("-"):
+        args = args[1:]
+    return args
+
+
+def resolve_compile_entry_source(
+    entry: Dict[str, Any], *, cwd: Path, package_dir: Path
+) -> Path:
+    """Resolve the primary source path for one compile_commands entry."""
+    src = entry.get("file") or ""
+    src_path = Path(str(src))
+    if src_path.is_absolute():
+        return src_path.resolve()
+    cand = (cwd / src_path).resolve()
+    if not cand.exists():
+        cand = (package_dir / Path(str(src)).name).resolve()
+    return cand
+
+
+def strip_compile_output_flags(args: Sequence[str]) -> List[str]:
+    """Drop compile/output flags so dependency or -E modes do not write objects.
+
+    Removes ``-c`` / ``-S`` / ``-E`` / ``-fsyntax-only``, ``-o`` outputs, and
+    existing dependency-generation flags (``-M*`` / ``-MF`` / ``-MT`` / ``-MQ``)
+    so callers can attach a single clean mode without clashing.
+    """
+    drop_flags = {
+        "-c",
+        "-S",
+        "-E",
+        "-fsyntax-only",
+        "-M",
+        "-MM",
+        "-MD",
+        "-MMD",
+        "-MG",
+        "-MP",
+        "-save-temps",
+    }
+    drop_with_arg = {
+        "-o",
+        "-MF",
+        "-MT",
+        "-MQ",
+        "-MJ",
+        "--output",
+        "--dependency-file",
+    }
+    cleaned: List[str] = []
+    i = 0
+    args_list = list(args)
+    while i < len(args_list):
+        a = args_list[i]
+        if a in drop_flags:
+            i += 1
+            continue
+        if a in drop_with_arg:
+            i += 2  # skip flag and its argument
+            continue
+        if a.startswith("-o") and a != "-o":
+            i += 1
+            continue
+        if any(a.startswith(prefix) and a != prefix for prefix in ("-MF", "-MT", "-MQ", "-MJ")):
+            i += 1
+            continue
+        if a.startswith(("--output=", "--dependency-file=", "-Wp,-M")):
+            i += 1
+            continue
+        if a.startswith("-save-temps="):
+            i += 1
+            continue
+        cleaned.append(a)
+        i += 1
+    return cleaned
+
+
+def ensure_source_on_argv(
+    cleaned: Sequence[str], src_path: Path, cwd: Path
+) -> List[str]:
+    """Append the primary source if the cleaned argv does not already name it."""
+    cleaned_list = list(cleaned)
+    src_path = src_path.resolve()
+
+    def names_source(arg: str) -> bool:
+        if arg.startswith("-"):
+            return False
+        candidate = Path(arg)
+        if not candidate.is_absolute():
+            candidate = cwd / candidate
+        return candidate.resolve() == src_path
+
+    if not any(names_source(arg) for arg in cleaned_list):
+        if (cwd / src_path.name).exists():
+            cleaned_list.append(src_path.name)
+        else:
+            cleaned_list.append(str(src_path))
+    return cleaned_list
+
+
 def preprocess_command_from_entry(
     entry: Dict[str, Any], *, compiler: str, package_dir: Path
 ) -> Tuple[Path, List[str], Path]:
@@ -1549,63 +1692,13 @@ def preprocess_command_from_entry(
 
     Returns (cwd, argv, primary_source).
     """
-    directory = entry.get("directory") or str(package_dir)
-    cwd_raw = Path(directory)
-    if cwd_raw.is_absolute() and cwd_raw.exists():
-        cwd = cwd_raw.resolve()
-    elif cwd_raw.exists():
-        cwd = cwd_raw.resolve()
-    else:
-        # compile_commands in this repo use repo-relative dirs; callers pass
-        # package_dir as the package root — fall back to it.
-        cwd = package_dir.resolve()
-
-    raw_cmd = entry.get("command") or ""
-    if not raw_cmd and entry.get("arguments"):
-        args = [str(a) for a in entry["arguments"]]
-    else:
-        import shlex
-
-        args = shlex.split(raw_cmd)
-
-    # Drop the original compiler token; rebuild with -E.
-    if args and not args[0].startswith("-"):
-        args = args[1:]
-
-    cleaned: List[str] = []
-    drop_flags = {"-c", "-fsyntax-only"}
-    i = 0
-    while i < len(args):
-        a = args[i]
-        if a in drop_flags:
-            i += 1
-            continue
-        if a == "-o":
-            i += 2  # skip -o and its argument
-            continue
-        if a.startswith("-o") and a != "-o":
-            i += 1
-            continue
-        cleaned.append(a)
-        i += 1
-
-    src = entry.get("file") or ""
-    src_path = Path(src)
-    if not src_path.is_absolute():
-        cand = (cwd / src_path).resolve()
-        if not cand.exists():
-            cand = (package_dir / Path(src).name).resolve()
-        src_path = cand
-
+    cwd = resolve_compile_entry_cwd(entry, package_dir)
+    cleaned = strip_compile_output_flags(split_compile_entry_args(entry))
+    src_path = resolve_compile_entry_source(
+        entry, cwd=cwd, package_dir=package_dir
+    )
+    cleaned = ensure_source_on_argv(cleaned, src_path, cwd)
     argv = [compiler, "-E", *cleaned]
-    # Ensure the source path is present (some entries only list it as "file").
-    joined = " ".join(cleaned)
-    if src_path.name not in joined and str(src_path) not in cleaned:
-        if (cwd / src_path.name).exists():
-            argv.append(src_path.name)
-        else:
-            argv.append(str(src_path))
-
     return cwd, argv, src_path
 
 

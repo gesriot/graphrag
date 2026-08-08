@@ -9,6 +9,10 @@ Preprocessor liveness defaults to **no_compiler** (host-independent). Pass
 ``--compiler-builtins`` for local host-specific analysis; the snapshot manifest
 then records the toolchain identity and macro-seed digest.
 
+Optional ``--compiler-dependencies`` overlays flattened compiler-backed
+translation-unit ``depends_on`` edges from ``compile_commands.json`` (default
+off; published graph counts stay tree-sitter-only).
+
 Usage:
     uv run python scripts/index_c.py --package examples/jsmn --graph byog_jsmn
 """
@@ -24,10 +28,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from extract_c import build_c_byog  # type: ignore
 from byog_graph import publish_byog_snapshot  # type: ignore
+from c_compiler_facts import (  # type: ignore
+    CompilerDependencyError,
+    append_compiler_dependencies,
+    build_disabled_provenance,
+)
 from c_preprocessor import (  # type: ignore
     ToolchainDriftError,
     annotate_byog,
-    build_liveness_provenance,
     check_liveness_stamp_freshness,
 )
 
@@ -48,6 +56,17 @@ def main(
             "Seed liveness from the host toolchain (compiler -E -dM). "
             "Default is off: published labels are host-independent (no_compiler). "
             "When on, the snapshot manifest records compiler id + macro-seed digest."
+        ),
+    ),
+    compiler_dependencies: bool = typer.Option(
+        False,
+        "--compiler-dependencies/--no-compiler-dependencies",
+        help=(
+            "Overlay flattened compiler-backed translation-unit depends_on edges "
+            "from compile_commands.json (compiler -M, then package-path filtering). "
+            "Default is off so published "
+            "tree-sitter-c graph counts stay unchanged. When on, missing "
+            "compile_commands.json or a broken compiler fails explicitly."
         ),
     ),
     allow_toolchain_drift: bool = typer.Option(
@@ -106,6 +125,16 @@ def main(
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from e
 
+    # Optional compiler TU dependency overlay (default off).
+    if compiler_dependencies:
+        try:
+            dep_prov = append_compiler_dependencies(data, pkg_dir)
+        except CompilerDependencyError as e:
+            typer.secho(str(e), fg=typer.colors.RED, err=True)
+            raise typer.Exit(2) from e
+    else:
+        dep_prov = build_disabled_provenance()
+
     ents_df = pd.DataFrame(data["entities"])
     rels_df = pd.DataFrame(data["relationships"])
     tus_df = pd.DataFrame(data["text_units"])
@@ -125,7 +154,19 @@ def main(
         f"digest={summary.get('liveness_provenance', {}).get('macro_seed_digest')} "
         f"host_independent={summary.get('liveness_provenance', {}).get('host_independent')}"
     )
-    extra = {"preprocessor_liveness": summary.get("liveness_provenance")}
+    if dep_prov.get("enabled"):
+        print(
+            f"  Compiler depends_on: facts={dep_prov.get('n_facts')} "
+            f"TUs={dep_prov.get('n_translation_units')} "
+            f"digest={dep_prov.get('compile_commands_digest')} "
+            f"compiler={dep_prov.get('compiler_id')}"
+        )
+    else:
+        print("  Compiler depends_on: off (default tree-sitter-c graph)")
+    extra = {
+        "preprocessor_liveness": summary.get("liveness_provenance"),
+        "compiler_dependencies": dep_prov,
+    }
     snap_dir = publish_byog_snapshot(
         ents_df, rels_df, tus_df, graph_dir, SETTINGS,
         keep_last=keep_snapshots, source_root=pkg_dir,

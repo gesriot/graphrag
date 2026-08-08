@@ -72,8 +72,16 @@ explicit skip and the final status says `PASS WITH SKIPS`.
 
 ## Compile metadata
 - `compile_commands.json` records the default build: `cc -c -I. cJSON.c`.
-- The current extractor is tree-sitter-c only; clang/compile-database semantic
-  facts remain a later Phase 6 layer.
+- The published extractor path is tree-sitter-c only. An **optional** compiler
+  overlay (`scripts/index_c.py --compiler-dependencies`, default **off**) can
+  add flattened `depends_on` edges from each compile-database translation unit
+  to package-local headers the recorded toolchain reports (`compiler -M`, then
+  package-path filtering). That is one configured TU-dependency layer — not
+  clang AST types, not direct-include provenance, not multi-config coverage,
+  and not production C/C++ completeness.
+  When enabled, missing `compile_commands.json` or a broken compiler fails
+  explicitly; compiler wrappers, response files, and MSVC are unsupported, and
+  the default off path keeps published graph counts unchanged.
 
 ## C frontend result — clean on the first pass
 Unlike `inih`, cJSON does not fragment function bodies with `#if`/`#endif`, so the

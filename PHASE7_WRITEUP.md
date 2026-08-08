@@ -157,7 +157,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`556 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`574 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 **Live re-check (2026-07-26):** `538 passed, 2 xfailed`.
