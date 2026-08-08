@@ -18,12 +18,20 @@ names exist; otherwise ambiguous or external calls stay observations.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from tree_sitter import Language, Node, Parser  # type: ignore
 import tree_sitter_c as tsc  # type: ignore
+
+from c_identities import (  # type: ignore
+    build_module_key_map,
+    file_entity_title,
+    list_indexed_c_files,
+    symbol_entity_title,
+)
 
 _LANG = Language(tsc.language())
 
@@ -110,7 +118,56 @@ def _span(node: Node) -> str:
 
 
 def _slug(title: str) -> str:
+    """Lossy display token; never the sole unique id component for new keys."""
     return re.sub(r"[^0-9A-Za-z_.]", "_", title)
+
+
+def _call_rel_id(
+    module_key: str, caller: str, callee: str, line: int, col: int
+) -> str:
+    """Call relationship id; preserve legacy shape when module_key has no '/'."""
+    # Legacy packages use stem-only keys and the historical bare-name form.
+    # Disambiguated keys (package-relative paths) embed the module key so two
+    # util.c files cannot emit the same relationship id.
+    if "/" in module_key:
+        return f"rel:call:{module_key}:{caller}:{callee}:{line}:{col}"
+    return f"rel:call:{caller}:{callee}:{line}:{col}"
+
+
+def _disambiguate_duplicate_relationship_ids(
+    relationships: List[Dict[str, Any]],
+) -> None:
+    """Keep legacy IDs when unique; add stable endpoint digests on collision."""
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for relationship in relationships:
+        grouped.setdefault(str(relationship.get("id", "")), []).append(
+            relationship
+        )
+
+    for base_id, rows in grouped.items():
+        if len(rows) < 2:
+            continue
+        for relationship in rows:
+            # Deliberately exclude source_file so IDs are checkout-path independent.
+            material = "\0".join(
+                str(relationship.get(field, ""))
+                for field in ("type", "source", "target", "span", "extractor")
+            )
+            digest = hashlib.sha256(material.encode("utf-8")).hexdigest()[:12]
+            relationship["id"] = f"{base_id}:{digest}"
+
+    remaining: Dict[str, int] = {}
+    for relationship in relationships:
+        rel_id = str(relationship.get("id", ""))
+        remaining[rel_id] = remaining.get(rel_id, 0) + 1
+    duplicates = sorted(
+        rel_id for rel_id, count in remaining.items() if count > 1
+    )
+    if duplicates:
+        raise ValueError(
+            "C relationship IDs remain ambiguous after disambiguation: "
+            f"{duplicates[:5]}"
+        )
 
 
 def _declarator_name(decl: Node) -> Optional[str]:
@@ -162,27 +219,26 @@ def _named_type(node: Node) -> Optional[str]:
 
 
 def build_c_byog(package_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
-    package_dir = Path(package_dir)
-    files = sorted(
-        p for p in package_dir.rglob("*") if p.suffix in (".c", ".h") and p.is_file()
-    )
+    package_dir = Path(package_dir).resolve()
+    files = list_indexed_c_files(package_dir)
+    module_keys = build_module_key_map(package_dir, files)
     parser = _parser()
     parsed = []
-    defined_funcs: Dict[str, List[str]] = {}  # name -> ["stem:name", ...]
+    defined_funcs: Dict[str, List[str]] = {}  # bare name -> [module_key:name, ...]
 
     # Pass 1: parse + collect package-wide function definitions.
     for path in files:
         src = path.read_bytes()
         tree = parser.parse(src)
-        stem = path.stem
+        module_key = module_keys[path]
         for fn in _collect_functions(tree.root_node):
             name = _func_name(fn)
             if name:
-                title = f"{stem}:{name}"
+                title = symbol_entity_title(module_key, name)
                 defined_funcs.setdefault(name, [])
                 if title not in defined_funcs[name]:
                     defined_funcs[name].append(title)
-        parsed.append((path, src, tree, stem))
+        parsed.append((path, src, tree, module_key))
 
     entities: List[Dict[str, Any]] = []
     relationships: List[Dict[str, Any]] = []
@@ -190,11 +246,19 @@ def build_c_byog(package_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
     observations: List[Dict[str, Any]] = []
     hid = 0
 
-    def add_entity(title: str, etype: str, node: Node, src: bytes, path: Path, stem: str):
+    def add_entity(
+        title: str, etype: str, node: Node, src: bytes, path: Path, module_key: str
+    ):
         nonlocal hid
         hid += 1
+        # Entity id embeds the full title (not a lossy slug) so punctuation in
+        # disambiguated module keys cannot collapse distinct entities.
         ent_id = f"ent:{etype}:{title}"
-        tu_id = f"tu:{stem}:{_slug(title)}"
+        # Text-unit id keeps the historical shape for stem-only keys. The
+        # module_key prefix is not slugged, so path-disambiguated keys stay unique
+        # even when _slug(title) would otherwise collide.
+        tu_id = f"tu:{module_key}:{_slug(title)}"
+        doc_id = f"doc:{module_key}"
         snippet = _text(src, node)
         entities.append({
             "id": ent_id,
@@ -209,7 +273,7 @@ def build_c_byog(package_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
             "extractor": "tree-sitter-c",
             "confidence": 1.0,
             "is_deterministic": True,
-            "document_ids": [f"doc:{stem}"],
+            "document_ids": [doc_id],
             "covariate_ids": [],
         })
         text_units.append({
@@ -217,8 +281,8 @@ def build_c_byog(package_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
             "human_readable_id": hid,
             "text": snippet,
             "n_tokens": max(1, len(snippet.split())),
-            "document_id": f"doc:{stem}",
-            "document_ids": [f"doc:{stem}"],
+            "document_id": doc_id,
+            "document_ids": [doc_id],
             "entity_ids": [ent_id],
             "relationship_ids": [],
             "covariate_ids": [],
@@ -232,15 +296,17 @@ def build_c_byog(package_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
 
     rid = 0
 
-    def add_contains(file_id: str, target_title: str, stem: str, name: str):
+    def add_contains(
+        file_id: str, target_title: str, module_key: str, name: str
+    ):
         nonlocal rid
         rid += 1
         relationships.append({
-            "id": f"rel:contains:{stem}:{name}",
+            "id": f"rel:contains:{module_key}:{name}",
             "source": file_id,
             "target": target_title,
             "type": "contains",
-            "description": f"{stem} contains {name}",
+            "description": f"{module_key} contains {name}",
             "weight": 1.0,
             "text_unit_ids": [],
             "human_readable_id": rid,
@@ -249,14 +315,16 @@ def build_c_byog(package_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
             "extractor": "tree-sitter-c",
             "confidence": 1.0,
             "is_deterministic": True,
-            "document_ids": [f"doc:{stem}"],
+            "document_ids": [f"doc:{module_key}"],
             "covariate_ids": [],
         })
 
     # Pass 2: entities + calls per file.
-    for path, src, tree, stem in parsed:
-        file_title = f"{stem}:{path.name}"
-        file_id = add_entity(file_title, "file", tree.root_node, src, path, stem)
+    for path, src, tree, module_key in parsed:
+        file_title = file_entity_title(path, module_key)
+        file_id = add_entity(
+            file_title, "file", tree.root_node, src, path, module_key
+        )
 
         seen_titles: set[str] = set()
         for n in _walk(tree.root_node):
@@ -264,31 +332,31 @@ def build_c_byog(package_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
             if n.type == "function_definition":
                 nm = _func_name(n)
                 if nm:
-                    name, etype, title = nm, "function", f"{stem}:{nm}"
+                    name, etype, title = nm, "function", symbol_entity_title(module_key, nm)
             elif n.type == "struct_specifier":
                 nm = _named_type(n)
                 if nm:
-                    name, etype, title = nm, "struct", f"{stem}:{nm}"
+                    name, etype, title = nm, "struct", symbol_entity_title(module_key, nm)
             elif n.type == "enum_specifier":
                 nm = _named_type(n)
                 if nm:
-                    name, etype, title = nm, "enum", f"{stem}:{nm}"
+                    name, etype, title = nm, "enum", symbol_entity_title(module_key, nm)
             elif n.type == "type_definition":
                 td = [c for c in n.children if c.type == "type_identifier"]
                 if td:
                     nm = td[-1].text.decode()
-                    name, etype, title = nm, "typedef", f"{stem}:{nm}"
+                    name, etype, title = nm, "typedef", symbol_entity_title(module_key, nm)
             if title and title not in seen_titles:
                 seen_titles.add(title)
-                add_entity(title, etype, n, src, path, stem)
-                add_contains(file_id, title, stem, name)
+                add_entity(title, etype, n, src, path, module_key)
+                add_contains(file_id, title, module_key, name)
 
         # calls: attribute each call_expression to its enclosing function.
         for fn in _collect_functions(tree.root_node):
             caller = _func_name(fn)
             if not caller:
                 continue
-            caller_title = f"{stem}:{caller}"
+            caller_title = symbol_entity_title(module_key, caller)
             for n in _walk(fn):
                 if n.type != "call_expression":
                     continue
@@ -297,7 +365,7 @@ def build_c_byog(package_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
                     continue  # function-pointer / member calls: out of bootstrap scope
                 callee = callee_node.text.decode()
                 candidates = defined_funcs.get(callee, [])
-                same_file_candidate = f"{stem}:{callee}"
+                same_file_candidate = symbol_entity_title(module_key, callee)
                 resolved_target = None
                 if same_file_candidate in candidates:
                     resolved_target = same_file_candidate
@@ -306,8 +374,10 @@ def build_c_byog(package_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
 
                 if resolved_target is not None:
                     rid += 1
+                    line = n.start_point[0] + 1
+                    col = n.start_point[1]
                     relationships.append({
-                        "id": f"rel:call:{caller}:{callee}:{n.start_point[0] + 1}:{n.start_point[1]}",
+                        "id": _call_rel_id(module_key, caller, callee, line, col),
                         "source": caller_title,
                         "target": resolved_target,
                         "type": "calls",
@@ -316,11 +386,11 @@ def build_c_byog(package_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
                         "text_unit_ids": [],
                         "human_readable_id": rid,
                         "source_file": str(path),
-                        "span": f"{n.start_point[0] + 1}:{n.start_point[1]}",
+                        "span": f"{line}:{col}",
                         "extractor": "tree-sitter-c",
                         "confidence": 0.9,
                         "is_deterministic": True,
-                        "document_ids": [f"doc:{stem}"],
+                        "document_ids": [f"doc:{module_key}"],
                         "covariate_ids": [],
                     })
                 else:
@@ -339,6 +409,7 @@ def build_c_byog(package_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
                         ),
                     })
 
+    _disambiguate_duplicate_relationship_ids(relationships)
     data = {
         "entities": entities,
         "relationships": relationships,

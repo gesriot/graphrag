@@ -26,6 +26,13 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
+from c_identities import (  # type: ignore
+    INDEXED_SUFFIXES,
+    build_module_key_map,
+    file_entity_title as identity_file_entity_title,
+    file_title_map,
+    list_indexed_c_files,
+)
 from c_preprocessor import (  # type: ignore
     _compiler_identity,
     _load_compile_command_entries,
@@ -39,7 +46,6 @@ from c_preprocessor import (  # type: ignore
 
 FACT_KIND = "translation_unit_dependency"
 EXTRACTOR = "c-compiler-deps"
-INDEXED_SUFFIXES = {".c", ".h"}
 
 # Explicit wording required on every overlay edge.
 _DEP_DESCRIPTION = (
@@ -59,21 +65,24 @@ def compile_commands_digest(package_dir: Path) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def file_entity_title(path: Path) -> str:
-    """Match ``extract_c.build_c_byog`` file-entity titles: ``{stem}:{name}``."""
-    return f"{path.stem}:{path.name}"
+def file_entity_title(path: Path, module_key: Optional[str] = None) -> str:
+    """File-entity title matching ``extract_c`` / ``c_identities``.
+
+    When ``module_key`` is omitted the legacy single-file stem form is used
+    only for call sites that already know the path is non-colliding; package
+    indexing must go through :func:`indexed_package_files`.
+    """
+    if module_key is None:
+        module_key = Path(path).stem
+    return identity_file_entity_title(path, module_key)
 
 
 def indexed_package_files(package_dir: Path) -> Dict[Path, str]:
-    """Map resolved package path -> file-entity title for indexed .c/.h files."""
+    """Map resolved package path -> file-entity title (shared identity map)."""
     package_dir = Path(package_dir).resolve()
-    out: Dict[Path, str] = {}
-    for path in package_dir.rglob("*"):
-        if not path.is_file() or path.suffix not in INDEXED_SUFFIXES:
-            continue
-        resolved = path.resolve()
-        out[resolved] = file_entity_title(path)
-    return out
+    files = list_indexed_c_files(package_dir)
+    module_keys = build_module_key_map(package_dir, files)
+    return file_title_map(package_dir, module_keys)
 
 
 def dependency_command_from_entry(

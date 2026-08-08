@@ -25,6 +25,24 @@ We extend with code-specific columns (present on both entities and relationships
 - constant / variable (top level)
 - test (special for golden traces)
 
+### C module keys (conditional, collision-safe)
+
+C file and symbol titles use a **module key** prefix shared by `scripts/extract_c.py`
+and `scripts/c_compiler_facts.py` (`scripts/c_identities.py`):
+
+1. Index every package `.c` / `.h` file.
+2. If `path.stem` appears under only one parent directory, the module key is that
+   stem (legacy-compatible: `cJSON.c` + `cJSON.h` → `cJSON`).
+3. If the same stem appears under multiple parents, each parent group uses the
+   package-relative POSIX path of `parent/stem` (no suffix), e.g.
+   `src/left/util.c` → `src/left/util`, `src/right/util.c` → `src/right/util`.
+
+Titles remain `{module_key}:{filename_or_symbol}`. Entity IDs embed the full
+title (not a lossy slug alone). Packages without stem collisions keep the same
+graph identities as before. Indexed paths that resolve outside the package, or
+multiple package paths that resolve to the same file, fail explicitly rather
+than receiving a guessed identity.
+
 ## Relationship Types (or rich description + type column)
 - contains (file→function, module→symbol)
 - calls / is_called_by
@@ -46,7 +64,7 @@ visible while system/outside-package paths do not).
 | Field | Value |
 | --- | --- |
 | `type` | `depends_on` (never `includes`) |
-| `source` / `target` | Existing file-entity titles from `extract_c` (`{stem}:{filename}`) |
+| `source` / `target` | Existing file-entity titles from `extract_c` (`{module_key}:{filename}`, see C module keys above) |
 | `fact_kind` | `translation_unit_dependency` |
 | `extractor` | `c-compiler-deps` |
 | `confidence` / `is_deterministic` | `1.0` / `true` **only** relative to the recorded toolchain + `compile_commands.json` (not pure syntax, not a direct `#include` claim) |

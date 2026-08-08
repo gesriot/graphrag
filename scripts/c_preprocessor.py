@@ -1176,7 +1176,14 @@ def reasons_for_span(
             live, basis = region_liveness(pa, fa, reg)
             reasons.append(f"branch_{live}:{reg.kind}({(reg.condition or reg.chain_condition or '')[:40]})")
             # config-ish if condition mentions a known define
-            cond_tokens = set(re.findall(r"[A-Za-z_]\w*", reg.condition or reg.chain_condition or ""))
+            cond_tokens = sorted(
+                set(
+                    re.findall(
+                        r"[A-Za-z_]\w*",
+                        reg.condition or reg.chain_condition or "",
+                    )
+                )
+            )
             for name in cond_tokens:
                 if name in pa.compile_defines or name in fa.compile_defines:
                     reasons.append(f"compile_define_condition:{name}")
