@@ -25,13 +25,11 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from c_compiler_common import (  # type: ignore
     CompilerOverlayError,
-    compiler_from_entry,
-    load_compile_entries,
     path_is_under,
     prepare_compile_entry,
     reject_hidden_compiler_outputs,
+    # Re-export for tests/consumers that historically imported these here.
     require_clang_identity,
-    validate_compile_entry,
 )
 from c_identities import INDEXED_SUFFIXES, package_relative_posix  # type: ignore
 from extract_c import build_c_byog  # type: ignore
@@ -843,87 +841,74 @@ def match_definitions(
 
 
 # ---------------------------------------------------------------------------
-# Full audit
+# Full audit (builders consume a shared in-memory capture)
 # ---------------------------------------------------------------------------
 
 
-def run_clang_ast_audit(
-    package_dir: Path,
-    *,
-    timeout: int = 120,
-) -> Dict[str, Any]:
-    """Run the full package audit; returns a deterministic JSON-ready dict."""
-    package_dir = Path(package_dir).resolve()
+def build_function_audit_from_capture(capture: Any) -> Dict[str, Any]:
+    """Build the function-definition audit report from an in-memory capture.
+
+    Never invokes the compiler or reloads ``compile_commands.json``.
+    """
+    # Local import avoids cycles with c_clang_ast_capture → this module.
+    from c_clang_ast_capture import (  # type: ignore
+        ClangAstCaptureError,
+        ClangAstPackageCapture,
+        assert_audit_report_matches_capture,
+        validate_clang_ast_capture,
+    )
+
+    if not isinstance(capture, ClangAstPackageCapture):
+        raise ClangAstAuditError(
+            "build_function_audit_from_capture requires a ClangAstPackageCapture"
+        )
     try:
-        entries, digest = load_compile_entries(package_dir)
-    except CompilerOverlayError as e:
+        validate_clang_ast_capture(capture)
+    except ClangAstCaptureError as e:
         raise ClangAstAuditError(str(e)) from e
+    package_dir = capture.package_dir
+    digest = capture.compile_commands_digest
 
     all_defs: List[ClangFunctionDefinition] = []
-    compilers: Dict[str, Dict[str, Optional[str]]] = {}
     translation_units: List[Dict[str, Any]] = []
     in_scope_paths: Set[str] = set()
-    n_entries = 0
 
-    for entry_index, raw in enumerate(entries):
-        try:
-            ent = validate_compile_entry(raw, entry_index)
-            cwd, cleaned, src_path = prepare_compile_entry(
-                ent, package_dir=package_dir
+    try:
+        for ent in capture.entries:
+            tu_path = ent.tu_path
+            if path_is_under(tu_path, package_dir):
+                in_scope_paths.add(package_relative_posix(tu_path, package_dir))
+
+            defs = collect_function_definitions_from_ast(
+                ent.ast_root,
+                package_dir=package_dir,
+                cwd=ent.cwd,
+                entry_index=ent.entry_index,
+                compiler_path=ent.compiler_path,
+                compiler_id=ent.compiler_id,
+                compile_commands_digest=digest,
             )
-            reject_hidden_compiler_outputs(cleaned)
-            compiler_path = compiler_from_entry(ent, cwd=cwd)
-            _, compiler_id, compiler_version = require_clang_identity(
-                compiler_path
+            for d in defs:
+                if d.is_package_local:
+                    in_scope_paths.add(d.source_path)
+            all_defs.extend(defs)
+            tu_is_local = path_is_under(tu_path, package_dir)
+            translation_units.append(
+                {
+                    "entry_index": ent.entry_index,
+                    "file": package_relative_posix(tu_path, package_dir)
+                    if tu_is_local
+                    else None,
+                    "package_local": tu_is_local,
+                    "compiler_path": ent.compiler_path,
+                    "compiler_id": ent.compiler_id,
+                    "n_package_local_definitions": len(
+                        [d for d in defs if d.is_package_local]
+                    ),
+                }
             )
-        except CompilerOverlayError as e:
-            raise ClangAstAuditError(str(e)) from e
-
-        n_entries += 1
-        if compiler_path not in compilers:
-            compilers[compiler_path] = {
-                "compiler_path": compiler_path,
-                "compiler_id": compiler_id,
-                "compiler_version": compiler_version,
-            }
-
-        tu_path, root = run_ast_dump_for_entry(
-            ent,
-            compiler=compiler_path,
-            package_dir=package_dir,
-            timeout=timeout,
-        )
-        if path_is_under(tu_path, package_dir):
-            in_scope_paths.add(package_relative_posix(tu_path, package_dir))
-
-        defs = collect_function_definitions_from_ast(
-            root,
-            package_dir=package_dir,
-            cwd=cwd,
-            entry_index=entry_index,
-            compiler_path=compiler_path,
-            compiler_id=compiler_id,
-            compile_commands_digest=digest,
-        )
-        for d in defs:
-            if d.is_package_local:
-                in_scope_paths.add(d.source_path)
-        all_defs.extend(defs)
-        tu_is_local = path_is_under(tu_path, package_dir)
-        translation_units.append(
-            {
-                "entry_index": entry_index,
-                "file": package_relative_posix(tu_path, package_dir)
-                if tu_is_local
-                else None,
-                "package_local": tu_is_local,
-                "compiler_path": compiler_path,
-                "compiler_id": compiler_id,
-                "n_package_local_definitions": len(
-                    [d for d in defs if d.is_package_local]
-                ),
-            }
-        )
+    except ClangAstCaptureError as e:
+        raise ClangAstAuditError(str(e)) from e
 
     ts_fns = collect_tree_sitter_functions(package_dir)
     classes = match_definitions(
@@ -932,7 +917,7 @@ def run_clang_ast_audit(
         in_scope_paths=in_scope_paths,
     )
 
-    compiler_list = [compilers[k] for k in sorted(compilers)]
+    compiler_list = list(capture.compilers)
     one = compiler_list[0] if len(compiler_list) == 1 else {}
 
     report = {
@@ -943,7 +928,7 @@ def run_clang_ast_audit(
         "compiler_version": one.get("compiler_version"),
         "compilers": compiler_list,
         "compile_commands_digest": digest,
-        "n_compile_entries": n_entries,
+        "n_compile_entries": capture.n_compile_entries,
         "translation_units": sorted(
             translation_units, key=lambda t: (t["entry_index"], t["file"])
         ),
@@ -967,7 +952,36 @@ def run_clang_ast_audit(
         ],
         "confidence_boundary": CONFIDENCE_BOUNDARY,
     }
-    return _normalize_report(report)
+    normalized = _normalize_report(report)
+    try:
+        assert_audit_report_matches_capture(
+            normalized, capture, context="function audit"
+        )
+    except ClangAstCaptureError as e:
+        raise ClangAstAuditError(str(e)) from e
+    return normalized
+
+
+def run_clang_ast_audit(
+    package_dir: Path,
+    *,
+    timeout: int = 120,
+) -> Dict[str, Any]:
+    """Run the full package audit; returns a deterministic JSON-ready dict.
+
+    Internally creates one shared AST capture (one dump per compile entry)
+    then builds the function-definition report from it.
+    """
+    from c_clang_ast_capture import (  # type: ignore
+        ClangAstCaptureError,
+        capture_clang_ast_package,
+    )
+
+    try:
+        capture = capture_clang_ast_package(package_dir, timeout=timeout)
+    except ClangAstCaptureError as e:
+        raise ClangAstAuditError(str(e)) from e
+    return build_function_audit_from_capture(capture)
 
 
 def _normalize_report(report: Dict[str, Any]) -> Dict[str, Any]:

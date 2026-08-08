@@ -150,6 +150,20 @@ multi-config coverage, C++, or ABI verification. The standalone call audit
 remains a diagnostic CLI; only this flag publishes selected matched metadata
 into BYOG.
 
+#### Shared in-memory AST capture (execution only)
+
+When either or both of `--clang-signatures` / `--clang-calls` are enabled,
+`index_c` creates one in-process AST capture (`scripts/c_clang_ast_capture.py`):
+load `compile_commands.json` once, fail-closed validate arguments/compiler
+identity, and run one Clang `-ast-dump=json` per compile entry. Function and
+call audit builders consume that capture without re-invoking the compiler.
+Enabling both flags still costs **N** dumps for **N** entries (not 2N). There
+is **no** disk AST cache and AST roots never appear in manifests, parquet, or
+logs. Standalone `c_clang_ast_audit.py` / `c_clang_call_audit.py` CLIs remain
+available and each still capture once for their own run. Confidence boundaries
+and independent `clang_signatures` / `clang_calls` manifest blocks are
+unchanged (no combined capture block).
+
 **Shared out of scope:** multi-config coverage, MSVC/wrappers/response files
 (fail closed), system/outside endpoints after filtering, production C/C++
 completeness. Snapshot manifests record separate `compiler_dependencies`,

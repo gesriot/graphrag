@@ -363,10 +363,12 @@ def test_live_gcc_identity_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         )
 
     monkeypatch.setattr(common, "require_clang_identity", fake_req)
-    # Audit imports require_clang_identity at module level - patch there too
+    # Capture (and re-exports) bind require_clang_identity at import time.
     import c_clang_ast_audit as audit
+    import c_clang_ast_capture as capture
 
     monkeypatch.setattr(audit, "require_clang_identity", fake_req)
+    monkeypatch.setattr(capture, "require_clang_identity", fake_req)
     with pytest.raises(ClangAstAuditError, match="Clang"):
         run_clang_ast_audit(pkg)
 

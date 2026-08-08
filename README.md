@@ -105,6 +105,13 @@ flags on `scripts/index_c.py`:
   `matched_internal` rows only (exact span + byte-offset attachment; no new
   entities/edges; base `confidence`/`extractor` unchanged).
 
+When both `--clang-signatures` and `--clang-calls` are enabled, `index_c`
+builds **one shared in-memory AST capture** (one `-ast-dump=json` per
+`compile_commands.json` entry) and both overlays consume it. There is **no**
+persistent AST cache and AST JSON is never written to manifests or parquet.
+Enabling either flag alone still dumps once per entry; neither flag dumps
+nothing. Trust/confidence boundaries are unchanged.
+
 These are narrow configuration-derived layers on top of tree-sitter-c — not
 full type resolution, ABI verification, multi-config coverage, points-to
 analysis, macro-complete call proof, or production C/C++ completeness. `-M` /
@@ -123,6 +130,7 @@ explicitly. See [docs/graph_schema.md](docs/graph_schema.md).
   tree-sitter edge accounting. Publishing selected matched call *evidence
   fields* into BYOG requires the separate explicit `--clang-calls` flag.
 
-Both are **Clang only** (`cc` accepted only when `--version` proves
-Clang/Apple Clang). Neither is points-to analysis, multi-config coverage, or
-production C/C++ completeness.
+Both CLIs remain available unchanged (each captures once internally). Both are
+**Clang only** (`cc` accepted only when `--version` proves Clang/Apple Clang).
+Neither is points-to analysis, multi-config coverage, or production C/C++
+completeness.

@@ -138,6 +138,11 @@ explicit skip and the final status says `PASS WITH SKIPS`.
   analysis, macro-complete call proof, multi-config coverage, C++, or ABI
   verification. `clang_call_confidence=1.0` is relative only to the recorded
   Clang + `compile_commands.json` configuration.
+- **Shared AST capture (execution only):** enabling `--clang-signatures` and
+  `--clang-calls` together uses one in-memory capture for both overlays (one
+  AST dump per compile entry for this package’s single-entry compile DB). No
+  disk AST cache; standalone audit CLIs remain available; confidence
+  boundaries and independent manifest blocks are unchanged.
 
 ## C frontend result — clean on the first pass
 Unlike `inih`, cJSON does not fragment function bodies with `#if`/`#endif`, so the

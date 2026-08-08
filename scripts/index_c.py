@@ -16,8 +16,10 @@ off). Optional ``--compiler-includes`` overlays direct ``includes`` edges from
 configured Clang function-signature fields to matched tree-sitter function
 entities (default off). Optional ``--clang-calls`` attaches configured direct-
 call evidence fields to existing tree-sitter ``calls`` relationships (default
-off). Diagnostic AST audits remain standalone. Published graph counts stay
-tree-sitter-only unless an overlay is explicitly enabled.
+off). When both Clang overlays are enabled they share one in-memory AST
+capture (one dump per compile entry; no disk AST cache). Diagnostic AST audits
+remain standalone. Published graph counts stay tree-sitter-only unless an
+overlay is explicitly enabled.
 
 Usage:
     uv run python scripts/index_c.py --package examples/jsmn --graph byog_jsmn
@@ -34,6 +36,19 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from extract_c import build_c_byog  # type: ignore
 from byog_graph import publish_byog_snapshot  # type: ignore
+from c_clang_ast_audit import (  # type: ignore
+    ClangAstAuditError,
+    build_function_audit_from_capture,
+)
+from c_clang_ast_capture import (  # type: ignore
+    ClangAstCaptureError,
+    assert_function_and_call_reports_agree,
+    capture_clang_ast_package,
+)
+from c_clang_call_audit import (  # type: ignore
+    ClangCallAuditError,
+    build_call_audit_from_capture,
+)
 from c_clang_calls import (  # type: ignore
     ClangCallOverlayError,
     append_clang_calls,
@@ -198,22 +213,45 @@ def main(
     else:
         inc_prov = build_disabled_include_provenance()
 
-    if clang_signatures:
+    # Clang AST overlays: share one in-memory capture when either/both enabled.
+    if clang_signatures or clang_calls:
         try:
-            sig_prov = append_clang_signatures(data, pkg_dir)
-        except ClangSignatureError as e:
+            ast_capture = capture_clang_ast_package(pkg_dir)
+            sig_report = None
+            call_report = None
+            if clang_signatures:
+                sig_report = build_function_audit_from_capture(ast_capture)
+            if clang_calls:
+                call_report = build_call_audit_from_capture(ast_capture)
+            if sig_report is not None and call_report is not None:
+                assert_function_and_call_reports_agree(
+                    sig_report, call_report, ast_capture
+                )
+            if clang_signatures:
+                assert sig_report is not None
+                sig_prov = append_clang_signatures(
+                    data, pkg_dir, report=sig_report
+                )
+            else:
+                sig_prov = build_disabled_signature_provenance()
+            if clang_calls:
+                assert call_report is not None
+                call_prov = append_clang_calls(
+                    data, pkg_dir, report=call_report
+                )
+            else:
+                call_prov = build_disabled_call_provenance()
+        except (
+            ClangAstCaptureError,
+            ClangAstAuditError,
+            ClangCallAuditError,
+            ClangSignatureError,
+            ClangCallOverlayError,
+        ) as e:
             typer.secho(str(e), fg=typer.colors.RED, err=True)
             raise typer.Exit(2) from e
     else:
         sig_prov = build_disabled_signature_provenance()
-
-    if clang_calls:
-        try:
-            call_prov = append_clang_calls(data, pkg_dir)
-        except ClangCallOverlayError as e:
-            typer.secho(str(e), fg=typer.colors.RED, err=True)
-            raise typer.Exit(2) from e
-    else:
         call_prov = build_disabled_call_provenance()
 
     ents_df = pd.DataFrame(data["entities"])

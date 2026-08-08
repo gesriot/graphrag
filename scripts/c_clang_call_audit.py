@@ -23,17 +23,10 @@ from c_clang_ast_audit import (  # type: ignore
     _has_function_body,
     _normalize_path_token,
     resolve_function_location,
-    run_ast_dump_for_entry,
 )
 from c_compiler_common import (  # type: ignore
     CompilerOverlayError,
-    compiler_from_entry,
-    load_compile_entries,
     path_is_under,
-    prepare_compile_entry,
-    reject_hidden_compiler_outputs,
-    require_clang_identity,
-    validate_compile_entry,
 )
 from c_identities import package_relative_posix  # type: ignore
 from extract_c import build_c_byog  # type: ignore
@@ -1406,96 +1399,74 @@ def compare_calls(
 
 
 # ---------------------------------------------------------------------------
-# Full audit
+# Full audit (builders consume a shared in-memory capture)
 # ---------------------------------------------------------------------------
 
 
-def run_clang_call_audit(
-    package_dir: Path,
-    *,
-    timeout: int = 120,
-) -> Dict[str, Any]:
-    """Run the call-site audit; one AST dump per compile entry."""
-    if timeout <= 0:
-        raise ClangCallAuditError("timeout must be a positive integer")
-    package_dir = Path(package_dir).resolve()
+def build_call_audit_from_capture(capture: Any) -> Dict[str, Any]:
+    """Build the call-site audit report from an in-memory capture.
+
+    Never invokes the compiler or reloads ``compile_commands.json``.
+    """
+    from c_clang_ast_capture import (  # type: ignore
+        ClangAstCaptureError,
+        ClangAstPackageCapture,
+        assert_audit_report_matches_capture,
+        validate_clang_ast_capture,
+    )
+
+    if not isinstance(capture, ClangAstPackageCapture):
+        raise ClangCallAuditError(
+            "build_call_audit_from_capture requires a ClangAstPackageCapture"
+        )
     try:
-        entries, digest = load_compile_entries(package_dir)
-    except CompilerOverlayError as e:
+        validate_clang_ast_capture(capture)
+    except ClangAstCaptureError as e:
         raise ClangCallAuditError(str(e)) from e
+    package_dir = capture.package_dir
+    digest = capture.compile_commands_digest
 
     ts_edges, path_name_to_titles, _title_to_path, _data = collect_tree_sitter_calls(
         package_dir
     )
 
     all_calls: List[RawClangCall] = []
-    compilers: Dict[str, Dict[str, Optional[str]]] = {}
     translation_units: List[Dict[str, Any]] = []
     in_scope_paths: Set[str] = set()
-    n_entries = 0
 
-    for entry_index, raw in enumerate(entries):
-        try:
-            ent = validate_compile_entry(raw, entry_index)
-            cwd, cleaned, _src = prepare_compile_entry(
-                ent, package_dir=package_dir
-            )
-            reject_hidden_compiler_outputs(cleaned)
-            compiler_path = compiler_from_entry(ent, cwd=cwd)
-            _, compiler_id, compiler_version = require_clang_identity(
-                compiler_path
-            )
-        except CompilerOverlayError as e:
-            raise ClangCallAuditError(str(e)) from e
-        except ClangAstAuditError as e:
-            raise ClangCallAuditError(str(e)) from e
+    try:
+        for ent in capture.entries:
+            tu_path = ent.tu_path
+            if path_is_under(tu_path, package_dir):
+                in_scope_paths.add(package_relative_posix(tu_path, package_dir))
 
-        n_entries += 1
-        if compiler_path not in compilers:
-            compilers[compiler_path] = {
-                "compiler_path": compiler_path,
-                "compiler_id": compiler_id,
-                "compiler_version": compiler_version,
-            }
-
-        try:
-            tu_path, root = run_ast_dump_for_entry(
-                ent,
-                compiler=compiler_path,
+            calls, scope = collect_calls_from_ast(
+                ent.ast_root,
                 package_dir=package_dir,
-                timeout=timeout,
+                cwd=ent.cwd,
+                entry_index=ent.entry_index,
+                compiler_path=ent.compiler_path,
+                compiler_id=ent.compiler_id,
+                compile_commands_digest=digest,
+                title_by_path_name=path_name_to_titles,
             )
-        except ClangAstAuditError as e:
-            raise ClangCallAuditError(str(e)) from e
-
-        if path_is_under(tu_path, package_dir):
-            in_scope_paths.add(package_relative_posix(tu_path, package_dir))
-
-        calls, scope = collect_calls_from_ast(
-            root,
-            package_dir=package_dir,
-            cwd=cwd,
-            entry_index=entry_index,
-            compiler_path=compiler_path,
-            compiler_id=compiler_id,
-            compile_commands_digest=digest,
-            title_by_path_name=path_name_to_titles,
-        )
-        in_scope_paths |= scope
-        all_calls.extend(calls)
-        tu_local = path_is_under(tu_path, package_dir)
-        translation_units.append(
-            {
-                "entry_index": entry_index,
-                "file": package_relative_posix(tu_path, package_dir)
-                if tu_local
-                else None,
-                "package_local": tu_local,
-                "compiler_path": compiler_path,
-                "compiler_id": compiler_id,
-                "n_calls_observed": len(calls),
-            }
-        )
+            in_scope_paths |= scope
+            all_calls.extend(calls)
+            tu_local = path_is_under(tu_path, package_dir)
+            translation_units.append(
+                {
+                    "entry_index": ent.entry_index,
+                    "file": package_relative_posix(tu_path, package_dir)
+                    if tu_local
+                    else None,
+                    "package_local": tu_local,
+                    "compiler_path": ent.compiler_path,
+                    "compiler_id": ent.compiler_id,
+                    "n_calls_observed": len(calls),
+                }
+            )
+    except ClangAstCaptureError as e:
+        raise ClangCallAuditError(str(e)) from e
 
     merged = merge_clang_calls(all_calls)
     compared = compare_calls(
@@ -1504,7 +1475,7 @@ def run_clang_call_audit(
         in_scope_paths=in_scope_paths,
     )
 
-    compiler_list = [compilers[k] for k in sorted(compilers)]
+    compiler_list = list(capture.compilers)
     one = compiler_list[0] if len(compiler_list) == 1 else {}
     buckets = compared["buckets"]
     counts = compared["counts"]
@@ -1517,7 +1488,7 @@ def run_clang_call_audit(
         "compiler_version": one.get("compiler_version"),
         "compilers": compiler_list,
         "compile_commands_digest": digest,
-        "n_compile_entries": n_entries,
+        "n_compile_entries": capture.n_compile_entries,
         "n_clang_call_observations": len(all_calls),
         "n_merged_clang_call_records": len(merged),
         "translation_units": sorted(
@@ -1559,7 +1530,37 @@ def run_clang_call_audit(
         ],
         "confidence_boundary": CONFIDENCE_BOUNDARY,
     }
-    return _normalize_report(report)
+    normalized = _normalize_report(report)
+    try:
+        assert_audit_report_matches_capture(
+            normalized, capture, context="call audit"
+        )
+    except ClangAstCaptureError as e:
+        raise ClangCallAuditError(str(e)) from e
+    return normalized
+
+
+def run_clang_call_audit(
+    package_dir: Path,
+    *,
+    timeout: int = 120,
+) -> Dict[str, Any]:
+    """Run the call-site audit; one AST dump per compile entry.
+
+    Internally creates one shared AST capture then builds the call report.
+    """
+    from c_clang_ast_capture import (  # type: ignore
+        ClangAstCaptureError,
+        capture_clang_ast_package,
+    )
+
+    if timeout <= 0:
+        raise ClangCallAuditError("timeout must be a positive integer")
+    try:
+        capture = capture_clang_ast_package(package_dir, timeout=timeout)
+    except ClangAstCaptureError as e:
+        raise ClangCallAuditError(str(e)) from e
+    return build_call_audit_from_capture(capture)
 
 
 def _normalize_report(report: Dict[str, Any]) -> Dict[str, Any]:
