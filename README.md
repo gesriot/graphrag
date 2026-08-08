@@ -88,14 +88,18 @@ public surface/refusals are checked against its real header, C traces, and
 compiler locations. Their scope and residuals are recorded in the target
 provenance files and the [evidence audit](docs/EVIDENCE_AUDIT_20260728.md).
 
-**Optional C compiler overlay (default off):**
-`scripts/index_c.py --compiler-dependencies` can attach flattened
-translation-unit `depends_on` edges from `compile_commands.json` via the
-compiler recorded by each entry (`-M`, then strict package-path filtering).
-This is one narrow configuration-derived dependency layer on top of
-tree-sitter-c — not clang AST type resolution, direct-include provenance,
-multi-config coverage, or production C/C++ completeness. See
+**Optional C compiler overlays (each default off):** independently selectable
+flags on `scripts/index_c.py`:
+
+- `--compiler-dependencies` — flattened TU `depends_on` edges
+  (`fact_kind=translation_unit_dependency`) via per-entry `compiler -M` and
+  package-path filtering (may be transitive).
+- `--compiler-includes` — direct `includes` edges
+  (`fact_kind=configured_direct_include`) via per-entry `compiler -E -H`
+  hierarchy reconstruction (parent → only its direct includes).
+
+These are narrow configuration-derived layers on top of tree-sitter-c — not
+clang AST type resolution, multi-config coverage, or production C/C++
+completeness. `-M` / `-H` are GNU/Clang-specific adapters, not a universal
+compiler API. Wrappers, response files, and MSVC fail explicitly. See
 [docs/graph_schema.md](docs/graph_schema.md).
-The current adapter accepts GNU/Clang-style `clang`, `cc`, or `gcc` commands;
-compiler wrappers, response files, and MSVC compile-database entries fail
-explicitly.

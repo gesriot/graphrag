@@ -20,28 +20,30 @@ from __future__ import annotations
 
 import hashlib
 import re
-import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
+from c_compiler_common import (  # type: ignore
+    CONFIDENCE_BOUNDARY,
+    CompilerOverlayError,
+    build_disabled_overlay_provenance,
+    compile_commands_digest,  # re-exported for tests/callers
+    compiler_from_entry as _common_compiler_from_entry,
+    compiler_identity,
+    indexed_package_files,  # re-exported for tests/callers
+    load_compile_entries,
+    next_human_readable_id,
+    path_is_under,
+    prepare_compile_entry,
+    resolve_compiler_path as _common_resolve_compiler_path,
+    validate_compile_entry,
+)
+from c_preprocessor import resolve_compile_entry_cwd  # type: ignore
 from c_identities import (  # type: ignore
     INDEXED_SUFFIXES,
-    build_module_key_map,
     file_entity_title as identity_file_entity_title,
-    file_title_map,
-    list_indexed_c_files,
-)
-from c_preprocessor import (  # type: ignore
-    _compiler_identity,
-    _load_compile_command_entries,
-    compile_entry_argv,
-    ensure_source_on_argv,
-    resolve_compile_entry_cwd,
-    resolve_compile_entry_source,
-    split_compile_entry_args,
-    strip_compile_output_flags,
 )
 
 FACT_KIND = "translation_unit_dependency"
@@ -54,15 +56,8 @@ _DEP_DESCRIPTION = (
 )
 
 
-class CompilerDependencyError(RuntimeError):
+class CompilerDependencyError(CompilerOverlayError):
     """Raised when compiler dependency collection cannot run honestly."""
-
-
-def compile_commands_digest(package_dir: Path) -> str:
-    """Stable SHA-256 of the package's compile_commands.json bytes."""
-    cc_path = Path(package_dir) / "compile_commands.json"
-    raw = cc_path.read_bytes()
-    return hashlib.sha256(raw).hexdigest()
 
 
 def file_entity_title(path: Path, module_key: Optional[str] = None) -> str:
@@ -77,12 +72,19 @@ def file_entity_title(path: Path, module_key: Optional[str] = None) -> str:
     return identity_file_entity_title(path, module_key)
 
 
-def indexed_package_files(package_dir: Path) -> Dict[Path, str]:
-    """Map resolved package path -> file-entity title (shared identity map)."""
-    package_dir = Path(package_dir).resolve()
-    files = list_indexed_c_files(package_dir)
-    module_keys = build_module_key_map(package_dir, files)
-    return file_title_map(package_dir, module_keys)
+def _resolve_compiler_path(token: str, *, cwd: Path) -> str:
+    try:
+        return _common_resolve_compiler_path(token, cwd=cwd)
+    except CompilerOverlayError as e:
+        raise CompilerDependencyError(str(e)) from e
+
+
+def compiler_from_entry(entry: Dict[str, Any], *, cwd: Path) -> str:
+    """Resolve the compiler actually named by a compile database entry."""
+    try:
+        return _common_compiler_from_entry(entry, cwd=cwd)
+    except CompilerOverlayError as e:
+        raise CompilerDependencyError(str(e)) from e
 
 
 def dependency_command_from_entry(
@@ -98,17 +100,12 @@ def dependency_command_from_entry(
     ``c_preprocessor.preprocess_command_from_entry`` so dependency discovery
     does not write ``.o`` files into the package tree.
     """
-    cwd = resolve_compile_entry_cwd(entry, package_dir)
-    cleaned = strip_compile_output_flags(split_compile_entry_args(entry))
-    if any(arg.startswith("@") for arg in cleaned):
-        raise CompilerDependencyError(
-            "response-file compile arguments are unsupported because hidden "
-            "output flags cannot be audited safely"
+    try:
+        cwd, cleaned, src_path = prepare_compile_entry(
+            entry, package_dir=package_dir
         )
-    src_path = resolve_compile_entry_source(
-        entry, cwd=cwd, package_dir=package_dir
-    )
-    cleaned = ensure_source_on_argv(cleaned, src_path, cwd)
+    except CompilerOverlayError as e:
+        raise CompilerDependencyError(str(e)) from e
     # -M reports the complete configured dependency set. Filtering below drops
     # paths outside the package, while retaining package-local headers reached
     # through -isystem (which -MM would incorrectly suppress).
@@ -164,54 +161,6 @@ def parse_makefile_dependencies(text: str) -> List[str]:
     return tokens
 
 
-_SUPPORTED_COMPILER = re.compile(
-    r"(?:.+-)?(?:clang|gcc|cc)(?:-\d+(?:\.\d+)*)?\Z"
-)
-
-
-def _resolve_compiler_path(token: str, *, cwd: Path) -> str:
-    """Resolve one GNU/Clang-compatible compiler token or fail explicitly."""
-    name = Path(token).name
-    if not _SUPPORTED_COMPILER.fullmatch(name):
-        raise CompilerDependencyError(
-            f"unsupported compiler command {token!r}; expected clang/cc/gcc "
-            "(compiler wrappers and MSVC are not supported)"
-        )
-    path = Path(token)
-    if path.is_absolute():
-        resolved = path
-    elif path.parent != Path("."):
-        resolved = (cwd / path).resolve()
-    else:
-        found = shutil.which(token)
-        if not found:
-            raise CompilerDependencyError(
-                f"compiler from compile_commands.json is not on PATH: {token!r}"
-            )
-        resolved = Path(found).resolve()
-    if not resolved.is_file():
-        raise CompilerDependencyError(f"compiler does not exist: {resolved}")
-    return str(resolved)
-
-
-def compiler_from_entry(entry: Dict[str, Any], *, cwd: Path) -> str:
-    """Resolve the compiler actually named by a compile database entry."""
-    argv = compile_entry_argv(entry)
-    if not argv:
-        raise CompilerDependencyError(
-            "compile_commands entry has neither arguments nor command"
-        )
-    return _resolve_compiler_path(argv[0], cwd=cwd)
-
-
-def _path_is_under(path: Path, root: Path) -> bool:
-    try:
-        path.resolve().relative_to(root.resolve())
-        return True
-    except ValueError:
-        return False
-
-
 def filter_package_dependencies(
     dep_paths: Sequence[str],
     *,
@@ -237,7 +186,7 @@ def filter_package_dependencies(
             continue
         if not p.is_file():
             continue
-        if not _path_is_under(p, package_dir):
+        if not path_is_under(p, package_dir):
             continue
         if p not in indexed:
             continue
@@ -311,28 +260,20 @@ def collect_translation_unit_dependencies(
     silently fall back to tree-sitter include guesses.
     """
     package_dir = Path(package_dir).resolve()
-    cc_path = package_dir / "compile_commands.json"
-    if not cc_path.is_file():
-        raise CompilerDependencyError(
-            f"compile_commands.json not found under {package_dir}; "
-            "compiler dependency overlay requires a compile database"
-        )
-
     try:
-        entries = _load_compile_command_entries(package_dir)
-        digest = compile_commands_digest(package_dir)
-    except OSError as e:
-        raise CompilerDependencyError(
-            f"cannot read compile_commands.json under {package_dir}: {e}"
-        ) from e
-    if not entries:
-        raise CompilerDependencyError(
-            f"compile_commands.json under {package_dir} is empty or unreadable"
-        )
+        entries, digest = load_compile_entries(package_dir)
+    except CompilerOverlayError as e:
+        raise CompilerDependencyError(str(e)) from e
 
-    compiler_override = (
-        _resolve_compiler_path(compiler, cwd=package_dir) if compiler else None
-    )
+    compiler_override = None
+    if compiler:
+        try:
+            compiler_override = _resolve_compiler_path(
+                compiler, cwd=package_dir
+            )
+        except CompilerDependencyError:
+            raise
+
     indexed = indexed_package_files(package_dir)
 
     # Dedup edges across TUs / duplicate compile entries.
@@ -343,18 +284,20 @@ def collect_translation_unit_dependencies(
     n_entries = 0
 
     for entry_index, ent in enumerate(entries):
-        if not isinstance(ent, dict):
-            raise CompilerDependencyError(
-                "invalid compile_commands.json: "
-                f"entry {entry_index} is not an object"
-            )
+        try:
+            ent = validate_compile_entry(ent, entry_index)
+        except CompilerOverlayError as e:
+            raise CompilerDependencyError(str(e)) from e
         n_entries += 1
-        entry_cwd = resolve_compile_entry_cwd(ent, package_dir)
-        selected_compiler = compiler_override or compiler_from_entry(
-            ent, cwd=entry_cwd
-        )
+        try:
+            entry_cwd = resolve_compile_entry_cwd(ent, package_dir)
+            selected_compiler = compiler_override or compiler_from_entry(
+                ent, cwd=entry_cwd
+            )
+        except CompilerOverlayError as e:
+            raise CompilerDependencyError(str(e)) from e
         if selected_compiler not in compiler_records:
-            compiler_id, compiler_version = _compiler_identity(selected_compiler)
+            compiler_id, compiler_version = compiler_identity(selected_compiler)
             compiler_records[selected_compiler] = {
                 "compiler_path": selected_compiler,
                 "compiler_id": compiler_id,
@@ -397,7 +340,7 @@ def collect_translation_unit_dependencies(
         "compiler_version": one_compiler.get("compiler_version"),
         "compilers": compilers,
         "compile_commands_digest": digest,
-        "compile_commands_path": str(cc_path),
+        "compile_commands_path": str(package_dir / "compile_commands.json"),
         "n_compile_entries": n_entries,
         "n_translation_units": len(tu_titles),
         "n_facts": len(edges),
@@ -405,24 +348,8 @@ def collect_translation_unit_dependencies(
         "edges": edges,
         "fact_kind": FACT_KIND,
         "extractor": EXTRACTOR,
-        # Boundary: high confidence only relative to recorded toolchain/config.
-        "confidence_boundary": (
-            "confidence=1.0 and is_deterministic=true mean the fact is "
-            "re-derivable from the recorded compiler + compile_commands.json "
-            "configuration, not that it is a direct textual #include or pure "
-            "syntax fact independent of the toolchain."
-        ),
+        "confidence_boundary": CONFIDENCE_BOUNDARY,
     }
-
-
-def _next_human_readable_id(relationships: Sequence[Dict[str, Any]]) -> int:
-    max_id = 0
-    for r in relationships:
-        try:
-            max_id = max(max_id, int(r.get("human_readable_id") or 0))
-        except (TypeError, ValueError):
-            continue
-    return max_id + 1
 
 
 def make_depends_on_relationship(
@@ -491,7 +418,7 @@ def append_compiler_dependencies(
         if str(r.get("type")) == "depends_on"
         and str(r.get("fact_kind")) == FACT_KIND
     }
-    hid = _next_human_readable_id(rels)
+    hid = next_human_readable_id(rels)
     added = 0
     for edge in collected["edges"]:
         key = (edge["source_title"], edge["target_title"])
@@ -535,9 +462,4 @@ def append_compiler_dependencies(
 
 def build_disabled_provenance() -> Dict[str, Any]:
     """Manifest block when the overlay is off (default publish path)."""
-    return {
-        "mode": "off",
-        "enabled": False,
-        "n_facts": 0,
-        "n_translation_units": 0,
-    }
+    return build_disabled_overlay_provenance()

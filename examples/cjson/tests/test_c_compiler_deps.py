@@ -317,6 +317,10 @@ def test_missing_compile_commands_fails_explicitly(tmp_path: Path):
     with pytest.raises(CompilerDependencyError, match="entry 0 is not an object"):
         collect_translation_unit_dependencies(tmp_path)
 
+    (tmp_path / "compile_commands.json").write_bytes(b"\xff")
+    with pytest.raises(CompilerDependencyError, match="cannot read"):
+        collect_translation_unit_dependencies(tmp_path)
+
 
 def test_compile_commands_digest_stable(tmp_path: Path):
     _write_compile_commands(tmp_path)
@@ -469,6 +473,7 @@ def test_default_index_option_off_records_no_facts(tmp_path: Path):
         keep_snapshots=2,
         compiler_builtins=False,
         compiler_dependencies=False,
+        compiler_includes=False,
         allow_toolchain_drift=False,
     )
     snapshot = (graph / "current").read_text(encoding="utf-8").strip()
@@ -478,6 +483,12 @@ def test_default_index_option_off_records_no_facts(tmp_path: Path):
         )
     )
     assert manifest["compiler_dependencies"] == {
+        "mode": "off",
+        "enabled": False,
+        "n_facts": 0,
+        "n_translation_units": 0,
+    }
+    assert manifest["compiler_includes"] == {
         "mode": "off",
         "enabled": False,
         "n_facts": 0,
@@ -500,6 +511,7 @@ def test_enabled_index_manifest_matches_published_overlay(tmp_path: Path):
         keep_snapshots=2,
         compiler_builtins=False,
         compiler_dependencies=True,
+        compiler_includes=False,
         allow_toolchain_drift=False,
     )
     snapshot = (graph / "current").read_text(encoding="utf-8").strip()

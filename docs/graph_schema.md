@@ -52,7 +52,14 @@ than receiving a guessed identity.
 - defines
 - tests (test entity → symbol under test)
 
-### Optional C compiler TU dependency overlay (`depends_on`)
+### Optional C compiler overlays (each default **off**)
+
+Two independently selectable compiler layers share compile-DB reconstruction
+helpers (`scripts/c_compiler_common.py`) and collision-safe file titles
+(`scripts/c_identities.py`). Neither is clang AST type resolution. Both are
+GNU/Clang-specific adapters (`-M` / `-E -H`), not a universal compiler API.
+
+#### Flattened TU dependency (`depends_on`)
 
 When `scripts/index_c.py --compiler-dependencies` is enabled (default **off**),
 the tree-sitter-c graph gains flattened file→file `depends_on` edges from each
@@ -63,22 +70,43 @@ visible while system/outside-package paths do not).
 
 | Field | Value |
 | --- | --- |
-| `type` | `depends_on` (never `includes`) |
-| `source` / `target` | Existing file-entity titles from `extract_c` (`{module_key}:{filename}`, see C module keys above) |
+| `type` | `depends_on` |
+| `source` / `target` | File-entity titles (`{module_key}:{filename}`) |
 | `fact_kind` | `translation_unit_dependency` |
 | `extractor` | `c-compiler-deps` |
-| `confidence` / `is_deterministic` | `1.0` / `true` **only** relative to the recorded toolchain + `compile_commands.json` (not pure syntax, not a direct `#include` claim) |
-| Provenance | `compiler_path`, `compiler_id`, `compile_commands_digest` |
-| Description | States that the edge is compiler/configuration-derived and may be transitive |
+| `confidence` / `is_deterministic` | `1.0` / `true` **only** relative to the recorded toolchain + compile DB |
+| Description | Compiler/configuration-derived; may be **transitive** |
 
-**Out of scope for this overlay:** clang AST type resolution, direct-include
-provenance, multi-config coverage, system/outside-package headers, and
-production C/C++ completeness. Default indexing leaves published graph counts
-unchanged (overlay off). Snapshot manifests record a `compiler_dependencies`
-block (`mode`, compiler identity, configuration digest, fact count, TU count).
-The adapter currently supports GNU/Clang dependency flags on `clang`, `cc`, or
-`gcc` entries; compiler wrappers, response-file expansion, and MSVC are outside
-this increment and fail rather than silently selecting another toolchain.
+#### Direct include hierarchy (`includes`)
+
+When `scripts/index_c.py --compiler-includes` is enabled (default **off**), the
+graph gains **direct** file→file `includes` edges from GNU/Clang
+`compiler -E -H` traces for each compile-database entry. Hierarchy is rebuilt
+from the full depth stack (including outside/system frames) before filtering to
+indexed package-local endpoints, so children are not re-parented incorrectly.
+
+| Field | Value |
+| --- | --- |
+| `type` | `includes` |
+| `source` / `target` | File-entity titles of the **including** and **directly included** files |
+| `fact_kind` | `configured_direct_include` |
+| `extractor` | `c-compiler-includes` |
+| `confidence` / `is_deterministic` | `1.0` / `true` **only** relative to the recorded toolchain + compile DB |
+| Description | Compiler/configuration-derived **direct** include in the active hierarchy (not flattened) |
+
+Example: if `main.c` includes `direct.h` and `direct.h` includes `transitive.h`,
+the include overlay emits `main.c → direct.h` and `direct.h → transitive.h`,
+**not** `main.c → transitive.h`. The depends_on overlay may still emit the
+flattened `main.c → transitive.h` edge.
+
+**Shared out of scope:** multi-config coverage, MSVC/wrappers/response files
+(fail closed), system/outside endpoints after filtering, production C/C++
+completeness. Snapshot manifests record separate `compiler_dependencies` and
+`compiler_includes` blocks (`mode`, compiler identity/identities, digest,
+fact/TU counts); both carry an explicit `mode=off` block when disabled.
+Module-producing compiler flags also fail closed for the `-H` adapter until
+their cache/output paths can be redirected without changing configured
+semantics.
 
 ## Example Row (entities)
 ```json

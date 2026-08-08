@@ -11,7 +11,9 @@ then records the toolchain identity and macro-seed digest.
 
 Optional ``--compiler-dependencies`` overlays flattened compiler-backed
 translation-unit ``depends_on`` edges from ``compile_commands.json`` (default
-off; published graph counts stay tree-sitter-only).
+off). Optional ``--compiler-includes`` overlays direct ``includes`` edges from
+``compiler -E -H`` (also default off). Published graph counts stay
+tree-sitter-only unless an overlay is explicitly enabled.
 
 Usage:
     uv run python scripts/index_c.py --package examples/jsmn --graph byog_jsmn
@@ -31,7 +33,12 @@ from byog_graph import publish_byog_snapshot  # type: ignore
 from c_compiler_facts import (  # type: ignore
     CompilerDependencyError,
     append_compiler_dependencies,
-    build_disabled_provenance,
+    build_disabled_provenance as build_disabled_dependency_provenance,
+)
+from c_compiler_includes import (  # type: ignore
+    CompilerIncludeError,
+    append_compiler_includes,
+    build_disabled_provenance as build_disabled_include_provenance,
 )
 from c_preprocessor import (  # type: ignore
     ToolchainDriftError,
@@ -67,6 +74,16 @@ def main(
             "Default is off so published "
             "tree-sitter-c graph counts stay unchanged. When on, missing "
             "compile_commands.json or a broken compiler fails explicitly."
+        ),
+    ),
+    compiler_includes: bool = typer.Option(
+        False,
+        "--compiler-includes/--no-compiler-includes",
+        help=(
+            "Overlay direct includes edges from compile_commands.json via "
+            "compiler -E -H (configured include hierarchy). Default is off. "
+            "Independently selectable from --compiler-dependencies. When on, "
+            "missing compile_commands.json or a broken compiler fails explicitly."
         ),
     ),
     allow_toolchain_drift: bool = typer.Option(
@@ -125,7 +142,7 @@ def main(
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from e
 
-    # Optional compiler TU dependency overlay (default off).
+    # Optional compiler overlays (each default off; independently selectable).
     if compiler_dependencies:
         try:
             dep_prov = append_compiler_dependencies(data, pkg_dir)
@@ -133,7 +150,16 @@ def main(
             typer.secho(str(e), fg=typer.colors.RED, err=True)
             raise typer.Exit(2) from e
     else:
-        dep_prov = build_disabled_provenance()
+        dep_prov = build_disabled_dependency_provenance()
+
+    if compiler_includes:
+        try:
+            inc_prov = append_compiler_includes(data, pkg_dir)
+        except CompilerIncludeError as e:
+            typer.secho(str(e), fg=typer.colors.RED, err=True)
+            raise typer.Exit(2) from e
+    else:
+        inc_prov = build_disabled_include_provenance()
 
     ents_df = pd.DataFrame(data["entities"])
     rels_df = pd.DataFrame(data["relationships"])
@@ -163,9 +189,19 @@ def main(
         )
     else:
         print("  Compiler depends_on: off (default tree-sitter-c graph)")
+    if inc_prov.get("enabled"):
+        print(
+            f"  Compiler includes: facts={inc_prov.get('n_facts')} "
+            f"TUs={inc_prov.get('n_translation_units')} "
+            f"digest={inc_prov.get('compile_commands_digest')} "
+            f"compiler={inc_prov.get('compiler_id')}"
+        )
+    else:
+        print("  Compiler includes: off (default tree-sitter-c graph)")
     extra = {
         "preprocessor_liveness": summary.get("liveness_provenance"),
         "compiler_dependencies": dep_prov,
+        "compiler_includes": inc_prov,
     }
     snap_dir = publish_byog_snapshot(
         ents_df, rels_df, tus_df, graph_dir, SETTINGS,

@@ -72,16 +72,20 @@ explicit skip and the final status says `PASS WITH SKIPS`.
 
 ## Compile metadata
 - `compile_commands.json` records the default build: `cc -c -I. cJSON.c`.
-- The published extractor path is tree-sitter-c only. An **optional** compiler
-  overlay (`scripts/index_c.py --compiler-dependencies`, default **off**) can
-  add flattened `depends_on` edges from each compile-database translation unit
-  to package-local headers the recorded toolchain reports (`compiler -M`, then
-  package-path filtering). That is one configured TU-dependency layer — not
-  clang AST types, not direct-include provenance, not multi-config coverage,
-  and not production C/C++ completeness.
-  When enabled, missing `compile_commands.json` or a broken compiler fails
-  explicitly; compiler wrappers, response files, and MSVC are unsupported, and
-  the default off path keeps published graph counts unchanged.
+- The published extractor path is tree-sitter-c only. Two **optional**,
+  independently selectable compiler overlays (both default **off**) can extend
+  it from `compile_commands.json` using the compiler named by each entry:
+  - `--compiler-dependencies`: flattened TU `depends_on` edges
+    (`translation_unit_dependency`) via `compiler -M` + package-path filtering
+    (may include transitive headers).
+  - `--compiler-includes`: direct `includes` edges
+    (`configured_direct_include`) via `compiler -E -H` hierarchy reconstruction
+    (including file → only its direct includes; not flattened).
+  Neither is clang AST types, multi-config coverage, or production C/C++
+  completeness. `-M`/`-H` are GNU/Clang-specific. When either flag is on,
+  missing `compile_commands.json` or a broken/unsupported compiler fails
+  explicitly; wrappers, response files, and MSVC are unsupported. The default
+  off path keeps published graph counts unchanged.
 
 ## C frontend result — clean on the first pass
 Unlike `inih`, cJSON does not fragment function bodies with `#if`/`#endif`, so the
