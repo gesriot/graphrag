@@ -1379,6 +1379,69 @@ def _enhance_with_ast(source: bytes, path: Path, entities: List[Dict], relations
             stack.extend(class_bases.get(cur, []))
         return None
 
+    # A zero-argument ``super().__init__()`` supplies one conservative
+    # same-file lexical candidate: the first owner after the defining class in
+    # that class's local C3 MRO.  A runtime receiver subclass can interpose a
+    # different owner (cooperative multiple inheritance), so this remains a
+    # non-deterministic call candidate rather than an exact dispatch fact.
+    # Imported/unknown bases and non-zero-argument forms stay unresolved.
+    def _next_local_super_init(simple_class: str) -> str | None:
+        linearized = _same_file_mro(simple_class)
+        if linearized is None:
+            return None
+        for base in linearized[1:]:
+            if "__init__" in class_methods.get(base, set()):
+                return base
+        return None
+
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "__init__"
+            and isinstance(node.func.value, ast.Call)
+            and isinstance(node.func.value.func, ast.Name)
+            and node.func.value.func.id == "super"
+            and not node.func.value.args
+            and not node.func.value.keywords
+        ):
+            continue
+        caller = enclosing_function_name(node)
+        if caller not in class_for_method:
+            continue
+        class_name = class_for_method[caller]
+        simple_class = class_name.split(".")[-1]
+        defining = _next_local_super_init(simple_class)
+        if defining is None:
+            continue
+        method_bare = caller.split(".")[-1] if "." in caller else caller
+        source_title = f"{Path(path).stem}:{class_name}.{method_bare}"
+        target = f"{Path(path).stem}:{defining}.__init__"
+        relationships.append(
+            {
+                "id": (
+                    f"rel:call:{class_name}.{method_bare}:super-init:{defining}:"
+                    f"{getattr(node, 'lineno', 0)}"
+                ),
+                "source": source_title,
+                "target": target,
+                "type": "calls",
+                "description": (
+                    f"{class_name}.{method_bare} may call {defining}.__init__ "
+                    "(zero-argument super; defining-class same-file C3 candidate)"
+                ),
+                "weight": 0.75,
+                "text_unit_ids": [f"tu:file:{path.name}"],
+                "human_readable_id": len(relationships) + 1,
+                "source_file": str(path),
+                "span": f"{getattr(node, 'lineno', 0)}",
+                "extractor": "tree-sitter-python+ast",
+                "confidence": 0.75,
+                "is_deterministic": False,
+                "resolved_target_hint": target,
+            }
+        )
+
     # Property bridge: a method reading self.<name>/cls.<name> where <name> is an
     # @property on the same class *or a same-file base* is a property edge
     # (NOT ``calls``). Inherited properties resolve to the defining base

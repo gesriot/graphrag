@@ -6,7 +6,7 @@
       "kind": "current",
       "description": "Full examples pytest summary: passed + xfailed.",
       "expect": {
-        "passed": 552,
+        "passed": 556,
         "xfailed": 2
       },
       "source": {
@@ -18,17 +18,17 @@
       "docs": [
         {
           "path": "Plan.md",
-          "must_contain": "552 passed, 2 xfailed",
+          "must_contain": "556 passed, 2 xfailed",
           "role": "current"
         },
         {
           "path": "PHASE7_WRITEUP.md",
-          "must_contain": "552 passed, 2 xfailed",
+          "must_contain": "556 passed, 2 xfailed",
           "role": "current"
         },
         {
           "path": "examples/charset_normalizer_rust/tools/check_port.sh",
-          "must_contain": "Full examples run: 552 passed, 2 xfailed.",
+          "must_contain": "Full examples run: 556 passed, 2 xfailed.",
           "role": "current",
           "note": "The compatibility handoff prints this live suite summary; keep it aligned with the documented claim."
         }
@@ -351,11 +351,11 @@
         "identity_export_edges_if_modules_added": 75,
         "traced_reexports": 50,
         "untraced_reexports": 63,
-        "resolved_targets_observed": 11,
+        "resolved_targets_observed": 9,
         "traced_workloads": 4,
         "traced_cases": 194,
         "humanize_observed_targets": 6,
-        "semantic_version_observed_targets": 3,
+        "semantic_version_observed_targets": 1,
         "sqlparse_observed_targets": 2,
         "runtime_errors": 0,
         "trace_errors": 0
@@ -386,7 +386,7 @@
         },
         {
           "path": "examples/sqlparse/PROVENANCE.md",
-          "must_contain": "Four registered workloads execute **194** golden cases: they give a\nmeasured workload to **50** of the 113 bindings, and **11** resolved defining\ntargets appear in their profile frames (6 humanize, 3 semantic-version, 2\nSQLParse-engine). The other\n**63** bindings have no registered call workload",
+          "must_contain": "Four registered workloads execute **194** golden cases: they give a\nmeasured workload to **50** of the 113 bindings, and **9** resolved defining\ntargets appear in their profile frames (6 humanize, 1 semantic-version, 2\nSQLParse-engine). The other\n**63** bindings have no registered call workload",
           "role": "current",
           "require_near": "## Re-export identity and trace reachability (2026-07-30)"
         }
@@ -397,11 +397,11 @@
       "kind": "current",
       "description": "SQLParse lex/split golden workload observed against the current local published call graph.",
       "expect": {
-        "graph_call_rows": 291,
-        "observed_mapped": 25,
-        "observed_raw": 28,
-        "confirmed": 16,
-        "missed": 9,
+        "graph_call_rows": 292,
+        "observed_mapped": 24,
+        "observed_raw": 27,
+        "confirmed": 17,
+        "missed": 7,
         "unconfirmed": 132,
         "lex_cases": 40,
         "split_cases": 25
@@ -415,15 +415,81 @@
       "docs": [
         {
           "path": "examples/sqlparse/PROVENANCE.md",
-          "must_contain": "**16 confirmed**, **9 missed**, and **132\nunconfirmed** edges from **25 mapped** observed pairs (**28 raw**)",
+          "must_contain": "**17 confirmed**, **7 missed**, and **132\nunconfirmed** from **24 mapped** observed pairs (**27 raw**)",
           "role": "current",
-          "require_near": "## SQLParse call-graph observation (2026-07-30)"
+          "require_near": "## Call-oracle recall composition (2026-07-31)"
         },
         {
           "path": "examples/sqlparse/PROVENANCE.md",
-          "must_contain": "**40** lexer cases and **25**\nsplit cases",
+          "must_contain": "**40** lexer and **25** split cases",
           "role": "current",
-          "require_near": "## SQLParse call-graph observation (2026-07-30)"
+          "require_near": "## Call-oracle recall composition (2026-07-31)"
+        }
+      ]
+    },
+    {
+      "id": "call_graph_miss_audit",
+      "kind": "current",
+      "description": "Exhaustive construct classification for every scoreable JSONPatch, SQLParse, and semantic-version call-oracle miss, with cold-import frames excluded and the observed super-constructor miss matched by a non-deterministic lexical candidate.",
+      "expect": {
+        "baseline_misses": 22,
+        "cold_import_artifacts": 3,
+        "super_constructor_miss_closed": 1,
+        "live_misses": 18,
+        "jsonpatch_confirmed": 30,
+        "jsonpatch_missed": 3,
+        "jsonpatch_unconfirmed": 83,
+        "jsonpatch_observed": 33,
+        "jsonpatch_raw": 33,
+        "sqlparse_confirmed": 17,
+        "sqlparse_missed": 7,
+        "sqlparse_unconfirmed": 132,
+        "sqlparse_observed": 24,
+        "sqlparse_raw": 27,
+        "semantic_version_confirmed": 5,
+        "semantic_version_missed": 8,
+        "semantic_version_unconfirmed": 57,
+        "semantic_version_observed": 13,
+        "semantic_version_raw": 16,
+        "category_rich_tuple_compare_protocol": 8,
+        "category_implicit_contains_protocol": 2,
+        "category_implicit_str_protocol": 2,
+        "category_higher_order_callback": 1,
+        "category_property_relation": 1,
+        "category_branch_refined_receiver": 1,
+        "category_collection_element_dispatch": 1,
+        "category_generator_resume_attribution": 1,
+        "category_cross_module_inherited_constructor": 1
+      },
+      "source": {
+        "type": "call_graph_miss_audit",
+        "mode": "live",
+        "note": "Runs three live published-graph call oracles, requires an exact reviewed category for every live miss, and asserts that the three cold-import class-body pairs do not return after package import is primed. The classification is construct-level evidence, not an agreement rate."
+      },
+      "docs": [
+        {
+          "path": "docs/ORACLE_CONTRACT.md",
+          "must_contain": "| **Current workload misses** | **3** | **7** | **8** | **18** | Exhaustive, disjoint categories. |",
+          "role": "current",
+          "require_near": "## Observed recall is construct-mix, not a package ranking (2026-07-31)"
+        },
+        {
+          "path": "docs/ORACLE_CONTRACT.md",
+          "must_contain": "The original **22**-miss measurement is preserved as a record: **3** were\ncold-import class-body frames",
+          "role": "current",
+          "require_near": "## Observed recall is construct-mix, not a package ranking (2026-07-31)"
+        },
+        {
+          "path": "examples/semantic_version/PROVENANCE.md",
+          "must_contain": "**5 confirmed**, **8 missed**, and **57\nunconfirmed** edges from **13 mapped** observed pairs (**16 raw**): **5/13 =\n38.5%** observed recall.",
+          "role": "current",
+          "require_near": "## Call-oracle recall composition (2026-07-31)"
+        },
+        {
+          "path": "examples/jsonpatch/PROVENANCE.md",
+          "must_contain": "**30 confirmed / 3 missed / 83 unconfirmed**: **30/33 = 90.9%** observed\nrecall.",
+          "role": "current",
+          "require_near": "**Observed-recall composition (2026-07-31).**"
         }
       ]
     },

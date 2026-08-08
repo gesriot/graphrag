@@ -419,6 +419,34 @@ def _trace_probe_script() -> str:
                         pass
                 _workload_cases.append((str(gf.relative_to(package_dir)), len(cases)))
 
+        # Imports execute module and class bodies.  A class body defining a
+        # nested class produces a ``call`` profile event, but it is containment
+        # during cold import, not a source-level call edge.  Prime each package
+        # before arming the profiler so the observation population is the
+        # golden workload rather than import-time class construction.
+        def prepare_jsonpatch_apply():
+            sys.path.insert(0, str(package_dir))
+            import jsonpatch  # noqa: F401,WPS433
+
+        def prepare_mini_lang_golden():
+            sys.path.insert(0, str(package_dir))
+            import main  # noqa: F401,WPS433
+
+        def prepare_sqlparse_golden():
+            sys.path.insert(0, str(package_dir.parent))
+            import sqlparse  # noqa: F401,WPS433
+            from sqlparse import lexer  # noqa: F401,WPS433
+
+        def prepare_humanize_number():
+            sys.path.insert(0, str(package_dir.parent))
+            sys.path.insert(0, str(package_dir))
+            import humanize.number  # noqa: F401,WPS433
+
+        def prepare_semantic_version_golden():
+            sys.path.insert(0, str(package_dir.parent))
+            sys.path.insert(0, str(package_dir))
+            import semantic_version  # noqa: F401,WPS433
+
         runners = {
             "jsonpatch_apply": run_jsonpatch_apply,
             "mini_lang_golden": run_mini_lang_golden,
@@ -426,10 +454,18 @@ def _trace_probe_script() -> str:
             "humanize_number": run_humanize_number,
             "semantic_version_golden": run_semantic_version_golden,
         }
+        preparers = {
+            "jsonpatch_apply": prepare_jsonpatch_apply,
+            "mini_lang_golden": prepare_mini_lang_golden,
+            "sqlparse_golden": prepare_sqlparse_golden,
+            "humanize_number": prepare_humanize_number,
+            "semantic_version_golden": prepare_semantic_version_golden,
+        }
         if workload not in runners:
             print(json.dumps({"ok": False, "error": f"unknown workload {workload!r}"}))
             raise SystemExit(0)
 
+        preparers[workload]()
         sys.setprofile(profile)
         try:
             runners[workload]()

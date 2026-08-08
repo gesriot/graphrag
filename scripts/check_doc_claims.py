@@ -298,6 +298,31 @@ def _reexport_reachability_audit() -> dict[str, int]:
     }
 
 
+def _call_graph_miss_audit() -> dict[str, int]:
+    """Derive the exhaustive construct mix behind the three recall values."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from call_graph_miss_audit import build_report  # type: ignore
+
+    report = build_report()
+    if not report.get("ok"):
+        raise RuntimeError("call-graph miss audit has an unclassified or stale population")
+    values = {
+        "baseline_misses": int(report["baseline_misses_before_import_priming"]),
+        "cold_import_artifacts": int(report["cold_import_artifacts_excluded"]),
+        "super_constructor_miss_closed": int(report["super_constructor_miss_closed"]),
+        "live_misses": int(report["live_misses"]),
+    }
+    for package, source in report["reports"].items():
+        values[f"{package}_confirmed"] = int(source["confirmed"])
+        values[f"{package}_missed"] = int(source["missed"])
+        values[f"{package}_unconfirmed"] = int(source["unconfirmed"])
+        values[f"{package}_observed"] = int(source["n_observed_mapped"])
+        values[f"{package}_raw"] = int(source["n_observed_raw"])
+    for category, count in report["categories"].items():
+        values[f"category_{category}"] = int(count)
+    return values
+
+
 def _call_graph_oracle(package: str) -> dict[str, int]:
     """Derive a named local-graph call-oracle measurement without a fallback."""
     sys.path.insert(0, str(ROOT / "scripts"))
@@ -399,6 +424,8 @@ def derive(claim: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
         return _initializer_api_runtime_audit(), "live"
     if stype == "reexport_reachability_audit":
         return _reexport_reachability_audit(), "live"
+    if stype == "call_graph_miss_audit":
+        return _call_graph_miss_audit(), "live"
     if stype == "call_graph_oracle":
         return _call_graph_oracle(src["package"]), "live"
     if mode == "traced":

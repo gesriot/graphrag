@@ -26,7 +26,7 @@ preferences; they are regressions that already happened here.
 | --- | --- | --- | --- | --- | --- |
 | C preprocessor liveness | `cc`/`clang -E` line survival and `-dM` macro state, not the labeler | live/dead scored; unknown and vacuous separate; zero scored is now `n/a` | reports compile commands and translation-unit files; compiler failure raises | flipped line and macro labels become disagreements | Satisfies contract after the 2026-07-29 `n/a` fix. |
 | Python registry | subprocess import plus independent runtime discovery | agree/disagree/missed/false-positive/undetected separate; empty scored population is `n/a` | identifies registries and import failures; an import failure is named, not agreement | injected wrong Name/decorator candidate disagrees | Satisfies contract. Lambda values remain a measured residual, not guessed targets. |
-| Call-graph observation | `sys.setprofile` over the real golden workload versus the published graph | confirmed/missed/unconfirmed separate; coverage and recall are `n/a` if their denominator is empty | prints every workload file and executed case count; missing golden refuses a substitute | deleting a graph edge becomes missed; fabricating one becomes unconfirmed | Satisfies contract. `unconfirmed` is coverage, not an extractor defect. |
+| Call-graph observation | `sys.setprofile` over the real golden workload versus the published graph | confirmed/missed/unconfirmed separate; coverage and recall are `n/a` if their denominator is empty | imports the package before profiling, then prints every workload file and executed case count; missing golden refuses a substitute | deleting a graph edge becomes missed; fabricating one becomes unconfirmed | Satisfies contract. `unconfirmed` is coverage, not an extractor defect. |
 | cJSON API surface | parses `cJSON.h`; its linked audit tests execute named C traces and compile candidate Rust snippets | covered, ownership-blocked, and process-global exclusions partition the header; no rate is claimed | stale audit or unclassified header entry fails; linked tests fail on a missing trace or mismatched compiler span | header corruption, unreachable refusal scenario, and unrelated E0502 plants fail | Satisfies contract. It is a classification audit, so a rate is not applicable. |
 
 **Review result:** all four currently satisfy every applicable rule. The only
@@ -58,6 +58,38 @@ historical report. They are boundaries to inspect, not evidence of a clean pass.
 | Python registry | **25 missed** isodate lambda entries | The runtime callable values exist, but their lambda bodies have no honest single callee name; they remain unguessed. |
 | Call-graph observation | **3 missed** observed jsonpatch edges; **83 unconfirmed** graph edges | Registry Name-table members at labelled dispatch sites are promoted to non-deterministic `calls` edges. Same-file inheritance and unoverridden inherited members are separate deterministic `inherits` facts, so they do not inflate this call-only oracle; the JSONPatch golden executes no abstract base `apply`. The three remaining misses are the `_ops` property read, `_ops → _get_operation` through `map`, and the if/else `from_ptr`. Unconfirmed edges are not exercised by this workload, not proven wrong. |
 | cJSON API surface | **6 ownership-blocked** calls; **4 process-global exclusions** | The six need aliased/shared mutable storage under the observed C traces; the four need allocator/error-state policy. Neither is silently deferred. |
+
+## Observed recall is construct-mix, not a package ranking (2026-07-31)
+
+`recall of observed` is the fraction of **mapped profiler pairs** that are
+present as published `calls` edges. It is useful within one declared workload,
+but it is not a package-independent extractor score: the denominator includes
+the workload's Python protocols and the profiler's generator-resume shape.
+`scripts/call_graph_miss_audit.py --check` derives and exhaustively classifies
+the population; a new or disappearing miss fails rather than inheriting a broad
+label.
+
+| Construct category | jsonpatch | sqlparse | semantic_version | Total | Extractor/oracle treatment |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Rich tuple comparison (`__eq__` / `__lt__`) | 0 | 0 | 8 | 8 | Unmodeled: tuple member types are assembled dynamically. |
+| Implicit `in` / `not in` protocol | 0 | 2 | 0 | 2 | Unmodeled: no `In`/`NotIn` special-method bridge. |
+| Implicit `str(...)` protocol | 0 | 2 | 0 | 2 | Unmodeled: no built-in-to-`__str__` bridge. |
+| Callback / property shape | 2 | 0 | 0 | 2 | `map` callback is unmodeled; property reads are recorded as `property`, not `calls`. |
+| Receiver-flow shape | 1 | 1 | 0 | 2 | Unmodeled: `isinstance` refinement and mutable-list element types are not inferred. |
+| Generator resume / cross-module constructor MRO | 0 | 2 | 0 | 2 | Resume is profiler attribution, not a lexical call; imported constructor resolution does not follow a base MRO. |
+| **Current workload misses** | **3** | **7** | **8** | **18** | Exhaustive, disjoint categories. |
+
+The original **22**-miss measurement is preserved as a record: **3** were
+cold-import class-body frames (one SQLParse nested-token access and two nested
+semantic-version parser definitions), and one observed same-file
+`TokenList.__init__ → Token.__init__` `super()` pair is now matched by a narrow
+lexical candidate. That edge is explicitly non-deterministic because a runtime
+receiver subclass can change the next MRO owner. The current
+workload recalls are therefore JSONPatch **30/33 = 90.9%**, SQLParse
+**17/24 = 70.8%**, and semantic-version **5/13 = 38.5%**. Semantic-version's
+eight misses are one rich-comparison construct, whereas SQLParse's seven are
+heterogeneous. Comparing these recalls without the table above would imply a
+package ranking that the oracle does not establish.
 
 The older jsonpatch table with 25 missed edges remains a dated baseline in its
 provenance record. The combined command intentionally reports the active

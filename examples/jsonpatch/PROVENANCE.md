@@ -207,6 +207,14 @@ Remaining three misses are the honest residuals: `apply → _ops` (a property
 read, not a call), `_ops → _get_operation` (through `map`), and the if/else
 `from_ptr → to_last`.
 
+**Observed-recall composition (2026-07-31).** The current JSONPatch workload
+remains **30 confirmed / 3 missed / 83 unconfirmed**: **30/33 = 90.9%** observed
+recall. That is not a package ranking. Its three misses are one property
+relationship (deliberately not a `calls` edge), one higher-order `map` callback,
+and one branch-refined configurable pointer receiver. The exhaustive
+three-package construct table and the fail-closed audit live in
+`docs/ORACLE_CONTRACT.md` and `scripts/call_graph_miss_audit.py`.
+
 Adequacy (`jsonpatch_adequacy.json` from `apply_patch`):
 
 | | reached | must_reach missing |

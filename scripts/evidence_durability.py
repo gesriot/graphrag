@@ -263,6 +263,42 @@ def claim_durability(claim: Mapping[str, Any], root: Path = ROOT) -> dict[str, A
             "replay_probe": probe,
         }
 
+    if stype == "call_graph_miss_audit":
+        # The exhaustive audit invokes the native call oracle for each of its
+        # declared packages.  Resolve every graph through both registries so
+        # its three local baselines remain discoverable without a second
+        # package-to-artifact list in this inventory.
+        sys.path.insert(0, str(ROOT / "scripts"))
+        from call_graph_miss_audit import PACKAGES  # type: ignore
+        from call_graph_oracle import known_contracts  # type: ignore
+
+        contracts = known_contracts()
+        artifacts: list[str] = []
+        for package in PACKAGES:
+            contract = contracts.get(package)
+            if contract is None:
+                raise ValueError(
+                    f"{claim_id}: miss audit selects unknown call-oracle package {package!r}"
+                )
+            artifact = _graph_name(str(contract.graph_dir))
+            if artifact is None:
+                raise ValueError(f"{claim_id}: call-oracle graph is not a byog_* artifact")
+            artifacts.append(artifact)
+        artifacts = sorted(set(artifacts))
+        return {
+            "claim": claim_id,
+            "tier": "local-published-oracle-input",
+            "replay": "not reproducible from Git; reindex changes the call-oracle baseline",
+            # A multi-graph claim deliberately has no misleading singular
+            # artifact field.  ``build_inventory`` indexes every entry below.
+            "artifact": None,
+            "artifacts": artifacts,
+            "snapshot": None,
+            "present": all(_artifact_path(artifact, None, root).is_dir() for artifact in artifacts),
+            "detail": "Exhaustive call-miss audit invokes three current local published call-oracle graphs.",
+            "replay_probe": probe,
+        }
+
     if stype == "call_graph_oracle":
         # The named oracle's own contract registry supplies the graph; do not
         # duplicate a package-to-artifact map in the durability inventory.
@@ -385,9 +421,17 @@ def build_inventory(
         if not isinstance(claim, Mapping):
             raise ValueError(f"{claims_manifest}: claim entry must be an object")
         durability = claim_durability(claim, root)
+        artifact_names: list[str] = []
         artifact = durability.get("artifact")
         if isinstance(artifact, str):
-            get(artifact)["claim_uses"].append(durability)
+            artifact_names.append(artifact)
+        additional_artifacts = durability.get("artifacts")
+        if isinstance(additional_artifacts, list):
+            if not all(isinstance(name, str) for name in additional_artifacts):
+                raise ValueError(f"{durability['claim']}: artifacts must contain only strings")
+            artifact_names.extend(additional_artifacts)
+        for name in sorted(set(artifact_names)):
+            get(name)["claim_uses"].append(durability)
 
     for package, name in _call_oracle_contracts():
         get(name)["oracle_uses"].append(package)
@@ -612,8 +656,8 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         "- A mutable published graph is **current-local evidence**.  It remains distinct from "
         "a frozen snapshot: the full aggregate gate compares it with the current extractor, "
         "and a present stale graph fails rather than becoming a historical record.  The "
-        "current `oracle_residuals` JSONPatch baseline follows this rule; it is not a frozen "
-        "historical number.",
+        "current `oracle_residuals` and `call_graph_miss_audit` call-observation baselines "
+        "follow this rule; they are not frozen historical numbers.",
         "- A historical record is never presented as live verification.  If its source snapshot "
         "has gone, the record retains the number and the loss is named here.",
         "- Proposed durability rule for future frozen claims: before a frozen snapshot becomes "

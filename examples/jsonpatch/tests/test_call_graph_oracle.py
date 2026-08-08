@@ -109,6 +109,19 @@ def test_sqlparse_oracle_runs_the_full_lex_and_split_corpus():
     ), report["confirmed_edges"]
 
 
+def test_oracle_excludes_cold_import_class_bodies_from_call_pairs():
+    """Nested ``class`` execution is containment, not a golden-workload call."""
+    report = compare_named_package("semantic_version")
+    assert report["status"] == "ok", report.get("skip_reason")
+    observed = {
+        (edge["caller"], edge["callee"])
+        for key in ("confirmed_edges", "missed_edges")
+        for edge in report[key]
+    }
+    assert ("base:SimpleSpec", "base:SimpleSpec.Parser") not in observed
+    assert ("base:NpmSpec", "base:NpmSpec.Parser") not in observed
+
+
 def test_deleted_edge_shows_as_missed_fabricated_as_unconfirmed():
     """Plant both directions without rewriting the snapshot."""
     full = compare_call_edges_to_trace(

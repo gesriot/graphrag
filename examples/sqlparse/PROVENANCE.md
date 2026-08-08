@@ -128,8 +128,8 @@ not be widened (its edge list is deliberately out of scope here).
 
 The trace result is an upper bound, not evidence that callers used a package
 alias. Four registered workloads execute **194** golden cases: they give a
-measured workload to **50** of the 113 bindings, and **11** resolved defining
-targets appear in their profile frames (6 humanize, 3 semantic-version, 2
+measured workload to **50** of the 113 bindings, and **9** resolved defining
+targets appear in their profile frames (6 humanize, 1 semantic-version, 2
 SQLParse-engine). The other
 **63** bindings have no registered call workload and are explicitly
 **unmeasured**, not assumed unreachable. SQLParse's three remaining unmapped
@@ -167,6 +167,27 @@ operator-protocol dispatch (`_TokenType.__contains__`, `__getattr__`,
 `TokenList.__str__`) and cross-module instance-method calls through the filter
 stack. Measuring a second package was worth it for that alone — JSONPatch's
 30/3/83 is not representative.
+
+## Call-oracle recall composition (2026-07-31)
+
+The preceding 2026-07-30 paragraph is retained as the original measurement.
+It armed `sys.setprofile` before package import, so one mapped pair was class
+body execution (`TypedLiteral → _TokenType.__getattr__`), not a golden-workload
+call. The tracer now imports before profiling; independently, a narrow
+same-file `super().__init__` lexical candidate adds the observed
+`TokenList.__init__ → Token.__init__` pair to the graph. It is marked
+non-deterministic because a runtime receiver subclass can alter the next MRO
+owner. The current live result is **17 confirmed**, **7 missed**, and **132
+unconfirmed** from **24 mapped** observed pairs (**27 raw**) across the same
+**40** lexer and **25** split cases: **17/24 = 70.8%** observed recall.
+
+Those seven misses are heterogeneous: two `_TokenType.__contains__` protocol
+calls, two `TokenList.__str__` protocol calls, one mutable-filter-list element
+dispatch, one profiler generator-resume frame (`process → Lexer.get_tokens`),
+and one imported-subclass constructor whose executing body belongs to
+`TokenList`. The full cross-package table in `docs/ORACLE_CONTRACT.md` is the
+meaning of this recall: it is a workload construct mix, not a score comparable
+to JSONPatch or semantic-version without those categories.
 
 ## Split behavior contract — gate step 2
 - Golden file: `tests/split/golden_split.json`.

@@ -42,3 +42,21 @@ claim of full Python package API compatibility. Deliberately out of scope are
 the deprecated `SpecItem` and `LegacySpec` / `Spec` compatibility APIs,
 top-level `match`, full Clause equality/hash/iteration behavior, warnings and
 Python-specific representations, and the omitted Django integration.
+
+## Call-oracle recall composition (2026-07-31)
+
+The 42-case live call workload reports **5 confirmed**, **8 missed**, and **57
+unconfirmed** edges from **13 mapped** observed pairs (**16 raw**): **5/13 =
+38.5%** observed recall. All eight misses are the same construct, not eight
+independent resolver failures: `Version.__lt__` / `Version.__gt__` compares
+dynamically assembled precedence-key tuples, and Python dispatches the nested
+`AlphaIdentifier`, `NumericIdentifier`, and `MaxIdentifier` `__eq__` / `__lt__`
+methods. The extractor has no safe receiver type for those tuple members, so it
+does not emit speculative `calls` edges.
+
+The tracer now imports the package before profiling. That removes two older
+`SimpleSpec/NpmSpec → Parser` pairs that were nested class-body execution during
+cold import rather than workload calls. This recall is therefore a property of
+this comparison-heavy workload's construct mix, not a ranking against
+JSONPatch or SQLParse; see `docs/ORACLE_CONTRACT.md` for the exhaustive
+three-package classification.

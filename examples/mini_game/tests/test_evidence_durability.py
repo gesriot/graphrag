@@ -39,6 +39,7 @@ def test_inventory_derives_frozen_lost_and_oracle_consumers():
         ("sqlparse_graph_current_index", "local-frozen-snapshot", "20260625-154143-8ce62d57"),
         ("sqlparse_graph_phase5_baseline", "historical-record", "20260618-151436-ad7b5954"),
         ("sqlparse_call_graph_oracle", "local-published-oracle-input", None),
+        ("call_graph_miss_audit", "local-published-oracle-input", None),
     }
     assert artifacts["byog_isodate"]["claim_uses"][0]["tier"] == "local-frozen-snapshot"
     assert artifacts["byog_jsonpatch"]["oracle_uses"] == ["jsonpatch"]
@@ -54,6 +55,12 @@ def test_inventory_derives_frozen_lost_and_oracle_consumers():
         "not reproducible from Git; reindex changes the call-oracle baseline"
     )
     assert jsonpatch_claim["present"] is (ROOT / "byog_jsonpatch").is_dir()
+    for artifact in ("byog_jsonpatch", "byog_semver"):
+        assert any(
+            use["claim"] == "call_graph_miss_audit"
+            and use["tier"] == "local-published-oracle-input"
+            for use in artifacts[artifact]["claim_uses"]
+        )
     adequacy_claim = next(
         use
         for use in artifacts["byog_jsonpatch"]["claim_uses"]
