@@ -99,14 +99,38 @@ the include overlay emits `main.c → direct.h` and `direct.h → transitive.h`,
 **not** `main.c → transitive.h`. The depends_on overlay may still emit the
 flattened `main.c → transitive.h` edge.
 
+#### Configured function signatures (entity fields, not edges)
+
+When `scripts/index_c.py --clang-signatures` is enabled (default **off**),
+existing tree-sitter-c **function** entities that the standalone
+`scripts/c_clang_ast_audit.py` report classifies as `matched` with
+`line_column_confirmed=true` gain configuration/toolchain-derived Clang
+signature columns (`clang_qual_type`, storage/inline/variadic/mangled metadata,
+compiler/digest provenance, canonical `clang_signature_observations_json`).
+
+| Property | Value |
+| --- | --- |
+| Graph shape | **No** new entities or relationships; entity count unchanged |
+| Attachment key | Collision-safe `tree_sitter_title` + package-relative source path |
+| `clang_signature_fact_kind` | `configured_function_signature` |
+| `clang_signature_extractor` | `clang-ast-json` |
+| Confidence | `clang_signature_confidence=1.0` only relative to recorded Clang + compile DB |
+| Fail-closed residuals | Any `clang_only` / `ambiguous` / `macro_location_unsupported` / unconfirmed location / missing entity aborts the overlay |
+| Allowed residuals | `tree_sitter_only` and `out_of_compile_db_scope` remain counted in the manifest and receive **no** invented signatures |
+
+Base tree-sitter `extractor` / `confidence` / `is_deterministic` / title / id
+are unchanged. The standalone audit remains a diagnostic CLI; only this flag
+publishes selected matched metadata into BYOG.
+
 **Shared out of scope:** multi-config coverage, MSVC/wrappers/response files
 (fail closed), system/outside endpoints after filtering, production C/C++
-completeness. Snapshot manifests record separate `compiler_dependencies` and
-`compiler_includes` blocks (`mode`, compiler identity/identities, digest,
-fact/TU counts); both carry an explicit `mode=off` block when disabled.
-Module-producing compiler flags also fail closed for the `-H` adapter until
-their cache/output paths can be redirected without changing configured
-semantics.
+completeness. Snapshot manifests record separate `compiler_dependencies`,
+`compiler_includes`, and `clang_signatures` blocks with their applicable mode,
+compiler identity/identities, digest, fact/TU counts, and residual counts; all
+carry an explicit `mode=off` block when disabled. Module/cache/plugin/PCH,
+response/config, and unrestricted `-Xclang` compile arguments fail closed for
+all compiler-backed adapters until their effects can be audited without
+changing configured semantics.
 
 ## Example Row (entities)
 ```json

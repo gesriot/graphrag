@@ -86,17 +86,26 @@ explicit skip and the final status says `PASS WITH SKIPS`.
   missing `compile_commands.json` or a broken/unsupported compiler fails
   explicitly; wrappers, response files, and MSVC are unsupported. The default
   off path keeps published graph counts unchanged.
-- **Clang AST function-definition audit (diagnostic, not a graph overlay):**
+- **Clang AST function-definition audit (standalone diagnostic):**
   `scripts/c_clang_ast_audit.py --package examples/cjson` runs the recorded
   Clang from `compile_commands.json` with
   `-fsyntax-only -Xclang -ast-dump=json` and compares package-local function
   *definitions* to tree-sitter-c entities. Expected shape for this package:
-  library functions in `cJSON.c` match with Clang `qualType` metadata; the
-  golden `tests/parse/runner.c` is `out_of_compile_db_scope` (not a false
-  miss); a few MSVC-only static helpers may remain `tree_sitter_only` with
-  preprocessor unknown evidence. **No AST facts are written into BYOG.** Clang
-  only; GCC/MSVC/wrappers fail closed. Macro spelling/expansion multi-file
-  disagreement is classified explicitly, not silently matched.
+  **113** library definitions in `cJSON.c` match with Clang `qualType`
+  metadata; **19** golden `tests/parse/runner.c` functions are
+  `out_of_compile_db_scope` (not false misses); **3** MSVC-only static helpers
+  (`internal_malloc` / `internal_free` / `internal_realloc`) remain
+  `tree_sitter_only` with preprocessor unknown evidence. Clang only;
+  GCC/MSVC/wrappers fail closed.
+- **Optional `--clang-signatures` graph fields (default off):**
+  `scripts/index_c.py --clang-signatures` attaches the audit’s **matched +
+  line-confirmed** signature metadata onto existing function entities only
+  (entity/relationship counts unchanged). Expected for cJSON when enabled:
+  **113** signature facts; the 3 `tree_sitter_only` and 19 out-of-scope rows
+  stay residual without invented signatures. Unclean residuals
+  (`clang_only` / `ambiguous` / macro multi-file locations) fail the overlay
+  explicitly. This is not full type resolution, ABI verification, multi-config
+  coverage, or C++ support.
 
 ## C frontend result — clean on the first pass
 Unlike `inih`, cJSON does not fragment function bodies with `#if`/`#endif`, so the

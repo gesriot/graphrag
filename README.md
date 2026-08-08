@@ -97,18 +97,20 @@ flags on `scripts/index_c.py`:
 - `--compiler-includes` — direct `includes` edges
   (`fact_kind=configured_direct_include`) via per-entry `compiler -E -H`
   hierarchy reconstruction (parent → only its direct includes).
+- `--clang-signatures` — attach configured Clang `qualType` / storage metadata
+  to **existing** tree-sitter function entities from the AST audit’s
+  unambiguously matched, line-confirmed rows only (no new entities/edges).
 
 These are narrow configuration-derived layers on top of tree-sitter-c — not
-clang AST type resolution, multi-config coverage, or production C/C++
-completeness. `-M` / `-H` are GNU/Clang-specific adapters, not a universal
-compiler API. Wrappers, response files, and MSVC fail explicitly. See
+full type resolution, ABI verification, multi-config coverage, or production
+C/C++ completeness. `-M` / `-H` / AST-dump are GNU/Clang-specific adapters, not
+a universal compiler API. Wrappers, response files, `--config`, modules,
+plugins, and PCH fail explicitly. See
 [docs/graph_schema.md](docs/graph_schema.md).
 
-**Clang AST function-definition audit (diagnostic only):**
+**Clang AST function-definition audit (still a standalone diagnostic):**
 `scripts/c_clang_ast_audit.py` compares package-local Clang `FunctionDecl`
-definitions (`-fsyntax-only -Xclang -ast-dump=json` per compile-database entry)
-to tree-sitter-c function entities. It reports matched signatures, out-of-scope
-files, configuration residuals, and macro-location ambiguity. **Clang only**
-(a `cc` binary is accepted only when `--version` proves Clang/Apple Clang).
-It does **not** publish BYOG graph facts or add `index_c` flags — it is the
-evidence gate before any future AST-derived overlay.
+definitions to tree-sitter-c entities and reports matches/residuals. **Clang
+only** (`cc` accepted only when `--version` proves Clang/Apple Clang). Publishing
+selected matched signature fields into BYOG requires the separate explicit
+`--clang-signatures` flag; the audit CLI itself does not mutate the graph.

@@ -12,8 +12,10 @@ then records the toolchain identity and macro-seed digest.
 Optional ``--compiler-dependencies`` overlays flattened compiler-backed
 translation-unit ``depends_on`` edges from ``compile_commands.json`` (default
 off). Optional ``--compiler-includes`` overlays direct ``includes`` edges from
-``compiler -E -H`` (also default off). Published graph counts stay
-tree-sitter-only unless an overlay is explicitly enabled.
+``compiler -E -H`` (also default off). Optional ``--clang-signatures`` attaches
+configured Clang function-signature fields to matched tree-sitter function
+entities (default off; diagnostic audit remains standalone). Published graph
+counts stay tree-sitter-only unless an overlay is explicitly enabled.
 
 Usage:
     uv run python scripts/index_c.py --package examples/jsmn --graph byog_jsmn
@@ -30,6 +32,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from extract_c import build_c_byog  # type: ignore
 from byog_graph import publish_byog_snapshot  # type: ignore
+from c_clang_signatures import (  # type: ignore
+    ClangSignatureError,
+    append_clang_signatures,
+    build_disabled_provenance as build_disabled_signature_provenance,
+)
 from c_compiler_facts import (  # type: ignore
     CompilerDependencyError,
     append_compiler_dependencies,
@@ -84,6 +91,17 @@ def main(
             "compiler -E -H (configured include hierarchy). Default is off. "
             "Independently selectable from --compiler-dependencies. When on, "
             "missing compile_commands.json or a broken compiler fails explicitly."
+        ),
+    ),
+    clang_signatures: bool = typer.Option(
+        False,
+        "--clang-signatures/--no-clang-signatures",
+        help=(
+            "Attach configured Clang function-signature fields to existing "
+            "tree-sitter function entities using the AST function-definition "
+            "audit (matched + line-confirmed only). Default is off. Unclean "
+            "audit residuals (clang_only/ambiguous/macro_location_unsupported) "
+            "fail the overlay explicitly. Does not create entities or edges."
         ),
     ),
     allow_toolchain_drift: bool = typer.Option(
@@ -161,6 +179,15 @@ def main(
     else:
         inc_prov = build_disabled_include_provenance()
 
+    if clang_signatures:
+        try:
+            sig_prov = append_clang_signatures(data, pkg_dir)
+        except ClangSignatureError as e:
+            typer.secho(str(e), fg=typer.colors.RED, err=True)
+            raise typer.Exit(2) from e
+    else:
+        sig_prov = build_disabled_signature_provenance()
+
     ents_df = pd.DataFrame(data["entities"])
     rels_df = pd.DataFrame(data["relationships"])
     tus_df = pd.DataFrame(data["text_units"])
@@ -198,10 +225,23 @@ def main(
         )
     else:
         print("  Compiler includes: off (default tree-sitter-c graph)")
+    if sig_prov.get("enabled"):
+        counts = sig_prov.get("counts") or {}
+        print(
+            f"  Clang signatures: facts={sig_prov.get('n_facts')} "
+            f"matched={counts.get('matched')} "
+            f"tree_sitter_only={counts.get('tree_sitter_only')} "
+            f"out_of_scope={counts.get('out_of_compile_db_scope')} "
+            f"digest={sig_prov.get('compile_commands_digest')} "
+            f"compiler={sig_prov.get('compiler_id')}"
+        )
+    else:
+        print("  Clang signatures: off (default tree-sitter-c graph)")
     extra = {
         "preprocessor_liveness": summary.get("liveness_provenance"),
         "compiler_dependencies": dep_prov,
         "compiler_includes": inc_prov,
+        "clang_signatures": sig_prov,
     }
     snap_dir = publish_byog_snapshot(
         ents_df, rels_df, tus_df, graph_dir, SETTINGS,

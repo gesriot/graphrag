@@ -486,6 +486,7 @@ def test_default_index_option_off_records_no_facts(tmp_path: Path):
         compiler_builtins=False,
         compiler_dependencies=False,
         compiler_includes=False,
+        clang_signatures=False,
         allow_toolchain_drift=False,
     )
     snapshot = (graph / "current").read_text(encoding="utf-8").strip()
@@ -501,6 +502,12 @@ def test_default_index_option_off_records_no_facts(tmp_path: Path):
         "n_translation_units": 0,
     }
     assert manifest["compiler_includes"] == {
+        "mode": "off",
+        "enabled": False,
+        "n_facts": 0,
+        "n_translation_units": 0,
+    }
+    assert manifest["clang_signatures"] == {
         "mode": "off",
         "enabled": False,
         "n_facts": 0,
@@ -524,6 +531,7 @@ def test_enabled_index_manifest_matches_published_overlay(tmp_path: Path):
         compiler_builtins=False,
         compiler_dependencies=True,
         compiler_includes=False,
+        clang_signatures=False,
         allow_toolchain_drift=False,
     )
     snapshot = (graph / "current").read_text(encoding="utf-8").strip()
