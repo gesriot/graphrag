@@ -100,13 +100,17 @@ flags on `scripts/index_c.py`:
 - `--clang-signatures` — attach configured Clang `qualType` / storage metadata
   to **existing** tree-sitter function entities from the AST audit’s
   unambiguously matched, line-confirmed rows only (no new entities/edges).
+- `--clang-calls` — attach configured Clang direct-call evidence metadata to
+  **existing** tree-sitter `calls` relationships from the AST call-site audit’s
+  `matched_internal` rows only (exact span + byte-offset attachment; no new
+  entities/edges; base `confidence`/`extractor` unchanged).
 
 These are narrow configuration-derived layers on top of tree-sitter-c — not
-full type resolution, ABI verification, multi-config coverage, or production
-C/C++ completeness. `-M` / `-H` / AST-dump are GNU/Clang-specific adapters, not
-a universal compiler API. Wrappers, response files, `--config`, modules,
-plugins, and PCH fail explicitly. See
-[docs/graph_schema.md](docs/graph_schema.md).
+full type resolution, ABI verification, multi-config coverage, points-to
+analysis, macro-complete call proof, or production C/C++ completeness. `-M` /
+`-H` / AST-dump are GNU/Clang-specific adapters, not a universal compiler API.
+Wrappers, response files, `--config`, modules, plugins, and PCH fail
+explicitly. See [docs/graph_schema.md](docs/graph_schema.md).
 
 **Clang AST audits (standalone diagnostics):**
 
@@ -116,8 +120,8 @@ plugins, and PCH fail explicitly. See
 - `scripts/c_clang_call_audit.py` — call sites vs tree-sitter `calls` edges
   (direct internal matches; external/indirect remain observations). Call-site
   matching is byte-offset-first with strict line/column fallback and complete
-  tree-sitter edge accounting. **Does not publish call facts** and does not add
-  an `index_c` flag.
+  tree-sitter edge accounting. Publishing selected matched call *evidence
+  fields* into BYOG requires the separate explicit `--clang-calls` flag.
 
 Both are **Clang only** (`cc` accepted only when `--version` proves
 Clang/Apple Clang). Neither is points-to analysis, multi-config coverage, or

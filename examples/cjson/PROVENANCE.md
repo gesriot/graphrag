@@ -106,7 +106,7 @@ explicit skip and the final status says `PASS WITH SKIPS`.
   (`clang_only` / `ambiguous` / macro multi-file locations) fail the overlay
   explicitly. This is not full type resolution, ABI verification, multi-config
   coverage, or C++ support.
-- **Clang AST call-site audit (diagnostic only, no graph mutation):**
+- **Clang AST call-site audit (standalone diagnostic):**
   `scripts/c_clang_call_audit.py --package examples/cjson` compares
   package-local `CallExpr` sites (callee subtree only) to tree-sitter `calls`
   edges. Direct internal matches require a `DeclRefExpr` → `FunctionDecl` with
@@ -120,8 +120,24 @@ explicit skip and the final status says `PASS WITH SKIPS`.
   toolchain/config): matched_internal=188, tree_sitter_only_internal=0,
   out_of_compile_db_scope=307 (runner-dominated), external_direct=71,
   indirect=26, ambiguous=0, clang_only_internal=0. The tree-sitter accounting
-  is complete (188 + 0 + 307 = 495 calls). **No call facts are published into
-  BYOG.**
+  is complete (188 + 0 + 307 = 495 calls).
+- **Optional `--clang-calls` relationship fields (default off):**
+  `scripts/index_c.py --clang-calls` attaches the audit’s **matched_internal**
+  rows as `clang_call_*` metadata onto existing tree-sitter `calls`
+  relationships only (relationship count/IDs/endpoints/types unchanged; base
+  `confidence=0.9` / `extractor=tree-sitter-c` unchanged). Attachment requires
+  one-to-one exact evidence: caller/target titles + package-relative path +
+  exact `tree_sitter_span` + exact byte offset. Expected for cJSON when
+  enabled: **188** call facts; unconfirmed/out-of-scope edges stay residual
+  without invented metadata. Fail-closed residuals
+  (`clang_only_internal` / `ambiguous` / macro multi-file locations /
+  `covered_by_noninternal_clang_observation`) and inconsistent compiler,
+  digest, or compile-entry provenance abort the overlay before mutation. Allowed
+  residuals (`tree_sitter_only_internal`, `out_of_compile_db_scope`,
+  `external_direct`, `indirect`) are manifest-only. This is not points-to
+  analysis, macro-complete call proof, multi-config coverage, C++, or ABI
+  verification. `clang_call_confidence=1.0` is relative only to the recorded
+  Clang + `compile_commands.json` configuration.
 
 ## C frontend result — clean on the first pass
 Unlike `inih`, cJSON does not fragment function bodies with `#if`/`#endif`, so the

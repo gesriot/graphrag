@@ -14,8 +14,10 @@ translation-unit ``depends_on`` edges from ``compile_commands.json`` (default
 off). Optional ``--compiler-includes`` overlays direct ``includes`` edges from
 ``compiler -E -H`` (also default off). Optional ``--clang-signatures`` attaches
 configured Clang function-signature fields to matched tree-sitter function
-entities (default off; diagnostic audit remains standalone). Published graph
-counts stay tree-sitter-only unless an overlay is explicitly enabled.
+entities (default off). Optional ``--clang-calls`` attaches configured direct-
+call evidence fields to existing tree-sitter ``calls`` relationships (default
+off). Diagnostic AST audits remain standalone. Published graph counts stay
+tree-sitter-only unless an overlay is explicitly enabled.
 
 Usage:
     uv run python scripts/index_c.py --package examples/jsmn --graph byog_jsmn
@@ -32,6 +34,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from extract_c import build_c_byog  # type: ignore
 from byog_graph import publish_byog_snapshot  # type: ignore
+from c_clang_calls import (  # type: ignore
+    ClangCallOverlayError,
+    append_clang_calls,
+    build_disabled_provenance as build_disabled_call_provenance,
+)
 from c_clang_signatures import (  # type: ignore
     ClangSignatureError,
     append_clang_signatures,
@@ -102,6 +109,18 @@ def main(
             "audit (matched + line-confirmed only). Default is off. Unclean "
             "audit residuals (clang_only/ambiguous/macro_location_unsupported) "
             "fail the overlay explicitly. Does not create entities or edges."
+        ),
+    ),
+    clang_calls: bool = typer.Option(
+        False,
+        "--clang-calls/--no-clang-calls",
+        help=(
+            "Attach configured Clang direct-call evidence fields to existing "
+            "tree-sitter calls relationships using the AST call-site audit "
+            "(matched_internal only; exact span + byte offset). Default is off. "
+            "Unclean residuals (clang_only_internal/ambiguous/macro/"
+            "covered_by_noninternal) fail explicitly. Does not create or delete "
+            "relationships."
         ),
     ),
     allow_toolchain_drift: bool = typer.Option(
@@ -188,6 +207,15 @@ def main(
     else:
         sig_prov = build_disabled_signature_provenance()
 
+    if clang_calls:
+        try:
+            call_prov = append_clang_calls(data, pkg_dir)
+        except ClangCallOverlayError as e:
+            typer.secho(str(e), fg=typer.colors.RED, err=True)
+            raise typer.Exit(2) from e
+    else:
+        call_prov = build_disabled_call_provenance()
+
     ents_df = pd.DataFrame(data["entities"])
     rels_df = pd.DataFrame(data["relationships"])
     tus_df = pd.DataFrame(data["text_units"])
@@ -237,11 +265,26 @@ def main(
         )
     else:
         print("  Clang signatures: off (default tree-sitter-c graph)")
+    if call_prov.get("enabled"):
+        counts = call_prov.get("counts") or {}
+        print(
+            f"  Clang calls: facts={call_prov.get('n_facts')} "
+            f"matched={counts.get('matched_internal')} "
+            f"ts_only={counts.get('tree_sitter_only_internal')} "
+            f"out_of_scope={counts.get('out_of_compile_db_scope')} "
+            f"external={counts.get('external_direct')} "
+            f"indirect={counts.get('indirect')} "
+            f"digest={call_prov.get('compile_commands_digest')} "
+            f"compiler={call_prov.get('compiler_id')}"
+        )
+    else:
+        print("  Clang calls: off (default tree-sitter-c graph)")
     extra = {
         "preprocessor_liveness": summary.get("liveness_provenance"),
         "compiler_dependencies": dep_prov,
         "compiler_includes": inc_prov,
         "clang_signatures": sig_prov,
+        "clang_calls": call_prov,
     }
     snap_dir = publish_byog_snapshot(
         ents_df, rels_df, tus_df, graph_dir, SETTINGS,

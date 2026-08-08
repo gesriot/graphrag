@@ -122,15 +122,43 @@ Base tree-sitter `extractor` / `confidence` / `is_deterministic` / title / id
 are unchanged. The standalone audit remains a diagnostic CLI; only this flag
 publishes selected matched metadata into BYOG.
 
+#### Configured direct-call evidence (relationship fields, not new edges)
+
+When `scripts/index_c.py --clang-calls` is enabled (default **off**), existing
+tree-sitter-c **`calls`** relationships that the standalone
+`scripts/c_clang_call_audit.py` report classifies as `matched_internal` gain
+configuration/toolchain-derived Clang call-evidence columns
+(`clang_call_status`, `clang_call_match_basis`, `clang_call_byte_offset`,
+entry indices, compiler/digest provenance, canonical
+`clang_call_observations_json` / `clang_call_compilers_json`).
+
+| Property | Value |
+| --- | --- |
+| Graph shape | **No** new entities or relationships; relationship IDs/endpoints/types unchanged |
+| Attachment key | `type=calls` + caller/target titles + package-relative `source_file` + exact `tree_sitter_span` + exact derived byte offset |
+| `clang_call_fact_kind` | `configured_direct_call` |
+| `clang_call_extractor` | `clang-ast-json` |
+| Confidence | `clang_call_confidence=1.0` only relative to recorded Clang + compile DB; base relationship `confidence=0.9` / `extractor=tree-sitter-c` stay unchanged |
+| Fail-closed residuals | Any `clang_only_internal` / `ambiguous` / `macro_location_unsupported` / `covered_by_noninternal_clang_observation`, malformed compiler/digest/entry provenance, missing/duplicate relationship match, or byte-offset mismatch aborts before mutation |
+| Allowed residuals | `tree_sitter_only_internal`, `out_of_compile_db_scope`, `external_direct`, and `indirect` remain counted in the manifest and receive **no** invented call metadata |
+
+The audit is byte-offset-first and may use strict line/column fallback when
+Clang omits its offset. Publication still requires the tree-sitter source span
+to derive the exact relationship byte offset; column-only attachment is
+impossible. This is **not** points-to analysis, macro-complete call proof,
+multi-config coverage, C++, or ABI verification. The standalone call audit
+remains a diagnostic CLI; only this flag publishes selected matched metadata
+into BYOG.
+
 **Shared out of scope:** multi-config coverage, MSVC/wrappers/response files
 (fail closed), system/outside endpoints after filtering, production C/C++
 completeness. Snapshot manifests record separate `compiler_dependencies`,
-`compiler_includes`, and `clang_signatures` blocks with their applicable mode,
-compiler identity/identities, digest, fact/TU counts, and residual counts; all
-carry an explicit `mode=off` block when disabled. Module/cache/plugin/PCH,
-response/config, and unrestricted `-Xclang` compile arguments fail closed for
-all compiler-backed adapters until their effects can be audited without
-changing configured semantics.
+`compiler_includes`, `clang_signatures`, and `clang_calls` blocks with their
+applicable mode, compiler identity/identities, digest, fact/TU counts, and
+residual counts; all carry an explicit `mode=off` block when disabled.
+Module/cache/plugin/PCH, response/config, and unrestricted `-Xclang` compile
+arguments fail closed for all compiler-backed adapters until their effects can
+be audited without changing configured semantics.
 
 ## Example Row (entities)
 ```json

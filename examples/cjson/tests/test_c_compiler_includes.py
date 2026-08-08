@@ -447,6 +447,7 @@ def test_cli_default_off_includes_manifest(tmp_path: Path):
         compiler_dependencies=False,
         compiler_includes=False,
         clang_signatures=False,
+        clang_calls=False,
         allow_toolchain_drift=False,
     )
     snapshot = (graph / "current").read_text(encoding="utf-8").strip()
@@ -481,6 +482,7 @@ def test_cli_includes_only(tmp_path: Path):
         compiler_dependencies=False,
         compiler_includes=True,
         clang_signatures=False,
+        clang_calls=False,
         allow_toolchain_drift=False,
     )
     snapshot = (graph / "current").read_text(encoding="utf-8").strip()
@@ -521,6 +523,7 @@ def test_cli_dependencies_only_unchanged(tmp_path: Path):
         compiler_dependencies=True,
         compiler_includes=False,
         clang_signatures=False,
+        clang_calls=False,
         allow_toolchain_drift=False,
     )
     snapshot = (graph / "current").read_text(encoding="utf-8").strip()
@@ -550,6 +553,7 @@ def test_cli_both_overlays(tmp_path: Path):
         compiler_dependencies=True,
         compiler_includes=True,
         clang_signatures=False,
+        clang_calls=False,
         allow_toolchain_drift=False,
     )
     snapshot = (graph / "current").read_text(encoding="utf-8").strip()
