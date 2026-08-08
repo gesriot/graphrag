@@ -577,3 +577,202 @@ def test_live_inih_cjson_call_counts_stable():
         for e in d["entities"]:
             if e["type"] == "function":
                 assert ":function:" not in e["title"]
+
+
+# ---------------------------------------------------------------------------
+# Declarator-aware typedef alias extraction
+# ---------------------------------------------------------------------------
+
+
+def test_typedef_alias_helper_patterns():
+    from extract_c import _parser, _typedef_alias_names  # type: ignore
+
+    parser = _parser()
+    cases = [
+        (b"typedef int Name;\n", ["Name"]),
+        (b"typedef int (*callback)(void* user, const char* s);\n", ["callback"]),
+        (
+            b"typedef char* (*reader)(char* str, int num, void* stream);\n",
+            ["reader"],
+        ),
+        (b"typedef int (**nested)(void);\n", ["nested"]),
+        (b"typedef int arr[10];\n", ["arr"]),
+        (b"typedef int ((*cb))(void);\n", ["cb"]),
+        (b"typedef int Alias [[deprecated]];\n", ["Alias"]),
+        (b"typedef int " + b"*" * 40 + b"Deep;\n", ["Deep"]),
+        (b"typedef int a, *b, (*c)(void);\n", ["a", "b", "c"]),
+        (b"typedef struct Item { int x; } Item;\n", ["Item"]),
+        # Parameter identifiers / tags must not become aliases.
+        (b"typedef int (*fp)(struct Tag *t, int x);\n", ["fp"]),
+    ]
+    for src, expect in cases:
+        tree = parser.parse(src)
+        td = next(c for c in tree.root_node.children if c.type == "type_definition")
+        assert _typedef_alias_names(td) == expect, (src, _typedef_alias_names(td))
+
+
+def test_function_pointer_typedefs_become_entities(tmp_path: Path):
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "cb.c").write_text(
+        "typedef int (*callback)(void* user, const char* s);\n"
+        "typedef char* (*reader)(char* str, int num, void* stream);\n"
+        "int use(callback cb, reader r) { (void)cb; (void)r; return 0; }\n",
+        encoding="utf-8",
+    )
+    data = build_c_byog(pkg)
+    tds = {
+        e["symbol_name"]: e
+        for e in data["entities"]
+        if e["type"] == "typedef"
+    }
+    assert set(tds) == {"callback", "reader"}
+    assert tds["callback"]["title"] == "cb:callback"
+    assert tds["reader"]["title"] == "cb:reader"
+    assert "symbol_name" in tds["callback"]
+    contains_targets = {
+        r["target"] for r in data["relationships"] if r["type"] == "contains"
+    }
+    assert "cb:callback" in contains_targets
+    assert "cb:reader" in contains_targets
+
+
+def test_parameter_and_struct_tag_not_typedef_aliases(tmp_path: Path):
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "t.c").write_text(
+        "typedef int (*fp)(struct Tag *t, enum E e, int x);\n"
+        "struct Tag { int v; };\n"
+        "enum E { E0 };\n",
+        encoding="utf-8",
+    )
+    data = build_c_byog(pkg)
+    typedef_names = {
+        e["symbol_name"] for e in data["entities"] if e["type"] == "typedef"
+    }
+    assert typedef_names == {"fp"}
+    assert "t" not in typedef_names
+    assert "x" not in typedef_names
+    assert "Tag" not in typedef_names or any(
+        e["type"] == "struct" and e["symbol_name"] == "Tag" for e in data["entities"]
+    )
+
+
+def test_conditional_duplicate_typedef_deterministic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Two same-kind typedefs under #if/#else: first in walk order wins."""
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "h.h").write_text(
+        "#if FLAG\n"
+        "typedef int (*handler)(int a);\n"
+        "#else\n"
+        "typedef int (*handler)(int a, int b);\n"
+        "#endif\n",
+        encoding="utf-8",
+    )
+    (pkg / "h.c").write_text('#include "h.h"\nint f(void){return 0;}\n', encoding="utf-8")
+    d1 = build_c_byog(pkg)
+    d2 = build_c_byog(pkg)
+    handlers = [
+        e for e in d1["entities"] if e.get("symbol_name") == "handler" and e["type"] == "typedef"
+    ]
+    assert len(handlers) == 1
+    # First branch in AST walk (the #if form) is the representative.
+    assert handlers[0]["span"].startswith("2:")
+    assert [e["id"] for e in d1["entities"]] == [e["id"] for e in d2["entities"]]
+
+    discovered = list_indexed_c_files(pkg)
+    monkeypatch.setattr(
+        extract_c_module,
+        "list_indexed_c_files",
+        lambda _package_dir: list(reversed(discovered)),
+    )
+    assert build_c_byog(pkg) == d1
+
+    script = (
+        "import json,sys\n"
+        f"sys.path.insert(0, {str(ROOT / 'scripts')!r})\n"
+        "from pathlib import Path\n"
+        "from extract_c import build_c_byog\n"
+        f"d=build_c_byog(Path({str(pkg)!r}))\n"
+        "print(json.dumps(["
+        "(e['id'],e['span']) for e in d['entities'] "
+        "if e.get('symbol_name')=='handler'"
+        "]))\n"
+    )
+    env = dict(os.environ)
+    outputs = []
+    for seed in ("0", "1", "42"):
+        env["PYTHONHASHSEED"] = seed
+        outputs.append(
+            subprocess.run(
+                [sys.executable, "-c", script],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+        )
+    assert len(set(outputs)) == 1
+
+
+@pytest.mark.skipif(_cc() is None, reason="no C compiler")
+def test_live_inih_typedef_and_type_audit_buckets():
+    from c_clang_type_audit import run_clang_type_audit, main as type_main  # type: ignore
+
+    pkg = ROOT / "examples" / "inih"
+    data = build_c_byog(pkg)
+    assert len(data["entities"]) == 21
+    assert len(data["relationships"]) == 56
+    assert len(data["text_units"]) == 21
+    calls = [r for r in data["relationships"] if r["type"] == "calls"]
+    assert len(calls) == 38
+    assert len({r["id"] for r in calls}) == 38
+    tds = {
+        e["symbol_name"]: e
+        for e in data["entities"]
+        if e["type"] == "typedef"
+    }
+    assert set(tds) == {
+        "ini_parse_string_ctx",
+        "ini_handler",
+        "ini_reader",
+    }
+    # First #if branch of ini_handler is the deterministic representative.
+    assert tds["ini_handler"]["span"].startswith("58:")
+    assert tds["ini_reader"]["span"].startswith("67:")
+
+    report = run_clang_type_audit(pkg)
+    c = report["counts"]
+    assert c["matched"] == 2
+    assert {m["name"] for m in report["matched"]} == {
+        "ini_parse_string_ctx",
+        "ini_reader",
+    }
+    assert c["clang_only"] == 0
+    assert c["tree_sitter_only"] == 0
+    # Conditional ini_handler: tree-sitter keeps #if span (line 58); configured
+    # Clang sees the #else declaration (line 62) → exact line/col residual.
+    assert c["ambiguous"] == 1
+    amb = report["ambiguous"][0]
+    assert amb["name"] == "ini_handler"
+    assert "line/column" in amb["reason"]
+    assert amb["tree_sitter_candidates"][0]["line"] == 58
+    assert amb["line"] == 62
+    assert c["anonymous_declarations"] == 1
+    assert c["outside_package_declarations"] == 109
+    assert type_main(["--package", str(pkg), "--fail-on-mismatch"]) == 1
+
+
+@pytest.mark.skipif(_cc() is None, reason="no C compiler")
+def test_live_cjson_jsmn_counts_unchanged_by_typedef_declarators():
+    cjson = build_c_byog(ROOT / "examples" / "cjson")
+    jsmn = build_c_byog(ROOT / "examples" / "jsmn")
+    assert len(cjson["entities"]) == 148
+    assert len(cjson["relationships"]) == 640
+    assert sum(1 for r in cjson["relationships"] if r["type"] == "calls") == 495
+    assert len(jsmn["entities"]) == 33
+    assert len(jsmn["relationships"]) == 73
+    assert sum(1 for r in jsmn["relationships"] if r["type"] == "calls") == 43

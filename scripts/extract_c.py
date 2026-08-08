@@ -229,6 +229,86 @@ def _named_type(node: Node) -> Optional[str]:
     return None
 
 
+# Declarator wrappers that may enclose a typedef alias name. Only these nodes
+# (and type_identifier) are followed when resolving typedef aliases — never
+# parameter_list, type, or other non-declarator structure.
+_TYPEDEF_DECLARATOR_KINDS = frozenset(
+    {
+        "pointer_declarator",
+        "function_declarator",
+        "parenthesized_declarator",
+        "array_declarator",
+        "attributed_declarator",
+    }
+)
+
+
+def _typedef_name_from_declarator(node: Node) -> Optional[str]:
+    """Resolve one typedef alias name by walking only declarator structure.
+
+    Starts at a ``type_definition`` ``declarator`` field value and follows
+    pointer / function / parenthesized / array / attributed declarators until
+    a ``type_identifier`` is reached. Does **not** enter ``parameter_list``
+    or other non-declarator children, so parameter names and nested type tags
+    cannot be mistaken for the alias.
+
+    Each step follows a strict descendant of the current node, so the finite
+    syntax tree itself bounds the walk; valid deeply nested declarators must
+    not be rejected by an arbitrary depth limit.
+    """
+    current: Optional[Node] = node
+    while current is not None:
+        if current.type == "type_identifier":
+            raw = current.text.decode() if current.text is not None else ""
+            if raw and raw not in _C_KEYWORDS:
+                return raw
+            return None
+        if current.type not in _TYPEDEF_DECLARATOR_KINDS:
+            return None
+        # Prefer the grammar's named declarator field when present.
+        nxt = current.child_by_field_name("declarator")
+        if nxt is not None:
+            current = nxt
+            continue
+        # parenthesized_declarator often leaves the inner node unlabeled.
+        structural = [
+            child
+            for child in current.children
+            if child.type in _TYPEDEF_DECLARATOR_KINDS
+            or child.type == "type_identifier"
+        ]
+        if len(structural) == 1:
+            current = structural[0]
+            continue
+        return None
+    return None
+
+
+def _typedef_alias_names(type_def: Node) -> List[str]:
+    """Return all top-level typedef alias names from one ``type_definition``.
+
+    Walks every ``declarator`` field on the node (tree-sitter-c may emit
+    multiple for ``typedef int a, *b, (*c)(void);``). Each alias is resolved
+    independently via :func:`_typedef_name_from_declarator`.
+    """
+    if type_def.type != "type_definition":
+        return []
+    names: List[str] = []
+    seen_names: set[str] = set()
+    for index in range(type_def.child_count):
+        if type_def.field_name_for_child(index) != "declarator":
+            continue
+        child = type_def.child(index)
+        if child is None:
+            continue
+        name = _typedef_name_from_declarator(child)
+        if name is None or name in seen_names:
+            continue
+        seen_names.add(name)
+        names.append(name)
+    return names
+
+
 @dataclass(frozen=True)
 class _SymbolCandidate:
     """One discovered symbol declaration before title assignment."""
@@ -247,36 +327,54 @@ def _discover_symbol_candidates(
     """Walk one TU AST and collect symbol candidates (no title assignment)."""
     out: List[_SymbolCandidate] = []
     for n in _walk(root):
-        name: Optional[str] = None
-        etype: Optional[str] = None
         if n.type == "function_definition":
             nm = _func_name(n)
             if nm:
-                name, etype = nm, "function"
-        elif n.type == "struct_specifier":
-            nm = _named_type(n)
-            if nm:
-                name, etype = nm, "struct"
-        elif n.type == "enum_specifier":
-            nm = _named_type(n)
-            if nm:
-                name, etype = nm, "enum"
-        elif n.type == "type_definition":
-            td = [c for c in n.children if c.type == "type_identifier"]
-            if td:
-                nm = td[-1].text.decode()
-                if nm and nm not in _C_KEYWORDS:
-                    name, etype = nm, "typedef"
-        if name is None or etype is None:
+                out.append(
+                    _SymbolCandidate(
+                        module_key=module_key,
+                        entity_kind="function",
+                        name=nm,
+                        node=n,
+                    )
+                )
             continue
-        out.append(
-            _SymbolCandidate(
-                module_key=module_key,
-                entity_kind=etype,
-                name=name,
-                node=n,
-            )
-        )
+        if n.type == "struct_specifier":
+            nm = _named_type(n)
+            if nm:
+                out.append(
+                    _SymbolCandidate(
+                        module_key=module_key,
+                        entity_kind="struct",
+                        name=nm,
+                        node=n,
+                    )
+                )
+            continue
+        if n.type == "enum_specifier":
+            nm = _named_type(n)
+            if nm:
+                out.append(
+                    _SymbolCandidate(
+                        module_key=module_key,
+                        entity_kind="enum",
+                        name=nm,
+                        node=n,
+                    )
+                )
+            continue
+        if n.type == "type_definition":
+            # One shared helper for ordinary, pointer, function-pointer, array,
+            # and multi-declarator typedefs. Pass 2 reuses these candidates only.
+            for nm in _typedef_alias_names(n):
+                out.append(
+                    _SymbolCandidate(
+                        module_key=module_key,
+                        entity_kind="typedef",
+                        name=nm,
+                        node=n,
+                    )
+                )
     return out
 
 

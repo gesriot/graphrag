@@ -707,28 +707,25 @@ def test_live_inih_type_audit_counts(tmp_path: Path):
     assert not any(pkg.rglob("*.d"))
     assert not any(pkg.rglob("*.i"))
     c = report["counts"]
-    assert c["matched"] == 1
-    assert c["tree_sitter_only"] == 0
-    assert c["out_of_compile_db_scope"] == 0
-    # Function-pointer typedefs in ini.h (ini_handler, ini_reader) are not
-    # extracted as tree-sitter type_definition entities — honest clang_only.
-    assert c["clang_only"] == 2
-    assert {row["name"] for row in report["clang_only"]} == {
-        "ini_handler",
+    # Function-pointer typedefs are now extracted via declarator walk.
+    # ini_reader matches exactly; ini_handler is configuration-ambiguous
+    # (#if/#else declaration sites at different spans).
+    assert c["matched"] == 2
+    assert {m["name"] for m in report["matched"]} == {
+        "ini_parse_string_ctx",
         "ini_reader",
     }
-    assert all(row["entity_kind"] == "typedef" for row in report["clang_only"])
-    assert c["ambiguous"] == 0
+    assert c["tree_sitter_only"] == 0
+    assert c["out_of_compile_db_scope"] == 0
+    assert c["clang_only"] == 0
+    assert c["ambiguous"] == 1
+    assert report["ambiguous"][0]["name"] == "ini_handler"
     assert c["macro_location_unsupported"] == 0
     assert c["anonymous_declarations"] == 1
     assert c["unsupported_declarations"] == 0
     assert c["outside_package_declarations"] == 109
     assert c["matched"] == len(report["matched"])
-    assert c["clang_only"] == len(report["clang_only"])
-    assert report["matched"][0]["name"] == "ini_parse_string_ctx"
-    assert report["matched"][0]["entity_kind"] == "typedef"
-    assert report["matched"][0]["line_column_confirmed"] is True
-    # The measured clang_only residual makes strict CLI mode exit 1.
+    # Strict CLI mode fails on the configuration-ambiguous ini_handler residual.
     assert type_audit_main(
         [
             "--package",

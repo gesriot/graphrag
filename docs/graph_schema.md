@@ -180,6 +180,14 @@ the module/name pair is cross-kind colliding, in which case they use
 function entities and keep historical call IDs when no function participates
 in a cross-kind collision.
 
+**Typedef declarators:** alias names are resolved from each `type_definition`
+`declarator` field by following only `pointer_declarator` /
+`function_declarator` / `parenthesized_declarator` / `array_declarator`
+/ `attributed_declarator` wrappers to the alias `type_identifier`. Parameter
+identifiers, parameter type tags, and underlying type names are never treated
+as aliases. Multiple top-level declarators in one typedef
+(`typedef int a, *b, (*c)(void);`) each produce an alias.
+
 #### Type-declaration audit (diagnostic only — no graph overlay yet)
 
 `scripts/c_clang_type_audit.py` compares configured Clang type declarations
