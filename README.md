@@ -103,3 +103,12 @@ clang AST type resolution, multi-config coverage, or production C/C++
 completeness. `-M` / `-H` are GNU/Clang-specific adapters, not a universal
 compiler API. Wrappers, response files, and MSVC fail explicitly. See
 [docs/graph_schema.md](docs/graph_schema.md).
+
+**Clang AST function-definition audit (diagnostic only):**
+`scripts/c_clang_ast_audit.py` compares package-local Clang `FunctionDecl`
+definitions (`-fsyntax-only -Xclang -ast-dump=json` per compile-database entry)
+to tree-sitter-c function entities. It reports matched signatures, out-of-scope
+files, configuration residuals, and macro-location ambiguity. **Clang only**
+(a `cc` binary is accepted only when `--version` proves Clang/Apple Clang).
+It does **not** publish BYOG graph facts or add `index_c` flags — it is the
+evidence gate before any future AST-derived overlay.

@@ -1,0 +1,51 @@
+{
+  "kind": "TranslationUnitDecl",
+  "inner": [
+    {
+      "kind": "FunctionDecl",
+      "name": "normal_fn",
+      "loc": {
+        "file": "main.c",
+        "line": 2,
+        "col": 5
+      },
+      "type": {
+        "qualType": "int (int)"
+      },
+      "mangledName": "_normal_fn",
+      "inner": [
+        {
+          "kind": "ParmVarDecl",
+          "name": "x"
+        },
+        {
+          "kind": "CompoundStmt",
+          "inner": []
+        }
+      ]
+    },
+    {
+      "kind": "FunctionDecl",
+      "name": "macro_gen",
+      "loc": {
+        "spellingLoc": {
+          "line": 5,
+          "col": 9
+        },
+        "expansionLoc": {
+          "line": 5,
+          "col": 1,
+          "isMacroArgExpansion": true
+        }
+      },
+      "type": {
+        "qualType": "int (void)"
+      },
+      "inner": [
+        {
+          "kind": "CompoundStmt"
+        }
+      ]
+    }
+  ]
+}

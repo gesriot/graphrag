@@ -184,3 +184,106 @@ CONFIDENCE_BOUNDARY = (
     "configuration, not that it is a direct textual #include or pure "
     "syntax fact independent of the toolchain."
 )
+
+# Module/cache/plugin modes that can write outside audited temp paths or hide
+# outputs. Shared by all compiler-backed dependency/include/AST diagnostics.
+UNSAFE_COMPILER_AUDIT_FLAGS = frozenset(
+    {
+        "-fmodules",
+        "-fmodules-ts",
+        "-fcxx-modules",
+        "-fimplicit-modules",
+        "-fimplicit-module-maps",
+        "-fmodules-cache-path",
+        "-fmodule-output",
+        "-emit-module",
+        "-emit-module-interface",
+        "-fmodule-file",
+        "-fprebuilt-module-path",
+        "-include-pch",
+        "-emit-pch",
+        "-add-plugin",
+        "-serialize-diagnostic-file",
+        "--serialize-diagnostics",
+        "-ftime-trace",
+    }
+)
+UNSAFE_COMPILER_AUDIT_PREFIXES = (
+    "-fmodules-cache-path=",
+    "-fmodule-output=",
+    "-fmodule-file=",
+    "-fprebuilt-module-path=",
+    "-fplugin=",
+    "-fplugin-arg-",
+    "-fpass-plugin=",
+    "-plugin",
+    "-add-plugin",
+    "-ast-dump",
+    "-serialize-diagnostic-file=",
+    "--serialize-diagnostics=",
+    "-ftime-trace",
+    "-fprofile-generate",
+    "-fprofile-instr-generate",
+    "-fcoverage-mapping",
+)
+
+
+def reject_hidden_compiler_outputs(cleaned_args: Sequence[str]) -> None:
+    """Fail closed on response files, config files, modules/plugins/PCH risks.
+
+    Shared policy for compiler-backed diagnostics that must not write under the
+    package or hide output-producing flags behind indirection.
+    """
+    unsafe: List[str] = []
+    i = 0
+    args = list(cleaned_args)
+    while i < len(args):
+        a = args[i]
+        if a.startswith("@"):
+            raise CompilerOverlayError(
+                "response-file compile arguments are unsupported because hidden "
+                "output flags cannot be audited safely"
+            )
+        if a == "--config" or a.startswith("--config="):
+            raise CompilerOverlayError(
+                "Clang --config files are unsupported because they can inject "
+                "unreviewed output-producing flags"
+            )
+        if a in UNSAFE_COMPILER_AUDIT_FLAGS or a.startswith(
+            UNSAFE_COMPILER_AUDIT_PREFIXES
+        ):
+            unsafe.append(a)
+        if a == "-Xclang":
+            # This is an unrestricted cc1 escape hatch. Even apparently benign
+            # options can redirect output or contaminate the AST JSON stream.
+            nxt = args[i + 1] if i + 1 < len(args) else "<missing>"
+            unsafe.append(f"-Xclang {nxt}")
+        elif a in {"-fplugin", "-load", "-plugin"} and i + 1 < len(args):
+            unsafe.append(f"{a} {args[i + 1]}")
+        i += 1
+    if unsafe:
+        raise CompilerOverlayError(
+            "unsafe compiler module/cache/plugin/PCH/AST flags are unsupported: "
+            f"{unsafe}; refusing possible package-tree artifacts or "
+            "unreviewed semantic changes"
+        )
+
+
+def require_clang_identity(
+    compiler_path: str,
+) -> Tuple[str, Optional[str], Optional[str]]:
+    """Require a Clang/Apple Clang identity from ``compiler --version``.
+
+    A binary named ``cc`` is acceptable only when its version line proves Clang.
+    GCC, MSVC, and unknown identities fail explicitly (no PATH substitution).
+    """
+    id_line, version = compiler_identity(compiler_path)
+    text = (id_line or "").strip()
+    lower = text.lower()
+    if not text or "clang" not in lower:
+        raise CompilerOverlayError(
+            f"compiler {compiler_path!r} is not a verified Clang/Apple Clang "
+            f"toolchain (version identity={id_line!r}); this operation is "
+            "Clang-only and will not fall back to another compiler on PATH"
+        )
+    return compiler_path, id_line, version

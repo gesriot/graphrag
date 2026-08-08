@@ -1,0 +1,41 @@
+{
+  "kind": "TranslationUnitDecl",
+  "inner": [
+    {
+      "kind": "FunctionDecl",
+      "name": "static_helper",
+      "storageClass": "static",
+      "loc": {
+        "file": "a.c",
+        "line": 1,
+        "col": 12
+      },
+      "type": {
+        "qualType": "int (void)"
+      },
+      "inner": [
+        {
+          "kind": "CompoundStmt"
+        }
+      ]
+    },
+    {
+      "kind": "FunctionDecl",
+      "name": "static_helper",
+      "storageClass": "static",
+      "loc": {
+        "file": "b.c",
+        "line": 1,
+        "col": 12
+      },
+      "type": {
+        "qualType": "int (void)"
+      },
+      "inner": [
+        {
+          "kind": "CompoundStmt"
+        }
+      ]
+    }
+  ]
+}

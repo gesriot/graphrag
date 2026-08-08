@@ -86,6 +86,17 @@ explicit skip and the final status says `PASS WITH SKIPS`.
   missing `compile_commands.json` or a broken/unsupported compiler fails
   explicitly; wrappers, response files, and MSVC are unsupported. The default
   off path keeps published graph counts unchanged.
+- **Clang AST function-definition audit (diagnostic, not a graph overlay):**
+  `scripts/c_clang_ast_audit.py --package examples/cjson` runs the recorded
+  Clang from `compile_commands.json` with
+  `-fsyntax-only -Xclang -ast-dump=json` and compares package-local function
+  *definitions* to tree-sitter-c entities. Expected shape for this package:
+  library functions in `cJSON.c` match with Clang `qualType` metadata; the
+  golden `tests/parse/runner.c` is `out_of_compile_db_scope` (not a false
+  miss); a few MSVC-only static helpers may remain `tree_sitter_only` with
+  preprocessor unknown evidence. **No AST facts are written into BYOG.** Clang
+  only; GCC/MSVC/wrappers fail closed. Macro spelling/expansion multi-file
+  disagreement is classified explicitly, not silently matched.
 
 ## C frontend result — clean on the first pass
 Unlike `inih`, cJSON does not fragment function bodies with `#if`/`#endif`, so the

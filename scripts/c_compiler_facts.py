@@ -37,6 +37,7 @@ from c_compiler_common import (  # type: ignore
     next_human_readable_id,
     path_is_under,
     prepare_compile_entry,
+    reject_hidden_compiler_outputs,
     resolve_compiler_path as _common_resolve_compiler_path,
     validate_compile_entry,
 )
@@ -104,6 +105,7 @@ def dependency_command_from_entry(
         cwd, cleaned, src_path = prepare_compile_entry(
             entry, package_dir=package_dir
         )
+        reject_hidden_compiler_outputs(cleaned)
     except CompilerOverlayError as e:
         raise CompilerDependencyError(str(e)) from e
     # -M reports the complete configured dependency set. Filtering below drops

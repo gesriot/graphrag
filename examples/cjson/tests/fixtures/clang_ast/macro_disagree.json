@@ -1,0 +1,29 @@
+{
+  "kind": "TranslationUnitDecl",
+  "inner": [
+    {
+      "kind": "FunctionDecl",
+      "name": "macro_other",
+      "loc": {
+        "spellingLoc": {
+          "file": "macros.h",
+          "line": 1,
+          "col": 1
+        },
+        "expansionLoc": {
+          "file": "main.c",
+          "line": 10,
+          "col": 1
+        }
+      },
+      "type": {
+        "qualType": "int (void)"
+      },
+      "inner": [
+        {
+          "kind": "CompoundStmt"
+        }
+      ]
+    }
+  ]
+}

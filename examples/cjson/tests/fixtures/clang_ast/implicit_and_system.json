@@ -1,0 +1,86 @@
+{
+  "kind": "TranslationUnitDecl",
+  "inner": [
+    {
+      "kind": "FunctionDecl",
+      "name": "normal_fn",
+      "loc": {
+        "file": "main.c",
+        "line": 2,
+        "col": 5
+      },
+      "type": {
+        "qualType": "int (int)"
+      },
+      "mangledName": "_normal_fn",
+      "inner": [
+        {
+          "kind": "ParmVarDecl",
+          "name": "x"
+        },
+        {
+          "kind": "CompoundStmt",
+          "inner": []
+        }
+      ]
+    },
+    {
+      "kind": "FunctionDecl",
+      "name": "__builtin_nanf",
+      "isImplicit": true,
+      "loc": {
+        "spellingLoc": {
+          "file": "/usr/include/float.h",
+          "line": 1,
+          "col": 1
+        },
+        "expansionLoc": {
+          "line": 20,
+          "col": 1
+        }
+      },
+      "type": {
+        "qualType": "float (const char *)"
+      },
+      "inner": [
+        {
+          "kind": "CompoundStmt"
+        }
+      ]
+    },
+    {
+      "kind": "FunctionDecl",
+      "name": "static_helper",
+      "storageClass": "static",
+      "loc": {
+        "line": 3,
+        "col": 12
+      },
+      "type": {
+        "qualType": "int (void)"
+      },
+      "inner": [
+        {
+          "kind": "CompoundStmt"
+        }
+      ]
+    },
+    {
+      "kind": "FunctionDecl",
+      "name": "isascii",
+      "loc": {
+        "file": "/usr/include/_ctype.h",
+        "line": 1,
+        "col": 1
+      },
+      "type": {
+        "qualType": "int (int)"
+      },
+      "inner": [
+        {
+          "kind": "CompoundStmt"
+        }
+      ]
+    }
+  ]
+}

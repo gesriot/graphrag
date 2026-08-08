@@ -241,6 +241,18 @@ def test_malformed_trace_and_missing_output_fail_closed(
             preprocessed_out=tmp_path / "response.i",
         )
 
+    plugin_entry = {
+        **entry,
+        "command": "cc -Xclang -add-plugin -Xclang hidden -c main.c -o main.o",
+    }
+    with pytest.raises(CompilerIncludeError, match="plugin"):
+        include_trace_command_from_entry(
+            plugin_entry,
+            compiler="/usr/bin/cc",
+            package_dir=pkg,
+            preprocessed_out=tmp_path / "plugin.i",
+        )
+
 
 def test_includes_relationship_provenance_wording():
     rel = make_includes_relationship(

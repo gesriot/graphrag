@@ -38,6 +38,7 @@ from c_compiler_common import (  # type: ignore
     next_human_readable_id,
     path_is_under,
     prepare_compile_entry,
+    reject_hidden_compiler_outputs,
     resolve_compiler_path as _common_resolve_compiler_path,
     validate_compile_entry,
 )
@@ -61,24 +62,6 @@ _DOTTED_LINE_RE = re.compile(r"^(\.+)(.*)$")
 _GCC_GUARD_FOOTER = "Multiple include guards may be useful for:"
 _FRAMEWORK_SUFFIX = " (framework directory)"
 
-# These modes may populate compiler caches or module outputs under a path from
-# the compile command. Supporting them requires a separate audited redirection
-# policy; silently changing their paths would also change configured semantics.
-_UNSAFE_MODULE_OUTPUT_FLAGS = {
-    "-fmodules",
-    "-fmodules-ts",
-    "-fcxx-modules",
-    "-fimplicit-modules",
-    "-fimplicit-module-maps",
-    "-fmodules-cache-path",
-    "-fmodule-output",
-}
-_UNSAFE_MODULE_OUTPUT_PREFIXES = (
-    "-fmodules-cache-path=",
-    "-fmodule-output=",
-)
-
-
 class CompilerIncludeError(CompilerOverlayError):
     """Raised when direct-include hierarchy collection cannot run honestly."""
 
@@ -101,20 +84,9 @@ def include_trace_command_from_entry(
         cwd, cleaned, src_path = prepare_compile_entry(
             entry, package_dir=package_dir
         )
+        reject_hidden_compiler_outputs(cleaned)
     except CompilerOverlayError as e:
         raise _wrap(e) from e
-    unsafe_module_flags = [
-        arg
-        for arg in cleaned
-        if arg in _UNSAFE_MODULE_OUTPUT_FLAGS
-        or arg.startswith(_UNSAFE_MODULE_OUTPUT_PREFIXES)
-    ]
-    if unsafe_module_flags:
-        raise CompilerIncludeError(
-            "compiler module/cache output flags are unsupported for include "
-            f"tracing: {unsafe_module_flags}; refusing possible package-tree "
-            "artifacts"
-        )
     argv = [
         compiler,
         "-E",

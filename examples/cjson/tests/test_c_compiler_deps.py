@@ -298,6 +298,18 @@ def test_dependency_command_uses_temp_mf_and_no_package_output(tmp_path: Path):
             depfile=depfile,
         )
 
+    module_entry = {
+        **entry,
+        "command": "cc -fmodules-cache-path=.cache -c main.c -o main.o",
+    }
+    with pytest.raises(CompilerDependencyError, match="module/cache"):
+        dependency_command_from_entry(
+            module_entry,
+            compiler="/usr/bin/cc",
+            package_dir=pkg,
+            depfile=depfile,
+        )
+
 
 def test_default_build_c_byog_has_no_depends_on():
     """Default extractor path must not emit compiler overlay edges."""
