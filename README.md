@@ -129,8 +129,17 @@ explicitly. See [docs/graph_schema.md](docs/graph_schema.md).
   matching is byte-offset-first with strict line/column fallback and complete
   tree-sitter edge accounting. Publishing selected matched call *evidence
   fields* into BYOG requires the separate explicit `--clang-calls` flag.
+- `scripts/c_clang_type_audit.py` — type *declarations* (named complete
+  structs, named complete enums, package-local typedefs) vs tree-sitter
+  `struct` / `enum` / `typedef` entities. Collision-safe identity is
+  kind + path + name + exact start line/column. **Diagnostic only:** no
+  `index_c` flag, no `uses_type` edges, no type fields on the graph, no
+  default-output change. Anonymous / union / incomplete / outside-package
+  residuals are counted explicitly. `--fail-on-mismatch` exits 1 only for
+  `tree_sitter_only` / `clang_only` / `ambiguous` / `macro_location_unsupported`
+  (not for out-of-scope, anonymous, unsupported, or outside-package alone).
 
-Both CLIs remain available unchanged (each captures once internally). Both are
+All three CLIs remain available (each captures once internally). They are
 **Clang only** (`cc` accepted only when `--version` proves Clang/Apple Clang).
-Neither is points-to analysis, multi-config coverage, or production C/C++
-completeness.
+None is points-to analysis, layout/ABI proof, multi-config coverage, or
+production C/C++ completeness.

@@ -159,10 +159,35 @@ identity, and run one Clang `-ast-dump=json` per compile entry. Function and
 call audit builders consume that capture without re-invoking the compiler.
 Enabling both flags still costs **N** dumps for **N** entries (not 2N). There
 is **no** disk AST cache and AST roots never appear in manifests, parquet, or
-logs. Standalone `c_clang_ast_audit.py` / `c_clang_call_audit.py` CLIs remain
-available and each still capture once for their own run. Confidence boundaries
-and independent `clang_signatures` / `clang_calls` manifest blocks are
-unchanged (no combined capture block).
+logs. Standalone `c_clang_ast_audit.py` / `c_clang_call_audit.py` /
+`c_clang_type_audit.py` CLIs remain available and each still capture once for
+their own run. Confidence boundaries and independent `clang_signatures` /
+`clang_calls` manifest blocks are unchanged (no combined capture block).
+
+#### Type-declaration audit (diagnostic only — no graph overlay yet)
+
+`scripts/c_clang_type_audit.py` compares configured Clang type declarations
+to tree-sitter-c type entities. **In scope for matching:** named complete
+`struct` (`RecordDecl`), named complete `enum` (`EnumDecl`), package-local
+`typedef` (`TypedefDecl`). **Explicit residual buckets (not matched):**
+anonymous declarations, unions / incomplete / unsupported forms, and
+outside-package/system declarations; also the usual
+`tree_sitter_only` / `clang_only` / `ambiguous` / `macro_location_unsupported`
+/ `out_of_compile_db_scope` classes. Identity is
+`entity_kind + package-relative path + name + exact line + exact col0`
+(never bare title alone; a struct and a typedef with the same title stay
+distinct). `--fail-on-mismatch` exits 1 only when `tree_sitter_only`,
+`clang_only`, `ambiguous`, or `macro_location_unsupported` is non-zero;
+out-of-scope / anonymous / unsupported / outside-package alone do not.
+Outside-package rows retain their resolved source path and are deduplicated by
+that path; declarations from different system headers are never collapsed just
+because their names and coordinates happen to agree.
+
+There is **no** `uses_type` relationship type, no type entity fields from
+Clang, no `index_c` flag, and no default-graph or manifest change from this
+audit. It is configuration-derived declaration evidence only — not a type
+graph, type-use proof, layout/ABI proof, macro-complete result, or multi-config
+result.
 
 **Shared out of scope:** multi-config coverage, MSVC/wrappers/response files
 (fail closed), system/outside endpoints after filtering, production C/C++

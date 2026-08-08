@@ -143,6 +143,23 @@ explicit skip and the final status says `PASS WITH SKIPS`.
   AST dump per compile entry for this package’s single-entry compile DB). No
   disk AST cache; standalone audit CLIs remain available; confidence
   boundaries and independent manifest blocks are unchanged.
+- **Clang AST type-declaration audit (diagnostic only, no graph mutation):**
+  `scripts/c_clang_type_audit.py --package examples/cjson` compares package-
+  local named complete structs, named complete enums, and typedefs to
+  tree-sitter `struct` / `enum` / `typedef` entities. Identity is
+  kind + path + name + exact start line/column (never bare title). Measured
+  on this host under the default compile DB (counts may move with
+  toolchain/config): matched=7 (all typedefs), clang_only=3 (named complete
+  structs without a distinct tree-sitter `struct` entity because the
+  extractor collapses same-title struct+typedef to one entity),
+  anonymous_declarations=3, outside_package_declarations=212 (each row keeps
+  its resolved outside source path; different headers are not collapsed),
+  tree_sitter_only=0, ambiguous=0, macro_location_unsupported=0,
+  unsupported_declarations=0, out_of_compile_db_scope=0. **No** `uses_type`
+  edges, type fields, `index_c` flag, or default-graph/manifest change.
+  `--fail-on-mismatch` fails only on tree_sitter_only / clang_only /
+  ambiguous / macro residuals — not on anonymous/outside-package alone.
+  Not layout/ABI, type-use analysis, points-to, C++, or multi-config.
 
 ## C frontend result — clean on the first pass
 Unlike `inih`, cJSON does not fragment function bodies with `#if`/`#endif`, so the
