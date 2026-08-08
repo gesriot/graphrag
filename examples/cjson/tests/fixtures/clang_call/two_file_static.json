@@ -1,0 +1,207 @@
+{
+  "kind": "TranslationUnitDecl",
+  "inner": [
+    {
+      "id": "id_ha",
+      "kind": "FunctionDecl",
+      "name": "helper",
+      "loc": {
+        "file": "a.c",
+        "line": 1,
+        "col": 1
+      },
+      "type": {
+        "qualType": "int (int)"
+      },
+      "inner": [
+        {
+          "kind": "ParmVarDecl",
+          "name": "x",
+          "type": {
+            "qualType": "int"
+          }
+        },
+        {
+          "kind": "CompoundStmt",
+          "inner": []
+        }
+      ],
+      "storageClass": "static"
+    },
+    {
+      "id": "id_uses_a",
+      "kind": "FunctionDecl",
+      "name": "uses_a",
+      "loc": {
+        "file": "a.c",
+        "line": 2,
+        "col": 1
+      },
+      "type": {
+        "qualType": "int (int)"
+      },
+      "inner": [
+        {
+          "kind": "ParmVarDecl",
+          "name": "x",
+          "type": {
+            "qualType": "int"
+          }
+        },
+        {
+          "kind": "CompoundStmt",
+          "inner": [
+            {
+              "kind": "CallExpr",
+              "range": {
+                "begin": {
+                  "col": 10,
+                  "tokLen": 6,
+                  "line": 2
+                },
+                "end": {
+                  "col": 16,
+                  "tokLen": 1
+                }
+              },
+              "type": {
+                "qualType": "int"
+              },
+              "inner": [
+                {
+                  "kind": "ImplicitCastExpr",
+                  "type": {
+                    "qualType": "int (*)(int)"
+                  },
+                  "inner": [
+                    {
+                      "kind": "DeclRefExpr",
+                      "type": {
+                        "qualType": "int (int)"
+                      },
+                      "referencedDecl": {
+                        "id": "id_ha",
+                        "kind": "FunctionDecl",
+                        "name": "helper",
+                        "type": {
+                          "qualType": "int (int)"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "kind": "IntegerLiteral",
+                  "type": {
+                    "qualType": "int"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "id_hb",
+      "kind": "FunctionDecl",
+      "name": "helper",
+      "loc": {
+        "file": "b.c",
+        "line": 1,
+        "col": 1
+      },
+      "type": {
+        "qualType": "int (int)"
+      },
+      "inner": [
+        {
+          "kind": "ParmVarDecl",
+          "name": "x",
+          "type": {
+            "qualType": "int"
+          }
+        },
+        {
+          "kind": "CompoundStmt",
+          "inner": []
+        }
+      ],
+      "storageClass": "static"
+    },
+    {
+      "id": "id_uses_b",
+      "kind": "FunctionDecl",
+      "name": "uses_b",
+      "loc": {
+        "file": "b.c",
+        "line": 2,
+        "col": 1
+      },
+      "type": {
+        "qualType": "int (int)"
+      },
+      "inner": [
+        {
+          "kind": "ParmVarDecl",
+          "name": "x",
+          "type": {
+            "qualType": "int"
+          }
+        },
+        {
+          "kind": "CompoundStmt",
+          "inner": [
+            {
+              "kind": "CallExpr",
+              "range": {
+                "begin": {
+                  "col": 10,
+                  "tokLen": 6,
+                  "line": 2
+                },
+                "end": {
+                  "col": 16,
+                  "tokLen": 1
+                }
+              },
+              "type": {
+                "qualType": "int"
+              },
+              "inner": [
+                {
+                  "kind": "ImplicitCastExpr",
+                  "type": {
+                    "qualType": "int (*)(int)"
+                  },
+                  "inner": [
+                    {
+                      "kind": "DeclRefExpr",
+                      "type": {
+                        "qualType": "int (int)"
+                      },
+                      "referencedDecl": {
+                        "id": "id_hb",
+                        "kind": "FunctionDecl",
+                        "name": "helper",
+                        "type": {
+                          "qualType": "int (int)"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "kind": "IntegerLiteral",
+                  "type": {
+                    "qualType": "int"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,758 @@
+{
+  "kind": "TranslationUnitDecl",
+  "inner": [
+    {
+      "id": "id_printf",
+      "kind": "FunctionDecl",
+      "name": "printf",
+      "loc": {
+        "file": "/usr/include/stdio.h",
+        "line": 100,
+        "col": 1
+      },
+      "type": {
+        "qualType": "int (const char *, ...)"
+      },
+      "inner": []
+    },
+    {
+      "id": "id_helper",
+      "kind": "FunctionDecl",
+      "name": "helper",
+      "loc": {
+        "file": "main.c",
+        "line": 1,
+        "col": 1
+      },
+      "type": {
+        "qualType": "int (int)"
+      },
+      "inner": [
+        {
+          "kind": "ParmVarDecl",
+          "name": "x",
+          "type": {
+            "qualType": "int"
+          }
+        },
+        {
+          "kind": "CompoundStmt",
+          "inner": []
+        }
+      ],
+      "storageClass": "static"
+    },
+    {
+      "id": "id_target",
+      "kind": "FunctionDecl",
+      "name": "target",
+      "loc": {
+        "file": "main.c",
+        "line": 2,
+        "col": 1
+      },
+      "type": {
+        "qualType": "int (int)"
+      },
+      "inner": [
+        {
+          "kind": "ParmVarDecl",
+          "name": "x",
+          "type": {
+            "qualType": "int"
+          }
+        },
+        {
+          "kind": "CompoundStmt",
+          "inner": [
+            {
+              "kind": "CallExpr",
+              "range": {
+                "begin": {
+                  "col": 20,
+                  "tokLen": 6,
+                  "line": 2
+                },
+                "end": {
+                  "col": 26,
+                  "tokLen": 1
+                }
+              },
+              "type": {
+                "qualType": "int"
+              },
+              "inner": [
+                {
+                  "kind": "ImplicitCastExpr",
+                  "type": {
+                    "qualType": "int (*)(int)"
+                  },
+                  "inner": [
+                    {
+                      "kind": "DeclRefExpr",
+                      "type": {
+                        "qualType": "int (int)"
+                      },
+                      "referencedDecl": {
+                        "id": "id_helper",
+                        "kind": "FunctionDecl",
+                        "name": "helper",
+                        "type": {
+                          "qualType": "int (int)"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "kind": "IntegerLiteral",
+                  "type": {
+                    "qualType": "int"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "id_recurse",
+      "kind": "FunctionDecl",
+      "name": "recurse",
+      "loc": {
+        "file": "main.c",
+        "line": 3,
+        "col": 1
+      },
+      "type": {
+        "qualType": "int (int)"
+      },
+      "inner": [
+        {
+          "kind": "ParmVarDecl",
+          "name": "x",
+          "type": {
+            "qualType": "int"
+          }
+        },
+        {
+          "kind": "CompoundStmt",
+          "inner": [
+            {
+              "kind": "CallExpr",
+              "range": {
+                "begin": {
+                  "col": 30,
+                  "tokLen": 7,
+                  "line": 3
+                },
+                "end": {
+                  "col": 37,
+                  "tokLen": 1
+                }
+              },
+              "type": {
+                "qualType": "int"
+              },
+              "inner": [
+                {
+                  "kind": "ImplicitCastExpr",
+                  "type": {
+                    "qualType": "int (*)(int)"
+                  },
+                  "inner": [
+                    {
+                      "kind": "DeclRefExpr",
+                      "type": {
+                        "qualType": "int (int)"
+                      },
+                      "referencedDecl": {
+                        "id": "id_recurse",
+                        "kind": "FunctionDecl",
+                        "name": "recurse",
+                        "type": {
+                          "qualType": "int (int)"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "kind": "IntegerLiteral",
+                  "type": {
+                    "qualType": "int"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "id_external",
+      "kind": "FunctionDecl",
+      "name": "external_user",
+      "loc": {
+        "file": "main.c",
+        "line": 4,
+        "col": 1
+      },
+      "type": {
+        "qualType": "int (int)"
+      },
+      "inner": [
+        {
+          "kind": "ParmVarDecl",
+          "name": "x",
+          "type": {
+            "qualType": "int"
+          }
+        },
+        {
+          "kind": "CompoundStmt",
+          "inner": [
+            {
+              "kind": "CallExpr",
+              "range": {
+                "begin": {
+                  "line": 4,
+                  "col": 10,
+                  "tokLen": 6
+                },
+                "end": {
+                  "col": 20,
+                  "tokLen": 1
+                }
+              },
+              "inner": [
+                {
+                  "kind": "ImplicitCastExpr",
+                  "inner": [
+                    {
+                      "kind": "DeclRefExpr",
+                      "referencedDecl": {
+                        "id": "id_printf",
+                        "kind": "FunctionDecl",
+                        "name": "printf",
+                        "type": {
+                          "qualType": "int (const char *, ...)"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "kind": "StringLiteral"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "id_proto",
+      "kind": "FunctionDecl",
+      "name": "proto_only",
+      "loc": {
+        "file": "main.c",
+        "line": 5,
+        "col": 1
+      },
+      "type": {
+        "qualType": "int (int)"
+      }
+    },
+    {
+      "id": "id_uses",
+      "kind": "FunctionDecl",
+      "name": "uses_proto",
+      "loc": {
+        "file": "main.c",
+        "line": 6,
+        "col": 1
+      },
+      "type": {
+        "qualType": "int (int)"
+      },
+      "inner": [
+        {
+          "kind": "ParmVarDecl",
+          "name": "x",
+          "type": {
+            "qualType": "int"
+          }
+        },
+        {
+          "kind": "CompoundStmt",
+          "inner": [
+            {
+              "kind": "CallExpr",
+              "range": {
+                "begin": {
+                  "col": 15,
+                  "tokLen": 10,
+                  "line": 6
+                },
+                "end": {
+                  "col": 25,
+                  "tokLen": 1
+                }
+              },
+              "type": {
+                "qualType": "int"
+              },
+              "inner": [
+                {
+                  "kind": "ImplicitCastExpr",
+                  "type": {
+                    "qualType": "int (*)(int)"
+                  },
+                  "inner": [
+                    {
+                      "kind": "DeclRefExpr",
+                      "type": {
+                        "qualType": "int (int)"
+                      },
+                      "referencedDecl": {
+                        "id": "id_proto",
+                        "kind": "FunctionDecl",
+                        "name": "proto_only",
+                        "type": {
+                          "qualType": "int (int)"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "kind": "IntegerLiteral",
+                  "type": {
+                    "qualType": "int"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "id_proto_def",
+      "kind": "FunctionDecl",
+      "name": "proto_only",
+      "loc": {
+        "file": "main.c",
+        "line": 7,
+        "col": 1
+      },
+      "type": {
+        "qualType": "int (int)"
+      },
+      "inner": [
+        {
+          "kind": "ParmVarDecl",
+          "name": "x",
+          "type": {
+            "qualType": "int"
+          }
+        },
+        {
+          "kind": "CompoundStmt",
+          "inner": []
+        }
+      ],
+      "previousDecl": "id_proto"
+    },
+    {
+      "id": "id_param",
+      "kind": "FunctionDecl",
+      "name": "param_ptr",
+      "loc": {
+        "file": "main.c",
+        "line": 10,
+        "col": 1
+      },
+      "type": {
+        "qualType": "int (int)"
+      },
+      "inner": [
+        {
+          "kind": "ParmVarDecl",
+          "name": "x",
+          "type": {
+            "qualType": "int"
+          }
+        },
+        {
+          "kind": "CompoundStmt",
+          "inner": [
+            {
+              "kind": "CallExpr",
+              "range": {
+                "begin": {
+                  "line": 10,
+                  "col": 40,
+                  "tokLen": 2
+                },
+                "end": {
+                  "col": 43,
+                  "tokLen": 1
+                }
+              },
+              "type": {
+                "qualType": "int"
+              },
+              "inner": [
+                {
+                  "kind": "ImplicitCastExpr",
+                  "type": {
+                    "qualType": "int (*)(int)"
+                  },
+                  "inner": [
+                    {
+                      "kind": "DeclRefExpr",
+                      "referencedDecl": {
+                        "id": "id_fp",
+                        "kind": "ParmVarDecl",
+                        "name": "fp",
+                        "type": {
+                          "qualType": "int (*)(int)"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "kind": "IntegerLiteral"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "id_member",
+      "kind": "FunctionDecl",
+      "name": "member_call",
+      "loc": {
+        "file": "main.c",
+        "line": 11,
+        "col": 1
+      },
+      "type": {
+        "qualType": "int (int)"
+      },
+      "inner": [
+        {
+          "kind": "ParmVarDecl",
+          "name": "x",
+          "type": {
+            "qualType": "int"
+          }
+        },
+        {
+          "kind": "CompoundStmt",
+          "inner": [
+            {
+              "kind": "CallExpr",
+              "range": {
+                "begin": {
+                  "line": 11,
+                  "col": 20,
+                  "tokLen": 1
+                },
+                "end": {
+                  "col": 24,
+                  "tokLen": 1
+                }
+              },
+              "type": {
+                "qualType": "int"
+              },
+              "inner": [
+                {
+                  "kind": "ImplicitCastExpr",
+                  "type": {
+                    "qualType": "int (*)(int)"
+                  },
+                  "inner": [
+                    {
+                      "kind": "MemberExpr",
+                      "name": "m",
+                      "isArrow": true,
+                      "type": {
+                        "qualType": "int (*)(int)"
+                      },
+                      "referencedMemberDecl": "id_field_m",
+                      "inner": [
+                        {
+                          "kind": "DeclRefExpr",
+                          "referencedDecl": {
+                            "kind": "ParmVarDecl",
+                            "name": "s"
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "kind": "IntegerLiteral"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "id_local",
+      "kind": "FunctionDecl",
+      "name": "local_ptr",
+      "loc": {
+        "file": "main.c",
+        "line": 12,
+        "col": 1
+      },
+      "type": {
+        "qualType": "int (int)"
+      },
+      "inner": [
+        {
+          "kind": "ParmVarDecl",
+          "name": "x",
+          "type": {
+            "qualType": "int"
+          }
+        },
+        {
+          "kind": "CompoundStmt",
+          "inner": [
+            {
+              "kind": "CallExpr",
+              "range": {
+                "begin": {
+                  "line": 12,
+                  "col": 10,
+                  "tokLen": 2
+                },
+                "end": {
+                  "col": 14,
+                  "tokLen": 1
+                }
+              },
+              "inner": [
+                {
+                  "kind": "ImplicitCastExpr",
+                  "inner": [
+                    {
+                      "kind": "DeclRefExpr",
+                      "referencedDecl": {
+                        "id": "id_vfp",
+                        "kind": "VarDecl",
+                        "name": "fp",
+                        "type": {
+                          "qualType": "int (*)(int)"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "kind": "IntegerLiteral"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "id_arg",
+      "kind": "FunctionDecl",
+      "name": "arg_not_callee",
+      "loc": {
+        "file": "main.c",
+        "line": 20,
+        "col": 1
+      },
+      "type": {
+        "qualType": "int (int)"
+      },
+      "inner": [
+        {
+          "kind": "ParmVarDecl",
+          "name": "x",
+          "type": {
+            "qualType": "int"
+          }
+        },
+        {
+          "kind": "CompoundStmt",
+          "inner": [
+            {
+              "kind": "CallExpr",
+              "range": {
+                "begin": {
+                  "line": 20,
+                  "col": 10,
+                  "tokLen": 6
+                },
+                "end": {
+                  "col": 30,
+                  "tokLen": 1
+                }
+              },
+              "inner": [
+                {
+                  "kind": "ImplicitCastExpr",
+                  "inner": [
+                    {
+                      "kind": "DeclRefExpr",
+                      "referencedDecl": {
+                        "id": "id_helper",
+                        "kind": "FunctionDecl",
+                        "name": "helper",
+                        "type": {
+                          "qualType": "int (int)"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "kind": "CallExpr",
+                  "range": {
+                    "begin": {
+                      "col": 17,
+                      "tokLen": 6,
+                      "line": 20
+                    },
+                    "end": {
+                      "col": 23,
+                      "tokLen": 1
+                    }
+                  },
+                  "type": {
+                    "qualType": "int"
+                  },
+                  "inner": [
+                    {
+                      "kind": "ImplicitCastExpr",
+                      "type": {
+                        "qualType": "int (*)(int)"
+                      },
+                      "inner": [
+                        {
+                          "kind": "DeclRefExpr",
+                          "type": {
+                            "qualType": "int (int)"
+                          },
+                          "referencedDecl": {
+                            "id": "id_target",
+                            "kind": "FunctionDecl",
+                            "name": "target",
+                            "type": {
+                              "qualType": "int (int)"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "kind": "IntegerLiteral",
+                      "type": {
+                        "qualType": "int"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "id_macro",
+      "kind": "FunctionDecl",
+      "name": "macro_user",
+      "loc": {
+        "file": "main.c",
+        "line": 30,
+        "col": 1
+      },
+      "type": {
+        "qualType": "int (int)"
+      },
+      "inner": [
+        {
+          "kind": "ParmVarDecl",
+          "name": "x",
+          "type": {
+            "qualType": "int"
+          }
+        },
+        {
+          "kind": "CompoundStmt",
+          "inner": [
+            {
+              "kind": "CallExpr",
+              "range": {
+                "begin": {
+                  "spellingLoc": {
+                    "file": "macros.h",
+                    "line": 1,
+                    "col": 1
+                  },
+                  "expansionLoc": {
+                    "file": "main.c",
+                    "line": 30,
+                    "col": 5
+                  }
+                },
+                "end": {
+                  "spellingLoc": {
+                    "file": "macros.h",
+                    "line": 1,
+                    "col": 10
+                  },
+                  "expansionLoc": {
+                    "file": "main.c",
+                    "line": 30,
+                    "col": 5
+                  }
+                }
+              },
+              "inner": [
+                {
+                  "kind": "ImplicitCastExpr",
+                  "inner": [
+                    {
+                      "kind": "DeclRefExpr",
+                      "referencedDecl": {
+                        "id": "id_helper",
+                        "kind": "FunctionDecl",
+                        "name": "helper",
+                        "type": {
+                          "qualType": "int (int)"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "kind": "IntegerLiteral"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

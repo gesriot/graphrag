@@ -106,6 +106,22 @@ explicit skip and the final status says `PASS WITH SKIPS`.
   (`clang_only` / `ambiguous` / macro multi-file locations) fail the overlay
   explicitly. This is not full type resolution, ABI verification, multi-config
   coverage, or C++ support.
+- **Clang AST call-site audit (diagnostic only, no graph mutation):**
+  `scripts/c_clang_call_audit.py --package examples/cjson` compares
+  package-local `CallExpr` sites (callee subtree only) to tree-sitter `calls`
+  edges. Direct internal matches require a `DeclRefExpr` → `FunctionDecl` with
+  unambiguous package definition/entity mapping; external and indirect
+  (parm/var/member function-pointer) calls stay observations — not points-to
+  analysis. Physical sites use Clang/tree-sitter byte offsets first and exact
+  line/normalized-column only when an offset is unavailable; column-only
+  matching is forbidden. Nested calls produced by one macro expansion remain
+  a multiset instead of being collapsed at the shared expansion offset.
+  Measured on this host under the default compile DB (counts may move with
+  toolchain/config): matched_internal=188, tree_sitter_only_internal=0,
+  out_of_compile_db_scope=307 (runner-dominated), external_direct=71,
+  indirect=26, ambiguous=0, clang_only_internal=0. The tree-sitter accounting
+  is complete (188 + 0 + 307 = 495 calls). **No call facts are published into
+  BYOG.**
 
 ## C frontend result — clean on the first pass
 Unlike `inih`, cJSON does not fragment function bodies with `#if`/`#endif`, so the

@@ -108,9 +108,17 @@ a universal compiler API. Wrappers, response files, `--config`, modules,
 plugins, and PCH fail explicitly. See
 [docs/graph_schema.md](docs/graph_schema.md).
 
-**Clang AST function-definition audit (still a standalone diagnostic):**
-`scripts/c_clang_ast_audit.py` compares package-local Clang `FunctionDecl`
-definitions to tree-sitter-c entities and reports matches/residuals. **Clang
-only** (`cc` accepted only when `--version` proves Clang/Apple Clang). Publishing
-selected matched signature fields into BYOG requires the separate explicit
-`--clang-signatures` flag; the audit CLI itself does not mutate the graph.
+**Clang AST audits (standalone diagnostics):**
+
+- `scripts/c_clang_ast_audit.py` — function definitions / signatures vs
+  tree-sitter entities. Publishing selected matched signature *fields* into
+  BYOG requires the separate explicit `--clang-signatures` flag.
+- `scripts/c_clang_call_audit.py` — call sites vs tree-sitter `calls` edges
+  (direct internal matches; external/indirect remain observations). Call-site
+  matching is byte-offset-first with strict line/column fallback and complete
+  tree-sitter edge accounting. **Does not publish call facts** and does not add
+  an `index_c` flag.
+
+Both are **Clang only** (`cc` accepted only when `--version` proves
+Clang/Apple Clang). Neither is points-to analysis, multi-config coverage, or
+production C/C++ completeness.
