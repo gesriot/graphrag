@@ -488,6 +488,7 @@ def test_default_index_option_off_records_no_facts(tmp_path: Path):
         compiler_includes=False,
         clang_signatures=False,
         clang_calls=False,
+        clang_types=False,
         allow_toolchain_drift=False,
     )
     snapshot = (graph / "current").read_text(encoding="utf-8").strip()
@@ -534,6 +535,7 @@ def test_enabled_index_manifest_matches_published_overlay(tmp_path: Path):
         compiler_includes=False,
         clang_signatures=False,
         clang_calls=False,
+        clang_types=False,
         allow_toolchain_drift=False,
     )
     snapshot = (graph / "current").read_text(encoding="utf-8").strip()

@@ -104,20 +104,28 @@ flags on `scripts/index_c.py`:
   **existing** tree-sitter `calls` relationships from the AST call-site audit’s
   `matched_internal` rows only (exact span + byte-offset attachment; no new
   entities/edges; base `confidence`/`extractor` unchanged).
+- `--clang-types` — attach configured Clang type-declaration evidence metadata
+  to **existing** tree-sitter `struct` / `enum` / `typedef` entities from the
+  AST type-declaration audit’s matched rows only (exact `tree_sitter_title` +
+  entity type + `symbol_name` + path + canonical graph span; no new entities,
+  no `uses_type` edges, no alternate-site entities).
 
-When both `--clang-signatures` and `--clang-calls` are enabled, `index_c`
-builds **one shared in-memory AST capture** (one `-ast-dump=json` per
-`compile_commands.json` entry) and both overlays consume it. There is **no**
-persistent AST cache and AST JSON is never written to manifests or parquet.
-Enabling either flag alone still dumps once per entry; neither flag dumps
-nothing. Trust/confidence boundaries are unchanged.
+When any non-empty combination of `--clang-signatures`, `--clang-calls`, and
+`--clang-types` is enabled, `index_c` builds **one shared in-memory AST
+capture** (one `-ast-dump=json` per `compile_commands.json` entry) and every
+enabled overlay consumes it. There is **no** persistent AST cache and AST JSON
+is never written to manifests or parquet. Enabling any non-empty subset still
+dumps once per entry (N dumps for N entries, never 2N or 3N); none of the
+flags dumps nothing. Trust/confidence boundaries are independent per overlay
+manifest block.
 
 These are narrow configuration-derived layers on top of tree-sitter-c — not
 full type resolution, ABI verification, multi-config coverage, points-to
-analysis, macro-complete call proof, or production C/C++ completeness. `-M` /
-`-H` / AST-dump are GNU/Clang-specific adapters, not a universal compiler API.
-Wrappers, response files, `--config`, modules, plugins, and PCH fail
-explicitly. See [docs/graph_schema.md](docs/graph_schema.md).
+analysis, type-use / `uses_type` proof, macro-complete call proof, or
+production C/C++ completeness. `-M` / `-H` / AST-dump are GNU/Clang-specific
+adapters, not a universal compiler API. Wrappers, response files, `--config`,
+modules, plugins, and PCH fail explicitly. See
+[docs/graph_schema.md](docs/graph_schema.md).
 
 **Clang AST audits (standalone diagnostics):**
 
@@ -132,12 +140,14 @@ explicitly. See [docs/graph_schema.md](docs/graph_schema.md).
 - `scripts/c_clang_type_audit.py` — type *declarations* (named complete
   structs, named complete enums, package-local typedefs) vs tree-sitter
   `struct` / `enum` / `typedef` entities. Collision-safe identity is
-  kind + path + name + exact start line/column. **Diagnostic only:** no
-  `index_c` flag, no `uses_type` edges, no type fields on the graph, no
-  default-output change. Anonymous / union / incomplete / outside-package
-  residuals are counted explicitly. `--fail-on-mismatch` exits 1 only for
-  `tree_sitter_only` / `clang_only` / `ambiguous` / `macro_location_unsupported`
-  (not for out-of-scope, anonymous, unsupported, or outside-package alone).
+  kind + path + name + exact start line/column. The CLI remains diagnostic
+  (no graph mutation). Publishing selected matched type-declaration *fields*
+  into BYOG requires the separate explicit `--clang-types` flag (no
+  `uses_type` edges). Anonymous / union / incomplete / outside-package /
+  alternate-site residuals are counted explicitly. `--fail-on-mismatch` exits
+  1 only for `tree_sitter_only` / `clang_only` / `ambiguous` /
+  `macro_location_unsupported` (not for out-of-scope, anonymous, unsupported,
+  outside-package, or alternate sites alone).
 
 All three CLIs remain available (each captures once internally). They are
 **Clang only** (`cc` accepted only when `--version` proves Clang/Apple Clang).
@@ -152,9 +162,9 @@ bare C name, every colliding kind uses the qualified title
 `module_key:name`. Typedef aliases nested in declarators (including
 function-pointer typedefs such as `typedef int (*handler)(...)`) are extracted
 by walking only declarator structure — not by scanning parameter lists. The
-diagnostic type audit may match any exact tree-sitter declaration site owned by
-a semantic graph entity (the graph still keeps one canonical source-derived
-span). Alternate unselected sites are reported without failing
-`--fail-on-mismatch` and are not claimed dead/inactive. This is single-config
-declaration evidence — not a multi-config type graph and not a `uses_type`
-overlay.
+type audit / `--clang-types` overlay may match any exact tree-sitter
+declaration site owned by a semantic graph entity (the graph still keeps one
+canonical source-derived span; fields record both graph-canonical and
+matched-site coordinates). Alternate unselected sites are observation-only
+and are not claimed dead/inactive. This is single-config declaration evidence
+— not a multi-config type graph and not a `uses_type` overlay.

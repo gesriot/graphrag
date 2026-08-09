@@ -16,10 +16,13 @@ off). Optional ``--compiler-includes`` overlays direct ``includes`` edges from
 configured Clang function-signature fields to matched tree-sitter function
 entities (default off). Optional ``--clang-calls`` attaches configured direct-
 call evidence fields to existing tree-sitter ``calls`` relationships (default
-off). When both Clang overlays are enabled they share one in-memory AST
-capture (one dump per compile entry; no disk AST cache). Diagnostic AST audits
-remain standalone. Published graph counts stay tree-sitter-only unless an
-overlay is explicitly enabled.
+off). Optional ``--clang-types`` attaches configured type-declaration evidence
+fields to existing tree-sitter ``struct`` / ``enum`` / ``typedef`` entities
+(default off; no type graph / ``uses_type`` edges). When any of the three Clang
+overlays are enabled they share one in-memory AST capture (one dump per
+compile entry; no disk AST cache). Diagnostic AST audits remain standalone.
+Published graph counts stay tree-sitter-only unless an overlay is explicitly
+enabled.
 
 Usage:
     uv run python scripts/index_c.py --package examples/jsmn --graph byog_jsmn
@@ -58,6 +61,15 @@ from c_clang_signatures import (  # type: ignore
     ClangSignatureError,
     append_clang_signatures,
     build_disabled_provenance as build_disabled_signature_provenance,
+)
+from c_clang_type_audit import (  # type: ignore
+    ClangTypeAuditError,
+    build_type_declaration_audit_from_capture,
+)
+from c_clang_types import (  # type: ignore
+    ClangTypeOverlayError,
+    append_clang_types,
+    build_disabled_provenance as build_disabled_type_provenance,
 )
 from c_compiler_facts import (  # type: ignore
     CompilerDependencyError,
@@ -138,6 +150,19 @@ def main(
             "relationships."
         ),
     ),
+    clang_types: bool = typer.Option(
+        False,
+        "--clang-types/--no-clang-types",
+        help=(
+            "Attach configured Clang type-declaration evidence fields to "
+            "existing tree-sitter struct/enum/typedef entities using the AST "
+            "type-declaration audit (matched rows only; exact tree_sitter_title "
+            "+ canonical graph span). Default is off. Standard mismatch "
+            "residuals (tree_sitter_only/clang_only/ambiguous/"
+            "macro_location_unsupported) fail explicitly. Does not create "
+            "entities, uses_type edges, or alternate-site entities."
+        ),
+    ),
     allow_toolchain_drift: bool = typer.Option(
         False,
         "--allow-toolchain-drift",
@@ -213,16 +238,21 @@ def main(
     else:
         inc_prov = build_disabled_include_provenance()
 
-    # Clang AST overlays: share one in-memory capture when either/both enabled.
-    if clang_signatures or clang_calls:
+    # Clang AST overlays: share one in-memory capture when any are enabled.
+    if clang_signatures or clang_calls or clang_types:
         try:
             ast_capture = capture_clang_ast_package(pkg_dir)
             sig_report = None
             call_report = None
+            type_report = None
             if clang_signatures:
                 sig_report = build_function_audit_from_capture(ast_capture)
             if clang_calls:
                 call_report = build_call_audit_from_capture(ast_capture)
+            if clang_types:
+                type_report = build_type_declaration_audit_from_capture(
+                    ast_capture
+                )
             if sig_report is not None and call_report is not None:
                 assert_function_and_call_reports_agree(
                     sig_report, call_report, ast_capture
@@ -241,18 +271,28 @@ def main(
                 )
             else:
                 call_prov = build_disabled_call_provenance()
+            if clang_types:
+                assert type_report is not None
+                type_prov = append_clang_types(
+                    data, pkg_dir, report=type_report
+                )
+            else:
+                type_prov = build_disabled_type_provenance()
         except (
             ClangAstCaptureError,
             ClangAstAuditError,
             ClangCallAuditError,
+            ClangTypeAuditError,
             ClangSignatureError,
             ClangCallOverlayError,
+            ClangTypeOverlayError,
         ) as e:
             typer.secho(str(e), fg=typer.colors.RED, err=True)
             raise typer.Exit(2) from e
     else:
         sig_prov = build_disabled_signature_provenance()
         call_prov = build_disabled_call_provenance()
+        type_prov = build_disabled_type_provenance()
 
     ents_df = pd.DataFrame(data["entities"])
     rels_df = pd.DataFrame(data["relationships"])
@@ -317,12 +357,26 @@ def main(
         )
     else:
         print("  Clang calls: off (default tree-sitter-c graph)")
+    if type_prov.get("enabled"):
+        counts = type_prov.get("counts") or {}
+        print(
+            f"  Clang types: facts={type_prov.get('n_facts')} "
+            f"matched={counts.get('matched')} "
+            f"alternates={counts.get('alternate_declaration_sites')} "
+            f"ts_only={counts.get('tree_sitter_only')} "
+            f"out_of_scope={counts.get('out_of_compile_db_scope')} "
+            f"digest={type_prov.get('compile_commands_digest')} "
+            f"compiler={type_prov.get('compiler_id')}"
+        )
+    else:
+        print("  Clang types: off (default tree-sitter-c graph)")
     extra = {
         "preprocessor_liveness": summary.get("liveness_provenance"),
         "compiler_dependencies": dep_prov,
         "compiler_includes": inc_prov,
         "clang_signatures": sig_prov,
         "clang_calls": call_prov,
+        "clang_types": type_prov,
     }
     snap_dir = publish_byog_snapshot(
         ents_df, rels_df, tus_df, graph_dir, SETTINGS,

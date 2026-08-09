@@ -798,14 +798,16 @@ def test_default_index_c_unchanged_by_type_audit(tmp_path: Path):
         compiler_includes=False,
         clang_signatures=False,
         clang_calls=False,
+        clang_types=False,
         allow_toolchain_drift=False,
     )
     snap = (graph / "current").read_text(encoding="utf-8").strip()
     manifest = json.loads(
         (graph / "snapshots" / snap / "manifest.json").read_text(encoding="utf-8")
     )
-    assert "clang_types" not in manifest
-    assert "clang_type" not in manifest
+    # Independent clang_types block always present; default mode is off.
+    assert manifest["clang_types"]["mode"] == "off"
+    assert manifest["clang_types"]["enabled"] is False
     assert manifest["clang_signatures"]["mode"] == "off"
     assert manifest["clang_calls"]["mode"] == "off"
     assert manifest["counts"]["entities"] == len(baseline["entities"])

@@ -89,6 +89,16 @@ The published graph now also contains the co-located golden runner
   configured Clang (line 62) against that exact site without rewriting the
   graph. The unselected canonical site is reported as an alternate site
   (not proven dead/inactive). `--fail-on-mismatch` exits 0.
+- **Optional `--clang-types` entity fields (default off):** when enabled,
+  attaches those 3 matched type-declaration rows as `clang_type_*` fields on
+  the existing typedef entities (graph remains 21/56/21/38/35). For
+  `ini_handler`, fields record `clang_type_graph_canonical_line=58` and
+  `clang_type_matched_site_line=62` while the entity `span` stays line 58.
+  Alternate sites are observation-only (not separate entities). Standard
+  mismatch residuals fail closed. Independent `extra_manifest["clang_types"]`
+  block (`mode=configured_clang_type_declarations` when on, `mode=off` when
+  disabled). Shares the in-memory AST capture with signatures/calls (N dumps
+  for N entries).
 - `audit_call_edges`: 38 calls, structural pass rate 1.0, 0 anomalies,
   0 dangling targets, 0 semantic suspicions.
 - The **library** subgraph (ini.c/ini.h) is 15 entities and 17 deterministic

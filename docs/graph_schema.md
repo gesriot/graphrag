@@ -150,19 +150,49 @@ multi-config coverage, C++, or ABI verification. The standalone call audit
 remains a diagnostic CLI; only this flag publishes selected matched metadata
 into BYOG.
 
+#### Configured type-declaration evidence (entity fields, not a type graph)
+
+When `scripts/index_c.py --clang-types` is enabled (default **off**), existing
+tree-sitter-c **`struct` / `enum` / `typedef`** entities that the standalone
+`scripts/c_clang_type_audit.py` report classifies as `matched` gain
+configuration/toolchain-derived Clang type-declaration columns under the
+`clang_type_*` namespace.
+
+| Property | Value |
+| --- | --- |
+| Graph shape | **No** new entities or relationships; entity count unchanged; **no** `uses_type` edges |
+| Attachment key | Exact `tree_sitter_title` + entity `type`/`entity_kind` + `symbol_name` + package-relative source path + **canonical graph `span`** |
+| Canonical vs matched site | Entity keeps its graph-canonical span; fields record both `clang_type_graph_canonical_*` and `clang_type_matched_site_*` (may differ, e.g. `ini_handler` graph line 58 vs matched line 62) |
+| `clang_type_fact_kind` | `configured_type_declaration` |
+| `clang_type_extractor` | `clang-ast-json` |
+| Confidence | `clang_type_confidence=1.0` / `clang_type_is_deterministic=true` only relative to recorded Clang + compile DB |
+| Fail-closed residuals | Any `tree_sitter_only` / `clang_only` / `ambiguous` / `macro_location_unsupported`, type/path/span/title mismatch, non-unique title, stale `clang_type_*`, or provenance disagreement aborts before mutation |
+| Allowed residuals | `out_of_compile_db_scope`, `anonymous_declarations`, `unsupported_declarations`, `outside_package_declarations`, and `alternate_declaration_sites` remain counted in the manifest and receive **no** invented entities |
+
+Optional type strings (`clang_type_qual_type`, `clang_type_desugared_qual_type`,
+`clang_type_fixed_underlying_type`) are set to null when Clang does not supply
+them. Singular `clang_type_compiler_path` / `clang_type_compiler_id` are set
+only for single-compiler rows; multi-compiler rows keep the canonical
+`clang_type_compilers` JSON list only. Base tree-sitter `title` / `id` /
+`type` / `source_file` / `span` / `snippet` / `extractor` / `confidence` /
+`is_deterministic` / text-unit IDs are never rewritten. Alternate declaration
+sites are never published as separate entities.
+
 #### Shared in-memory AST capture (execution only)
 
-When either or both of `--clang-signatures` / `--clang-calls` are enabled,
-`index_c` creates one in-process AST capture (`scripts/c_clang_ast_capture.py`):
-load `compile_commands.json` once, fail-closed validate arguments/compiler
-identity, and run one Clang `-ast-dump=json` per compile entry. Function and
-call audit builders consume that capture without re-invoking the compiler.
-Enabling both flags still costs **N** dumps for **N** entries (not 2N). There
+When any of `--clang-signatures` / `--clang-calls` / `--clang-types` are
+enabled, `index_c` creates one in-process AST capture
+(`scripts/c_clang_ast_capture.py`): load `compile_commands.json` once,
+fail-closed validate arguments/compiler identity, and run one Clang
+`-ast-dump=json` per compile entry. Function, call, and type audit builders
+consume that capture without re-invoking the compiler. Any non-empty flag
+combination still costs **N** dumps for **N** entries (never 2N or 3N). There
 is **no** disk AST cache and AST roots never appear in manifests, parquet, or
 logs. Standalone `c_clang_ast_audit.py` / `c_clang_call_audit.py` /
 `c_clang_type_audit.py` CLIs remain available and each still capture once for
 their own run. Confidence boundaries and independent `clang_signatures` /
-`clang_calls` manifest blocks are unchanged (no combined capture block).
+`clang_calls` / `clang_types` manifest blocks are unchanged (no combined
+capture block).
 
 #### C symbol identity (tree-sitter extractor)
 
@@ -196,7 +226,7 @@ configured Clang only by exact
 without changing the graph span; unselected owned sites appear under
 `alternate_declaration_sites` and do not fail `--fail-on-mismatch`.
 
-#### Type-declaration audit (diagnostic only — no graph overlay yet)
+#### Type-declaration audit (standalone diagnostic CLI)
 
 `scripts/c_clang_type_audit.py` compares configured Clang type declarations
 to tree-sitter-c type entities. **In scope for matching:** named complete
@@ -205,31 +235,31 @@ to tree-sitter-c type entities. **In scope for matching:** named complete
 anonymous declarations, unions / incomplete / unsupported forms, and
 outside-package/system declarations; also the usual
 `tree_sitter_only` / `clang_only` / `ambiguous` / `macro_location_unsupported`
-/ `out_of_compile_db_scope` classes. Identity is
+/ `out_of_compile_db_scope` classes, plus observation-only
+`alternate_declaration_sites`. Identity is
 `entity_kind + package-relative path + name + exact line + exact col0`
 (never bare title alone; a struct and a typedef with the same title stay
 distinct). `--fail-on-mismatch` exits 1 only when `tree_sitter_only`,
 `clang_only`, `ambiguous`, or `macro_location_unsupported` is non-zero;
-out-of-scope / anonymous / unsupported / outside-package alone do not.
-Outside-package rows retain their resolved source path and are deduplicated by
-that path; declarations from different system headers are never collapsed just
-because their names and coordinates happen to agree.
+out-of-scope / anonymous / unsupported / outside-package / alternate sites
+alone do not. Outside-package rows retain their resolved source path and are
+deduplicated by that path; declarations from different system headers are
+never collapsed just because their names and coordinates happen to agree.
 
-There is **no** `uses_type` relationship type, no type entity fields from
-Clang, no `index_c` flag, and no default-graph or manifest change from this
-audit. It is configuration-derived declaration evidence only — not a type
-graph, type-use proof, layout/ABI proof, macro-complete result, or multi-config
-result.
+The standalone CLI does not mutate BYOG. Publishing selected matched type
+fields into the graph requires the separate explicit `--clang-types` flag
+(see above). There is still **no** `uses_type` relationship type and no
+default-on graph change.
 
 **Shared out of scope:** multi-config coverage, MSVC/wrappers/response files
 (fail closed), system/outside endpoints after filtering, production C/C++
 completeness. Snapshot manifests record separate `compiler_dependencies`,
-`compiler_includes`, `clang_signatures`, and `clang_calls` blocks with their
-applicable mode, compiler identity/identities, digest, fact/TU counts, and
-residual counts; all carry an explicit `mode=off` block when disabled.
-Module/cache/plugin/PCH, response/config, and unrestricted `-Xclang` compile
-arguments fail closed for all compiler-backed adapters until their effects can
-be audited without changing configured semantics.
+`compiler_includes`, `clang_signatures`, `clang_calls`, and `clang_types`
+blocks with their applicable mode, compiler identity/identities, digest,
+fact/TU counts, and residual counts; all carry an explicit `mode=off` block
+when disabled. Module/cache/plugin/PCH, response/config, and unrestricted
+`-Xclang` compile arguments fail closed for all compiler-backed adapters
+until their effects can be audited without changing configured semantics.
 
 ## Example Row (entities)
 ```json

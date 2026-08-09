@@ -138,11 +138,13 @@ explicit skip and the final status says `PASS WITH SKIPS`.
   analysis, macro-complete call proof, multi-config coverage, C++, or ABI
   verification. `clang_call_confidence=1.0` is relative only to the recorded
   Clang + `compile_commands.json` configuration.
-- **Shared AST capture (execution only):** enabling `--clang-signatures` and
-  `--clang-calls` together uses one in-memory capture for both overlays (one
-  AST dump per compile entry for this package’s single-entry compile DB). No
-  disk AST cache; standalone audit CLIs remain available; confidence
-  boundaries and independent manifest blocks are unchanged.
+- **Shared AST capture (execution only):** enabling any non-empty combination
+  of `--clang-signatures`, `--clang-calls`, and `--clang-types` uses one
+  in-memory capture for the enabled overlays (one AST dump per compile entry
+  for this package’s single-entry compile DB; never 2N/3N). No disk AST
+  cache; standalone audit CLIs remain available; confidence boundaries and
+  independent `clang_signatures` / `clang_calls` / `clang_types` manifest
+  blocks are unchanged.
 - **C symbol identity (tree-sitter extractor, kind-aware titles):** within one
   module key, when `function` / `struct` / `enum` / `typedef` share a bare
   name, every colliding kind is titled `module_key:entity_kind:name` (no
@@ -155,7 +157,7 @@ explicit skip and the final status says `PASS WITH SKIPS`.
   `cJSON:struct:internal_hooks`) plus matching `contains` edges; colliding
   typedefs use `cJSON:typedef:…` titles. Historical published snapshot rows
   in the table below remain historical.
-- **Clang AST type-declaration audit (diagnostic only, no graph mutation):**
+- **Clang AST type-declaration audit (standalone diagnostic CLI):**
   `scripts/c_clang_type_audit.py --package examples/cjson` compares package-
   local named complete structs, named complete enums, and typedefs to
   tree-sitter `struct` / `enum` / `typedef` entities. Identity is
@@ -165,11 +167,22 @@ explicit skip and the final status says `PASS WITH SKIPS`.
   anonymous_declarations=3, outside_package_declarations=212 (each row keeps
   its resolved outside source path; different headers are not collapsed),
   tree_sitter_only=0, ambiguous=0, macro_location_unsupported=0,
-  unsupported_declarations=0, out_of_compile_db_scope=0. **No** `uses_type`
-  edges, Clang type fields, `index_c` flag, or overlay.
-  `--fail-on-mismatch` fails only on tree_sitter_only / clang_only /
-  ambiguous / macro residuals — not on anonymous/outside-package alone.
-  Not layout/ABI, type-use analysis, points-to, C++, or multi-config.
+  unsupported_declarations=0, out_of_compile_db_scope=0. The CLI does not
+  mutate BYOG. `--fail-on-mismatch` fails only on tree_sitter_only /
+  clang_only / ambiguous / macro residuals — not on anonymous/outside-package
+  alone. Not layout/ABI, type-use analysis, points-to, C++, or multi-config.
+- **Optional `--clang-types` entity fields (default off):**
+  `scripts/index_c.py --clang-types` attaches the audit’s **matched** type-
+  declaration metadata as `clang_type_*` fields onto existing
+  `struct`/`enum`/`typedef` entities only (entity/relationship counts
+  unchanged; base title/id/type/source_file/span/extractor/confidence
+  unchanged). Attachment requires exact `tree_sitter_title` + entity type +
+  `symbol_name` + package-relative path + **canonical graph span**. Expected
+  for cJSON when enabled: **10** type facts; standard mismatch residuals must
+  be zero or the overlay fails closed. Observation-only residuals
+  (anonymous/outside-package/alternate sites) do not invent entities.
+  **No** `uses_type` edges. `clang_type_confidence=1.0` is relative only to
+  the recorded Clang + `compile_commands.json` configuration.
 
 ## C frontend result — clean on the first pass
 Unlike `inih`, cJSON does not fragment function bodies with `#if`/`#endif`, so the

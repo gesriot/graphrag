@@ -98,11 +98,26 @@ def _write_multi_entry_pkg(tmp_path: Path, n: int = 3) -> Path:
 
 
 @pytest.mark.skipif(_cc() is None, reason="no C compiler on PATH")
-def test_combined_flags_one_dump_per_entry(tmp_path: Path, monkeypatch):
+@pytest.mark.parametrize(
+    "sigs,calls,types",
+    [
+        (True, False, False),
+        (False, True, False),
+        (False, False, True),
+        (True, True, False),
+        (True, False, True),
+        (False, True, True),
+        (True, True, True),
+    ],
+)
+def test_any_clang_flag_subset_one_dump_per_entry(
+    tmp_path: Path, monkeypatch, sigs: bool, calls: bool, types: bool
+):
+    """Any non-empty subset of signatures/calls/types must dump exactly N times."""
     n = 3
     pkg = _write_multi_entry_pkg(tmp_path, n=n)
     counter = _patch_dump_counter(monkeypatch)
-    graph = tmp_path / "g_both"
+    graph = tmp_path / f"g_{int(sigs)}{int(calls)}{int(types)}"
     index_c_main(
         package=pkg,
         graph=graph,
@@ -110,8 +125,9 @@ def test_combined_flags_one_dump_per_entry(tmp_path: Path, monkeypatch):
         compiler_builtins=False,
         compiler_dependencies=False,
         compiler_includes=False,
-        clang_signatures=True,
-        clang_calls=True,
+        clang_signatures=sigs,
+        clang_calls=calls,
+        clang_types=types,
         allow_toolchain_drift=False,
     )
     assert counter["n"] == n
@@ -120,56 +136,19 @@ def test_combined_flags_one_dump_per_entry(tmp_path: Path, monkeypatch):
     manifest = json.loads(
         (graph / "snapshots" / snap / "manifest.json").read_text(encoding="utf-8")
     )
-    assert manifest["clang_signatures"]["enabled"] is True
-    assert manifest["clang_calls"]["enabled"] is True
-    assert manifest["clang_signatures"]["n_compile_entries"] == n
-    assert manifest["clang_calls"]["n_compile_entries"] == n
+    assert manifest["clang_signatures"]["enabled"] is sigs
+    assert manifest["clang_calls"]["enabled"] is calls
+    assert manifest["clang_types"]["enabled"] is types
+    if sigs:
+        assert manifest["clang_signatures"]["n_compile_entries"] == n
+    if calls:
+        assert manifest["clang_calls"]["n_compile_entries"] == n
+    if types:
+        assert manifest["clang_types"]["n_compile_entries"] == n
     assert not any(pkg.rglob("*.o"))
     assert not any(pkg.rglob("*.ast"))
     assert not any(pkg.rglob("*.d"))
     assert not any(pkg.rglob("*.i"))
-
-
-@pytest.mark.skipif(_cc() is None, reason="no C compiler on PATH")
-def test_signature_only_one_dump_per_entry(tmp_path: Path, monkeypatch):
-    n = 3
-    pkg = _write_multi_entry_pkg(tmp_path, n=n)
-    counter = _patch_dump_counter(monkeypatch)
-    graph = tmp_path / "g_sig"
-    index_c_main(
-        package=pkg,
-        graph=graph,
-        keep_snapshots=2,
-        compiler_builtins=False,
-        compiler_dependencies=False,
-        compiler_includes=False,
-        clang_signatures=True,
-        clang_calls=False,
-        allow_toolchain_drift=False,
-    )
-    assert counter["n"] == n
-    assert counter["loads"] == 1
-
-
-@pytest.mark.skipif(_cc() is None, reason="no C compiler on PATH")
-def test_call_only_one_dump_per_entry(tmp_path: Path, monkeypatch):
-    n = 3
-    pkg = _write_multi_entry_pkg(tmp_path, n=n)
-    counter = _patch_dump_counter(monkeypatch)
-    graph = tmp_path / "g_call"
-    index_c_main(
-        package=pkg,
-        graph=graph,
-        keep_snapshots=2,
-        compiler_builtins=False,
-        compiler_dependencies=False,
-        compiler_includes=False,
-        clang_signatures=False,
-        clang_calls=True,
-        allow_toolchain_drift=False,
-    )
-    assert counter["n"] == n
-    assert counter["loads"] == 1
 
 
 @pytest.mark.skipif(_cc() is None, reason="no C compiler on PATH")
@@ -187,6 +166,7 @@ def test_neither_flag_zero_dumps(tmp_path: Path, monkeypatch):
         compiler_includes=False,
         clang_signatures=False,
         clang_calls=False,
+        clang_types=False,
         allow_toolchain_drift=False,
     )
     assert counter["n"] == 0
@@ -197,6 +177,7 @@ def test_neither_flag_zero_dumps(tmp_path: Path, monkeypatch):
     )
     assert manifest["clang_signatures"]["mode"] == "off"
     assert manifest["clang_calls"]["mode"] == "off"
+    assert manifest["clang_types"]["mode"] == "off"
 
 
 # ---------------------------------------------------------------------------
@@ -213,8 +194,13 @@ def test_builders_perform_zero_compiler_invocations(tmp_path: Path, monkeypatch)
     loads_after_capture = counter["loads"]
     assert n_after_capture == 2
     assert loads_after_capture == 1
+    from c_clang_type_audit import (  # type: ignore
+        build_type_declaration_audit_from_capture,
+    )
+
     build_function_audit_from_capture(capture)
     build_call_audit_from_capture(capture)
+    build_type_declaration_audit_from_capture(capture)
     assert counter["n"] == n_after_capture
     assert counter["loads"] == loads_after_capture
 
@@ -291,6 +277,8 @@ def test_combined_parquet_smoke_inih(tmp_path: Path):
     pkg = ROOT / "examples" / "inih"
     baseline = build_c_byog(pkg)
     graph = tmp_path / "g_inih_both"
+    from c_clang_types import FACT_KIND as TYPE_FACT_KIND  # type: ignore
+
     index_c_main(
         package=pkg,
         graph=graph,
@@ -300,6 +288,7 @@ def test_combined_parquet_smoke_inih(tmp_path: Path):
         compiler_includes=False,
         clang_signatures=True,
         clang_calls=True,
+        clang_types=True,
         allow_toolchain_drift=False,
     )
     snap = (graph / "current").read_text(encoding="utf-8").strip()
@@ -323,11 +312,16 @@ def test_combined_parquet_smoke_inih(tmp_path: Path):
     assert len(matched_calls) == 16
     assert (matched_calls["clang_call_fact_kind"] == CALL_FACT_KIND).all()
     assert (matched_calls["confidence"] == 0.9).all()
+    typed = ents[ents["clang_type_declaration_confirmed"] == True]  # noqa: E712
+    assert len(typed) == 3
+    assert (typed["clang_type_fact_kind"] == TYPE_FACT_KIND).all()
     manifest = json.loads((snap_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["clang_signatures"]["enabled"] is True
     assert manifest["clang_signatures"]["n_facts"] == 10
     assert manifest["clang_calls"]["enabled"] is True
     assert manifest["clang_calls"]["n_facts"] == 16
+    assert manifest["clang_types"]["enabled"] is True
+    assert manifest["clang_types"]["n_facts"] == 3
     assert "clang_ast_capture" not in manifest
     assert not any(pkg.rglob("*.o"))
     assert not any(pkg.rglob("*.ast"))
@@ -348,6 +342,7 @@ def test_second_overlay_failure_publishes_no_snapshot(tmp_path: Path, monkeypatc
         compiler_includes=False,
         clang_signatures=False,
         clang_calls=False,
+        clang_types=False,
         allow_toolchain_drift=False,
     )
     prior_current = (graph / "current").read_text(encoding="utf-8")
@@ -377,6 +372,7 @@ def test_second_overlay_failure_publishes_no_snapshot(tmp_path: Path, monkeypatc
             compiler_includes=False,
             clang_signatures=True,
             clang_calls=True,
+            clang_types=False,
             allow_toolchain_drift=False,
         )
     code = getattr(ei.value, "exit_code", None)

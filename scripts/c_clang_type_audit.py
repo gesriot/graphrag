@@ -5,8 +5,9 @@ Compares package-local Clang type *declarations* (named complete structs,
 named complete enums, and package-local typedefs) against tree-sitter-c
 ``struct`` / ``enum`` / ``typedef`` entities.
 
-This is **not** a graph overlay: it does not publish type facts into BYOG,
-does not add ``uses_type`` edges, and does not add flags to ``index_c.py``.
+This module is a **diagnostic audit** (and the pure builder consumed by the
+optional ``--clang-types`` overlay). The standalone CLI does not mutate BYOG
+and does not add ``uses_type`` edges.
 
 Identity is collision-safe and includes entity kind, name, package-relative
 path, and exact source start line/column (never bare title alone). A struct
@@ -46,8 +47,9 @@ CONFIDENCE_BOUNDARY = (
     "entity; the audit may match any exact tree-sitter declaration site owned "
     "by that entity. Alternate sites are declaration-site observations only "
     "(not proven dead/inactive). Anonymous, union, incomplete, unsupported, "
-    "and outside-package observations remain explicit residuals. No type facts "
-    "are published into BYOG."
+    "and outside-package observations remain explicit residuals. The standalone "
+    "CLI publishes no type facts; optional ``--clang-types`` may attach matched "
+    "fields only under a separate fail-closed overlay."
 )
 
 _SPAN_RE = re.compile(
@@ -1543,7 +1545,7 @@ def build_type_declaration_audit_from_capture(capture: Any) -> Dict[str, Any]:
         "outside_package_declarations": buckets["outside_package_declarations"],
         "alternate_declaration_sites": buckets["alternate_declaration_sites"],
         "limitations": [
-            "Diagnostic only — no BYOG type facts, uses_type edges, or index_c flag",
+            "Standalone CLI is diagnostic only; optional --clang-types may attach matched fields (no uses_type edges)",
             "Named complete struct (RecordDecl tagUsed=struct completeDefinition) only",
             "Named complete enum (EnumDecl with EnumConstantDecl body) only",
             "Package-local TypedefDecl only",
