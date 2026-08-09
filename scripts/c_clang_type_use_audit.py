@@ -1328,11 +1328,20 @@ def audit_to_json(report: Dict[str, Any]) -> str:
     return json.dumps(report, sort_keys=True, indent=2) + "\n"
 
 
-def build_type_use_audit_from_capture(capture: Any) -> Dict[str, Any]:
+def build_type_use_audit_from_capture(
+    capture: Any,
+    *,
+    function_report: Optional[Dict[str, Any]] = None,
+    type_report: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Build the type-use audit from an in-memory capture.
 
     Zero compiler invocations; zero compile_commands reloads; never mutates
     the capture or AST roots.
+
+    Optional ``function_report`` / ``type_report`` must already have been built
+    from the same capture (validated against it). When omitted, they are built
+    here — standalone CLI behavior remains byte-identical.
     """
     from c_clang_ast_capture import (  # type: ignore
         ClangAstCaptureError,
@@ -1359,8 +1368,44 @@ def build_type_use_audit_from_capture(capture: Any) -> Dict[str, Any]:
     ]
 
     try:
-        function_report = build_function_audit_from_capture(capture)
-        type_report = build_type_declaration_audit_from_capture(capture)
+        if function_report is None:
+            function_report = build_function_audit_from_capture(capture)
+        else:
+            if not isinstance(function_report, dict):
+                raise ClangTypeUseAuditError(
+                    "function_report must be a dict when provided"
+                )
+            assert_audit_report_matches_capture(
+                function_report,
+                capture,
+                context="type-use function_report",
+            )
+            if str(function_report.get("mode") or "") != "clang_ast_json_audit":
+                raise ClangTypeUseAuditError(
+                    f"function_report has unexpected mode "
+                    f"{function_report.get('mode')!r}"
+                )
+        if type_report is None:
+            type_report = build_type_declaration_audit_from_capture(capture)
+        else:
+            if not isinstance(type_report, dict):
+                raise ClangTypeUseAuditError(
+                    "type_report must be a dict when provided"
+                )
+            assert_audit_report_matches_capture(
+                type_report,
+                capture,
+                context="type-use type_report",
+            )
+            if (
+                str(type_report.get("mode") or "")
+                != "clang_ast_json_type_declaration_audit"
+            ):
+                raise ClangTypeUseAuditError(
+                    f"type_report has unexpected mode {type_report.get('mode')!r}"
+                )
+    except ClangAstCaptureError as e:
+        raise ClangTypeUseAuditError(str(e)) from e
     except (ClangAstAuditError, ClangTypeAuditError) as e:
         raise ClangTypeUseAuditError(str(e)) from e
 
@@ -1468,7 +1513,7 @@ def build_type_use_audit_from_capture(capture: Any) -> Dict[str, Any]:
         "counts": counts,
         **{k: bucket_rows[k] for k in _ALL_BUCKETS},
         "limitations": [
-            "Diagnostic only — no uses_type edges, graph fields, index_c flag, or manifest block",
+            "Standalone CLI is diagnostic only; optional --clang-type-uses may publish aggregated uses_type edges",
             "Locations are declaration-bearing nodes, not proven type-token spans",
             "Target resolution prefers typeAliasDeclId; spelling is unique-only",
             "C tag names stay distinct: bare names resolve only as unique typedef spellings",

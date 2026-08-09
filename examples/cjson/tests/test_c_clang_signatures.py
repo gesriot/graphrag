@@ -554,6 +554,7 @@ def test_cli_default_off_manifest(tmp_path: Path):
         clang_signatures=False,
         clang_calls=False,
         clang_types=False,
+        clang_type_uses=False,
         allow_toolchain_drift=False,
     )
     snapshot = (graph / "current").read_text(encoding="utf-8").strip()
@@ -590,6 +591,7 @@ def test_parquet_roundtrip_signature_fields(tmp_path: Path):
         clang_signatures=True,
         clang_calls=False,
         clang_types=False,
+        clang_type_uses=False,
         allow_toolchain_drift=False,
     )
     snapshot = (graph / "current").read_text(encoding="utf-8").strip()

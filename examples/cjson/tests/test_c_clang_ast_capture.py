@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import sys
 from copy import deepcopy
+from itertools import product
 from pathlib import Path
 
 import pytest
@@ -99,25 +100,22 @@ def _write_multi_entry_pkg(tmp_path: Path, n: int = 3) -> Path:
 
 @pytest.mark.skipif(_cc() is None, reason="no C compiler on PATH")
 @pytest.mark.parametrize(
-    "sigs,calls,types",
-    [
-        (True, False, False),
-        (False, True, False),
-        (False, False, True),
-        (True, True, False),
-        (True, False, True),
-        (False, True, True),
-        (True, True, True),
-    ],
+    "sigs,calls,types,tuses",
+    [flags for flags in product((False, True), repeat=4) if any(flags)],
 )
 def test_any_clang_flag_subset_one_dump_per_entry(
-    tmp_path: Path, monkeypatch, sigs: bool, calls: bool, types: bool
+    tmp_path: Path,
+    monkeypatch,
+    sigs: bool,
+    calls: bool,
+    types: bool,
+    tuses: bool,
 ):
-    """Any non-empty subset of signatures/calls/types must dump exactly N times."""
+    """Any non-empty subset of the four Clang flags dumps exactly N times."""
     n = 3
     pkg = _write_multi_entry_pkg(tmp_path, n=n)
     counter = _patch_dump_counter(monkeypatch)
-    graph = tmp_path / f"g_{int(sigs)}{int(calls)}{int(types)}"
+    graph = tmp_path / f"g_{int(sigs)}{int(calls)}{int(types)}{int(tuses)}"
     index_c_main(
         package=pkg,
         graph=graph,
@@ -128,6 +126,7 @@ def test_any_clang_flag_subset_one_dump_per_entry(
         clang_signatures=sigs,
         clang_calls=calls,
         clang_types=types,
+        clang_type_uses=tuses,
         allow_toolchain_drift=False,
     )
     assert counter["n"] == n
@@ -139,12 +138,15 @@ def test_any_clang_flag_subset_one_dump_per_entry(
     assert manifest["clang_signatures"]["enabled"] is sigs
     assert manifest["clang_calls"]["enabled"] is calls
     assert manifest["clang_types"]["enabled"] is types
+    assert manifest["clang_type_uses"]["enabled"] is tuses
     if sigs:
         assert manifest["clang_signatures"]["n_compile_entries"] == n
     if calls:
         assert manifest["clang_calls"]["n_compile_entries"] == n
     if types:
         assert manifest["clang_types"]["n_compile_entries"] == n
+    if tuses:
+        assert manifest["clang_type_uses"]["n_compile_entries"] == n
     assert not any(pkg.rglob("*.o"))
     assert not any(pkg.rglob("*.ast"))
     assert not any(pkg.rglob("*.d"))
@@ -167,6 +169,7 @@ def test_neither_flag_zero_dumps(tmp_path: Path, monkeypatch):
         clang_signatures=False,
         clang_calls=False,
         clang_types=False,
+        clang_type_uses=False,
         allow_toolchain_drift=False,
     )
     assert counter["n"] == 0
@@ -178,6 +181,7 @@ def test_neither_flag_zero_dumps(tmp_path: Path, monkeypatch):
     assert manifest["clang_signatures"]["mode"] == "off"
     assert manifest["clang_calls"]["mode"] == "off"
     assert manifest["clang_types"]["mode"] == "off"
+    assert manifest["clang_type_uses"]["mode"] == "off"
 
 
 # ---------------------------------------------------------------------------
@@ -289,6 +293,7 @@ def test_combined_parquet_smoke_inih(tmp_path: Path):
         clang_signatures=True,
         clang_calls=True,
         clang_types=True,
+        clang_type_uses=False,
         allow_toolchain_drift=False,
     )
     snap = (graph / "current").read_text(encoding="utf-8").strip()
@@ -343,6 +348,7 @@ def test_second_overlay_failure_publishes_no_snapshot(tmp_path: Path, monkeypatc
         clang_signatures=False,
         clang_calls=False,
         clang_types=False,
+        clang_type_uses=False,
         allow_toolchain_drift=False,
     )
     prior_current = (graph / "current").read_text(encoding="utf-8")
@@ -373,6 +379,7 @@ def test_second_overlay_failure_publishes_no_snapshot(tmp_path: Path, monkeypatc
             clang_signatures=True,
             clang_calls=True,
             clang_types=False,
+            clang_type_uses=False,
             allow_toolchain_drift=False,
         )
     code = getattr(ei.value, "exit_code", None)

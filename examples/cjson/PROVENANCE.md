@@ -183,18 +183,23 @@ explicit skip and the final status says `PASS WITH SKIPS`.
   (anonymous/outside-package/alternate sites) do not invent entities.
   **No** `uses_type` edges. `clang_type_confidence=1.0` is relative only to
   the recorded Clang + `compile_commands.json` configuration.
-- **Clang AST type-use audit (diagnostic only, no graph mutation):**
+- **Clang AST type-use audit (diagnostic):**
   `scripts/c_clang_type_use_audit.py --package examples/cjson` inventories
   declaration-bearing type uses (returns/params/locals/fields/globals/typedef
   underlying). Measured on this host under the default compile DB:
-  matched_internal=439, ambiguous_target=0 (bare `cJSON` resolves in C's
-  typedef namespace; `struct cJSON` remains an explicit tag use),
-  external_or_system=269,
-  unsupported_type_form=5, unowned_context=2, owner_unmatched=0,
-  target_unresolved=0, macro_location_unsupported=0. Locations are
-  declaration-bearing nodes (not exact type-token spans). **No** `uses_type`
-  edges, graph fields, `index_c` flag, or manifest block.
+  matched_internal=**439**, ambiguous_target=**0** (bare `cJSON` resolves in
+  C's typedef namespace; `struct cJSON` remains an explicit tag use),
+  external_or_system=269, unsupported_type_form=5, unowned_context=2,
+  owner_unmatched=0, target_unresolved=0, macro_location_unsupported=0.
+  Locations are declaration-bearing nodes (not exact type-token spans).
   `--fail-on-mismatch` exits 0.
+- **Optional `--clang-type-uses` graph edges (default off):** aggregates those
+  439 matched observations into **172** `uses_type` relationships (one per
+  owner/target entity-id pair; includes one recursive
+  `cJSON:struct:cJSON -> cJSON:struct:cJSON` self-edge from fields). Entity
+  count stays 148; pre-existing relationship IDs/endpoints/types are preserved.
+  Independent `extra_manifest["clang_type_uses"]` block. Confidence is
+  configuration-relative only — not layout/ABI/multi-config/points-to proof.
 
 ## C frontend result — clean on the first pass
 Unlike `inih`, cJSON does not fragment function bodies with `#if`/`#endif`, so the

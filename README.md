@@ -108,16 +108,20 @@ flags on `scripts/index_c.py`:
   to **existing** tree-sitter `struct` / `enum` / `typedef` entities from the
   AST type-declaration audit’s matched rows only (exact `tree_sitter_title` +
   entity type + `symbol_name` + path + canonical graph span; no new entities,
-  no `uses_type` edges, no alternate-site entities).
+  no alternate-site entities).
+- `--clang-type-uses` — publish aggregated `uses_type` relationships from the
+  type-use audit’s `matched_internal` rows only (one edge per owner/target
+  entity-id pair; recursive self-edges allowed). Observation counts and edge
+  counts differ; fail-closed residuals abort. Default off.
 
-When any non-empty combination of `--clang-signatures`, `--clang-calls`, and
-`--clang-types` is enabled, `index_c` builds **one shared in-memory AST
-capture** (one `-ast-dump=json` per `compile_commands.json` entry) and every
-enabled overlay consumes it. There is **no** persistent AST cache and AST JSON
-is never written to manifests or parquet. Enabling any non-empty subset still
-dumps once per entry (N dumps for N entries, never 2N or 3N); none of the
-flags dumps nothing. Trust/confidence boundaries are independent per overlay
-manifest block.
+When any non-empty combination of `--clang-signatures`, `--clang-calls`,
+`--clang-types`, and `--clang-type-uses` is enabled, `index_c` builds **one
+shared in-memory AST capture** (one `-ast-dump=json` per
+`compile_commands.json` entry) and every enabled overlay consumes it. There is
+**no** persistent AST cache and AST JSON is never written to manifests or
+parquet. Enabling any non-empty subset still dumps once per entry (N dumps for
+N entries, never 2N–4N); none of the flags dumps nothing. Trust/confidence
+boundaries are independent per overlay manifest block.
 
 These are narrow configuration-derived layers on top of tree-sitter-c — not
 full type resolution, ABI verification, multi-config coverage, points-to
@@ -150,13 +154,13 @@ modules, plugins, and PCH fail explicitly. See
   outside-package, or alternate sites alone).
 - `scripts/c_clang_type_use_audit.py` — type *uses* on declaration-bearing
   AST nodes (function returns, parameters, locals, fields, globals, typedef
-  underlying types). **Diagnostic only:** no `uses_type` edges, no graph
-  fields, no `index_c` flag, no manifest block. Owners/targets reuse the
-  function and type-declaration audits. Locations are the declaration-bearing
-  node (not proven exact type-token spans). C's tag namespace stays distinct:
-  bare names resolve only as unique typedef spellings, while `struct T` /
-  `enum T` use explicit tag spelling. `--fail-on-mismatch` exits 1 for
-  `owner_unmatched` / `target_unresolved` / `ambiguous_target` /
+  underlying types). The CLI is diagnostic; publishing aggregated `uses_type`
+  edges requires the separate explicit `--clang-type-uses` flag. Owners/targets
+  reuse the function and type-declaration audits. Locations are the
+  declaration-bearing node (not proven exact type-token spans). C's tag
+  namespace stays distinct: bare names resolve only as unique typedef spellings,
+  while `struct T` / `enum T` use explicit tag spelling. `--fail-on-mismatch`
+  exits 1 for `owner_unmatched` / `target_unresolved` / `ambiguous_target` /
   `macro_location_unsupported` only.
 
 All four CLIs remain available (each captures once internally). They are

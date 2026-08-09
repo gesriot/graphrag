@@ -799,6 +799,7 @@ def test_default_index_c_unchanged_by_type_audit(tmp_path: Path):
         clang_signatures=False,
         clang_calls=False,
         clang_types=False,
+        clang_type_uses=False,
         allow_toolchain_drift=False,
     )
     snap = (graph / "current").read_text(encoding="utf-8").strip()

@@ -18,11 +18,12 @@ entities (default off). Optional ``--clang-calls`` attaches configured direct-
 call evidence fields to existing tree-sitter ``calls`` relationships (default
 off). Optional ``--clang-types`` attaches configured type-declaration evidence
 fields to existing tree-sitter ``struct`` / ``enum`` / ``typedef`` entities
-(default off; no type graph / ``uses_type`` edges). When any of the three Clang
-overlays are enabled they share one in-memory AST capture (one dump per
-compile entry; no disk AST cache). Diagnostic AST audits remain standalone.
-Published graph counts stay tree-sitter-only unless an overlay is explicitly
-enabled.
+(default off). Optional ``--clang-type-uses`` publishes aggregated ``uses_type``
+edges from the type-use audit’s matched_internal rows (default off). When any
+of the four Clang overlays are enabled they share one in-memory AST capture
+(one dump per compile entry; no disk AST cache). Diagnostic AST audits remain
+standalone. Published graph counts stay tree-sitter-only unless an overlay is
+explicitly enabled.
 
 Usage:
     uv run python scripts/index_c.py --package examples/jsmn --graph byog_jsmn
@@ -65,6 +66,15 @@ from c_clang_signatures import (  # type: ignore
 from c_clang_type_audit import (  # type: ignore
     ClangTypeAuditError,
     build_type_declaration_audit_from_capture,
+)
+from c_clang_type_use_audit import (  # type: ignore
+    ClangTypeUseAuditError,
+    build_type_use_audit_from_capture,
+)
+from c_clang_type_uses import (  # type: ignore
+    ClangTypeUseOverlayError,
+    append_clang_type_uses,
+    build_disabled_provenance as build_disabled_type_use_provenance,
 )
 from c_clang_types import (  # type: ignore
     ClangTypeOverlayError,
@@ -163,6 +173,17 @@ def main(
             "entities, uses_type edges, or alternate-site entities."
         ),
     ),
+    clang_type_uses: bool = typer.Option(
+        False,
+        "--clang-type-uses/--no-clang-type-uses",
+        help=(
+            "Publish aggregated uses_type relationships from the AST type-use "
+            "audit matched_internal rows only (one edge per owner/target "
+            "entity-id pair). Default is off. Fail-closed residuals "
+            "(owner_unmatched/target_unresolved/ambiguous_target/"
+            "macro_location_unsupported) abort. Does not create entities."
+        ),
+    ),
     allow_toolchain_drift: bool = typer.Option(
         False,
         "--allow-toolchain-drift",
@@ -239,19 +260,29 @@ def main(
         inc_prov = build_disabled_include_provenance()
 
     # Clang AST overlays: share one in-memory capture when any are enabled.
-    if clang_signatures or clang_calls or clang_types:
+    if clang_signatures or clang_calls or clang_types or clang_type_uses:
         try:
             ast_capture = capture_clang_ast_package(pkg_dir)
             sig_report = None
             call_report = None
             type_report = None
-            if clang_signatures:
+            type_use_report = None
+            # Build shared intermediate audits at most once each.
+            need_function = clang_signatures or clang_type_uses
+            need_type_decl = clang_types or clang_type_uses
+            if need_function:
                 sig_report = build_function_audit_from_capture(ast_capture)
             if clang_calls:
                 call_report = build_call_audit_from_capture(ast_capture)
-            if clang_types:
+            if need_type_decl:
                 type_report = build_type_declaration_audit_from_capture(
                     ast_capture
+                )
+            if clang_type_uses:
+                type_use_report = build_type_use_audit_from_capture(
+                    ast_capture,
+                    function_report=sig_report,
+                    type_report=type_report,
                 )
             if sig_report is not None and call_report is not None:
                 assert_function_and_call_reports_agree(
@@ -278,14 +309,23 @@ def main(
                 )
             else:
                 type_prov = build_disabled_type_provenance()
+            if clang_type_uses:
+                assert type_use_report is not None
+                type_use_prov = append_clang_type_uses(
+                    data, pkg_dir, report=type_use_report
+                )
+            else:
+                type_use_prov = build_disabled_type_use_provenance()
         except (
             ClangAstCaptureError,
             ClangAstAuditError,
             ClangCallAuditError,
             ClangTypeAuditError,
+            ClangTypeUseAuditError,
             ClangSignatureError,
             ClangCallOverlayError,
             ClangTypeOverlayError,
+            ClangTypeUseOverlayError,
         ) as e:
             typer.secho(str(e), fg=typer.colors.RED, err=True)
             raise typer.Exit(2) from e
@@ -293,6 +333,7 @@ def main(
         sig_prov = build_disabled_signature_provenance()
         call_prov = build_disabled_call_provenance()
         type_prov = build_disabled_type_provenance()
+        type_use_prov = build_disabled_type_use_provenance()
 
     ents_df = pd.DataFrame(data["entities"])
     rels_df = pd.DataFrame(data["relationships"])
@@ -370,6 +411,20 @@ def main(
         )
     else:
         print("  Clang types: off (default tree-sitter-c graph)")
+    if type_use_prov.get("enabled"):
+        counts = type_use_prov.get("counts") or {}
+        print(
+            f"  Clang type-uses: edges={type_use_prov.get('n_facts')} "
+            f"observations={type_use_prov.get('n_observations')} "
+            f"matched={counts.get('matched_internal')} "
+            f"external={counts.get('external_or_system')} "
+            f"unsupported={counts.get('unsupported_type_form')} "
+            f"unowned={counts.get('unowned_context')} "
+            f"digest={type_use_prov.get('compile_commands_digest')} "
+            f"compiler={type_use_prov.get('compiler_id')}"
+        )
+    else:
+        print("  Clang type-uses: off (default tree-sitter-c graph)")
     extra = {
         "preprocessor_liveness": summary.get("liveness_provenance"),
         "compiler_dependencies": dep_prov,
@@ -377,6 +432,7 @@ def main(
         "clang_signatures": sig_prov,
         "clang_calls": call_prov,
         "clang_types": type_prov,
+        "clang_type_uses": type_use_prov,
     }
     snap_dir = publish_byog_snapshot(
         ents_df, rels_df, tus_df, graph_dir, SETTINGS,

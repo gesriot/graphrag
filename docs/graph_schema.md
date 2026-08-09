@@ -180,19 +180,20 @@ sites are never published as separate entities.
 
 #### Shared in-memory AST capture (execution only)
 
-When any of `--clang-signatures` / `--clang-calls` / `--clang-types` are
-enabled, `index_c` creates one in-process AST capture
+When any of `--clang-signatures` / `--clang-calls` / `--clang-types` /
+`--clang-type-uses` are enabled, `index_c` creates one in-process AST capture
 (`scripts/c_clang_ast_capture.py`): load `compile_commands.json` once,
 fail-closed validate arguments/compiler identity, and run one Clang
-`-ast-dump=json` per compile entry. Function, call, and type audit builders
-consume that capture without re-invoking the compiler. Any non-empty flag
-combination still costs **N** dumps for **N** entries (never 2N or 3N). There
+`-ast-dump=json` per compile entry. Function, call, type-declaration, and
+type-use builders consume that capture without re-invoking the compiler (shared
+intermediate audits are reused when multiple overlays need them). Any non-empty
+flag combination still costs **N** dumps for **N** entries (never 2N–4N). There
 is **no** disk AST cache and AST roots never appear in manifests, parquet, or
 logs. Standalone `c_clang_ast_audit.py` / `c_clang_call_audit.py` /
-`c_clang_type_audit.py` CLIs remain available and each still capture once for
-their own run. Confidence boundaries and independent `clang_signatures` /
-`clang_calls` / `clang_types` manifest blocks are unchanged (no combined
-capture block).
+`c_clang_type_audit.py` / `c_clang_type_use_audit.py` CLIs remain available and
+each still capture once for their own run. Confidence boundaries and
+independent `clang_signatures` / `clang_calls` / `clang_types` /
+`clang_type_uses` manifest blocks are unchanged (no combined capture block).
 
 #### C symbol identity (tree-sitter extractor)
 
@@ -248,10 +249,10 @@ never collapsed just because their names and coordinates happen to agree.
 
 The standalone CLI does not mutate BYOG. Publishing selected matched type
 fields into the graph requires the separate explicit `--clang-types` flag
-(see above). There is still **no** `uses_type` relationship type and no
-default-on graph change.
+(see above). Default-off graphs still have no `uses_type` edges until
+`--clang-type-uses` is enabled.
 
-#### Type-use audit (diagnostic only — no graph overlay yet)
+#### Type-use audit (standalone diagnostic CLI)
 
 `scripts/c_clang_type_use_audit.py` inventories Clang-observed type uses on
 declaration-bearing AST nodes (function returns, parameters, locals, fields,
@@ -261,7 +262,7 @@ globals, typedef underlying types). It reuses
 
 | Property | Value |
 | --- | --- |
-| Graph mutation | **None** — no `uses_type` edges, no entity fields, no `index_c` flag, no manifest block |
+| Standalone CLI | Diagnostic only (no graph mutation by itself) |
 | Location honesty | `location_precision=declaration_bearing_node` (loc / range.begin of the declaring node). **Not** claimed as an exact type-token span |
 | Matched when | owner uniquely maps (when an owner context exists) and target uniquely maps to a package-local matched struct/enum/typedef |
 | Target resolvers | `type_alias_decl_id` (scoped to one compile entry), `exact_tag_spelling`, `unique_typedef_spelling`; C's bare typedef namespace stays distinct from explicit `struct T` / `enum T` tags |
@@ -269,16 +270,33 @@ globals, typedef underlying types). It reuses
 | Fail-closed residuals | `owner_unmatched`, `target_unresolved`, `ambiguous_target`, `macro_location_unsupported` |
 | Observation-only | `external_or_system`, `unsupported_type_form`, `unowned_context` |
 
-This is configuration-derived type-use *evidence* only — not a type graph,
-layout/ABI proof, multi-config result, or points-to analysis.
+#### Configured type-use edges (`uses_type`)
+
+When `scripts/index_c.py --clang-type-uses` is enabled (default **off**),
+`matched_internal` rows are aggregated into `uses_type` relationships:
+
+| Property | Value |
+| --- | --- |
+| Graph shape | New `uses_type` edges only; **no** new entities; recursive self-edges allowed |
+| Aggregation | One edge per unique **source entity id + target entity id** |
+| Observation vs edge | Diagnostic observation count ≥ edge count (multiple use kinds/sites merge) |
+| `fact_kind` | `configured_type_use` |
+| `extractor` | `clang-ast-json` |
+| Confidence | `1.0` / deterministic only relative to recorded Clang + compile DB |
+| Evidence | Sorted use kinds, observation count, canonical observations JSON, entry indices, compiler list/digest |
+| Fail-closed | Same residual buckets as the type-use audit; missing/non-unique endpoints abort before mutation |
+| Manifest | Independent `clang_type_uses` block (`mode=off` or `configured_clang_type_uses`) |
+
+This is configuration-derived type-use *evidence* — not layout/ABI proof,
+multi-config coverage, or points-to analysis.
 
 **Shared out of scope:** multi-config coverage, MSVC/wrappers/response files
 (fail closed), system/outside endpoints after filtering, production C/C++
 completeness. Snapshot manifests record separate `compiler_dependencies`,
-`compiler_includes`, `clang_signatures`, `clang_calls`, and `clang_types`
-blocks with their applicable mode, compiler identity/identities, digest,
-fact/TU counts, and residual counts; all carry an explicit `mode=off` block
-when disabled. Module/cache/plugin/PCH, response/config, and unrestricted
+`compiler_includes`, `clang_signatures`, `clang_calls`, `clang_types`, and
+`clang_type_uses` blocks with their applicable mode, compiler
+identity/identities, digest, fact/observation/TU counts, and residual counts;
+all carry an explicit `mode=off` block when disabled. Module/cache/plugin/PCH, response/config, and unrestricted
 `-Xclang` compile arguments fail closed for all compiler-backed adapters
 until their effects can be audited without changing configured semantics.
 
