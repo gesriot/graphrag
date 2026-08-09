@@ -188,6 +188,14 @@ identifiers, parameter type tags, and underlying type names are never treated
 as aliases. Multiple top-level declarators in one typedef
 (`typedef int a, *b, (*c)(void);`) each produce an alias.
 
+**Multi-site type-audit matching (diagnostic only):** the graph still emits one
+canonical entity per semantic key (first walk-order site). The Clang type
+declaration audit collects every owned tree-sitter declaration site and matches
+configured Clang only by exact
+`entity_kind + path + name + line + col0`. A non-canonical exact site may match
+without changing the graph span; unselected owned sites appear under
+`alternate_declaration_sites` and do not fail `--fail-on-mismatch`.
+
 #### Type-declaration audit (diagnostic only — no graph overlay yet)
 
 `scripts/c_clang_type_audit.py` compares configured Clang type declarations

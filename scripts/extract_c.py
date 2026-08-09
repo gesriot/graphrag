@@ -42,6 +42,7 @@ from c_identities import (  # type: ignore
     file_entity_title,
     list_indexed_c_files,
     module_name_is_cross_kind_collision,
+    package_relative_posix,
 )
 
 _LANG = Language(tsc.language())
@@ -319,6 +320,118 @@ class _SymbolCandidate:
     node: Node
 
 
+@dataclass(frozen=True)
+class TypeDeclarationSite:
+    """Immutable tree-sitter type declaration site (no Node references).
+
+    One semantic graph entity may own multiple sites (e.g. mutually exclusive
+    ``#if`` / ``#else`` typedefs of the same name). ``is_canonical`` marks the
+    first walk-order site used as the published graph entity span.
+    """
+
+    module_key: str
+    entity_kind: str  # struct | enum | typedef
+    name: str
+    title: str
+    source_path: str  # package-relative POSIX
+    line: int
+    col0: int
+    span: str
+    is_canonical: bool
+
+
+def _indexed_c_files(package_dir: Path) -> List[Path]:
+    """Stable package file order shared by graph extract and type-site audit."""
+    package_dir = Path(package_dir).resolve()
+    return sorted(
+        list_indexed_c_files(package_dir),
+        key=lambda path: path.relative_to(package_dir).parts,
+    )
+
+
+def collect_type_declaration_sites(package_dir: Path) -> List[TypeDeclarationSite]:
+    """Collect every tree-sitter type declaration site (no graph mutation).
+
+    Reuses :func:`_discover_symbol_candidates` and the shared title map. One
+    parse per source file. Coordinates/spans are snapshotted while each tree is
+    live; returned records hold no tree-sitter Node objects.
+    """
+    package_dir = Path(package_dir).resolve()
+    files = _indexed_c_files(package_dir)
+    module_keys = build_module_key_map(package_dir, files)
+    parser = _parser()
+
+    # Snapshot plain fields while each tree is still alive.
+    raw_sites: List[Tuple[str, str, str, str, int, int, str]] = []
+    # (module_key, entity_kind, name, source_path, line, col0, span)
+    all_symbol_keys: Set[Tuple[str, str, str]] = set()
+    for path in files:
+        src = path.read_bytes()
+        tree = parser.parse(src)
+        module_key = module_keys[path]
+        source_path = package_relative_posix(path, package_dir)
+        candidates = _discover_symbol_candidates(
+            tree.root_node, module_key=module_key
+        )
+        for cand in candidates:
+            # The graph qualifies cross-kind collisions using every symbol
+            # kind, including functions. Site titles must use the same full
+            # candidate universe or they can diverge from their graph entity.
+            all_symbol_keys.add(
+                (cand.module_key, cand.entity_kind, cand.name)
+            )
+            if cand.entity_kind not in {"struct", "enum", "typedef"}:
+                continue
+            raw_sites.append(
+                (
+                    cand.module_key,
+                    cand.entity_kind,
+                    cand.name,
+                    source_path,
+                    cand.node.start_point[0] + 1,
+                    cand.node.start_point[1],
+                    _span(cand.node),
+                )
+            )
+
+    title_map = build_symbol_title_map(sorted(all_symbol_keys))
+    seen_keys: Set[Tuple[str, str, str]] = set()
+    sites: List[TypeDeclarationSite] = []
+
+    for module_key, entity_kind, name, source_path, line, col0, span in raw_sites:
+        key = (module_key, entity_kind, name)
+        title = title_map[key]
+        is_canonical = key not in seen_keys
+        if is_canonical:
+            seen_keys.add(key)
+        sites.append(
+            TypeDeclarationSite(
+                module_key=module_key,
+                entity_kind=entity_kind,
+                name=name,
+                title=title,
+                source_path=source_path,
+                line=line,
+                col0=col0,
+                span=span,
+                is_canonical=is_canonical,
+            )
+        )
+    sites.sort(
+        key=lambda s: (
+            s.entity_kind,
+            s.source_path,
+            s.name,
+            s.line,
+            s.col0,
+            s.title,
+            s.span,
+            not s.is_canonical,
+        )
+    )
+    return sites
+
+
 def _discover_symbol_candidates(
     root: Node,
     *,
@@ -380,15 +493,9 @@ def _discover_symbol_candidates(
 
 def build_c_byog(package_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
     package_dir = Path(package_dir).resolve()
-    # Do not rely on the discovery helper's current ordering contract here:
-    # emission order affects human-readable IDs and same-kind representative
-    # selection, so make that order explicit at the extraction boundary.
-    files = sorted(
-        list_indexed_c_files(package_dir),
-        # Path's historical ordering is component-wise, which intentionally
-        # puts ``tests/parse/runner.c`` before the sibling ``tests.c``.
-        key=lambda path: path.relative_to(package_dir).parts,
-    )
+    # Emission order affects human-readable IDs and same-kind representative
+    # selection; keep it explicit and shared with type-site audit collection.
+    files = _indexed_c_files(package_dir)
     module_keys = build_module_key_map(package_dir, files)
     parser = _parser()
     parsed: List[Tuple[Path, bytes, Any, str, List[_SymbolCandidate]]] = []

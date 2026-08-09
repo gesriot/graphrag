@@ -393,6 +393,13 @@ def test_struct_function_worker_call_resolves_to_function(tmp_path: Path):
         and edge.target_title == "worker:function:Worker"
         for edge in audited_calls
     )
+    type_sites = extract_c_module.collect_type_declaration_sites(pkg)
+    worker_struct = next(
+        site
+        for site in type_sites
+        if site.entity_kind == "struct" and site.name == "Worker"
+    )
+    assert worker_struct.title == "worker:struct:Worker"
 
 
 def test_same_name_different_module_keys_separated(tmp_path: Path):
@@ -496,6 +503,9 @@ def test_kind_identity_determinism_hashseed_and_file_order(
     (pkg / "tests.c").write_text("int tests(void){return 0;}\n", encoding="utf-8")
     d1 = build_c_byog(pkg)
     d2 = build_c_byog(pkg)
+    sites1 = extract_c_module.collect_type_declaration_sites(pkg)
+    sites2 = extract_c_module.collect_type_declaration_sites(pkg)
+    assert sites1 == sites2
     assert [
         e["title"] for e in d1["entities"] if e["type"] == "file"
     ] == ["a:a.c", "runner:runner.c", "tests:tests.c", "z:z.c"]
@@ -511,6 +521,7 @@ def test_kind_identity_determinism_hashseed_and_file_order(
     )
     reverse_discovery = build_c_byog(pkg)
     assert reverse_discovery == d1
+    assert extract_c_module.collect_type_declaration_sites(pkg) == sites1
 
     script = (
         "import json,sys\n"
@@ -675,6 +686,9 @@ def test_conditional_duplicate_typedef_deterministic(
     (pkg / "h.c").write_text('#include "h.h"\nint f(void){return 0;}\n', encoding="utf-8")
     d1 = build_c_byog(pkg)
     d2 = build_c_byog(pkg)
+    sites1 = extract_c_module.collect_type_declaration_sites(pkg)
+    sites2 = extract_c_module.collect_type_declaration_sites(pkg)
+    assert sites1 == sites2
     handlers = [
         e for e in d1["entities"] if e.get("symbol_name") == "handler" and e["type"] == "typedef"
     ]
@@ -690,17 +704,21 @@ def test_conditional_duplicate_typedef_deterministic(
         lambda _package_dir: list(reversed(discovered)),
     )
     assert build_c_byog(pkg) == d1
+    assert extract_c_module.collect_type_declaration_sites(pkg) == sites1
 
     script = (
         "import json,sys\n"
         f"sys.path.insert(0, {str(ROOT / 'scripts')!r})\n"
         "from pathlib import Path\n"
-        "from extract_c import build_c_byog\n"
+        "from extract_c import build_c_byog,collect_type_declaration_sites\n"
         f"d=build_c_byog(Path({str(pkg)!r}))\n"
-        "print(json.dumps(["
-        "(e['id'],e['span']) for e in d['entities'] "
-        "if e.get('symbol_name')=='handler'"
-        "]))\n"
+        f"s=collect_type_declaration_sites(Path({str(pkg)!r}))\n"
+        "print(json.dumps({"
+        "'entities':[(e['id'],e['span']) for e in d['entities'] "
+        "if e.get('symbol_name')=='handler'],"
+        "'sites':[(x.title,x.line,x.col0,x.span,x.is_canonical) for x in s "
+        "if x.name=='handler']"
+        "},sort_keys=True))\n"
     )
     env = dict(os.environ)
     outputs = []
@@ -720,7 +738,14 @@ def test_conditional_duplicate_typedef_deterministic(
 
 @pytest.mark.skipif(_cc() is None, reason="no C compiler")
 def test_live_inih_typedef_and_type_audit_buckets():
-    from c_clang_type_audit import run_clang_type_audit, main as type_main  # type: ignore
+    from c_clang_type_audit import (  # type: ignore
+        audit_to_json,
+        build_type_declaration_audit_from_capture,
+        run_clang_type_audit,
+        main as type_main,
+    )
+    from c_clang_ast_capture import capture_clang_ast_package  # type: ignore
+    from extract_c import collect_type_declaration_sites  # type: ignore
 
     pkg = ROOT / "examples" / "inih"
     data = build_c_byog(pkg)
@@ -730,6 +755,7 @@ def test_live_inih_typedef_and_type_audit_buckets():
     calls = [r for r in data["relationships"] if r["type"] == "calls"]
     assert len(calls) == 38
     assert len({r["id"] for r in calls}) == 38
+    assert len(data["call_observations"]) == 35
     tds = {
         e["symbol_name"]: e
         for e in data["entities"]
@@ -740,30 +766,141 @@ def test_live_inih_typedef_and_type_audit_buckets():
         "ini_handler",
         "ini_reader",
     }
-    # First #if branch of ini_handler is the deterministic representative.
+    # Graph keeps the deterministic first walk-order representative at line 58.
     assert tds["ini_handler"]["span"].startswith("58:")
     assert tds["ini_reader"]["span"].startswith("67:")
 
+    sites = collect_type_declaration_sites(pkg)
+    handler_sites = [s for s in sites if s.name == "ini_handler"]
+    assert {(s.line, s.is_canonical) for s in handler_sites} == {
+        (58, True),
+        (62, False),
+    }
+
     report = run_clang_type_audit(pkg)
     c = report["counts"]
-    assert c["matched"] == 2
+    assert c["matched"] == 3
     assert {m["name"] for m in report["matched"]} == {
         "ini_parse_string_ctx",
+        "ini_handler",
         "ini_reader",
     }
+    handler = next(m for m in report["matched"] if m["name"] == "ini_handler")
+    assert handler["graph_canonical_line"] == 58
+    assert handler["matched_site_line"] == 62
+    assert handler["graph_canonical_is_matched_site"] is False
     assert c["clang_only"] == 0
     assert c["tree_sitter_only"] == 0
-    # Conditional ini_handler: tree-sitter keeps #if span (line 58); configured
-    # Clang sees the #else declaration (line 62) → exact line/col residual.
-    assert c["ambiguous"] == 1
-    amb = report["ambiguous"][0]
-    assert amb["name"] == "ini_handler"
-    assert "line/column" in amb["reason"]
-    assert amb["tree_sitter_candidates"][0]["line"] == 58
-    assert amb["line"] == 62
+    assert c["ambiguous"] == 0
+    assert c["macro_location_unsupported"] == 0
     assert c["anonymous_declarations"] == 1
     assert c["outside_package_declarations"] == 109
-    assert type_main(["--package", str(pkg), "--fail-on-mismatch"]) == 1
+    assert c["alternate_declaration_sites"] == 1
+    alt = report["alternate_declaration_sites"][0]
+    assert alt["name"] == "ini_handler" and alt["line"] == 58
+    assert type_main(["--package", str(pkg), "--fail-on-mismatch"]) == 0
+    cap = capture_clang_ast_package(pkg)
+    assert audit_to_json(report) == audit_to_json(
+        build_type_declaration_audit_from_capture(cap)
+    )
+
+
+def test_multi_site_exact_match_and_no_coordinate_fallback():
+    from c_clang_type_audit import (  # type: ignore
+        ClangTypeDeclaration,
+        TreeSitterTypeEntity,
+        match_type_declarations,
+    )
+
+    sites = [
+        TreeSitterTypeEntity(
+            title="pkg:handler",
+            entity_kind="typedef",
+            name="handler",
+            source_path="h.h",
+            line=10,
+            col0=0,
+            span="10:0-11:1",
+            is_canonical=True,
+        ),
+        TreeSitterTypeEntity(
+            title="pkg:handler",
+            entity_kind="typedef",
+            name="handler",
+            source_path="h.h",
+            line=20,
+            col0=0,
+            span="20:0-21:1",
+            is_canonical=False,
+        ),
+    ]
+    digest = "d" * 64
+    clang_exact = [
+        ClangTypeDeclaration(
+            entity_kind="typedef",
+            name="handler",
+            source_path="h.h",
+            line=20,
+            col0=0,
+            clang_col1=1,
+            location_origin="direct",
+            is_package_local=True,
+            entry_indices=[0],
+            compiler_path="/usr/bin/clang",
+            compiler_id="clang",
+            compile_commands_digest=digest,
+            observation_variants=[
+                {
+                    "entry_indices": [0],
+                    "compiler_path": "/usr/bin/clang",
+                    "compiler_id": "clang",
+                    "compile_commands_digest": digest,
+                }
+            ],
+        )
+    ]
+    result = match_type_declarations(
+        clang_decls=clang_exact,
+        tree_sitter=sites,
+        in_scope_paths={"h.h"},
+    )
+    assert result["counts"]["matched"] == 1
+    row = result["buckets"]["matched"][0]
+    assert row["graph_canonical_line"] == 10
+    assert row["matched_site_line"] == 20
+    assert result["counts"]["alternate_declaration_sites"] == 1
+
+    clang_wrong = [
+        ClangTypeDeclaration(
+            entity_kind="typedef",
+            name="handler",
+            source_path="h.h",
+            line=99,
+            col0=0,
+            clang_col1=1,
+            location_origin="direct",
+            is_package_local=True,
+            entry_indices=[0],
+            compiler_path="/usr/bin/clang",
+            compiler_id="clang",
+            compile_commands_digest=digest,
+            observation_variants=[
+                {
+                    "entry_indices": [0],
+                    "compiler_path": "/usr/bin/clang",
+                    "compiler_id": "clang",
+                    "compile_commands_digest": digest,
+                }
+            ],
+        )
+    ]
+    bad = match_type_declarations(
+        clang_decls=clang_wrong,
+        tree_sitter=sites,
+        in_scope_paths={"h.h"},
+    )
+    assert bad["counts"]["matched"] == 0
+    assert bad["counts"]["ambiguous"] == 1
 
 
 @pytest.mark.skipif(_cc() is None, reason="no C compiler")

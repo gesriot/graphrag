@@ -534,7 +534,7 @@ def test_duplicate_graph_candidates_ambiguous():
     )
     assert r["counts"]["ambiguous"] == 1
     assert r["counts"]["matched"] == 0
-    assert "multiple tree-sitter" in r["buckets"]["ambiguous"][0]["reason"]
+    assert "multiple semantic" in r["buckets"]["ambiguous"][0]["reason"]
 
 
 # ---------------------------------------------------------------------------
@@ -707,25 +707,36 @@ def test_live_inih_type_audit_counts(tmp_path: Path):
     assert not any(pkg.rglob("*.d"))
     assert not any(pkg.rglob("*.i"))
     c = report["counts"]
-    # Function-pointer typedefs are now extracted via declarator walk.
-    # ini_reader matches exactly; ini_handler is configuration-ambiguous
-    # (#if/#else declaration sites at different spans).
-    assert c["matched"] == 2
+    # Multi-site exact matching: configured Clang line 62 matches the real
+    # tree-sitter #else site; graph canonical span stays line 58.
+    assert c["matched"] == 3
     assert {m["name"] for m in report["matched"]} == {
         "ini_parse_string_ctx",
+        "ini_handler",
         "ini_reader",
     }
+    handler = next(m for m in report["matched"] if m["name"] == "ini_handler")
+    assert handler["graph_canonical_line"] == 58
+    assert handler["matched_site_line"] == 62
+    assert handler["graph_canonical_is_matched_site"] is False
+    assert handler["matched_site_is_canonical"] is False
+    assert handler["line_column_confirmed"] is True
     assert c["tree_sitter_only"] == 0
     assert c["out_of_compile_db_scope"] == 0
     assert c["clang_only"] == 0
-    assert c["ambiguous"] == 1
-    assert report["ambiguous"][0]["name"] == "ini_handler"
+    assert c["ambiguous"] == 0
     assert c["macro_location_unsupported"] == 0
     assert c["anonymous_declarations"] == 1
     assert c["unsupported_declarations"] == 0
     assert c["outside_package_declarations"] == 109
+    assert c["alternate_declaration_sites"] == 1
+    alt = report["alternate_declaration_sites"][0]
+    assert alt["name"] == "ini_handler"
+    assert alt["line"] == 58
+    assert alt["is_canonical"] is True
+    assert alt["matched_site_line"] == 62
     assert c["matched"] == len(report["matched"])
-    # Strict CLI mode fails on the configuration-ambiguous ini_handler residual.
+    # Alternate sites do not fail strict CLI mode.
     assert type_audit_main(
         [
             "--package",
@@ -734,7 +745,7 @@ def test_live_inih_type_audit_counts(tmp_path: Path):
             str(tmp_path / "inih-types.json"),
             "--fail-on-mismatch",
         ]
-    ) == 1
+    ) == 0
 
 
 @pytest.mark.skipif(_cc() is None, reason="no C compiler on PATH")

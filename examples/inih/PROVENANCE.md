@@ -80,14 +80,15 @@ The published graph now also contains the co-located golden runner
 - Entity mix (source-derived): 15 functions (10 library + 5 runner), 3 files,
   3 typedefs (`ini_parse_string_ctx`, `ini_handler`, `ini_reader`).
 - Relationship mix: 38 `calls`, 18 `contains`.
-- **Type-declaration audit (measured):** matched=2
-  (`ini_parse_string_ctx`, `ini_reader`); `ambiguous=1` for `ini_handler`
-  because `ini.h` has two mutually exclusive declarations under
-  `#if INI_HANDLER_LINENO` / `#else` at different spans (tree-sitter keeps the
-  first walk-order site at line 58; the configured Clang compile sees the
-  `#else` site at line 62). Closing this residual needs configuration-aware
-  representative selection — out of scope for the typedef-declarator slice.
-  `--fail-on-mismatch` exits 1 while that residual remains.
+- **Type-declaration audit (measured, multi-site exact matching):** matched=3
+  (`ini_parse_string_ctx`, `ini_handler`, `ini_reader`);
+  `ambiguous=0`, `clang_only=0`, `tree_sitter_only=0`,
+  `alternate_declaration_sites=1`. The graph still publishes one canonical
+  `ini_handler` entity at the first walk-order span (line 58). The diagnostic
+  audit also owns the `#else` declaration site (line 62) and matches
+  configured Clang (line 62) against that exact site without rewriting the
+  graph. The unselected canonical site is reported as an alternate site
+  (not proven dead/inactive). `--fail-on-mismatch` exits 0.
 - `audit_call_edges`: 38 calls, structural pass rate 1.0, 0 anomalies,
   0 dangling targets, 0 semantic suspicions.
 - The **library** subgraph (ini.c/ini.h) is 15 entities and 17 deterministic

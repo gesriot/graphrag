@@ -151,6 +151,10 @@ bare C name, every colliding kind uses the qualified title
 `cJSON:typedef:cJSON`). Non-colliding symbols keep the legacy
 `module_key:name`. Typedef aliases nested in declarators (including
 function-pointer typedefs such as `typedef int (*handler)(...)`) are extracted
-by walking only declarator structure — not by scanning parameter lists. This is
-a deterministic extractor correction — not a Clang overlay and not a
-`uses_type` graph.
+by walking only declarator structure — not by scanning parameter lists. The
+diagnostic type audit may match any exact tree-sitter declaration site owned by
+a semantic graph entity (the graph still keeps one canonical source-derived
+span). Alternate unselected sites are reported without failing
+`--fail-on-mismatch` and are not claimed dead/inactive. This is single-config
+declaration evidence — not a multi-config type graph and not a `uses_type`
+overlay.

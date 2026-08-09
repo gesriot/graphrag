@@ -31,7 +31,10 @@ from c_clang_ast_audit import (  # type: ignore
 )
 from c_compiler_common import path_is_under  # type: ignore
 from c_identities import package_relative_posix  # type: ignore
-from extract_c import build_c_byog  # type: ignore
+from extract_c import (  # type: ignore
+    TypeDeclarationSite,
+    collect_type_declaration_sites,
+)
 
 MODE = "clang_ast_json_type_declaration_audit"
 CONFIDENCE_BOUNDARY = (
@@ -39,9 +42,12 @@ CONFIDENCE_BOUNDARY = (
     "from the recorded Clang + compile_commands.json only. This is not a type "
     "graph, not type-use / uses_type proof, not layout or ABI verification, "
     "not macro-complete fidelity, not multi-config coverage, and not C++. "
-    "Anonymous, union, incomplete, unsupported, and outside-package "
-    "observations remain explicit residuals. No type facts are published into "
-    "BYOG."
+    "The graph keeps one canonical source-derived representative per semantic "
+    "entity; the audit may match any exact tree-sitter declaration site owned "
+    "by that entity. Alternate sites are declaration-site observations only "
+    "(not proven dead/inactive). Anonymous, union, incomplete, unsupported, "
+    "and outside-package observations remain explicit residuals. No type facts "
+    "are published into BYOG."
 )
 
 _SPAN_RE = re.compile(
@@ -62,6 +68,7 @@ _OBSERVATION_ONLY_BUCKETS = (
     "anonymous_declarations",
     "unsupported_declarations",
     "outside_package_declarations",
+    "alternate_declaration_sites",
 )
 
 _ALL_BUCKETS = (
@@ -74,6 +81,7 @@ _ALL_BUCKETS = (
     "anonymous_declarations",
     "unsupported_declarations",
     "outside_package_declarations",
+    "alternate_declaration_sites",
 )
 
 EntityKind = str  # "struct" | "enum" | "typedef"
@@ -159,19 +167,26 @@ class ClangTypeDeclaration:
 
 @dataclass(frozen=True)
 class TreeSitterTypeEntity:
+    """One tree-sitter type declaration site owned by a semantic graph entity.
+
+    Multiple sites may share the same ``title`` / semantic key when the
+    extractor saw several declaration sites (e.g. ``#if`` / ``#else``).
+    ``is_canonical`` marks the graph's published representative span.
+    """
+
     title: str
     entity_kind: EntityKind
     name: str
     source_path: str
-    line: Optional[int]
-    col0: Optional[int]
-    preprocessor_dependent: bool
-    preprocessor_reasons: Tuple[str, ...]
-    preprocessor_branches: Tuple[Any, ...]
+    line: int
+    col0: int
+    span: str = ""
+    is_canonical: bool = True
+    preprocessor_dependent: bool = False
+    preprocessor_reasons: Tuple[str, ...] = ()
+    preprocessor_branches: Tuple[Any, ...] = ()
 
-    def identity(self) -> Optional[Tuple[str, str, str, int, int]]:
-        if self.line is None or self.col0 is None:
-            return None
+    def identity(self) -> Tuple[str, str, str, int, int]:
         return (
             self.entity_kind,
             self.source_path,
@@ -179,6 +194,9 @@ class TreeSitterTypeEntity:
             int(self.line),
             int(self.col0),
         )
+
+    def semantic_key(self) -> Tuple[str, str, str]:
+        return (self.entity_kind, self.source_path, self.name)
 
 
 # ---------------------------------------------------------------------------
@@ -666,66 +684,35 @@ def collect_type_declarations_from_ast(
 
 
 def collect_tree_sitter_types(package_dir: Path) -> List[TreeSitterTypeEntity]:
+    """All tree-sitter type declaration sites (multi-site per semantic entity).
+
+    One parse per source file via :func:`collect_type_declaration_sites`.
+    Does not call ``build_c_byog`` (avoids a second package parse).
+    """
     package_dir = package_dir.resolve()
-    data = build_c_byog(package_dir)
+    try:
+        sites: Sequence[TypeDeclarationSite] = collect_type_declaration_sites(
+            package_dir
+        )
+    except (OSError, ValueError) as err:
+        raise ClangTypeAuditError(
+            f"failed to collect tree-sitter type declaration sites: {err}"
+        ) from err
+
     out: List[TreeSitterTypeEntity] = []
-    for e in data.get("entities") or []:
-        etype = str(e.get("type") or "")
-        if etype not in {"struct", "enum", "typedef"}:
-            continue
-        title = str(e.get("title") or "")
-        # Prefer authoritative symbol_name; never re-parse qualified titles alone.
-        raw_name = e.get("symbol_name")
-        if isinstance(raw_name, str) and raw_name.strip():
-            name = raw_name.strip()
-        else:
-            name = title.rsplit(":", 1)[-1] if title else ""
-        sf = str(e.get("source_file") or "")
-        try:
-            p = Path(sf)
-            if not p.is_absolute():
-                p = (package_dir / p).resolve()
-            else:
-                p = p.resolve()
-            rel = package_relative_posix(p, package_dir)
-        except (OSError, ValueError) as err:
-            raise ClangTypeAuditError(
-                "tree-sitter type entity has a source path outside the audited "
-                f"package: {sf!r}"
-            ) from err
-        line, col0 = _parse_span_start(str(e.get("span") or ""))
-        reasons = e.get("preprocessor_reasons") or []
-        if not isinstance(reasons, list):
-            reasons = [reasons]
-        branches = e.get("preprocessor_branches") or []
-        if not isinstance(branches, list):
-            branches = []
+    for site in sites:
         out.append(
             TreeSitterTypeEntity(
-                title=title,
-                entity_kind=etype,
-                name=name,
-                source_path=rel,
-                line=line,
-                col0=col0,
-                preprocessor_dependent=bool(e.get("preprocessor_dependent")),
-                preprocessor_reasons=tuple(str(r) for r in reasons),
-                preprocessor_branches=tuple(
-                    json.dumps(b, sort_keys=True) if isinstance(b, dict) else str(b)
-                    for b in branches
-                ),
+                title=site.title,
+                entity_kind=site.entity_kind,
+                name=site.name,
+                source_path=site.source_path,
+                line=site.line,
+                col0=site.col0,
+                span=site.span,
+                is_canonical=site.is_canonical,
             )
         )
-    out.sort(
-        key=lambda t: (
-            t.entity_kind,
-            t.source_path,
-            t.name,
-            t.line or 0,
-            t.col0 or 0,
-            t.title,
-        )
-    )
     return out
 
 
@@ -744,6 +731,19 @@ def _ts_config_evidence(ts: TreeSitterTypeEntity) -> Dict[str, Any]:
         "preprocessor_reasons": sorted(ts.preprocessor_reasons),
         "branch_dead_evidence": dead,
         "branch_unknown_evidence": unknown,
+    }
+
+
+def _site_record(ts: TreeSitterTypeEntity) -> Dict[str, Any]:
+    return {
+        "title": ts.title,
+        "entity_kind": ts.entity_kind,
+        "name": ts.name,
+        "source_path": ts.source_path,
+        "line": ts.line,
+        "col0": ts.col0,
+        "span": ts.span,
+        "is_canonical": ts.is_canonical,
     }
 
 
@@ -930,7 +930,12 @@ def match_type_declarations(
     tree_sitter: Sequence[TreeSitterTypeEntity],
     in_scope_paths: Set[str],
 ) -> Dict[str, Any]:
-    """Classify type declarations into the required audit buckets."""
+    """Classify type declarations into the required audit buckets.
+
+    Tree-sitter input is multi-site: several sites may share one semantic
+    graph title. Matching is exact site identity only; alternate sites of a
+    matched entity are reported as non-failing diagnostics.
+    """
     merged = merge_clang_type_declarations(clang_decls)
 
     matched: List[Dict[str, Any]] = []
@@ -942,19 +947,26 @@ def match_type_declarations(
     anonymous: List[Dict[str, Any]] = []
     unsupported: List[Dict[str, Any]] = []
     outside: List[Dict[str, Any]] = []
+    alternate_sites: List[Dict[str, Any]] = []
 
-    # Index tree-sitter by full identity and by (kind, path, name) for
-    # location-disagreement detection.
+    # Index sites by exact identity and by title (semantic graph entity).
     ts_by_id: Dict[Tuple[str, str, str, int, int], List[TreeSitterTypeEntity]] = {}
-    ts_by_kpn: Dict[Tuple[str, str, str], List[TreeSitterTypeEntity]] = {}
+    ts_by_title: Dict[str, List[TreeSitterTypeEntity]] = {}
     for t in tree_sitter:
-        kpn = (t.entity_kind, t.source_path, t.name)
-        ts_by_kpn.setdefault(kpn, []).append(t)
-        ident = t.identity()
-        if ident is not None:
-            ts_by_id.setdefault(ident, []).append(t)
+        ts_by_title.setdefault(t.title, []).append(t)
+        ts_by_id.setdefault(t.identity(), []).append(t)
 
-    claimed_ts: Set[int] = set()  # id(ts entity)
+    claimed_titles: Set[str] = set()
+
+    def _claim_title(title: str) -> None:
+        claimed_titles.add(title)
+
+    def _canonical_site(title: str) -> Optional[TreeSitterTypeEntity]:
+        sites = ts_by_title.get(title) or []
+        for site in sites:
+            if site.is_canonical:
+                return site
+        return sites[0] if sites else None
 
     for d in merged:
         hint = d.classification_hint
@@ -987,30 +999,22 @@ def match_type_declarations(
         if hint == "conflicting_compile_observations":
             ident = d.matchable_identity()
             exact = ts_by_id.get(ident) or [] if ident is not None else []
-            same_name = (
-                ts_by_kpn.get((ident[0], ident[1], ident[2])) or []
-                if ident is not None
-                else []
-            )
-            candidates = exact or same_name
-            for candidate in candidates:
-                claimed_ts.add(id(candidate))
+            titles = sorted({t.title for t in exact})
+            for title in titles:
+                _claim_title(title)
             ambiguous.append(
                 _decl_row(
                     d,
                     reason="compile entries produced conflicting Clang observations",
                     tree_sitter_candidates=[
-                        {
-                            "title": candidate.title,
-                            "line": candidate.line,
-                            "col0": candidate.col0,
-                        }
-                        for candidate in sorted(
-                            candidates,
+                        _site_record(t)
+                        for t in sorted(
+                            exact,
                             key=lambda item: (
-                                item.line or 0,
-                                item.col0 or 0,
+                                item.line,
+                                item.col0,
                                 item.title,
+                                item.span,
                             ),
                         )
                     ],
@@ -1021,7 +1025,6 @@ def match_type_declarations(
 
         ident = d.matchable_identity()
         if ident is None:
-            # Incomplete location → cannot match honestly.
             unsupported.append(
                 _decl_row(
                     d,
@@ -1031,94 +1034,186 @@ def match_type_declarations(
             )
             continue
 
-        # Exact identity candidates.
         exact = ts_by_id.get(ident) or []
-        kpn = (ident[0], ident[1], ident[2])
-        same_name = ts_by_kpn.get(kpn) or []
 
-        if len(exact) > 1:
-            ambiguous.append(
-                _decl_row(
-                    d,
-                    reason="multiple tree-sitter entities share exact type identity",
-                    tree_sitter_titles=sorted(t.title for t in exact),
-                    classification="ambiguous",
+        if not exact:
+            # No exact site. Do not fall back to coordinate-free matching.
+            # Collect same kind+path+name sites only for residual diagnostics.
+            same_name_sites = [
+                t
+                for t in tree_sitter
+                if t.entity_kind == ident[0]
+                and t.source_path == ident[1]
+                and t.name == ident[2]
+                and t.title not in claimed_titles
+            ]
+            if same_name_sites:
+                for t in same_name_sites:
+                    _claim_title(t.title)
+                ambiguous.append(
+                    _decl_row(
+                        d,
+                        reason=(
+                            "kind+path+name agree but exact line/column does not "
+                            "match any tree-sitter declaration site "
+                            "(wrong line/column cannot match)"
+                        ),
+                        tree_sitter_candidates=[
+                            _site_record(t)
+                            for t in sorted(
+                                same_name_sites,
+                                key=lambda x: (x.line, x.col0, x.title, x.span),
+                            )
+                        ],
+                        classification="ambiguous",
+                    )
                 )
-            )
-            for t in exact:
-                claimed_ts.add(id(t))
+            else:
+                clang_only.append(_decl_row(d, classification="clang_only"))
             continue
 
-        if len(exact) == 1:
-            ts = exact[0]
-            claimed_ts.add(id(ts))
-            provenance = _declaration_provenance(d)
-            matched.append(
-                {
-                    "entity_kind": d.entity_kind,
-                    "name": d.name,
-                    "source_path": d.source_path,
-                    "tree_sitter_title": ts.title,
-                    "tree_sitter_line": ts.line,
-                    "tree_sitter_col": ts.col0,
-                    "clang_line": d.line,
-                    "clang_col0": d.col0,
-                    "clang_col1": d.clang_col1,
-                    "line_column_confirmed": True,
-                    "tag_kind": d.tag_kind,
-                    "is_complete": d.is_complete,
-                    "qualType": d.qual_type,
-                    "desugaredQualType": d.desugared_qual_type,
-                    "fixedUnderlyingType": d.fixed_underlying_type,
-                    "location_origin": d.location_origin,
-                    **provenance,
-                }
-            )
-            continue
-
-        # No exact identity match. Same kind+path+name but wrong line/col?
-        unclaimed_same = [t for t in same_name if id(t) not in claimed_ts]
-        if unclaimed_same:
+        # Exact sites must all belong to one semantic title.
+        titles = {t.title for t in exact}
+        if len(titles) > 1:
+            for title in titles:
+                _claim_title(title)
             ambiguous.append(
                 _decl_row(
                     d,
                     reason=(
-                        "kind+path+name agree but exact line/column does not match "
-                        "any tree-sitter entity (wrong line/column cannot match)"
+                        "exact declaration site maps to multiple semantic "
+                        "tree-sitter entities"
                     ),
-                    tree_sitter_candidates=[
-                        {
-                            "title": t.title,
-                            "line": t.line,
-                            "col0": t.col0,
-                        }
-                        for t in sorted(
-                            unclaimed_same,
-                            key=lambda x: (x.line or 0, x.col0 or 0, x.title),
-                        )
-                    ],
+                    tree_sitter_titles=sorted(titles),
                     classification="ambiguous",
                 )
             )
-            for t in unclaimed_same:
-                claimed_ts.add(id(t))
             continue
 
-        clang_only.append(_decl_row(d, classification="clang_only"))
-
-    for t in tree_sitter:
-        if id(t) in claimed_ts:
+        if len(exact) > 1:
+            # Same title, same exact coordinates twice — fail closed.
+            for title in titles:
+                _claim_title(title)
+            ambiguous.append(
+                _decl_row(
+                    d,
+                    reason=(
+                        "multiple tree-sitter declaration sites share the exact "
+                        "type identity"
+                    ),
+                    tree_sitter_titles=sorted(titles),
+                    classification="ambiguous",
+                )
+            )
             continue
+
+        matched_site = exact[0]
+        title = matched_site.title
+        if title in claimed_titles:
+            # Another clang row already claimed this semantic entity.
+            ambiguous.append(
+                _decl_row(
+                    d,
+                    reason=(
+                        "two configured Clang declarations claim the same "
+                        "semantic tree-sitter entity"
+                    ),
+                    tree_sitter_title=title,
+                    classification="ambiguous",
+                )
+            )
+            continue
+
+        _claim_title(title)
+        all_sites = sorted(
+            ts_by_title.get(title) or [],
+            key=lambda s: (s.line, s.col0, s.span, not s.is_canonical),
+        )
+        canonical = _canonical_site(title) or matched_site
+        provenance = _declaration_provenance(d)
+        matched.append(
+            {
+                "entity_kind": d.entity_kind,
+                "name": d.name,
+                "source_path": d.source_path,
+                "tree_sitter_title": title,
+                # Canonical graph representative (unchanged by configuration).
+                "graph_canonical_span": canonical.span,
+                "graph_canonical_line": canonical.line,
+                "graph_canonical_col0": canonical.col0,
+                "graph_canonical_is_matched_site": (
+                    canonical.line == matched_site.line
+                    and canonical.col0 == matched_site.col0
+                    and canonical.span == matched_site.span
+                ),
+                # Exact configured match site (may differ from canonical).
+                "matched_site_span": matched_site.span,
+                "matched_site_line": matched_site.line,
+                "matched_site_col0": matched_site.col0,
+                "matched_site_is_canonical": matched_site.is_canonical,
+                # Back-compat fields: report the exact matched site coordinates.
+                "tree_sitter_line": matched_site.line,
+                "tree_sitter_col": matched_site.col0,
+                "clang_line": d.line,
+                "clang_col0": d.col0,
+                "clang_col1": d.clang_col1,
+                "line_column_confirmed": True,
+                "tag_kind": d.tag_kind,
+                "is_complete": d.is_complete,
+                "qualType": d.qual_type,
+                "desugaredQualType": d.desugared_qual_type,
+                "fixedUnderlyingType": d.fixed_underlying_type,
+                "location_origin": d.location_origin,
+                **provenance,
+            }
+        )
+        for site in all_sites:
+            if (
+                site.line == matched_site.line
+                and site.col0 == matched_site.col0
+                and site.span == matched_site.span
+            ):
+                continue
+            alternate_sites.append(
+                {
+                    "classification": "alternate_declaration_sites",
+                    "entity_kind": site.entity_kind,
+                    "name": site.name,
+                    "source_path": site.source_path,
+                    "tree_sitter_title": site.title,
+                    "line": site.line,
+                    "col0": site.col0,
+                    "span": site.span,
+                    "is_canonical": site.is_canonical,
+                    "matched_site_line": matched_site.line,
+                    "matched_site_col0": matched_site.col0,
+                    "matched_site_span": matched_site.span,
+                    "note": (
+                        "exact declaration site owned by a matched semantic "
+                        "entity but not selected by the current Clang "
+                        "configuration; not proven dead or inactive"
+                    ),
+                }
+            )
+
+    # Unmatched semantic entities (by title), entity-level residuals.
+    for title, sites in sorted(ts_by_title.items()):
+        if title in claimed_titles:
+            continue
+        # Prefer canonical site for residual location reporting.
+        canonical = next((s for s in sites if s.is_canonical), sites[0])
         base = {
-            "entity_kind": t.entity_kind,
-            "name": t.name,
-            "source_path": t.source_path,
-            "tree_sitter_title": t.title,
-            "line": t.line,
-            "col0": t.col0,
-            **_ts_config_evidence(t),
+            "entity_kind": canonical.entity_kind,
+            "name": canonical.name,
+            "source_path": canonical.source_path,
+            "tree_sitter_title": title,
+            "line": canonical.line,
+            "col0": canonical.col0,
+            "span": canonical.span,
+            "declaration_site_count": len(sites),
+            **_ts_config_evidence(canonical),
         }
-        if t.source_path not in in_scope_paths:
+        if canonical.source_path not in in_scope_paths:
             out_of_scope.append(
                 {**base, "classification": "out_of_compile_db_scope"}
             )
@@ -1138,12 +1233,14 @@ def match_type_declarations(
                 int(
                     r.get("line")
                     or r.get("clang_line")
+                    or r.get("matched_site_line")
                     or r.get("tree_sitter_line")
                     or 0
                 ),
                 int(
                     r.get("col0")
                     or r.get("clang_col0")
+                    or r.get("matched_site_col0")
                     or r.get("tree_sitter_col")
                     or 0
                 ),
@@ -1161,15 +1258,21 @@ def match_type_declarations(
         "anonymous_declarations": sort_recs(anonymous),
         "unsupported_declarations": sort_recs(unsupported),
         "outside_package_declarations": sort_recs(outside),
+        "alternate_declaration_sites": sort_recs(alternate_sites),
     }
     counts = {k: len(buckets[k]) for k in _ALL_BUCKETS}
     counts["clang_type_declarations_package_local"] = sum(
         1 for d in merged if d.is_package_local
     )
-    counts["tree_sitter_type_entities_total"] = len(tree_sitter)
+    # Semantic entities (unique titles), not raw site count.
+    semantic_titles = set(ts_by_title)
+    counts["tree_sitter_type_entities_total"] = len(semantic_titles)
     counts["tree_sitter_type_entities_in_scope"] = sum(
-        1 for t in tree_sitter if t.source_path in in_scope_paths
+        1
+        for title, sites in ts_by_title.items()
+        if any(s.source_path in in_scope_paths for s in sites)
     )
+    counts["tree_sitter_declaration_sites_total"] = len(tree_sitter)
     return {"buckets": buckets, "counts": counts}
 
 
@@ -1423,8 +1526,9 @@ def build_type_declaration_audit_from_capture(capture: Any) -> Dict[str, Any]:
             "observation_only_buckets": list(_OBSERVATION_ONLY_BUCKETS),
             "note": (
                 "out_of_compile_db_scope, anonymous_declarations, "
-                "unsupported_declarations, and outside_package_declarations "
-                "do not by themselves cause --fail-on-mismatch to exit 1"
+                "unsupported_declarations, outside_package_declarations, and "
+                "alternate_declaration_sites do not by themselves cause "
+                "--fail-on-mismatch to exit 1"
             ),
         },
         "counts": counts,
@@ -1437,6 +1541,7 @@ def build_type_declaration_audit_from_capture(capture: Any) -> Dict[str, Any]:
         "anonymous_declarations": buckets["anonymous_declarations"],
         "unsupported_declarations": buckets["unsupported_declarations"],
         "outside_package_declarations": buckets["outside_package_declarations"],
+        "alternate_declaration_sites": buckets["alternate_declaration_sites"],
         "limitations": [
             "Diagnostic only — no BYOG type facts, uses_type edges, or index_c flag",
             "Named complete struct (RecordDecl tagUsed=struct completeDefinition) only",
@@ -1447,6 +1552,14 @@ def build_type_declaration_audit_from_capture(capture: Any) -> Dict[str, Any]:
             "Struct and typedef with the same title remain distinct identities",
             "Not layout/ABI, not type-use analysis, not points-to, not C++, not multi-config",
             "Macro spelling/expansion multi-file disagreement is not guessed",
+            (
+                "Graph keeps one canonical source-derived site per semantic "
+                "entity; audit may match any exact owned site"
+            ),
+            (
+                "alternate_declaration_sites are configuration-unselected "
+                "owned sites, not proven dead/inactive"
+            ),
         ],
         "confidence_boundary": CONFIDENCE_BOUNDARY,
     }
