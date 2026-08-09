@@ -112,7 +112,11 @@ flags on `scripts/index_c.py`:
 - `--clang-type-uses` — publish aggregated `uses_type` relationships from the
   type-use audit’s `matched_internal` rows only (one edge per owner/target
   entity-id pair; recursive self-edges allowed). Observation counts and edge
-  counts differ; fail-closed residuals abort. Default off.
+  counts differ; fail-closed residuals abort. Default off. When present, query
+  with `graph_query.py types-used-by` / `type-users` (or `graphrag_code.py`
+  equivalents); both CLI surfaces support `--json`. Context packs surface bounded
+  `type_dependencies` / `type_dependency_edges` / `type_user_edges` from the
+  full relationship set (not the 30-neighbor cap).
 
 When any non-empty combination of `--clang-signatures`, `--clang-calls`,
 `--clang-types`, and `--clang-type-uses` is enabled, `index_c` builds **one

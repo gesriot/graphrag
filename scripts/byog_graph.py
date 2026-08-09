@@ -399,6 +399,34 @@ class ByogGraph:
         )
         return sorted(self.rels[mask]["target"].astype(str).unique().tolist())
 
+    def types_used_by(self, symbol: str) -> List[str]:
+        """Sorted unique outgoing ``uses_type`` target titles.
+
+        Recursive self-edges are preserved. Call-graph traversals
+        (``callers``/``callees``/``impact``) are unaffected.
+        """
+        title = self.resolve(symbol)
+        if not title:
+            return []
+        mask = (self.rels["source"].astype(str) == title) & (
+            self.rels["type"].astype(str) == "uses_type"
+        )
+        return sorted(self.rels[mask]["target"].astype(str).unique().tolist())
+
+    def type_users(self, symbol: str) -> List[str]:
+        """Sorted unique incoming ``uses_type`` source titles.
+
+        Recursive self-edges are preserved. Call-graph traversals are
+        unaffected.
+        """
+        title = self.resolve(symbol)
+        if not title:
+            return []
+        mask = (self.rels["target"].astype(str) == title) & (
+            self.rels["type"].astype(str) == "uses_type"
+        )
+        return sorted(self.rels[mask]["source"].astype(str).unique().tolist())
+
     def neighbors(self, symbol: str) -> Dict[str, List[str]]:
         title = self.resolve(symbol)
         if not title:

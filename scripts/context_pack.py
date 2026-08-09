@@ -20,8 +20,9 @@ Later this can be backed by GraphRAG Local/Global search or a proper graph query
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import sys
@@ -127,7 +128,90 @@ def _reasons_list(val: Any) -> List[str]:
     return [str(x) for x in _to_list(val) if x is not None and str(x) not in ("", "nan", "None")]
 
 
-def compact_relationship(rel: Dict[str, Any]) -> Dict[str, Any]:
+def _type_json_safe(val: Any) -> Any:
+    """JSON normalization local to configured type evidence."""
+    if val is None:
+        return None
+    if isinstance(val, float) and not math.isfinite(val):
+        return None
+    if isinstance(val, (str, int, float, bool)):
+        return val
+    if isinstance(val, (list, tuple)):
+        return [_type_json_safe(item) for item in val]
+    if isinstance(val, dict):
+        return {
+            str(key): _type_json_safe(value) for key, value in val.items()
+        }
+    normalized = _json_safe(val)
+    if normalized is val:
+        return normalized
+    return _type_json_safe(normalized)
+
+
+def _material_json_value(val: Any) -> Any:
+    """Return a JSON-safe material value, treating parquet nulls as absent."""
+    normalized = _type_json_safe(val)
+    if normalized is None or normalized == "" or normalized == "nan":
+        return None
+    return normalized
+
+
+def _first_material_json_value(*values: Any) -> Any:
+    for value in values:
+        normalized = _material_json_value(value)
+        if normalized is not None:
+            return normalized
+    return None
+
+
+def _decode_json_object_list(raw: Any) -> tuple[List[Dict[str, Any]], Optional[str]]:
+    """Decode a JSON/list value that must contain objects only."""
+    val = _material_json_value(raw)
+    if val is None:
+        return [], None
+    parsed: Any = val
+    if isinstance(val, str):
+        try:
+            parsed = json.loads(val)
+        except (TypeError, ValueError) as e:
+            return [], f"decode_error:{type(e).__name__}"
+    if not isinstance(parsed, list):
+        return [], "decode_error:not_a_list"
+    normalized: List[Dict[str, Any]] = []
+    for item in parsed:
+        safe_item = _type_json_safe(item)
+        if not isinstance(safe_item, dict):
+            return [], "decode_error:item_not_object"
+        normalized.append(
+            {
+                str(key): _type_json_safe(value)
+                for key, value in safe_item.items()
+            }
+        )
+    return normalized, None
+
+
+def _decode_type_use_observations(
+    raw: Any, *, max_observations: int
+) -> tuple[List[Dict[str, Any]], int, Optional[str]]:
+    """Decode/normalize uses_type observations JSON into a bounded sample.
+
+    Returns ``(sample, total_count, decode_error_or_none)``. Never invents
+    observation facts on malformed input.
+    """
+    if max_observations < 0:
+        max_observations = 0
+    observations, error = _decode_json_object_list(raw)
+    if error:
+        return [], 0, error
+    return observations[:max_observations], len(observations), None
+
+
+def compact_relationship(
+    rel: Dict[str, Any],
+    *,
+    max_type_observations: int = 5,
+) -> Dict[str, Any]:
     out: Dict[str, Any] = {
         "id": rel.get("id"),
         "source": rel.get("source"),
@@ -149,6 +233,123 @@ def compact_relationship(rel: Dict[str, Any]) -> Dict[str, Any]:
         reasons = _reasons_list(rel.get("dynamic_reasons"))
         if reasons:
             out["dynamic_reasons"] = reasons
+
+    # Configured uses_type evidence (bounded; never unbounded raw JSON strings).
+    if str(rel.get("type", "")) == "uses_type":
+        fact_kind = _first_material_json_value(
+            rel.get("fact_kind"), rel.get("clang_type_use_fact_kind")
+        )
+        if fact_kind is not None:
+            out["fact_kind"] = fact_kind
+        extractor = _first_material_json_value(
+            rel.get("extractor"), rel.get("clang_type_use_extractor")
+        )
+        if extractor is not None:
+            out["extractor"] = extractor
+        conf = _first_material_json_value(
+            rel.get("clang_type_use_confidence"), rel.get("confidence")
+        )
+        if conf is not None:
+            out["confidence"] = conf
+        det = _first_material_json_value(
+            rel.get("clang_type_use_is_deterministic"),
+            rel.get("is_deterministic"),
+        )
+        if det is not None:
+            out["is_deterministic"] = _as_bool(det)
+
+        obs_count = _material_json_value(
+            rel.get("clang_type_use_observation_count")
+        )
+        normalized_obs_count: Optional[int] = None
+        if (
+            isinstance(obs_count, (int, float))
+            and not isinstance(obs_count, bool)
+            and math.isfinite(float(obs_count))
+            and float(obs_count).is_integer()
+            and obs_count >= 0
+        ):
+            normalized_obs_count = int(obs_count)
+            out["observation_count"] = normalized_obs_count
+
+        use_kinds = _to_list(rel.get("clang_type_use_use_kinds"))
+        cleaned_use_kinds = sorted(
+            {
+                str(value)
+                for value in (
+                    _material_json_value(item) for item in use_kinds
+                )
+                if value is not None
+            }
+        )
+        if cleaned_use_kinds:
+            out["use_kinds"] = cleaned_use_kinds
+
+        entry_indices = _to_list(rel.get("clang_type_use_entry_indices"))
+        if entry_indices:
+            cleaned: List[int] = []
+            for x in entry_indices:
+                sx = _material_json_value(x)
+                if isinstance(sx, bool):
+                    continue
+                if (
+                    isinstance(sx, (int, float))
+                    and math.isfinite(float(sx))
+                    and float(sx).is_integer()
+                    and sx >= 0
+                ):
+                    cleaned.append(int(sx))
+            if cleaned:
+                out["entry_indices"] = sorted(set(cleaned))
+
+        cpath = _material_json_value(rel.get("clang_type_use_compiler_path"))
+        cid = _material_json_value(rel.get("clang_type_use_compiler_id"))
+        if cpath is not None:
+            out["compiler_path"] = cpath
+        if cid is not None:
+            out["compiler_id"] = cid
+        compilers_raw = rel.get("clang_type_use_compilers")
+        if _material_json_value(compilers_raw) is not None:
+            compilers, compiler_error = _decode_json_object_list(compilers_raw)
+            if compiler_error:
+                out["compilers_decode_error"] = compiler_error
+            else:
+                out["compilers"] = compilers
+
+        digest = _material_json_value(
+            rel.get("clang_type_use_compile_commands_digest")
+        )
+        if digest is not None:
+            out["compile_commands_digest"] = digest
+
+        src_eid = _material_json_value(
+            rel.get("clang_type_use_source_entity_id")
+        )
+        tgt_eid = _material_json_value(
+            rel.get("clang_type_use_target_entity_id")
+        )
+        if src_eid is not None:
+            out["source_entity_id"] = src_eid
+        if tgt_eid is not None:
+            out["target_entity_id"] = tgt_eid
+
+        sample, total, err = _decode_type_use_observations(
+            rel.get("clang_type_use_observations_json"),
+            max_observations=max_type_observations,
+        )
+        out["observation_sample"] = sample
+        out["observation_sample_count"] = len(sample)
+        out["observation_total_count"] = total
+        out["observation_truncated"] = total > len(sample)
+        if normalized_obs_count is not None and normalized_obs_count != total:
+            out["observation_count_mismatch"] = {
+                "declared": normalized_obs_count,
+                "decoded": total,
+            }
+        if err:
+            out["observation_decode_error"] = err
+            out["observation_sample"] = []
+            out["observation_sample_count"] = 0
     return out
 
 
@@ -187,10 +388,24 @@ def pack(
         "--neighbor-text/--no-neighbor-text",
         help="Include text units attached to neighbor relationships",
     ),
+    max_type_edges: int = typer.Option(
+        20,
+        "--max-type-edges",
+        help="Max uses_type edges per direction (outgoing type_dependencies / incoming type_users)",
+    ),
+    max_type_observations: int = typer.Option(
+        5,
+        "--max-type-observations",
+        help="Max observations sampled per uses_type edge in the pack",
+    ),
 ):
     """Assemble and print (or save) a context pack for the given symbol."""
     if full_text:
         max_text_chars = 0
+    if max_type_edges < 0:
+        max_type_edges = 0
+    if max_type_observations < 0:
+        max_type_observations = 0
 
     try:
         data = load_byog(graph)
@@ -240,7 +455,10 @@ def pack(
         "symbol": ent_dict.get("title"),
         "purpose": purpose,
         "entity": entity_fields,
-        "neighbors": [compact_relationship(nr) for nr in neighbors[:30]],
+        "neighbors": [
+            compact_relationship(nr, max_type_observations=max_type_observations)
+            for nr in neighbors[:30]
+        ],
     }
 
     # Make preprocessor dependence impossible to miss: top-level warning +
@@ -406,7 +624,13 @@ def pack(
         pack["is_module_pack"] = True
         pack["module_prefix"] = module_prefix
         pack["members"] = members[:50]
-        pack["module_neighbors"] = [compact_relationship(r) for r in module_relationships[:100]]
+        pack["module_neighbors"] = [
+            compact_relationship(
+                relationship,
+                max_type_observations=max_type_observations,
+            )
+            for relationship in module_relationships[:100]
+        ]
 
     # Golden contract note for the canonical mini_game graph only.  Symbol names
     # such as `sim` or `physics` are not sufficient evidence: they are common in
@@ -464,7 +688,100 @@ def pack(
                 })
             if deps:
                 pack["data_dependencies"] = deps
-                pack["data_dependency_edges"] = [compact_relationship(r) for r in data_dep_rels]
+                pack["data_dependency_edges"] = [
+                    compact_relationship(
+                        r, max_type_observations=max_type_observations
+                    )
+                    for r in data_dep_rels
+                ]
+
+    # Configured uses_type evidence (optional Clang overlay). Collected from
+    # the full neighbor relationship set — not the capped pack["neighbors"] —
+    # so type edges remain visible even when they fall after the first 30
+    # unrelated neighbors.
+    symbol_title = str(ent_dict.get("title", ""))
+    symbol_id = str(ent_dict.get("id", ""))
+    uses_type_all = [
+        r for r in neighbors if str(r.get("type", "")) == "uses_type"
+    ]
+    if uses_type_all:
+        def _rel_sort_key(r: Dict[str, Any]) -> tuple:
+            return (
+                str(r.get("source", "")),
+                str(r.get("target", "")),
+                str(r.get("id", "")),
+            )
+
+        outgoing = sorted(
+            [
+                r
+                for r in uses_type_all
+                if str(r.get("source", "")) in {symbol_title, symbol_id}
+            ],
+            key=_rel_sort_key,
+        )
+        incoming = sorted(
+            [
+                r
+                for r in uses_type_all
+                if str(r.get("target", "")) in {symbol_title, symbol_id}
+            ],
+            key=_rel_sort_key,
+        )
+        # Self-edges (source == target) legitimately appear in both roles.
+        if outgoing:
+            out_slice = outgoing[:max_type_edges]
+            pack["type_dependency_edges"] = [
+                compact_relationship(
+                    r, max_type_observations=max_type_observations
+                )
+                for r in out_slice
+            ]
+            target_refs: List[str] = []
+            for r in out_slice:
+                tgt = str(r.get("target", ""))
+                if tgt and tgt not in target_refs:
+                    target_refs.append(tgt)
+            if target_refs and len(ents) > 0:
+                data_mask = ents["title"].astype(str).isin(target_refs)
+                type_rows = ents[data_mask]
+                if len(type_rows) and "title" in type_rows.columns:
+                    type_rows = type_rows.sort_values(by="title")
+                type_deps: List[Dict[str, Any]] = []
+                for _, dep in type_rows.iterrows():
+                    tu_refs = [str(x) for x in _to_list(dep.get("text_unit_ids"))]
+                    raw_text = ""
+                    if tu_refs and len(tus) > 0:
+                        tmask = tus["id"].astype(str).isin(tu_refs)
+                        if tmask.any():
+                            raw_text = str(tus[tmask].iloc[0].get("text", ""))
+                    dep_text, dep_truncated = truncate_text(raw_text, max_text_chars)
+                    type_deps.append(
+                        {
+                            "title": _json_safe(dep.get("title")),
+                            "type": _json_safe(dep.get("type")),
+                            "source_file": _json_safe(dep.get("source_file")),
+                            "span": _json_safe(dep.get("span")),
+                            "description": _json_safe(dep.get("description")),
+                            "text": dep_text,
+                            "truncated": dep_truncated,
+                        }
+                    )
+                if type_deps:
+                    pack["type_dependencies"] = type_deps
+            pack["type_dependency_truncated"] = len(outgoing) > len(out_slice)
+            pack["type_dependency_total"] = len(outgoing)
+
+        if incoming:
+            in_slice = incoming[:max_type_edges]
+            pack["type_user_edges"] = [
+                compact_relationship(
+                    r, max_type_observations=max_type_observations
+                )
+                for r in in_slice
+            ]
+            pack["type_user_truncated"] = len(incoming) > len(in_slice)
+            pack["type_user_total"] = len(incoming)
 
     packed_texts = []
     for t in texts[:10]:

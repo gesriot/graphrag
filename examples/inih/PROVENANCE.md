@@ -109,7 +109,9 @@ The published graph now also contains the co-located golden runner
   owner/target entity-id pair). Entity count stays 21; pre-existing
   relationship IDs/endpoints/types are preserved. Independent
   `extra_manifest["clang_type_uses"]` block. Confidence is
-  configuration-relative only.
+  configuration-relative only. Query via `types-used-by` /
+  `type-users`; context packs expose bounded type-dependency evidence
+  (e.g. `ini:ini_parse` → `ini:ini_handler`).
 - `audit_call_edges`: 38 calls, structural pass rate 1.0, 0 anomalies,
   0 dangling targets, 0 semantic suspicions.
 - The **library** subgraph (ini.c/ini.h) is 15 entities and 17 deterministic

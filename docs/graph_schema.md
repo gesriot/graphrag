@@ -287,6 +287,22 @@ When `scripts/index_c.py --clang-type-uses` is enabled (default **off**),
 | Fail-closed | Same residual buckets as the type-use audit; missing/non-unique endpoints abort before mutation |
 | Manifest | Independent `clang_type_uses` block (`mode=off` or `configured_clang_type_uses`) |
 
+**Local query + context-pack consumption (when edges exist):**
+
+| Surface | Behavior |
+| --- | --- |
+| `ByogGraph.types_used_by(symbol)` | Sorted unique outgoing `uses_type` target titles |
+| `ByogGraph.type_users(symbol)` | Sorted unique incoming `uses_type` source titles |
+| CLI | `graph_query.py types-used-by` / `type-users`; same via `graphrag_code.py`; both support optional `--json` |
+| Context pack (outgoing) | `type_dependencies` (compact target entities + truncated text) and `type_dependency_edges` |
+| Context pack (incoming) | `type_user_edges` |
+| Evidence bounding | Defaults: 20 edges/direction, 5 observations/edge; sample + truncation counts; no unbounded raw observations JSON; malformed legacy JSON and declared/decoded count disagreements are surfaced without invented samples |
+| Neighbor cap | Type sections are built from the full relationship set, not the capped 30-neighbor list |
+
+Call-graph queries (`callers` / `callees` / `impact`) never traverse `uses_type`.
+Graphs without `uses_type` edges return empty query lists and omit the
+type_* pack keys (byte-identical pack shape aside from docs/pins).
+
 This is configuration-derived type-use *evidence* — not layout/ABI proof,
 multi-config coverage, or points-to analysis.
 

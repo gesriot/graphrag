@@ -5,6 +5,8 @@ Local graph queries over BYOG parquets (no external API).
 Provides:
 - callers(symbol)
 - callees(symbol)
+- types_used_by(symbol)   # outgoing uses_type targets
+- type_users(symbol)      # incoming uses_type sources
 - neighbors(symbol)
 - dependency_order()
 - impact(symbol)
@@ -15,6 +17,7 @@ Designed to be used from agent loops, context-pack, or directly from the shell.
 
 Example:
     uv run python scripts/graph_query.py callers sim:run_simulation --graph byog_mini_game
+    uv run python scripts/graph_query.py types-used-by ini:ini_parse --graph byog_inih
     uv run python scripts/graph_query.py observations sim:run_simulation --graph byog_mini_game
 """
 
@@ -76,6 +79,28 @@ def callees(ents: pd.DataFrame, rels: pd.DataFrame, symbol: str) -> List[str]:
         return []
     mask = (rels["source"].astype(str) == title) & (rels["type"].astype(str) == "calls")
     return sorted(rels[mask]["target"].astype(str).unique().tolist())
+
+
+def types_used_by(ents: pd.DataFrame, rels: pd.DataFrame, symbol: str) -> List[str]:
+    """Outgoing ``uses_type`` targets (sorted unique titles)."""
+    title = _resolve_symbol(ents, symbol)
+    if not title:
+        return []
+    mask = (rels["source"].astype(str) == title) & (
+        rels["type"].astype(str) == "uses_type"
+    )
+    return sorted(rels[mask]["target"].astype(str).unique().tolist())
+
+
+def type_users(ents: pd.DataFrame, rels: pd.DataFrame, symbol: str) -> List[str]:
+    """Incoming ``uses_type`` sources (sorted unique titles)."""
+    title = _resolve_symbol(ents, symbol)
+    if not title:
+        return []
+    mask = (rels["target"].astype(str) == title) & (
+        rels["type"].astype(str) == "uses_type"
+    )
+    return sorted(rels[mask]["source"].astype(str).unique().tolist())
 
 
 def neighbors(ents: pd.DataFrame, rels: pd.DataFrame, symbol: str) -> Dict[str, List[str]]:
@@ -173,6 +198,36 @@ def cli_callers(symbol: str, graph: Path = typer.Option(Path("byog_mini_game"), 
 def cli_callees(symbol: str, graph: Path = typer.Option(Path("byog_mini_game"), "--graph")):
     g = ByogGraph(graph)
     print("\n".join(g.callees(symbol)))
+
+
+@app.command("types-used-by")
+def cli_types_used_by(
+    symbol: str,
+    graph: Path = typer.Option(Path("byog_mini_game"), "--graph"),
+    json_output: bool = typer.Option(False, "--json"),
+):
+    """Outgoing uses_type targets for a symbol (configured type-use overlay)."""
+    g = ByogGraph(graph)
+    result = g.types_used_by(symbol)
+    if json_output:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    else:
+        print("\n".join(result))
+
+
+@app.command("type-users")
+def cli_type_users(
+    symbol: str,
+    graph: Path = typer.Option(Path("byog_mini_game"), "--graph"),
+    json_output: bool = typer.Option(False, "--json"),
+):
+    """Incoming uses_type sources for a type/symbol (configured type-use overlay)."""
+    g = ByogGraph(graph)
+    result = g.type_users(symbol)
+    if json_output:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    else:
+        print("\n".join(result))
 
 
 @app.command("neighbors")

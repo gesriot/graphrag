@@ -200,6 +200,9 @@ explicit skip and the final status says `PASS WITH SKIPS`.
   count stays 148; pre-existing relationship IDs/endpoints/types are preserved.
   Independent `extra_manifest["clang_type_uses"]` block. Confidence is
   configuration-relative only — not layout/ABI/multi-config/points-to proof.
+  Local consumers: `types-used-by` / `type-users` queries and context-pack
+  `type_dependencies` / `type_dependency_edges` / `type_user_edges` (bounded
+  observation samples; struct vs typedef titles remain distinct).
 
 ## C frontend result — clean on the first pass
 Unlike `inih`, cJSON does not fragment function bodies with `#if`/`#endif`, so the

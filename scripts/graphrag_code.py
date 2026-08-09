@@ -197,6 +197,32 @@ def callees(
     _print_json(ByogGraph(graph).callees(symbol))
 
 
+@app.command("types-used-by")
+def types_used_by(
+    symbol: str = typer.Argument(...),
+    graph: Path = _graph_opt(),
+    json_out: bool = typer.Option(False, "--json"),
+):
+    """Outgoing uses_type targets (graph_query.py types-used-by)."""
+    args = ["types-used-by", symbol, "--graph", str(graph)]
+    if json_out:
+        args.append("--json")
+    _delegate("graph_query.py", args)
+
+
+@app.command("type-users")
+def type_users(
+    symbol: str = typer.Argument(...),
+    graph: Path = _graph_opt(),
+    json_out: bool = typer.Option(False, "--json"),
+):
+    """Incoming uses_type sources (graph_query.py type-users)."""
+    args = ["type-users", symbol, "--graph", str(graph)]
+    if json_out:
+        args.append("--json")
+    _delegate("graph_query.py", args)
+
+
 @app.command("neighbors")
 def neighbors(
     symbol: str = typer.Argument(...),
@@ -288,6 +314,16 @@ def context_pack(
     max_text_chars: int = typer.Option(300, "--max-text-chars"),
     full_text: bool = typer.Option(False, "--full-text"),
     neighbor_text: bool = typer.Option(True, "--neighbor-text/--no-neighbor-text"),
+    max_type_edges: int = typer.Option(
+        20,
+        "--max-type-edges",
+        help="Max uses_type edges per direction in the pack (default 20)",
+    ),
+    max_type_observations: int = typer.Option(
+        5,
+        "--max-type-observations",
+        help="Max observations sampled per uses_type edge (default 5)",
+    ),
     json_out: bool = typer.Option(
         False,
         "--json",
@@ -299,7 +335,19 @@ def context_pack(
     Default: short human summary. --json: exact pack JSON from the underlying
     script (field names unchanged).
     """
-    args = [symbol, "--graph", str(graph), "--purpose", purpose, "--max-text-chars", str(max_text_chars)]
+    args = [
+        symbol,
+        "--graph",
+        str(graph),
+        "--purpose",
+        purpose,
+        "--max-text-chars",
+        str(max_text_chars),
+        "--max-type-edges",
+        str(max_type_edges),
+        "--max-type-observations",
+        str(max_type_observations),
+    ]
     if full_text:
         args.append("--full-text")
     if not neighbor_text:
@@ -334,6 +382,10 @@ def context_pack(
     print(f"text_units  : {len(pack.get('text_units') or [])}")
     if pack.get("data_dependencies") is not None:
         print(f"data_deps   : {len(pack.get('data_dependencies') or [])}")
+    if pack.get("type_dependencies") is not None:
+        print(f"type_deps   : {len(pack.get('type_dependencies') or [])}")
+    if pack.get("type_user_edges") is not None:
+        print(f"type_users  : {len(pack.get('type_user_edges') or [])}")
     if pack.get("uncertain_calls") is not None:
         print(f"uncertain   : {len(pack.get('uncertain_calls') or [])}")
     print("(full pack: re-run with --json)")
