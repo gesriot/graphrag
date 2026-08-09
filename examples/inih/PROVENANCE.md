@@ -99,6 +99,13 @@ The published graph now also contains the co-located golden runner
   block (`mode=configured_clang_type_declarations` when on, `mode=off` when
   disabled). Shares the in-memory AST capture with signatures/calls (N dumps
   for N entries).
+- **Clang AST type-use audit (diagnostic only):** measured
+  matched_internal=14 (ini_handler / ini_reader / ini_parse_string_ctx
+  parameter and local uses), external_or_system=72, unsupported_type_form=2
+  (function-pointer typedef underlying forms), owner_unmatched=0,
+  target_unresolved=0, ambiguous_target=0, macro_location_unsupported=0,
+  unowned_context=0. `--fail-on-mismatch` exits 0. **No** `uses_type` edges
+  or graph/manifest mutation.
 - `audit_call_edges`: 38 calls, structural pass rate 1.0, 0 anomalies,
   0 dangling targets, 0 semantic suspicions.
 - The **library** subgraph (ini.c/ini.h) is 15 entities and 17 deterministic

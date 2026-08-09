@@ -251,6 +251,27 @@ fields into the graph requires the separate explicit `--clang-types` flag
 (see above). There is still **no** `uses_type` relationship type and no
 default-on graph change.
 
+#### Type-use audit (diagnostic only — no graph overlay yet)
+
+`scripts/c_clang_type_use_audit.py` inventories Clang-observed type uses on
+declaration-bearing AST nodes (function returns, parameters, locals, fields,
+globals, typedef underlying types). It reuses
+`build_function_audit_from_capture` and
+`build_type_declaration_audit_from_capture` for owner/target identity.
+
+| Property | Value |
+| --- | --- |
+| Graph mutation | **None** — no `uses_type` edges, no entity fields, no `index_c` flag, no manifest block |
+| Location honesty | `location_precision=declaration_bearing_node` (loc / range.begin of the declaring node). **Not** claimed as an exact type-token span |
+| Matched when | owner uniquely maps (when an owner context exists) and target uniquely maps to a package-local matched struct/enum/typedef |
+| Target resolvers | `type_alias_decl_id` (scoped to one compile entry), `exact_tag_spelling`, `unique_typedef_spelling`; C's bare typedef namespace stays distinct from explicit `struct T` / `enum T` tags |
+| Owner resolvers | Exact declaration site first; unique external function name for header prototypes; unique same-file static function name for forward declarations; owned anonymous-tag typedef site |
+| Fail-closed residuals | `owner_unmatched`, `target_unresolved`, `ambiguous_target`, `macro_location_unsupported` |
+| Observation-only | `external_or_system`, `unsupported_type_form`, `unowned_context` |
+
+This is configuration-derived type-use *evidence* only — not a type graph,
+layout/ABI proof, multi-config result, or points-to analysis.
+
 **Shared out of scope:** multi-config coverage, MSVC/wrappers/response files
 (fail closed), system/outside endpoints after filtering, production C/C++
 completeness. Snapshot manifests record separate `compiler_dependencies`,

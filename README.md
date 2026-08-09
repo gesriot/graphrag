@@ -148,8 +148,18 @@ modules, plugins, and PCH fail explicitly. See
   1 only for `tree_sitter_only` / `clang_only` / `ambiguous` /
   `macro_location_unsupported` (not for out-of-scope, anonymous, unsupported,
   outside-package, or alternate sites alone).
+- `scripts/c_clang_type_use_audit.py` — type *uses* on declaration-bearing
+  AST nodes (function returns, parameters, locals, fields, globals, typedef
+  underlying types). **Diagnostic only:** no `uses_type` edges, no graph
+  fields, no `index_c` flag, no manifest block. Owners/targets reuse the
+  function and type-declaration audits. Locations are the declaration-bearing
+  node (not proven exact type-token spans). C's tag namespace stays distinct:
+  bare names resolve only as unique typedef spellings, while `struct T` /
+  `enum T` use explicit tag spelling. `--fail-on-mismatch` exits 1 for
+  `owner_unmatched` / `target_unresolved` / `ambiguous_target` /
+  `macro_location_unsupported` only.
 
-All three CLIs remain available (each captures once internally). They are
+All four CLIs remain available (each captures once internally). They are
 **Clang only** (`cc` accepted only when `--version` proves Clang/Apple Clang).
 None is points-to analysis, layout/ABI proof, multi-config coverage, or
 production C/C++ completeness.
