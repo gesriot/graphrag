@@ -303,6 +303,30 @@ Call-graph queries (`callers` / `callees` / `impact`) never traverse `uses_type`
 Graphs without `uses_type` edges return empty query lists and omit the
 type_* pack keys (byte-identical pack shape aside from docs/pins).
 
+**Persisted integrity audit (read-only):**
+`scripts/c_clang_type_use_graph_audit.py` validates already-published
+configured `uses_type` edges against the producer contract without invoking
+Clang or re-running the overlay.
+
+| Mode | Condition | Expected |
+| --- | --- | --- |
+| `legacy_absent` | No `clang_type_uses` block and zero configured edges | valid |
+| `off` | `mode=off` and `enabled=false` | zero configured edges required |
+| `enabled` | `mode=configured_clang_type_uses` + `enabled=true` | full edge + manifest census |
+
+A missing block in a readable manifest never legitimizes existing configured
+edges; a missing or malformed snapshot manifest is an I/O failure, not a
+legacy graph. Checks include
+unique relationship IDs, no stale `clang_type_use_*` on non-`uses_type` rows,
+mirrored fact/extractor/confidence fields, collision-safe title→entity
+resolution, stored entity-id agreement, deterministic `relationship_id`,
+one edge per source/target entity-id pair (self-edges allowed), strict
+observations JSON (canonical order, count, use_kinds, entry_indices),
+compiler/digest consistency, unknown material fields fail-closed, and
+manifest `n_facts` / `n_observations` cross-checks. Bounded anomaly samples
+retain exact totals. `published_graph_health.py` attaches this status for C
+published graphs; legacy/default-off roots continue to pass.
+
 This is configuration-derived type-use *evidence* — not layout/ABI proof,
 multi-config coverage, or points-to analysis.
 

@@ -166,8 +166,16 @@ modules, plugins, and PCH fail explicitly. See
   while `struct T` / `enum T` use explicit tag spelling. `--fail-on-mismatch`
   exits 1 for `owner_unmatched` / `target_unresolved` / `ambiguous_target` /
   `macro_location_unsupported` only.
+- `scripts/c_clang_type_use_graph_audit.py` — **read-only integrity audit** for
+  already-persisted configured `uses_type` edges and the
+  `clang_type_uses` manifest block. Does not invoke Clang, reindex, publish,
+  or rewrite graphs. Exit 0 = valid (including legacy/off with zero configured
+  edges), 1 = integrity anomalies, 2 = unreadable graph/snapshot/manifest.
+  Shared producer-contract helpers live in `c_clang_type_uses.py`
+  (`relationship_id`, `validate_persisted_type_use_overlay`). Published C
+  graph health also runs this pure check without changing extractor comparison.
 
-All four CLIs remain available (each captures once internally). They are
+All four AST CLIs remain available (each captures once internally). They are
 **Clang only** (`cc` accepted only when `--version` proves Clang/Apple Clang).
 None is points-to analysis, layout/ABI proof, multi-config coverage, or
 production C/C++ completeness.

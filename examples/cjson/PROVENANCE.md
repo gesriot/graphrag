@@ -202,7 +202,10 @@ explicit skip and the final status says `PASS WITH SKIPS`.
   configuration-relative only — not layout/ABI/multi-config/points-to proof.
   Local consumers: `types-used-by` / `type-users` queries and context-pack
   `type_dependencies` / `type_dependency_edges` / `type_user_edges` (bounded
-  observation samples; struct vs typedef titles remain distinct).
+  observation samples; struct vs typedef titles remain distinct). Read-only
+  integrity: `scripts/c_clang_type_use_graph_audit.py` (and C
+  `published_graph_health`) validate persisted configured edges against the
+  producer contract without invoking Clang or rewriting graphs.
 
 ## C frontend result — clean on the first pass
 Unlike `inih`, cJSON does not fragment function bodies with `#if`/`#endif`, so the

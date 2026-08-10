@@ -152,23 +152,90 @@ def _fresh_data(spec: PublishedGraphSpec, root: Path) -> dict[str, list[dict[str
     raise ValueError(f"{spec.ident}: unknown indexer {spec.indexer!r}")
 
 
-def _published_data(graph_root: Path) -> tuple[str, dict[str, list[dict[str, Any]]]]:
+def _strict_manifest_object(path: Path) -> dict[str, Any]:
+    def reject_constant(token: str) -> None:
+        raise ValueError(f"non-finite JSON constant {token}")
+
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in out:
+                raise ValueError(f"duplicate JSON object key {key!r}")
+            out[key] = value
+        return out
+
+    raw = json.loads(
+        path.read_text(encoding="utf-8"),
+        parse_constant=reject_constant,
+        object_pairs_hook=unique_object,
+    )
+    if not isinstance(raw, dict):
+        raise ValueError(f"manifest is not a JSON object: {path}")
+    return raw
+
+
+def _published_data(
+    graph_root: Path,
+) -> tuple[str, dict[str, list[dict[str, Any]]], dict[str, Any]]:
     pointer = graph_root / "current"
     if not pointer.is_file():
         raise FileNotFoundError(f"missing current pointer: {pointer}")
     snapshot = pointer.read_text(encoding="utf-8").strip()
     if not snapshot:
         raise ValueError(f"empty current pointer: {pointer}")
-    base = graph_root / "snapshots" / snapshot
+    if Path(snapshot).name != snapshot or snapshot in {".", ".."}:
+        raise ValueError(f"unsafe current snapshot id: {snapshot!r}")
+    snapshots_dir = (graph_root / "snapshots").resolve()
+    base = (snapshots_dir / snapshot).resolve()
+    if base.parent != snapshots_dir:
+        raise ValueError(f"current snapshot escapes snapshots directory: {snapshot!r}")
     if not base.is_dir():
         raise FileNotFoundError(f"current snapshot not found: {base}")
+    manifest_path = base / "manifest.json"
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"current snapshot missing manifest: {manifest_path}")
+    manifest = _strict_manifest_object(manifest_path)
     data: dict[str, list[dict[str, Any]]] = {}
     for table in TABLE_FIELDS:
         path = base / f"{table}.parquet"
         if not path.is_file():
             raise FileNotFoundError(f"current snapshot missing {table}: {path}")
         data[table] = pd.read_parquet(path).to_dict("records")
-    return snapshot, data
+    return snapshot, data, manifest
+
+
+def _type_use_integrity(
+    published: dict[str, list[dict[str, Any]]],
+    manifest: Mapping[str, Any],
+    *,
+    indexer: str,
+) -> dict[str, Any] | None:
+    """Read-only configured uses_type integrity for C published graphs.
+
+    Never invokes Clang and never re-runs the overlay. Legacy / default-off
+    C graphs with zero configured edges pass as ``legacy_absent`` / ``off``.
+    Non-C indexers skip this check (returns None).
+    """
+    if indexer != "c":
+        return None
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from c_clang_type_uses import validate_persisted_type_use_overlay  # type: ignore
+
+    result = validate_persisted_type_use_overlay(
+        published.get("entities") or [],
+        published.get("relationships") or [],
+        manifest,
+    )
+    return {
+        "ok": bool(result["ok"]),
+        "status": str(result["status"]),
+        "mode": str(result["mode"]),
+        "n_configured_edges": int(result["n_configured_edges"]),
+        "n_anomalies": int(result["n_anomalies"]),
+        "n_anomaly_samples": int(result["n_anomaly_samples"]),
+        "anomalies_truncated": bool(result["anomalies_truncated"]),
+        "anomalies": list(result["anomalies"]),
+    }
 
 
 def check_spec(
@@ -198,7 +265,7 @@ def check_spec(
         }
 
     try:
-        snapshot, published = _published_data(published_root)
+        snapshot, published, published_manifest = _published_data(published_root)
         fresh = _fresh_data(spec, root)
     except (OSError, ValueError, KeyError) as error:
         return {
@@ -221,8 +288,13 @@ def check_spec(
                 "missing_from_published": missing,
                 "extra_in_published": extra,
             }
+
+    type_use = _type_use_integrity(
+        published, published_manifest, indexer=spec.indexer
+    )
+
     if mismatches:
-        return {
+        result: dict[str, Any] = {
             "id": spec.ident,
             "graph": spec.graph,
             "snapshot": snapshot,
@@ -230,12 +302,29 @@ def check_spec(
             "reason": "published graph disagrees with current extractor",
             "mismatches": mismatches,
         }
-    return {
+        if type_use is not None:
+            result["clang_type_use_integrity"] = type_use
+        return result
+
+    if type_use is not None and not type_use["ok"]:
+        return {
+            "id": spec.ident,
+            "graph": spec.graph,
+            "snapshot": snapshot,
+            "status": "fail",
+            "reason": "configured uses_type integrity anomalies",
+            "clang_type_use_integrity": type_use,
+        }
+
+    result = {
         "id": spec.ident,
         "graph": spec.graph,
         "snapshot": snapshot,
         "status": "pass",
     }
+    if type_use is not None:
+        result["clang_type_use_integrity"] = type_use
+    return result
 
 
 def build_report(manifest: Path = DEFAULT_MANIFEST, root: Path = ROOT) -> dict[str, Any]:
@@ -265,6 +354,13 @@ def format_report(report: Mapping[str, Any]) -> str:
             lines.append(
                 f"    {table}: fresh={mismatch['fresh_rows']} published={mismatch['published_rows']} "
                 f"missing={mismatch['missing_from_published']} extra={mismatch['extra_in_published']}"
+            )
+        type_use = result.get("clang_type_use_integrity")
+        if isinstance(type_use, Mapping):
+            lines.append(
+                f"    clang_type_use_integrity: status={type_use.get('status')} "
+                f"ok={type_use.get('ok')} edges={type_use.get('n_configured_edges')} "
+                f"anomalies={type_use.get('n_anomalies')}"
             )
     lines.append(
         f"  declared mutable={report['mutable']} frozen-exempt={report['frozen']} "
