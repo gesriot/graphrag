@@ -7,6 +7,7 @@ Provides:
 - callees(symbol)
 - types_used_by(symbol)   # outgoing uses_type targets
 - type_users(symbol)      # incoming uses_type sources
+- type_closure(symbol)    # bounded cycle-safe transitive uses_type
 - neighbors(symbol)
 - dependency_order()
 - impact(symbol)
@@ -18,6 +19,7 @@ Designed to be used from agent loops, context-pack, or directly from the shell.
 Example:
     uv run python scripts/graph_query.py callers sim:run_simulation --graph byog_mini_game
     uv run python scripts/graph_query.py types-used-by ini:ini_parse --graph byog_inih
+    uv run python scripts/graph_query.py type-closure ini:ini_parse --direction dependencies --max-depth 2
     uv run python scripts/graph_query.py observations sim:run_simulation --graph byog_mini_game
 """
 
@@ -33,7 +35,14 @@ import typer
 
 # Support both `python -m scripts.xxx` and direct `python scripts/xxx.py`
 sys.path.insert(0, str(Path(__file__).parent))
-from byog_graph import ByogGraph, load_graph  # re-export for backward compat
+from byog_graph import (  # re-export for backward compat
+    DEFAULT_TYPE_CLOSURE_MAX_DEPTH,
+    DEFAULT_TYPE_CLOSURE_MAX_EDGES,
+    DEFAULT_TYPE_CLOSURE_MAX_NODES,
+    ByogGraph,
+    compute_uses_type_closure,
+    load_graph,
+)
 
 app = typer.Typer(help="Local BYOG graph queries (callers, callees, impact, etc.)")
 
@@ -101,6 +110,60 @@ def type_users(ents: pd.DataFrame, rels: pd.DataFrame, symbol: str) -> List[str]
         rels["type"].astype(str) == "uses_type"
     )
     return sorted(rels[mask]["source"].astype(str).unique().tolist())
+
+
+def type_closure(
+    ents: pd.DataFrame,
+    rels: pd.DataFrame,
+    symbol: str,
+    *,
+    direction: str = "dependencies",
+    max_depth: int = DEFAULT_TYPE_CLOSURE_MAX_DEPTH,
+    max_nodes: int = DEFAULT_TYPE_CLOSURE_MAX_NODES,
+    max_edges: int = DEFAULT_TYPE_CLOSURE_MAX_EDGES,
+) -> Dict[str, Any]:
+    """Bounded cycle-safe transitive ``uses_type`` closure (delegates to pure BFS)."""
+    title = _resolve_symbol(ents, symbol)
+    return compute_uses_type_closure(
+        rels,
+        title,
+        direction=direction,
+        max_depth=max_depth,
+        max_nodes=max_nodes,
+        max_edges=max_edges,
+    )
+
+
+def format_type_closure_human(result: Dict[str, Any]) -> str:
+    """Stable human-readable type-closure report (shared by graph_query wrappers)."""
+    lines: List[str] = []
+    root = result.get("root")
+    if not result.get("resolved"):
+        lines.append("Not found" if root is None else f"root: {root}")
+        lines.append(f"resolved: {bool(result.get('resolved'))}")
+        lines.append(f"direction: {result.get('direction')}")
+        lines.append(f"max_depth: {result.get('max_depth')}")
+        lines.append("nodes (0/0):")
+        lines.append("edges (0/0):")
+        return "\n".join(lines)
+    lines.append(f"root: {root}")
+    lines.append(f"direction: {result.get('direction')}")
+    lines.append(f"max_depth: {result.get('max_depth')}")
+    n_ret = int(result.get("n_nodes_returned") or 0)
+    n_tot = int(result.get("n_nodes_total") or 0)
+    e_ret = int(result.get("n_edges_returned") or 0)
+    e_tot = int(result.get("n_edges_total") or 0)
+    trunc_n = " truncated" if result.get("nodes_truncated") else ""
+    trunc_e = " truncated" if result.get("edges_truncated") else ""
+    lines.append(f"nodes ({n_ret}/{n_tot}){trunc_n}:")
+    for node in result.get("nodes") or []:
+        lines.append(f"  {node.get('depth')}\t{node.get('title')}")
+    lines.append(f"edges ({e_ret}/{e_tot}){trunc_e}:")
+    for edge in result.get("edges") or []:
+        lines.append(
+            f"  {edge.get('depth')}\t{edge.get('source')} -> {edge.get('target')}\t{edge.get('id')}"
+        )
+    return "\n".join(lines)
 
 
 def neighbors(ents: pd.DataFrame, rels: pd.DataFrame, symbol: str) -> Dict[str, List[str]]:
@@ -228,6 +291,51 @@ def cli_type_users(
         print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
         print("\n".join(result))
+
+
+@app.command("type-closure")
+def cli_type_closure(
+    symbol: str,
+    graph: Path = typer.Option(Path("byog_mini_game"), "--graph"),
+    direction: str = typer.Option(
+        "dependencies",
+        "--direction",
+        help="dependencies (outgoing), users (incoming), or both",
+    ),
+    max_depth: int = typer.Option(
+        DEFAULT_TYPE_CLOSURE_MAX_DEPTH,
+        "--max-depth",
+        help="Maximum BFS depth (non-negative)",
+    ),
+    max_nodes: int = typer.Option(
+        DEFAULT_TYPE_CLOSURE_MAX_NODES,
+        "--max-nodes",
+        help="Max nodes returned (exact totals still reported)",
+    ),
+    max_edges: int = typer.Option(
+        DEFAULT_TYPE_CLOSURE_MAX_EDGES,
+        "--max-edges",
+        help="Max edges returned (exact totals still reported)",
+    ),
+    json_output: bool = typer.Option(False, "--json"),
+):
+    """Bounded cycle-safe transitive uses_type closure (consumer-only)."""
+    try:
+        g = ByogGraph(graph)
+        result = g.type_closure(
+            symbol,
+            direction=direction,
+            max_depth=max_depth,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
+        )
+    except ValueError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from e
+    if json_output:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    else:
+        print(format_type_closure_human(result))
 
 
 @app.command("neighbors")

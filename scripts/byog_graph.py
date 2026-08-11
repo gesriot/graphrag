@@ -16,13 +16,20 @@ import shutil
 import subprocess
 import tempfile
 import uuid
+from collections import defaultdict, deque
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+
+# Transitive uses_type closure (consumer-only; never invents graph facts).
+TYPE_CLOSURE_DIRECTIONS = frozenset({"dependencies", "users", "both"})
+DEFAULT_TYPE_CLOSURE_MAX_DEPTH = 3
+DEFAULT_TYPE_CLOSURE_MAX_NODES = 50
+DEFAULT_TYPE_CLOSURE_MAX_EDGES = 100
 
 
 def _resolve_output_base(base: Path) -> Path:
@@ -427,6 +434,31 @@ class ByogGraph:
         )
         return sorted(self.rels[mask]["source"].astype(str).unique().tolist())
 
+    def type_closure(
+        self,
+        symbol: str,
+        *,
+        direction: str = "dependencies",
+        max_depth: int = DEFAULT_TYPE_CLOSURE_MAX_DEPTH,
+        max_nodes: int = DEFAULT_TYPE_CLOSURE_MAX_NODES,
+        max_edges: int = DEFAULT_TYPE_CLOSURE_MAX_EDGES,
+    ) -> Dict[str, Any]:
+        """Bounded cycle-safe transitive ``uses_type`` closure (BFS, min depth).
+
+        Only traverses relationships whose type is exactly ``uses_type``.
+        Caps limit **returned** material; ``n_*_total`` counts remain exact
+        within ``max_depth``. Self-edges are retained as evidence without
+        duplicating the root node.
+        """
+        return compute_uses_type_closure(
+            self.rels,
+            self.resolve(symbol),
+            direction=direction,
+            max_depth=max_depth,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
+        )
+
     def neighbors(self, symbol: str) -> Dict[str, List[str]]:
         title = self.resolve(symbol)
         if not title:
@@ -547,6 +579,207 @@ def load_byog(graph_dir: Path) -> Dict[str, pd.DataFrame]:
     if len(g.call_observations) > 0:
         res["call_observations"] = g.call_observations
     return res
+
+
+def _empty_type_closure(
+    *,
+    root: Optional[str],
+    direction: str,
+    max_depth: int,
+    max_nodes: int,
+    max_edges: int,
+    resolved: bool,
+) -> Dict[str, Any]:
+    return {
+        "root": root,
+        "resolved": resolved,
+        "direction": direction,
+        "max_depth": max_depth,
+        "max_nodes": max_nodes,
+        "max_edges": max_edges,
+        "nodes": [],
+        "edges": [],
+        "n_nodes_total": 0,
+        "n_edges_total": 0,
+        "n_nodes_returned": 0,
+        "n_edges_returned": 0,
+        "nodes_truncated": False,
+        "edges_truncated": False,
+    }
+
+
+def compute_uses_type_closure(
+    rels: pd.DataFrame,
+    root_title: Optional[str],
+    *,
+    direction: str = "dependencies",
+    max_depth: int = DEFAULT_TYPE_CLOSURE_MAX_DEPTH,
+    max_nodes: int = DEFAULT_TYPE_CLOSURE_MAX_NODES,
+    max_edges: int = DEFAULT_TYPE_CLOSURE_MAX_EDGES,
+) -> Dict[str, Any]:
+    """Pure BFS ``uses_type`` closure over a relationships table.
+
+    Does not mutate inputs. Does not consult any other relationship type.
+    ``max_nodes`` / ``max_edges`` only truncate the returned lists; totals
+    within ``max_depth`` are always exact.
+    """
+    if direction not in TYPE_CLOSURE_DIRECTIONS:
+        raise ValueError(
+            f"unsupported type-closure direction {direction!r}; "
+            f"expected one of {sorted(TYPE_CLOSURE_DIRECTIONS)}"
+        )
+    for name, value in (
+        ("max_depth", max_depth),
+        ("max_nodes", max_nodes),
+        ("max_edges", max_edges),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(f"{name} must be a non-negative integer, got {value!r}")
+
+    if not root_title:
+        return _empty_type_closure(
+            root=None,
+            direction=direction,
+            max_depth=max_depth,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
+            resolved=False,
+        )
+
+    # Adjacency over uses_type only. Neighbor lists sorted for deterministic BFS.
+    out_adj: Dict[str, List[Tuple[str, str]]] = defaultdict(list)
+    in_adj: Dict[str, List[Tuple[str, str]]] = defaultdict(list)
+    edge_meta: Dict[str, Dict[str, str]] = {}
+
+    if rels is not None and len(rels) > 0 and "type" in rels.columns:
+        type_col = rels["type"].astype(str)
+        uses = rels[type_col == "uses_type"]
+        required = {"id", "source", "target"}
+        missing_columns = sorted(required - set(uses.columns))
+        if len(uses) and missing_columns:
+            raise ValueError(
+                "uses_type relationship table is missing required columns "
+                f"{missing_columns!r}"
+            )
+        for row_index, row in uses.iterrows():
+            values: Dict[str, str] = {}
+            for field in sorted(required):
+                raw = row.get(field)
+                is_null = raw is None
+                if not is_null:
+                    try:
+                        null_marker = pd.isna(raw)
+                        is_null = bool(null_marker)
+                    except (TypeError, ValueError):
+                        is_null = False
+                if is_null or not isinstance(raw, str) or not raw.strip():
+                    raise ValueError(
+                        f"uses_type relationship at row {row_index!r} has "
+                        f"invalid {field}={raw!r}"
+                    )
+                values[field] = raw
+            src = values["source"]
+            tgt = values["target"]
+            rid = values["id"]
+            if rid in edge_meta:
+                raise ValueError(
+                    f"duplicate uses_type relationship id {rid!r}"
+                )
+            edge_meta[rid] = {"id": rid, "source": src, "target": tgt}
+            out_adj[src].append((tgt, rid))
+            in_adj[tgt].append((src, rid))
+
+    for adj in (out_adj, in_adj):
+        for key in list(adj.keys()):
+            # Stable neighbor order: title then relationship id.
+            adj[key] = sorted(set(adj[key]), key=lambda item: (item[0], item[1]))
+
+    follow_out = direction in ("dependencies", "both")
+    follow_in = direction in ("users", "both")
+
+    depth_of: Dict[str, int] = {root_title: 0}
+    # edge_id -> minimum expansion depth at which the edge was observed
+    edge_depth: Dict[str, int] = {}
+    queue: deque[str] = deque([root_title])
+
+    while queue:
+        cur = queue.popleft()
+        cur_depth = depth_of[cur]
+        if cur_depth >= max_depth:
+            continue
+        hops: List[Tuple[str, str]] = []
+        if follow_out:
+            hops.extend(out_adj.get(cur, []))
+        if follow_in:
+            hops.extend(in_adj.get(cur, []))
+        # Deterministic expansion order when both directions apply.
+        hops = sorted(set(hops), key=lambda item: (item[0], item[1]))
+        for neighbor, rid in hops:
+            prev_edge_depth = edge_depth.get(rid)
+            if prev_edge_depth is None or cur_depth < prev_edge_depth:
+                edge_depth[rid] = cur_depth
+            # Self-edge: evidence only; root/node already present at min depth.
+            if neighbor == cur:
+                continue
+            next_depth = cur_depth + 1
+            if neighbor not in depth_of:
+                depth_of[neighbor] = next_depth
+                if next_depth < max_depth:
+                    queue.append(neighbor)
+                elif next_depth == max_depth:
+                    # Node is in-range but must not expand further.
+                    pass
+            # BFS first visit is already min depth; ignore later longer paths.
+
+    nodes_all = [
+        {"title": title, "depth": depth}
+        for title, depth in depth_of.items()
+    ]
+    nodes_all.sort(key=lambda n: (int(n["depth"]), str(n["title"])))
+
+    edges_all: List[Dict[str, Any]] = []
+    for rid, d in edge_depth.items():
+        meta = edge_meta.get(rid)
+        if meta is None:
+            continue
+        edges_all.append(
+            {
+                "id": meta["id"],
+                "source": meta["source"],
+                "target": meta["target"],
+                "depth": int(d),
+            }
+        )
+    edges_all.sort(
+        key=lambda e: (
+            int(e["depth"]),
+            str(e["source"]),
+            str(e["target"]),
+            str(e["id"]),
+        )
+    )
+
+    n_nodes_total = len(nodes_all)
+    n_edges_total = len(edges_all)
+    nodes_out = nodes_all[:max_nodes]
+    edges_out = edges_all[:max_edges]
+
+    return {
+        "root": root_title,
+        "resolved": True,
+        "direction": direction,
+        "max_depth": max_depth,
+        "max_nodes": max_nodes,
+        "max_edges": max_edges,
+        "nodes": nodes_out,
+        "edges": edges_out,
+        "n_nodes_total": n_nodes_total,
+        "n_edges_total": n_edges_total,
+        "n_nodes_returned": len(nodes_out),
+        "n_edges_returned": len(edges_out),
+        "nodes_truncated": n_nodes_total > len(nodes_out),
+        "edges_truncated": n_edges_total > len(edges_out),
+    }
 
 
 def load_graph(graph_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:

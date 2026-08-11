@@ -391,12 +391,23 @@ def pack(
     max_type_edges: int = typer.Option(
         20,
         "--max-type-edges",
-        help="Max uses_type edges per direction (outgoing type_dependencies / incoming type_users)",
+        help=(
+            "Max uses_type edges per direction; at depth > 1 this also caps "
+            "returned closure-node payloads"
+        ),
     ),
     max_type_observations: int = typer.Option(
         5,
         "--max-type-observations",
         help="Max observations sampled per uses_type edge in the pack",
+    ),
+    type_depth: int = typer.Option(
+        1,
+        "--type-depth",
+        help=(
+            "uses_type depth for context packs (default 1 = direct only; "
+            "depth > 1 adds transitive type_*_closure sections)"
+        ),
     ),
 ):
     """Assemble and print (or save) a context pack for the given symbol."""
@@ -406,6 +417,12 @@ def pack(
         max_type_edges = 0
     if max_type_observations < 0:
         max_type_observations = 0
+    if isinstance(type_depth, bool) or not isinstance(type_depth, int) or type_depth < 1:
+        typer.secho(
+            f"--type-depth must be a positive integer, got {type_depth!r}",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(2)
 
     try:
         data = load_byog(graph)
@@ -782,6 +799,125 @@ def pack(
             ]
             pack["type_user_truncated"] = len(incoming) > len(in_slice)
             pack["type_user_total"] = len(incoming)
+
+    # Transitive uses_type closure sections (consumer-only). Default
+    # type_depth=1 keeps pack JSON byte-identical to the direct-only shape.
+    if type_depth > 1:
+        from byog_graph import compute_uses_type_closure  # type: ignore
+
+        uses_by_id: Dict[str, Dict[str, Any]] = {}
+        if len(rels) > 0 and "type" in rels.columns:
+            for _, row in rels[rels["type"].astype(str) == "uses_type"].iterrows():
+                raw_id = row.get("id")
+                # Validation happens in compute_uses_type_closure(). Do not
+                # coerce malformed IDs here: pd.NA, for example, cannot be
+                # truth-tested and must reach the controlled fail-closed path.
+                if isinstance(raw_id, str) and raw_id and raw_id not in uses_by_id:
+                    uses_by_id[raw_id] = row.to_dict()
+
+        def _closure_section(direction: str) -> Optional[Dict[str, Any]]:
+            closure = compute_uses_type_closure(
+                rels,
+                symbol_title,
+                direction=direction,
+                max_depth=type_depth,
+                max_nodes=max_type_edges,
+                max_edges=max_type_edges,
+            )
+            if (
+                int(closure.get("n_edges_total") or 0) == 0
+                and int(closure.get("n_nodes_total") or 0) <= 1
+            ):
+                return None
+            # Preserve a one-to-one correspondence with closure["nodes"]. A
+            # dangling endpoint or duplicate entity title is corrupt graph
+            # state, but silently dropping/duplicating it here would make the
+            # returned counts and truncation flags dishonest.
+            type_nodes: List[Dict[str, Any]] = []
+            for closure_node in closure.get("nodes") or []:
+                title = str(closure_node.get("title"))
+                depth = int(closure_node.get("depth") or 0)
+                if len(ents) > 0 and "title" in ents.columns:
+                    matches = ents[ents["title"].astype(str) == title]
+                else:
+                    matches = ents.iloc[0:0]
+                if len(matches) != 1:
+                    type_nodes.append(
+                        {
+                            "title": title,
+                            "depth": depth,
+                            "entity_status": "missing" if len(matches) == 0 else "ambiguous",
+                            "entity_match_count": int(len(matches)),
+                            "text": "",
+                            "truncated": False,
+                        }
+                    )
+                    continue
+                dep = matches.iloc[0]
+                tu_refs = [str(x) for x in _to_list(dep.get("text_unit_ids"))]
+                raw_text = ""
+                if tu_refs and len(tus) > 0:
+                    tmask = tus["id"].astype(str).isin(tu_refs)
+                    if tmask.any():
+                        raw_text = str(tus[tmask].iloc[0].get("text", ""))
+                dep_text, dep_truncated = truncate_text(raw_text, max_text_chars)
+                type_nodes.append(
+                    {
+                        "title": _json_safe(dep.get("title")),
+                        "type": _json_safe(dep.get("type")),
+                        "depth": depth,
+                        "source_file": _json_safe(dep.get("source_file")),
+                        "span": _json_safe(dep.get("span")),
+                        "description": _json_safe(dep.get("description")),
+                        "text": dep_text,
+                        "truncated": dep_truncated,
+                    }
+                )
+            compact_edges: List[Dict[str, Any]] = []
+            for edge in closure.get("edges") or []:
+                rid = str(edge.get("id") or "")
+                raw_rel = uses_by_id.get(rid)
+                if raw_rel is None:
+                    # This cannot occur when closure and payloads use the same
+                    # dataframe, but keep the corruption explicit if that
+                    # invariant changes in a future refactor.
+                    compact = {
+                        "id": rid,
+                        "source": edge.get("source"),
+                        "target": edge.get("target"),
+                        "type": "uses_type",
+                        "relationship_status": "missing",
+                    }
+                else:
+                    compact = compact_relationship(
+                        raw_rel, max_type_observations=max_type_observations
+                    )
+                compact["depth"] = int(edge.get("depth") or 0)
+                compact_edges.append(compact)
+            return {
+                "root": closure.get("root"),
+                "direction": direction,
+                "max_depth": type_depth,
+                "nodes": type_nodes,
+                "edges": compact_edges,
+                "n_nodes_total": int(closure.get("n_nodes_total") or 0),
+                "n_edges_total": int(closure.get("n_edges_total") or 0),
+                "n_nodes_returned": len(type_nodes),
+                "n_edges_returned": len(compact_edges),
+                "nodes_truncated": bool(closure.get("nodes_truncated")),
+                "edges_truncated": bool(closure.get("edges_truncated")),
+            }
+
+        try:
+            dep_section = _closure_section("dependencies")
+            if dep_section is not None:
+                pack["type_dependency_closure"] = dep_section
+            user_section = _closure_section("users")
+            if user_section is not None:
+                pack["type_user_closure"] = user_section
+        except ValueError as e:
+            typer.secho(str(e), fg=typer.colors.RED, err=True)
+            raise typer.Exit(2) from e
 
     packed_texts = []
     for t in texts[:10]:

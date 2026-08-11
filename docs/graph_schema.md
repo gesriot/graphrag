@@ -293,15 +293,19 @@ When `scripts/index_c.py --clang-type-uses` is enabled (default **off**),
 | --- | --- |
 | `ByogGraph.types_used_by(symbol)` | Sorted unique outgoing `uses_type` target titles |
 | `ByogGraph.type_users(symbol)` | Sorted unique incoming `uses_type` source titles |
-| CLI | `graph_query.py types-used-by` / `type-users`; same via `graphrag_code.py`; both support optional `--json` |
-| Context pack (outgoing) | `type_dependencies` (compact target entities + truncated text) and `type_dependency_edges` |
-| Context pack (incoming) | `type_user_edges` |
-| Evidence bounding | Defaults: 20 edges/direction, 5 observations/edge; sample + truncation counts; no unbounded raw observations JSON; malformed legacy JSON and declared/decoded count disagreements are surfaced without invented samples |
+| `ByogGraph.type_closure(symbol, …)` | Bounded cycle-safe BFS over **only** `uses_type` (directions: `dependencies` / `users` / `both`); min depths; self-edges as evidence without node duplication; caps truncate **returned** lists while `n_*_total` stay exact within `max_depth`; malformed rows or duplicate relationship IDs fail closed |
+| CLI | `graph_query.py types-used-by` / `type-users` / `type-closure`; same via `graphrag_code.py` (delegation; human + `--json` parity); negative limits / bad directions / malformed `uses_type` rows exit non-zero |
+| Context pack (outgoing, depth 1) | `type_dependencies` + `type_dependency_edges` (+ totals/truncated) |
+| Context pack (incoming, depth 1) | `type_user_edges` (+ totals/truncated) |
+| Context pack (depth > 1) | Adds `type_dependency_closure` / `type_user_closure` with per-node min depth, bounded entity text, compact edge evidence, exact totals and truncation flags; default `--type-depth 1` keeps pack JSON byte-identical to direct-only; dangling or non-unique entity endpoints retain one explicit `missing` / `ambiguous` node payload rather than falsifying returned counts |
+| Evidence bounding | Defaults: 20 edges/direction (also 20 returned closure-node payloads when depth > 1), 5 observations/edge; sample + truncation counts; no unbounded raw observations JSON; malformed legacy JSON and declared/decoded count disagreements are surfaced without invented samples |
 | Neighbor cap | Type sections are built from the full relationship set, not the capped 30-neighbor list |
 
-Call-graph queries (`callers` / `callees` / `impact`) never traverse `uses_type`.
-Graphs without `uses_type` edges return empty query lists and omit the
-type_* pack keys (byte-identical pack shape aside from docs/pins).
+Call-graph queries (`callers` / `callees` / `impact` / `dependency_order`) never
+traverse `uses_type`. Closure never traverses `calls`, `contains`,
+`depends_on`, `includes`, or `uses_data`. Graphs without `uses_type` edges
+return empty query lists and omit the type_* pack keys (byte-identical pack
+shape at default depth aside from docs/pins).
 
 **Persisted integrity audit (read-only):**
 `scripts/c_clang_type_use_graph_audit.py` validates already-published

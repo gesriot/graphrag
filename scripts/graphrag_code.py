@@ -32,6 +32,12 @@ SCRIPTS = Path(__file__).resolve().parent
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
+from byog_graph import (  # type: ignore  # noqa: E402
+    DEFAULT_TYPE_CLOSURE_MAX_DEPTH,
+    DEFAULT_TYPE_CLOSURE_MAX_EDGES,
+    DEFAULT_TYPE_CLOSURE_MAX_NODES,
+)
+
 app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
@@ -223,6 +229,40 @@ def type_users(
     _delegate("graph_query.py", args)
 
 
+@app.command("type-closure")
+def type_closure(
+    symbol: str = typer.Argument(...),
+    graph: Path = _graph_opt(),
+    direction: str = typer.Option(
+        "dependencies",
+        "--direction",
+        help="dependencies (outgoing), users (incoming), or both",
+    ),
+    max_depth: int = typer.Option(DEFAULT_TYPE_CLOSURE_MAX_DEPTH, "--max-depth"),
+    max_nodes: int = typer.Option(DEFAULT_TYPE_CLOSURE_MAX_NODES, "--max-nodes"),
+    max_edges: int = typer.Option(DEFAULT_TYPE_CLOSURE_MAX_EDGES, "--max-edges"),
+    json_out: bool = typer.Option(False, "--json"),
+):
+    """Bounded cycle-safe transitive uses_type closure (graph_query.py type-closure)."""
+    args = [
+        "type-closure",
+        symbol,
+        "--graph",
+        str(graph),
+        "--direction",
+        direction,
+        "--max-depth",
+        str(max_depth),
+        "--max-nodes",
+        str(max_nodes),
+        "--max-edges",
+        str(max_edges),
+    ]
+    if json_out:
+        args.append("--json")
+    _delegate("graph_query.py", args)
+
+
 @app.command("neighbors")
 def neighbors(
     symbol: str = typer.Argument(...),
@@ -317,12 +357,20 @@ def context_pack(
     max_type_edges: int = typer.Option(
         20,
         "--max-type-edges",
-        help="Max uses_type edges per direction in the pack (default 20)",
+        help=(
+            "Max uses_type edges per direction and, for transitive sections, "
+            "returned closure-node payloads (default 20)"
+        ),
     ),
     max_type_observations: int = typer.Option(
         5,
         "--max-type-observations",
         help="Max observations sampled per uses_type edge (default 5)",
+    ),
+    type_depth: int = typer.Option(
+        1,
+        "--type-depth",
+        help="uses_type depth (default 1 = direct only; >1 adds type_*_closure)",
     ),
     json_out: bool = typer.Option(
         False,
@@ -347,6 +395,8 @@ def context_pack(
         str(max_type_edges),
         "--max-type-observations",
         str(max_type_observations),
+        "--type-depth",
+        str(type_depth),
     ]
     if full_text:
         args.append("--full-text")
@@ -386,6 +436,20 @@ def context_pack(
         print(f"type_deps   : {len(pack.get('type_dependencies') or [])}")
     if pack.get("type_user_edges") is not None:
         print(f"type_users  : {len(pack.get('type_user_edges') or [])}")
+    if pack.get("type_dependency_closure") is not None:
+        tdc = pack["type_dependency_closure"] or {}
+        print(
+            f"type_dep_cl : nodes={tdc.get('n_nodes_returned')}/"
+            f"{tdc.get('n_nodes_total')} edges={tdc.get('n_edges_returned')}/"
+            f"{tdc.get('n_edges_total')} depth={tdc.get('max_depth')}"
+        )
+    if pack.get("type_user_closure") is not None:
+        tuc = pack["type_user_closure"] or {}
+        print(
+            f"type_usr_cl : nodes={tuc.get('n_nodes_returned')}/"
+            f"{tuc.get('n_nodes_total')} edges={tuc.get('n_edges_returned')}/"
+            f"{tuc.get('n_edges_total')} depth={tuc.get('max_depth')}"
+        )
     if pack.get("uncertain_calls") is not None:
         print(f"uncertain   : {len(pack.get('uncertain_calls') or [])}")
     print("(full pack: re-run with --json)")

@@ -110,11 +110,13 @@ The published graph now also contains the co-located golden runner
   relationship IDs/endpoints/types are preserved. Independent
   `extra_manifest["clang_type_uses"]` block. Confidence is
   configuration-relative only. Query via `types-used-by` /
-  `type-users`; context packs expose bounded type-dependency evidence
-  (e.g. `ini:ini_parse` → `ini:ini_handler`). Read-only integrity:
-  `scripts/c_clang_type_use_graph_audit.py` validates persisted edges
-  without Clang re-run (legacy/off default graphs pass; enabled
-  temporary snapshots with 8 edges pass; corruption fails closed).
+  `type-users` / bounded `type-closure`; context packs expose bounded
+  type-dependency evidence (e.g. `ini:ini_parse` → `ini:ini_handler`)
+  and optional multi-hop `type_*_closure` when `--type-depth > 1`.
+  Read-only integrity: `scripts/c_clang_type_use_graph_audit.py`
+  validates persisted edges without Clang re-run (legacy/off default
+  graphs pass; enabled temporary snapshots with 8 edges pass;
+  corruption fails closed).
 - `audit_call_edges`: 38 calls, structural pass rate 1.0, 0 anomalies,
   0 dangling targets, 0 semantic suspicions.
 - The **library** subgraph (ini.c/ini.h) is 15 entities and 17 deterministic

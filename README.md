@@ -113,10 +113,18 @@ flags on `scripts/index_c.py`:
   type-use audit’s `matched_internal` rows only (one edge per owner/target
   entity-id pair; recursive self-edges allowed). Observation counts and edge
   counts differ; fail-closed residuals abort. Default off. When present, query
-  with `graph_query.py types-used-by` / `type-users` (or `graphrag_code.py`
-  equivalents); both CLI surfaces support `--json`. Context packs surface bounded
+  with `graph_query.py types-used-by` / `type-users` / `type-closure` (or
+  `graphrag_code.py` equivalents). Direct queries list one-hop titles;
+  `type-closure` is a bounded cycle-safe BFS over **only** `uses_type`
+  (`--direction dependencies|users|both`, `--max-depth` / `--max-nodes` /
+  `--max-edges`; caps truncate returned material while totals within depth
+  stay exact; malformed rows fail closed). Context packs surface bounded direct
   `type_dependencies` / `type_dependency_edges` / `type_user_edges` from the
-  full relationship set (not the 30-neighbor cap).
+  full relationship set (not the 30-neighbor cap). Default `--type-depth 1`
+  keeps pack JSON unchanged; depth > 1 adds `type_dependency_closure` /
+  `type_user_closure` with min depths and the same observation/text bounds.
+  Missing or non-unique closure endpoints remain explicit node payloads so
+  returned counts and truncation flags stay honest.
 
 When any non-empty combination of `--clang-signatures`, `--clang-calls`,
 `--clang-types`, and `--clang-type-uses` is enabled, `index_c` builds **one
