@@ -208,7 +208,11 @@ explicit skip and the final status says `PASS WITH SKIPS`.
   `cJSON:struct:cJSON` self-edge). Read-only integrity:
   `scripts/c_clang_type_use_graph_audit.py` (and C `published_graph_health`)
   validate persisted configured edges against the producer contract without
-  invoking Clang or rewriting graphs.
+  invoking Clang or rewriting graphs. Port gate: profile `type_context`
+  rebuilds disposable `output/port_gates/cjson/graph` with
+  `--clang-type-uses` and requires non-empty untruncated
+  `type_dependency_closure` for `cJSON:cJSON_Delete` (depth 2; existing
+  symbol coverage retained); published `byog_cjson` is not rewritten.
 
 ## C frontend result — clean on the first pass
 Unlike `inih`, cJSON does not fragment function bodies with `#if`/`#endif`, so the

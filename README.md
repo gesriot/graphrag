@@ -28,6 +28,9 @@ From the repository root, run the portable full-evidence gate:
 
 ```bash
 uv run python scripts/port_eval.py --all-gates --full
+# Context packs are fail-closed evidence: every requested pack must generate.
+# Optional C profile type_context (inih/cJSON) indexes disposable graphs with
+# --clang-type-uses and validates type_*_closure; never rewrites byog_*.
 ```
 
 It rebuilds disposable graphs under `output/port_gates/`, runs each declared

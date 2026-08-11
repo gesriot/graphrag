@@ -91,6 +91,25 @@
         "path": "byog_inih",
         "mode": "mutable"
       },
+      "symbols": [
+        "ini:ini_parse",
+        "ini:ini_parse_string",
+        "ini:ini_parse_stream"
+      ],
+      "type_context": {
+        "clang_type_uses": true,
+        "depth": 2,
+        "max_type_edges": 50,
+        "max_type_observations": 5,
+        "requirements": [
+          {
+            "symbol": "ini:ini_parse",
+            "direction": "dependencies",
+            "require_nonempty": true,
+            "allow_truncation": false
+          }
+        ]
+      },
       "checks": [
         {
           "name": "C graph and golden-oracle contract",
@@ -306,6 +325,20 @@
         "cJSON:cJSON_Delete",
         "runner:emit_raw"
       ],
+      "type_context": {
+        "clang_type_uses": true,
+        "depth": 2,
+        "max_type_edges": 50,
+        "max_type_observations": 5,
+        "requirements": [
+          {
+            "symbol": "cJSON:cJSON_Delete",
+            "direction": "dependencies",
+            "require_nonempty": true,
+            "allow_truncation": false
+          }
+        ]
+      },
       "checks": [
         {
           "name": "header-derived API audit",
