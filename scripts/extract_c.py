@@ -310,6 +310,335 @@ def _typedef_alias_names(type_def: Node) -> List[str]:
     return names
 
 
+# Field declarator wrappers (struct members). Never enter parameter_list or
+# nested type bodies (struct_specifier / enum_specifier / union).
+_FIELD_DECLARATOR_KINDS = frozenset(
+    {
+        "pointer_declarator",
+        "function_declarator",
+        "parenthesized_declarator",
+        "array_declarator",
+        "attributed_declarator",
+    }
+)
+
+
+def _field_declarator_name(node: Node) -> Optional[str]:
+    """Resolve one field name by walking only declarator structure.
+
+    Does not enter ``parameter_list`` or nested ``struct_specifier`` /
+    ``enum_specifier`` bodies. Empty ``field_identifier`` text (unnamed
+    bit-fields) returns ``""`` so callers can distinguish "no declarator"
+    (``None``) from "unnamed" (empty string).
+    """
+    current: Optional[Node] = node
+    while current is not None:
+        if current.type == "field_identifier":
+            raw = current.text.decode() if current.text is not None else ""
+            # Empty text is an unnamed bit-field placeholder.
+            return raw
+        if current.type == "identifier":
+            # Some tree-sitter-c versions emit identifier under declarators.
+            raw = current.text.decode() if current.text is not None else ""
+            if raw and raw not in _C_KEYWORDS:
+                return raw
+            return None
+        if current.type not in _FIELD_DECLARATOR_KINDS:
+            return None
+        nxt = current.child_by_field_name("declarator")
+        if nxt is not None:
+            current = nxt
+            continue
+        structural = [
+            child
+            for child in current.children
+            if child.type in _FIELD_DECLARATOR_KINDS
+            or child.type in {"field_identifier", "identifier"}
+        ]
+        if len(structural) == 1:
+            current = structural[0]
+            continue
+        return None
+    return None
+
+
+def _bitfield_width(clause: Node, src: bytes) -> Optional[int]:
+    """Parse `:N` bitfield_clause width when it is a simple integer literal."""
+    if clause.type != "bitfield_clause":
+        return None
+    for child in clause.children:
+        if child.type == "number_literal":
+            text = _text(src, child).strip()
+            try:
+                return int(text, 0)
+            except ValueError:
+                return None
+    return None
+
+
+@dataclass(frozen=True)
+class TypeShapeMember:
+    """Immutable direct member of a struct/enum declaration site.
+
+    No tree-sitter Node references. Nested record bodies are never flattened
+    into the parent inventory.
+    """
+
+    name: Optional[str]
+    order: int
+    form: str  # field | enumerator | unnamed_bitfield | anonymous | unsupported
+    is_bitfield: bool
+    bit_width: Optional[int]
+    line: Optional[int]
+    col0: Optional[int]
+    span: str
+    residual: Optional[str] = None
+
+
+def _direct_struct_fields(src: bytes, struct_node: Node) -> List[TypeShapeMember]:
+    """Collect only direct field_declaration members of a struct_specifier."""
+    body = None
+    for child in struct_node.children:
+        if child.type == "field_declaration_list":
+            body = child
+            break
+    if body is None:
+        return []
+    members: List[TypeShapeMember] = []
+    order = 0
+    for field in body.children:
+        if field.type != "field_declaration":
+            continue
+        # A field declaration can contain several declarators and a separate
+        # bitfield_clause after each one (``unsigned a:1, b:2``).  Keep the
+        # clause paired with the immediately preceding declarator instead of
+        # applying the last clause to every member in the declaration.
+        declarators: List[Tuple[Optional[Node], Optional[Node]]] = []
+        pending_declarator: Optional[int] = None
+        has_nested_type_body = False
+        for child in field.children:
+            if child.type == "bitfield_clause":
+                if (
+                    pending_declarator is not None
+                    and declarators[pending_declarator][1] is None
+                ):
+                    decl, _ = declarators[pending_declarator]
+                    declarators[pending_declarator] = (decl, child)
+                else:
+                    # Defensive support for grammars that omit the empty
+                    # field_identifier of an unnamed bit-field.
+                    declarators.append((None, child))
+                pending_declarator = None
+            elif child.type in _FIELD_DECLARATOR_KINDS or child.type in {
+                "field_identifier",
+                "identifier",
+            }:
+                declarators.append((child, None))
+                pending_declarator = len(declarators) - 1
+            elif child.type in {
+                "struct_specifier",
+                "enum_specifier",
+                "union_specifier",
+            }:
+                # Nested type as the field's type; may still have a declarator
+                # name on the field. Do not walk into nested field lists.
+                if any(
+                    gc.type in ("field_declaration_list", "enumerator_list")
+                    for gc in child.children
+                ):
+                    has_nested_type_body = True
+            # primitive_type / type_identifier / storage / comments / ; ignored
+
+        if not declarators:
+            # e.g. anonymous nested struct without a field name in some parses.
+            members.append(
+                TypeShapeMember(
+                    name=None,
+                    order=order,
+                    form="anonymous" if has_nested_type_body else "unsupported",
+                    is_bitfield=False,
+                    bit_width=None,
+                    line=field.start_point[0] + 1,
+                    col0=field.start_point[1],
+                    span=_span(field),
+                    residual=(
+                        "anonymous_member"
+                        if has_nested_type_body
+                        else "unsupported_member_form"
+                    ),
+                )
+            )
+            order += 1
+            continue
+
+        for decl, bitfield_clause in declarators:
+            width = (
+                _bitfield_width(bitfield_clause, src)
+                if bitfield_clause is not None
+                else None
+            )
+            is_bitfield = bitfield_clause is not None
+            name = _field_declarator_name(decl) if decl is not None else ""
+            location = decl if decl is not None else bitfield_clause
+            assert location is not None
+            if name is None:
+                members.append(
+                    TypeShapeMember(
+                        name=None,
+                        order=order,
+                        form="unsupported",
+                        is_bitfield=is_bitfield,
+                        bit_width=width,
+                        line=location.start_point[0] + 1,
+                        col0=location.start_point[1],
+                        span=_span(location),
+                        residual="unsupported_member_form",
+                    )
+                )
+            elif name == "":
+                members.append(
+                    TypeShapeMember(
+                        name=None,
+                        order=order,
+                        form="unnamed_bitfield",
+                        is_bitfield=True,
+                        bit_width=width,
+                        line=location.start_point[0] + 1,
+                        col0=location.start_point[1],
+                        span=_span(location),
+                        residual="unnamed_bitfield",
+                    )
+                )
+            else:
+                members.append(
+                    TypeShapeMember(
+                        name=name,
+                        order=order,
+                        form="field",
+                        is_bitfield=is_bitfield,
+                        bit_width=width,
+                        line=location.start_point[0] + 1,
+                        col0=location.start_point[1],
+                        span=_span(location),
+                        residual=None,
+                    )
+                )
+            order += 1
+    return members
+
+
+def _direct_enum_enumerators(src: bytes, enum_node: Node) -> List[TypeShapeMember]:
+    """Collect only direct enumerator children of an enum_specifier."""
+    body = None
+    for child in enum_node.children:
+        if child.type == "enumerator_list":
+            body = child
+            break
+    if body is None:
+        return []
+    members: List[TypeShapeMember] = []
+    order = 0
+    for child in body.children:
+        if child.type != "enumerator":
+            continue
+        name: Optional[str] = None
+        for part in child.children:
+            if part.type == "identifier":
+                raw = part.text.decode() if part.text is not None else ""
+                if raw and raw not in _C_KEYWORDS:
+                    name = raw
+                break
+        if name is None:
+            members.append(
+                TypeShapeMember(
+                    name=None,
+                    order=order,
+                    form="unsupported",
+                    is_bitfield=False,
+                    bit_width=None,
+                    line=child.start_point[0] + 1,
+                    col0=child.start_point[1],
+                    span=_span(child),
+                    residual="unsupported_member_form",
+                )
+            )
+        else:
+            members.append(
+                TypeShapeMember(
+                    name=name,
+                    order=order,
+                    form="enumerator",
+                    is_bitfield=False,
+                    bit_width=None,
+                    line=child.start_point[0] + 1,
+                    col0=child.start_point[1],
+                    span=_span(child),
+                    residual=None,
+                )
+            )
+        order += 1
+    return members
+
+
+def collect_type_shape_members_at_site(
+    package_dir: Path,
+    *,
+    source_path: str,
+    entity_kind: str,
+    line: int,
+    col0: int,
+) -> Tuple[Optional[str], List[TypeShapeMember]]:
+    """Locate the exact type declaration site and inventory direct members.
+
+    Returns ``(error, members)`` where ``error`` is a residual code when the
+    site cannot be selected honestly (``site_not_found``, ``kind_mismatch``,
+    ``io_error``). Members never include nested record bodies' fields.
+
+    Does not mutate the graph extractor or change canonical entity spans.
+    """
+    package_dir = Path(package_dir).resolve()
+    if entity_kind not in {"struct", "enum"}:
+        return "kind_mismatch", []
+    if (
+        isinstance(line, bool)
+        or not isinstance(line, int)
+        or line < 1
+        or isinstance(col0, bool)
+        or not isinstance(col0, int)
+        or col0 < 0
+    ):
+        return "site_not_found", []
+    if not isinstance(source_path, str) or not source_path or Path(source_path).is_absolute():
+        return "site_not_found", []
+    abs_path = (package_dir / source_path).resolve()
+    try:
+        abs_path.relative_to(package_dir)
+    except ValueError:
+        return "site_not_found", []
+    if not abs_path.is_file():
+        return "site_not_found", []
+    try:
+        src = abs_path.read_bytes()
+    except OSError:
+        return "io_error", []
+
+    parser = _parser()
+    tree = parser.parse(src)
+    want_type = "struct_specifier" if entity_kind == "struct" else "enum_specifier"
+    matches: List[Node] = []
+    for node in _walk(tree.root_node):
+        if node.type != want_type:
+            continue
+        if node.start_point[0] + 1 == line and node.start_point[1] == col0:
+            matches.append(node)
+    if len(matches) != 1:
+        return "site_not_found", []
+    node = matches[0]
+    if entity_kind == "struct":
+        return None, _direct_struct_fields(src, node)
+    return None, _direct_enum_enumerators(src, node)
+
+
 @dataclass(frozen=True)
 class _SymbolCandidate:
     """One discovered symbol declaration before title assignment."""

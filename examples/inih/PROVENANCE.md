@@ -120,6 +120,10 @@ The published graph now also contains the co-located golden runner
   disposable `output/port_gates/inih/graph` with `--clang-type-uses`
   and requires non-empty untruncated `type_dependency_closure` for
   `ini:ini_parse` (depth 2); published `byog_inih` is not rewritten.
+- **Type-shape audit (diagnostic):** configured type-declaration matches are
+  typedef-only under the default compile DB, so shape owners classified = 0
+  (no struct/enum shapes to compare). Outside-package residuals remain
+  observation-only. Not ABI/layout; no graph mutation.
 - `audit_call_edges`: 38 calls, structural pass rate 1.0, 0 anomalies,
   0 dangling targets, 0 semantic suspicions.
 - The **library** subgraph (ini.c/ini.h) is 15 entities and 17 deterministic

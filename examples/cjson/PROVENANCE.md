@@ -213,6 +213,11 @@ explicit skip and the final status says `PASS WITH SKIPS`.
   `--clang-type-uses` and requires non-empty untruncated
   `type_dependency_closure` for `cJSON:cJSON_Delete` (depth 2; existing
   symbol coverage retained); published `byog_cjson` is not rewritten.
+- **Type-shape audit (diagnostic):** for the three matched named structs
+  (`cJSON`, `cJSON_Hooks`, `internal_hooks`), ordered direct field names
+  match tree-sitter at the configured site (`matched_shape=3`, shape
+  mismatch buckets 0). Nested bodies are not flattened. Not ABI/layout.
+  No graph mutation.
 
 ## C frontend result — clean on the first pass
 Unlike `inih`, cJSON does not fragment function bodies with `#if`/`#endif`, so the

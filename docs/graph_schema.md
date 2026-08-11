@@ -334,6 +334,17 @@ published graphs; legacy/default-off roots continue to pass.
 This is configuration-derived type-use *evidence* — not layout/ABI proof,
 multi-config coverage, or points-to analysis.
 
+#### Type-shape audit (diagnostic only; not published)
+
+`scripts/c_clang_type_shape_audit.py` inventories **direct** struct fields and
+enum enumerators for owners already matched by the type-declaration audit.
+Hard equality is **ordered member names only**. Clang type spellings, enum
+integer values, and bit-field widths are residual evidence fields — never
+size, alignment, offsets, calling convention, or Rust/FFI representation
+claims. Typedef aliases are not independent shapes. Nested record bodies are
+not flattened into parents. No graph entities, relationships, overlay flags,
+or manifest blocks are produced.
+
 **Shared out of scope:** multi-config coverage, MSVC/wrappers/response files
 (fail closed), system/outside endpoints after filtering, production C/C++
 completeness. Snapshot manifests record separate `compiler_dependencies`,

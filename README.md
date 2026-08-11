@@ -185,8 +185,16 @@ modules, plugins, and PCH fail explicitly. See
   Shared producer-contract helpers live in `c_clang_type_uses.py`
   (`relationship_id`, `validate_persisted_type_use_overlay`). Published C
   graph health also runs this pure check without changing extractor comparison.
+- `scripts/c_clang_type_shape_audit.py` — **diagnostic type-shape audit** for
+  package-local named complete structs/enums already matched by the
+  type-declaration audit. Compares **ordered direct member names** (fields /
+  enumerators) between Clang and tree-sitter at the exact configured site.
+  Raw qualType, enum values, and bit-field widths are evidence only — **not**
+  size/alignment/offset/ABI/layout/FFI claims. No BYOG mutation, no
+  `index_c` flag, no graph edges. Exit 1 only for internal shape mismatch
+  buckets under `--fail-on-mismatch`.
 
-All four AST CLIs remain available (each captures once internally). They are
+AST audit CLIs remain available (each captures once internally). They are
 **Clang only** (`cc` accepted only when `--version` proves Clang/Apple Clang).
 None is points-to analysis, layout/ABI proof, multi-config coverage, or
 production C/C++ completeness.
