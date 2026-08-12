@@ -1,4 +1,4 @@
-# Provenance — vendored `sqlparse` (Phase 5 scale experiment)
+# Provenance – vendored `sqlparse` (Phase 5 scale experiment)
 
 First large, multi-package scale target (Plan Phase 5). Earlier targets were 1-3
 files / a single class; sqlparse is a real ~4.1k-LOC project with nested
@@ -6,12 +6,12 @@ sub-packages (`engine/`, `filters/`), exercising cross-module/cross-package
 resolution at scale rather than one-file complexity.
 
 ## Source
-- Package: `sqlparse` 0.5.5 (PyPI) — a non-validating SQL parser/formatter.
+- Package: `sqlparse` 0.5.5 (PyPI) – a non-validating SQL parser/formatter.
 - Upstream: https://github.com/andialbrecht/sqlparse
 - Retrieved: 2026-06-18 from the PyPI wheel `sqlparse-0.5.5-py3-none-any.whl`.
 - Pure Python, no runtime dependencies.
 
-## License — gate step 1 (captured)
+## License – gate step 1 (captured)
 - **BSD-3-Clause** (`License :: OSI Approved :: BSD License`). Full text in `LICENSE` (verbatim).
 
 ## Common evidence gate
@@ -34,7 +34,7 @@ for the complete manifest and tool-skip policy.
    pipeline) to port end-to-end with a differential SQL corpus.
 
 ## Scale audit result
-- Snapshot: `byog_sqlparse/snapshots/20260618-151436-ad7b5954` — **no longer
+- Snapshot: `byog_sqlparse/snapshots/20260618-151436-ad7b5954` – **no longer
   on disk.** Routine `keep_last=5` retention deleted it on 2026-07-28 when a
   cross-module resolver change republished `byog_sqlparse` twice and this
   snapshot became the sixth-oldest. It cannot be regenerated: the extractor
@@ -165,7 +165,7 @@ number.
 The nine misses are a different shape from JSONPatch's registry residuals:
 operator-protocol dispatch (`_TokenType.__contains__`, `__getattr__`,
 `TokenList.__str__`) and cross-module instance-method calls through the filter
-stack. Measuring a second package was worth it for that alone — JSONPatch's
+stack. Measuring a second package was worth it for that alone – JSONPatch's
 30/3/83 is not representative.
 
 ## Call-oracle recall composition (2026-07-31)
@@ -189,7 +189,7 @@ and one imported-subclass constructor whose executing body belongs to
 meaning of this recall: it is a workload construct mix, not a score comparable
 to JSONPatch or semantic-version without those categories.
 
-## Split behavior contract — gate step 2
+## Split behavior contract – gate step 2
 - Golden file: `tests/split/golden_split.json`.
 - Contract test: `tests/test_split_contract.py`.
 - Scope: `sqlparse.split(sql, strip_semicolon=...) -> list[str]`.

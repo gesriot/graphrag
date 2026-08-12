@@ -1,4 +1,4 @@
-# Phase 7 write-up — what worked, what did not, why the graph is still useful
+# Phase 7 write-up – what worked, what did not, why the graph is still useful
 
 **Audience:** a reader outside this project. This is the entry document for Phase
 7: what the system is, what the ablation series measured, and what the evidence
@@ -27,28 +27,28 @@ complete static semantics or a proof that every high-confidence edge is correct.
 It is not a claim that generic LLM entity extraction over raw text recovers
 precise call structure. The intended path is:
 
-1. **Deterministic extraction** — tree-sitter (and language-specific AST
+1. **Deterministic extraction** – tree-sitter (and language-specific AST
    resolution) for Python (`scripts/extract_python.py`, `scripts/index_python.py`)
    and C (`scripts/extract_c.py`, `scripts/index_c.py`).
-2. **BYOG interchange** — GraphRAG-compatible parquet:
+2. **BYOG interchange** – GraphRAG-compatible parquet:
    `entities` / `relationships` / `text_units`, plus `call_observations` for
    weak or ambiguous calls. Snapshots under a graph root (`current` +
    `snapshots/`). See [Plan.md](Plan.md) §2 and the BYOG helpers in
    `scripts/byog_graph.py`.
-3. **Provenance and confidence** — edges and nodes carry source location,
+3. **Provenance and confidence** – edges and nodes carry source location,
    extractor identity, confidence, and `is_deterministic` so a human or agent
    can tell hard fact from observation.
-4. **Graph-side gate** — `scripts/audit_call_edges.py`: structural pass rate of
+4. **Graph-side gate** – `scripts/audit_call_edges.py`: structural pass rate of
    `calls` edges, dangling targets, semantic-suspicion heuristics (including an
    import-aware check), and a seeded precision sample.
-5. **Local queries and context packs** — `scripts/graph_query.py` (callers,
+5. **Local queries and context packs** – `scripts/graph_query.py` (callers,
    callees, neighbors, impact, dependency order, symbol, observations) and
    `scripts/context_pack.py` (entity + neighbors + text units + first-class
    `uses_data` / `data_dependencies` when present).
-6. **Golden-first porting gate** — before Rust: license/provenance, a golden
+6. **Golden-first porting gate** – before Rust: license/provenance, a golden
    contract the **reference language** already passes, then a clean graph audit,
    then porting. Recorded in [Plan.md](Plan.md) (“Porting gate”).
-7. **End-to-end harness** — `scripts/port_eval.py`: graph quality → context packs
+7. **End-to-end harness** – `scripts/port_eval.py`: graph quality → context packs
    → `cargo fmt/check/test/run` → golden contract coverage → `manual_fix_count`
    → `OVERALL PASS`.
 
@@ -94,11 +94,11 @@ limits, or that the graph caused the success versus raw prompting.
 
 **What it does not mean:** that any of these ports would have failed without a
 graph; that full library APIs were ported; that C/C++ production migration is
-ready (clang-accurate macros/types, multi-config builds, full ABI — still open
+ready (clang-accurate macros/types, multi-config builds, full ABI – still open
 per [Plan.md](Plan.md)); or that the Microsoft “code4llm” demo was reproduced
 (see §1.4).
 
-### 1.3 Scale snapshot (sqlparse — the Phase 5 scale target)
+### 1.3 Scale snapshot (sqlparse – the Phase 5 scale target)
 
 From [PHASE5_REPORT.md](PHASE5_REPORT.md) and [Plan.md](Plan.md) (sqlparse 0.5.5):
 
@@ -126,7 +126,7 @@ two snapshots and both numbers are correct for the one they describe.
 Quote the baseline when citing Phase 5 evidence and the current index when
 reporting a live audit; do not silently mix them.
 
-### 1.3b Scale snapshot (cJSON — Phase 6 ownership + mutation graph)
+### 1.3b Scale snapshot (cJSON – Phase 6 ownership + mutation graph)
 
 From [examples/cjson/PROVENANCE.md](examples/cjson/PROVENANCE.md) and [Plan.md](Plan.md):
 
@@ -135,7 +135,7 @@ The cJSON BYOG has two load-bearing scopes. Quote the one the claim needs.
 | scope | entities | relationships | calls | observations | |
 |---|---:|---:|---:|---:|---|
 | Full graph **current** (`20260726-040744`, library + mutation golden runner) | 145 | 637 | **495** | 144 | live audit / `port_eval` graph stage / `doc_claims` `cjson_graph_calls` |
-| Library subgraph only (`cJSON:` → `cJSON:`) | 125 | — | **188** | — | ownership and ported-API claims |
+| Library subgraph only (`cJSON:` → `cJSON:`) | 125 | – | **188** | – | ownership and ported-API claims |
 | Pre-mutation-runner snapshot (bootstrap / provenance-stamp era) | 131 | 367 | **239** | 125 | historical; ownership slice before mutation traces |
 
 The +14 entities / +256 calls from 239 → 495 are entirely
@@ -149,15 +149,15 @@ library).
 [Plan.md](Plan.md) §1 is careful: Microsoft GraphRAG is open source; the specific
 “code4llm” demo and internal code-processing infrastructure shown in talks are
 **not** publicly released (community issue closed as not planned). This project
-implements a **public related pattern** — deterministic code graph + agents +
-verification — it does **not** claim to have reproduced the talk demo, its
+implements a **public related pattern** – deterministic code graph + agents +
+verification – it does **not** claim to have reproduced the talk demo, its
 capabilities, or any internal Microsoft system. Match that care when citing this
 work.
 
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`948 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`1006 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 **Live re-check (2026-07-26):** `538 passed, 2 xfailed`.
@@ -206,7 +206,7 @@ porting advantage over raw source.
 **measurable advantage** over handing it the raw source alone (capability and/or
 efficiency).
 
-**Result:** **not demonstrated** for the class of target this series used —
+**Result:** **not demonstrated** for the class of target this series used –
 bounded, statically structured, single-entry-point library slices. After four
 pre-registered attempts, the accumulated evidence **argues against** that claim
 for this class ([PHASE7_ABLATION.md](PHASE7_ABLATION.md), series closed
@@ -217,9 +217,9 @@ A reader does not need the full ablation log to take away the finding:
 > Ablations did not demonstrate that deterministic graph context improves
 > cold-agent porting accuracy over raw source for bounded, clean benchmark
 > slices. The graph remains valuable as an auditability, provenance,
-> adequacy-gating, and context-assembly discipline — not as a measured accuracy
+> adequacy-gating, and context-assembly discipline – not as a measured accuracy
 > multiplier.  
-> — [PHASE7_ABLATION.md](PHASE7_ABLATION.md), “Series closed”
+> – [PHASE7_ABLATION.md](PHASE7_ABLATION.md), “Series closed”
 
 ### 2.2 Four experiments (summary only)
 
@@ -230,7 +230,7 @@ Full tables, kits, and preregistration: [PHASE7_ABLATION.md](PHASE7_ABLATION.md)
 | Experiment | Target | Design intent | Headline outcome |
 |---|---|---|---|
 | **v1** | `sqlparse.split` (familiar, multi-file) | First cold graph-vs-raw | Both arms high fidelity; graph **near-parity** with less material / tools; **efficiency**, not capability. Corrected protocol later: raw perfect, graph median 23/25 |
-| **jsonpatch** | `apply_patch` slice | Fresh target | **Not a fair capability run** — call graph under-captures registry + polymorphism; boundary documented instead of forced |
+| **jsonpatch** | `apply_patch` slice | Fresh target | **Not a fair capability run** – call graph under-captures registry + polymorphism; boundary documented instead of forced |
 | **v2** | `humanize.number` (fresh, N=3) | Less prior, multi-formatter | Near-parity (medians **59/59** graph vs **58/59** raw); **no** capability or efficiency win |
 | **v3** | `isodate.parse_duration` (N=3, **GPT-5.6**) | High raw-assembly cost (8 modules), adequacy-clean | Medians **24/24** both arms; raw perfect ×3; **no** capability or efficiency win |
 
@@ -240,7 +240,7 @@ efficiency win, so the closed-series conclusion is no measured graph advantage
 in accuracy or efficiency for the tested benchmark class. This correction does
 not alter the archived run record.
 
-**v3 detail (harness-measured scores)** — from
+**v3 detail (harness-measured scores)** – from
 [PHASE7_ABLATION.md](PHASE7_ABLATION.md):
 
 | arm | scores | median |
@@ -263,7 +263,7 @@ From the series conclusion in [PHASE7_ABLATION.md](PHASE7_ABLATION.md):
 benchmark was also small enough for the raw package to fit in the model’s
 context.** The targets tried are on the order of a few thousand LOC (or less)
 with one obvious entry point. “Raw-assembly cost” was *locating and wiring* code
-the model could still read in full — not *being unable to see the code*. This
+the model could still read in full – not *being unable to see the code*. This
 does not establish the same result for larger repositories or hard material
 budgets; it identifies the regime the closed experiment did not reach.
 
@@ -271,7 +271,7 @@ So the negative result is not “the graph is useless.” It is: **on these
 protocol runs, the graph arm did not improve the measured port outcome over the
 raw arm.**
 
-### 2.4 The jsonpatch boundary (not a failed ablation — a documented frontier)
+### 2.4 The jsonpatch boundary (not a failed ablation – a documented frontier)
 
 `examples/jsonpatch/PROVENANCE.md` and [PHASE7_ABLATION.md](PHASE7_ABLATION.md):
 after adding general resolver edges (chained constructors, same-file ctor/factory,
@@ -298,8 +298,8 @@ Decided explicitly in [PHASE7_ABLATION.md](PHASE7_ABLATION.md) (“Series closed
 - Searching further for a target “where the graph finally wins” would become
   result-hunting, not research.  
 - A true next experiment would be a **different protocol** (hard material budget,
-  tool-call / wall budgets, isolation so raw cannot pull the repo iteratively) —
-  pre-registered on its own terms — not another small slice.  
+  tool-call / wall budgets, isolation so raw cannot pull the repo iteratively) –
+  pre-registered on its own terms – not another small slice.
 - `charset-normalizer` is **not** drafted into that role-run: it remains a
   stress-test artifact, not a large ablation.
 
@@ -324,7 +324,7 @@ Every deterministic edge can be traced to a file/span and an extractor. Weak
 calls stay in `call_observations` instead of being promoted into high-confidence
 `calls`. `audit_call_edges` turns “does this graph look right?” into a
 **repeatable number** (pass rate, anomaly list, dangling list, seeded sample).
-That is useful whether or not an LLM is in the loop — for human review, CI gates,
+That is useful whether or not an LLM is in the loop – for human review, CI gates,
 and comparing graph versions over time.
 
 ### 3.2 Golden-first porting as a process
@@ -339,16 +339,16 @@ said it worked.” That process is independent of winning graph-vs-raw ablations
 Even though capability wins did not appear, the ablation harness forced **honest
 setup**:
 
-- **Adequacy specs** (`must_reach` / `must_exclude` / closure size) — e.g. isodate
+- **Adequacy specs** (`must_reach` / `must_exclude` / closure size) – e.g. isodate
   v3 parser-only: closure 16, 13/13, 0 leaked ([PHASE7_ISODATE_V3_PREREG.md](PHASE7_ISODATE_V3_PREREG.md);
   live adequacy re-check above).  
-- **Dry-prep / `audit` / `verify-fill`** — kit isolation, no golden leakage, no
+- **Dry-prep / `audit` / `verify-fill`** – kit isolation, no golden leakage, no
   absolute paths out of the kit, packed == packable(closure). Pre-run review of
   isodate caught real protocol bugs (wrong adequacy roots, `PROVENANCE.md` in
   raw kits, path leakage, underspecified normalization) **before** any N=3 result
   was published ([PHASE7_ISODATE_V3_PREREG.md](PHASE7_ISODATE_V3_PREREG.md)
   “Pre-run corrections”).  
-- **Recorded runs + `report`** — scores re-derivable; self-reported efficiency
+- **Recorded runs + `report`** – scores re-derivable; self-reported efficiency
   columns labelled as such (so a session-truncated self-report cannot be silently
   mixed with harness scores).
 
@@ -358,7 +358,7 @@ and **stop** a failed hypothesis.
 ### 3.4 Concrete general improvements the gates forced
 
 These are recorded as methodology wins in [PHASE7_ABLATION.md](PHASE7_ABLATION.md)
-and target provenance — they apply beyond the ablation that discovered them:
+and target provenance – they apply beyond the ablation that discovered them:
 
 | Improvement | Forced by | What it does |
 |---|---|---|
@@ -379,7 +379,7 @@ recorded run used less material and fewer tools for near-parity scores, but the
 corrected protocol did not establish an efficiency win
 ([PHASE7_ABLATION.md](PHASE7_ABLATION.md) v1 / corrected-v1). On smaller targets
 the same focus did not beat raw. Useful product interpretation: the graph is a
-**retrieval and scoping tool** for ports and reviews — not a measured accuracy
+**retrieval and scoping tool** for ports and reviews – not a measured accuracy
 or efficiency boost when the whole package already fits in context.
 
 ### 3.6 What remains a fair, non-inflated claim
@@ -414,12 +414,12 @@ or efficiency boost when the whole package already fits in context.
 2. **The headline hypothesis failed (for this class):** four ablations did not
    show a graph accuracy (or, after v1, efficiency) win over raw source.  
 3. **The graph is still worth building** as auditability, provenance, adequacy
-   gating, and focused context assembly — especially when you refuse to ship a
+   gating, and focused context assembly – especially when you refuse to ship a
    confounded number.
 
 ---
 
-## Appendix A — Live checks performed for this write-up
+## Appendix A – Live checks performed for this write-up
 
 | Check | Command | Result |
 |---|---|---|
@@ -432,7 +432,7 @@ or efficiency boost when the whole package already fits in context.
 Ablation N=3 scores and efficiency numbers were **not** re-run; they are taken
 from [PHASE7_ABLATION.md](PHASE7_ABLATION.md) and the archived v3 artifacts.
 
-## Appendix B — Where quantitative claims live
+## Appendix B – Where quantitative claims live
 
 | Claim family | Primary sources |
 |---|---|

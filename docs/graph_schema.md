@@ -13,8 +13,8 @@ We extend with code-specific columns (present on both entities and relationships
 - `source_file`: relative path in the original repo
 - `span`: either "line:col-line:col", "def foo", or byte range
 - `extractor`: "tree-sitter-python", "clang-ast", "manual", "llm-entity-v1", etc.
-- `confidence`: float [0,1] — 1.0 for deterministic parser facts
-- `is_deterministic`: bool — true when the fact can be re-derived from source without LLM
+- `confidence`: float [0,1] – 1.0 for deterministic parser facts
+- `is_deterministic`: bool – true when the fact can be re-derived from source without LLM
 
 ## Entity Types (code domain, start with these)
 - file
@@ -181,19 +181,26 @@ sites are never published as separate entities.
 #### Shared in-memory AST capture (execution only)
 
 When any of `--clang-signatures` / `--clang-calls` / `--clang-types` /
-`--clang-type-uses` are enabled, `index_c` creates one in-process AST capture
+`--clang-type-uses` / `--clang-type-shapes` are enabled, `index_c` creates one
+in-process AST capture
 (`scripts/c_clang_ast_capture.py`): load `compile_commands.json` once,
 fail-closed validate arguments/compiler identity, and run one Clang
-`-ast-dump=json` per compile entry. Function, call, type-declaration, and
-type-use builders consume that capture without re-invoking the compiler (shared
-intermediate audits are reused when multiple overlays need them). Any non-empty
-flag combination still costs **N** dumps for **N** entries (never 2N–4N). There
+`-ast-dump=json` per compile entry. Function, call, type-declaration,
+type-use, and type-shape builders consume that capture without re-invoking the
+compiler (shared intermediate audits are reused when multiple overlays need
+them: the type-declaration audit is built at most once and passed to both the
+type-use and type-shape builders, which validate it against the same capture,
+digest, and toolchain before reuse). Any non-empty
+flag combination still costs **N** dumps for **N** entries (never 2N–5N). There
 is **no** disk AST cache and AST roots never appear in manifests, parquet, or
 logs. Standalone `c_clang_ast_audit.py` / `c_clang_call_audit.py` /
-`c_clang_type_audit.py` / `c_clang_type_use_audit.py` CLIs remain available and
-each still capture once for their own run. Confidence boundaries and
+`c_clang_type_audit.py` / `c_clang_type_use_audit.py` /
+`c_clang_type_shape_audit.py` CLIs remain available and
+each still capture once for their own run, with byte-identical output whether
+or not a precomputed report is reused. Confidence boundaries and
 independent `clang_signatures` / `clang_calls` / `clang_types` /
-`clang_type_uses` manifest blocks are unchanged (no combined capture block).
+`clang_type_uses` / `clang_type_shapes` manifest blocks are unchanged (no
+combined capture block).
 
 #### C symbol identity (tree-sitter extractor)
 
@@ -202,7 +209,7 @@ collision-safe module key policy documented above. **Cross-kind collision
 within one module key:** when two or more of those kinds use the same bare C
 name, every colliding kind is titled `module_key:entity_kind:name` (no
 arbitrary legacy winner). Non-colliding symbols keep `module_key:name`.
-Same-kind redeclarations are deduplicated by `(module_key, kind, name)` —
+Same-kind redeclarations are deduplicated by `(module_key, kind, name)` –
 never by rendered title alone. Symbol entities also carry an authoritative
 `symbol_name` field (bare C name) so consumers need not re-parse qualified
 titles. `contains` relationship IDs stay `rel:contains:module_key:name` unless
@@ -331,25 +338,66 @@ manifest `n_facts` / `n_observations` cross-checks. Bounded anomaly samples
 retain exact totals. `published_graph_health.py` attaches this status for C
 published graphs; legacy/default-off roots continue to pass.
 
-This is configuration-derived type-use *evidence* — not layout/ABI proof,
+This is configuration-derived type-use *evidence* – not layout/ABI proof,
 multi-config coverage, or points-to analysis.
 
-#### Type-shape audit (diagnostic only; not published)
+#### Type-shape audit and optional `--clang-type-shapes` overlay
 
 `scripts/c_clang_type_shape_audit.py` inventories **direct** struct fields and
 enum enumerators for owners already matched by the type-declaration audit.
 Hard equality is **ordered member names only**. Clang type spellings, enum
-integer values, and bit-field widths are residual evidence fields — never
+integer values, and bit-field widths are residual evidence fields – never
 size, alignment, offsets, calling convention, or Rust/FFI representation
 claims. Typedef aliases are not independent shapes. Nested record bodies are
-not flattened into parents. No graph entities, relationships, overlay flags,
-or manifest blocks are produced.
+not flattened into parents. The audit CLI itself produces no graph entities,
+relationships, or manifest blocks.
+
+`--clang-type-shapes` (default off) publishes that evidence as `clang_shape_*`
+fields on **existing** tree-sitter `struct` / `enum` entities, using only
+`matched_shape` rows from the same builder (no second AST traversal, matcher,
+or compiler invocation). The type-declaration audit that supplies the owners is
+built once and passed in, so with `--clang-types` enabled as well it is not
+rebuilt.
+
+| Field | Meaning |
+| --- | --- |
+| `clang_shape_members_validated` | `true` only for a validated `matched_shape` row |
+| `clang_shape_fact_kind` / `clang_shape_extractor` | `configured_type_shape` / `clang-ast-json` |
+| `clang_shape_entity_kind` | `struct` or `enum` (matches the graph entity type) |
+| `clang_shape_member_count` | Number of ordered direct members |
+| `clang_shape_member_names` | Deterministic canonical JSON array of ordered direct member names (**the only hard equality**) |
+| `clang_shape_member_evidence` | Deterministic canonical JSON of per-member `qualType`, `desugaredQualType`, `enum_value`, `bit_width`, `is_bitfield`, `form`, `line`, `col0` – diagnostic evidence only |
+| `clang_shape_graph_canonical_span` | Canonical graph span of the decorated entity (unchanged by the overlay) |
+| `clang_shape_matched_site_span` / `_line` / `_col0` / `_is_canonical` | Configured declaration site actually matched |
+| `clang_shape_location_origin`, `clang_shape_entry_indices` | Location provenance and contributing compile entries |
+| `clang_shape_compiler_path` / `_id` / `_compilers` / `_compile_commands_digest` | Toolchain and configuration identity |
+| `clang_shape_confidence` / `clang_shape_is_deterministic` / `clang_shape_description` | Configuration-relative determinism boundary |
+
+Attachment is collision-safe and fail-closed: a row applies only when exactly
+one graph entity agrees on entity type, exact `tree_sitter_title`,
+`symbol_name`, package-relative source path, and canonical graph span, and only
+when the shape row and its type-declaration owner agree on kind, name, path,
+and matched site. Missing, non-unique, or diverging targets abort the whole
+overlay before any entity is touched (plan-then-mutate atomicity). Base entity
+IDs, titles, spans, `confidence`, `extractor`, and tree-sitter fields are never
+rewritten, and no entities, relationships, `uses_type` edges, alternate-site
+entities, or ABI/layout facts are created.
+
+Fail-closed residuals: `tree_sitter_only_members`, `clang_only_members`,
+`member_order_mismatch`, `duplicate_or_ambiguous_members`,
+`macro_location_unsupported`, `owner_unmatched`. Observation-only:
+`unsupported_member_form`, `outside_package_declarations` – they never create
+metadata and never abort the overlay, but their counts are recorded in the
+`clang_type_shapes` manifest block together with compiler identity, digest,
+compile-entry count, every bucket count, the number of decorated entities, the
+explicit confidence boundary, and the limitations (not ABI, not layout, not FFI
+proof, not Rust `repr` proof, not multi-config, not C++).
 
 **Shared out of scope:** multi-config coverage, MSVC/wrappers/response files
 (fail closed), system/outside endpoints after filtering, production C/C++
 completeness. Snapshot manifests record separate `compiler_dependencies`,
-`compiler_includes`, `clang_signatures`, `clang_calls`, `clang_types`, and
-`clang_type_uses` blocks with their applicable mode, compiler
+`compiler_includes`, `clang_signatures`, `clang_calls`, `clang_types`,
+`clang_type_uses`, and `clang_type_shapes` blocks with their applicable mode, compiler
 identity/identities, digest, fact/observation/TU counts, and residual counts;
 all carry an explicit `mode=off` block when disabled. Module/cache/plugin/PCH, response/config, and unrestricted
 `-Xclang` compile arguments fail closed for all compiler-backed adapters

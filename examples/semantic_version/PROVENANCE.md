@@ -1,4 +1,4 @@
-# Provenance — vendored `semantic_version` (third Python→Rust porting target)
+# Provenance – vendored `semantic_version` (third Python→Rust porting target)
 
 This is the **first genuinely external** porting target (mini_game and mini_lang
 were our own code). Vendored so indexing / golden / port are reproducible.
@@ -9,7 +9,7 @@ were our own code). Vendored so indexing / golden / port are reproducible.
 - Retrieved: 2026-06-16 from the PyPI wheel `semantic_version-2.10.0-py2.py3-none-any.whl`
 - Pure Python, no C extensions; `base.py` imports only stdlib (`functools`, `re`, `warnings`).
 
-## License — gate step 1 (captured)
+## License – gate step 1 (captured)
 - **BSD-2-Clause** (`License :: OSI Approved :: BSD License`). Full text in `LICENSE` (verbatim).
 - Redistribution permitted with the copyright notice retained, which this directory does.
 
@@ -21,16 +21,16 @@ golden contracts, then runs the Rust port-eval stages. See
 `examples/PORT_EVIDENCE.md` for the complete manifest and tool-skip policy.
 
 ## What was vendored / modified
-- `base.py` — **verbatim** upstream (1449 LOC). Contains the port target (`Version`)
+- `base.py` – **verbatim** upstream (1449 LOC). Contains the port target (`Version`)
   plus the v2-scope spec/range machinery (`SimpleSpec`, `NpmSpec`, `BaseSpec`, ...).
-- `__init__.py` — **adapted**: the upstream `importlib.metadata.version(...)` /
+- `__init__.py` – **adapted**: the upstream `importlib.metadata.version(...)` /
   `pkg_resources` lookup (needs the package pip-installed) is replaced with a static
   `__version__ = "2.10.0"`. Re-exports are unchanged.
-- `django_fields.py` — **omitted**: Django ORM integration, out of scope and would
+- `django_fields.py` – **omitted**: Django ORM integration, out of scope and would
   pull in Django (not pure-stdlib).
 
 ## Port scope
-- **v1 (complete):** `Version` — parse / stringify / compare / ordering / invalid
+- **v1 (complete):** `Version` – parse / stringify / compare / ordering / invalid
   inputs (with its identifier-comparison helpers plus `compare` / `validate`).
 - **v2a (complete):** `SimpleSpec` match / select / filter and invalid-spec
   behavior.

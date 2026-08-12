@@ -1,4 +1,4 @@
-# Provenance — vendored `charset-normalizer` (graph pipeline test target)
+# Provenance – vendored `charset-normalizer` (graph pipeline test target)
 
 First real-world heuristic + data-table-heavy pure-Python library chosen to exercise the deterministic graph + context-pack + golden-contract porting rails (beyond simple parsers and data structures).
 
@@ -8,7 +8,7 @@ First real-world heuristic + data-table-heavy pure-Python library chosen to exer
 - Retrieved: 2026-06-26 from shallow clone of main branch (commit at time of clone).
 - Pure Python implementation (core logic only; mypyc-accelerated wheels and hooks excluded for the graph target).
 
-## License — gate step 1 (captured)
+## License – gate step 1 (captured)
 - **MIT License**
 - Full text in `LICENSE` (verbatim copy from upstream).
 - Copyright © 2025 TAHRI Ahmed R. (and contributors).

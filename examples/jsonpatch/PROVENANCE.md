@@ -1,4 +1,4 @@
-# Provenance — vendored `jsonpatch` + `jsonpointer` (Phase 7 boundary case)
+# Provenance – vendored `jsonpatch` + `jsonpointer` (Phase 7 boundary case)
 
 Initially chosen as the v2 capability-ablation target: a fresh, less-familiar,
 multi-module Python component (`jsonpatch` depends on `jsonpointer`) with an
@@ -10,7 +10,7 @@ target after the mini-gate exposed a real closure boundary** (details below).
 - Upstream: github.com/stefankoegl/python-json-patch and python-json-pointer
   (vendored verbatim from `master`).
 
-## License — gate step 1 (captured)
+## License – gate step 1 (captured)
 - **Modified BSD (BSD-3-Clause)** for both; full texts in `LICENSE_jsonpatch` and
   `LICENSE_jsonpointer`.
 
@@ -37,17 +37,17 @@ target after the mini-gate exposed a real closure boundary** (details below).
 - After graph-frontier step 1, `byog_jsonpatch` remains at 104 entities and has
   222 relationships: 104 calls / 102 contains / 9 property / 7 uses_data, plus
   19 call observations; `audit_call_edges` remains pass_rate 1.0 with 0
-  anomalies/dangling/suspicions. (Observations later grew to 31 — see
+  anomalies/dangling/suspicions. (Observations later grew to 31 – see
   *Actionable candidates* below; entities, relationships and pass rate did not
   move.)
 
-## Closure-coverage finding (gate step 4 — BLOCKER for a fair ablation)
+## Closure-coverage finding (gate step 4 – BLOCKER for a fair ablation)
 The calls-closure from `apply_patch` reaches only **3 entities** and never reaches
 `jsonpointer` or the operation classes. Cause: jsonpatch is a
 registry+polymorphism architecture, which the deterministic *call* graph
 under-captures:
 - `JsonPatch.apply` has **zero resolved call edges**; its work is
-  `operation.apply(obj)` — a polymorphic call demoted to a weak observation.
+  `operation.apply(obj)` – a polymorphic call demoted to a weak observation.
 - Operations are dispatched through a **static registry**
   (`operations = MappingProxyType({'add': AddOperation, ...})`, jsonpatch.py:508).
   The registry is statically visible, but there is no edge from that data entity
@@ -58,7 +58,7 @@ under-captures:
 Implication: a calls-only context pack would starve the graph arm unfairly (it
 would lack the operations and the entire jsonpointer dependency that the raw arm
 has). Running the ablation in this state would measure the closure's gap, not
-graph-vs-raw — the same class of confound v1's spec bug taught us to avoid.
+graph-vs-raw – the same class of confound v1's spec bug taught us to avoid.
 
 This is also a real, honest result about the approach: the deterministic call
 graph captures static call structure well (sqlparse) but **under-captures
@@ -70,25 +70,25 @@ requires modeling, at minimum, import edges and static data->entity references
 blind spots as provenance (`dynamic_dependent` / `dynamic_reasons`) without
 demoting `is_deterministic` or adding/dropping edges. On the published
 `byog_jsonpatch` graph it flags:
-- `jsonpatch:JsonPatch._get_operation` — `registry_lookup:operations`,
+- `jsonpatch:JsonPatch._get_operation` – `registry_lookup:operations`,
   `call_through_dynamic_name:cls<…>`
-- `jsonpatch:JsonPatch.apply` — `registry_derived_iter:_ops`,
+- `jsonpatch:JsonPatch.apply` – `registry_derived_iter:_ops`,
   `polymorphic_call:operation.apply<…>`
 - the weak observation `JsonPatch.apply -> operation.apply`
 
 Context packs surface a top-level `dynamic_warning` (same shape as the C
-`preprocessor_warning`). Detection only — not resolution of the missing edges.
+`preprocessor_warning`). Detection only – not resolution of the missing edges.
 
 **Actionable candidates (same day):** reading the flag alone only told an agent
 that *some* implementations exist. The diagnostic now also emits weak
 `call_observations` with `reason=registry_candidate:operations['…']` naming
 each static table member (`AddOperation.apply`, `RemoveOperation.apply`, …) at
-confidence 0.35 — never as `calls` edges. Context packs expose them as
+confidence 0.35 – never as `calls` edges. Context packs expose them as
 `dynamic.dispatch_candidates` so a porter can open the right methods without
 resolver changes or pass-rate moves. On the published graph this is 12 new
 observations (19 → 31): six `.apply` targets for `JsonPatch.apply` and the six
 operation classes for `JsonPatch._get_operation`. Recall is deliberately narrow
-— only dict literals whose values are plain names resolve, so lambda-valued
+– only dict literals whose values are plain names resolve, so lambda-valued
 tables elsewhere (`isodate:STRF_DT_MAP`, `humanize:_TRANSLATIONS`) yield no
 candidates rather than guesses.
 
@@ -105,10 +105,10 @@ scored population are `n/a`, not 100%.
 |---|---|---:|---:|---:|---:|---:|---|
 | `jsonpatch` | `JsonPatch.operations` | 6 | 6 | 6 | 0 | 0 | Name values, fully resolved |
 | `semantic_version` | `BaseSpec.SYNTAXES` | 2 | 2 | **2** | 0 | 0 | **decorator registration** (`@BaseSpec.register_syntax`) |
-| `isodate` | `STRF_DT_MAP`, `STRF_D_MAP` | 25 | 0 | 0 | 0 | **25** | Lambda values — left missed |
-| `humanize` | `_TRANSLATIONS` | 1 | — | — | — | — | not a callable registry |
-| `semantic_version` | `SpecItem.KIND_ALIASES` | 2 | — | — | — | — | not a callable registry |
-| `charset_normalizer` | `UNICODE_RANGES_COMBINED` | 347 | — | — | — | — | not a callable registry |
+| `isodate` | `STRF_DT_MAP`, `STRF_D_MAP` | 25 | 0 | 0 | 0 | **25** | Lambda values – left missed |
+| `humanize` | `_TRANSLATIONS` | 1 | – | – | – | – | not a callable registry |
+| `semantic_version` | `SpecItem.KIND_ALIASES` | 2 | – | – | – | – | not a callable registry |
+| `charset_normalizer` | `UNICODE_RANGES_COMBINED` | 347 | – | – | – | – | not a callable registry |
 
 **Scored coverage on callable registries: 8/8 agree (jsonpatch 6 + SYNTAXES 2),
 0 disagreements; genuine residual miss = isodate's 25 lambdas.**
@@ -117,7 +117,7 @@ Decorator registration is statically tractable: a classmethod that does
 `cls.REG[key] = subclass`, used as `@Owner.register_*` on a class whose body
 sets a string key, emits the same `registry_candidate:` observations as a dict
 literal (e.g. `BaseSpec.parse` → `SimpleSpec` / `NpmSpec`). The oracle confirms
-those entries against the imported object — a planted wrong candidate is a
+those entries against the imported object – a planted wrong candidate is a
 disagreement. Independent discovery no longer lists `BaseSpec.SYNTAXES` as
 undetected.
 
@@ -129,7 +129,7 @@ Leaving 25 missed is the correct residual.
 
 False-positive history: an earlier measurement reported "375 missed"; 350 of
 those came from non-callable tables (`range`, `NullTranslations`, `str→str`).
-The probe already recorded value `kind` — runtime settles what is a registry.
+The probe already recorded value `kind` – runtime settles what is a registry.
 
 **Call-graph oracle (2026-07-28):** `scripts/call_graph_oracle.py` is the first
 measurement of whether published `calls` edges are *observed*, not merely
@@ -146,7 +146,7 @@ three disjoint counts (no single agreement numerator).
 | `humanize` (59 cases) | 80 / 42 | 9 | 9 | 0 | 33 |
 
 Of jsonpatch's 25 misses, eleven were cross-module `jsonpatch:* → jsonpointer:*`
-— a static `from jsonpointer import JsonPointer` binding the graph did not
+– a static `from jsonpointer import JsonPointer` binding the graph did not
 follow (PROVENANCE has named this modelling gap since the closure-coverage
 finding).
 
@@ -160,14 +160,14 @@ finding).
 | `humanize` | 124 / 42 | 9 | 9 | 0 | 33 | unique pairs unchanged |
 
 Cross-module residual after that step: **1** (`MoveOperation.apply →
-JsonPointer.to_last`, if/else `from_ptr` — left unresolved). The other eleven
+JsonPointer.to_last`, if/else `from_ptr` – left unresolved). The other eleven
 cross-module edges were trace-confirmed.
 
 **Registry-dispatch promotion (2026-07-30):** the six
 `JsonPatch.apply → *Operation.apply` targets (and six
 `_get_operation → *Operation` constructs) are **statically named** Name values
 in `JsonPatch.operations`, and the dispatch sites are labelled. Runtime
-`--vs-runtime` already agreed 6/6 on that table — that *justifies* promotion;
+`--vs-runtime` already agreed 6/6 on that table – that *justifies* promotion;
 extract time still requires the static Name binding so lambda/runtime-only
 members can never become edges.
 
@@ -196,7 +196,7 @@ an imported-type construction now targets both the class and its `__init__`, so
 the closure can enter the constructor body, and registry promotion follows the
 same-file MRO: the six operation classes define no `__init__` of their own
 (`AddOperation.__init__ is PatchOperation.__init__`), so `cls(operation)` earns
-one inherited-constructor edge — 13 promoted edges, not 12.
+one inherited-constructor edge – 13 promoted edges, not 12.
 
 | | confirmed | missed | unconfirmed | call rows |
 |---|---:|---:|---:|---:|
@@ -225,7 +225,7 @@ Adequacy (`jsonpatch_adequacy.json` from `apply_patch`):
 
 Still missing: `PatchOperation.apply` / `.path` / `.key`. The closure now reaches
 the `PatchOperation` class itself through `inherits`, but does not expand a class
-to its methods — `contains` is deliberately not a closure edge. `must_exclude`
+to its methods – `contains` is deliberately not a closure edge. `must_exclude`
 remains clean.
 
 **Inherited-member closure (2026-07-30).** A class still does not expand to its
@@ -257,7 +257,7 @@ reindexed for this step and `published_graph_health.py --check` reports 11
 PASS + 1 frozen exemption; the sqlparse pin `20260625-154143-8ce62d57` survived.
 
 A deleted published edge shows as missed; a fabricated edge shows as
-unconfirmed — verified end to end against a copied graph on disk, not only
+unconfirmed – verified end to end against a copied graph on disk, not only
 against the scoring function. Tracing overhead is negligible on these packages
 (<2s).
 
@@ -287,16 +287,16 @@ was measured against `scripts/ablation_specs/jsonpatch_adequacy.json`:
 These are general resolver wins (they help any Python graph), all with audit
 pass_rate 1.0 and the full suite green. But the apply-slice closure then **stalls
 exactly at `_ops -> _get_operation`**, which is `tuple(map(self._get_operation,
-self.patch))` — a method passed by value. Closure size from `apply_patch` is 5;
+self.patch))` – a method passed by value. Closure size from `apply_patch` is 5;
 it never reaches the operation registry, the operation classes, or `jsonpointer`.
 
 **Boundary conclusion (pre-registered go/no-go):** the remaining links are genuine
 higher-order / dynamic-dispatch / points-to problems, out of scope for the current
 deterministic resolver without dataflow analysis:
-- `map(self._get_operation, …)` — callable passed by value;
-- `cls = self.operations[op]; cls(op)` — dynamic instantiation via a registry value;
-- `operation.apply(obj)` — polymorphic dispatch;
-- `self.pointer.to_last(…)` — cross-module self-attribute type propagation.
+- `map(self._get_operation, …)` – callable passed by value;
+- `cls = self.operations[op]; cls(op)` – dynamic instantiation via a registry value;
+- `operation.apply(obj)` – polymorphic dispatch;
+- `self.pointer.to_last(…)` – cross-module self-attribute type propagation.
 
 So `jsonpatch` is a **boundary case** for the deterministic graph, not a fair
 capability-ablation target (its graph arm would be honestly starved by the

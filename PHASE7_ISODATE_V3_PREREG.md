@@ -1,9 +1,9 @@
-# Phase 7 Ablation v3 — pre-registration (isodate `parse_duration`)
+# Phase 7 Ablation v3 – pre-registration (isodate `parse_duration`)
 
 **Written before running.** Locks target, scope, golden descriptor, adequacy
 criteria, and go/no-go before results, so v3 cannot be retrofit. Grounded in the
 step-2 mini-probe (`examples/isodate/PROVENANCE.md`): `parse_duration` closure =
-17 entities across 9 modules, focus ratio ~0.17, audit clean — the high
+17 entities across 9 modules, focus ratio ~0.17, audit clean – the high
 raw-assembly-cost + statically-adequate target v1/jsonpatch/v2 never hit together.
 
 ## Why v3 needs this target
@@ -18,7 +18,7 @@ isodate's `parse_duration` meets both.
 - `isodate` (github.com/gweis/isodate), BSD-3-Clause, vendored `src/isodate/*.py`
   (10 modules) + `version.py` shim. Already in `examples/isodate/`.
 
-## Scope (frozen — design decision 1)
+## Scope (frozen – design decision 1)
 - **Primary API under test: `parse_duration(datestring: str) -> timedelta | Duration`**
   (the parser; `as_timedelta_if_possible` stays at its default True).
 - **`duration_isoformat` is SECONDARY (formatter only), scored separately.** The
@@ -29,7 +29,7 @@ isodate's `parse_duration` meets both.
   are not separate scored APIs), tz formatting, `Duration` arithmetic API beyond
   what the parser uses, CLI.
 
-## Golden descriptor (frozen — design decision 2)
+## Golden descriptor (frozen – design decision 2)
 `parse_duration` returns a `datetime.timedelta` (fixed-only ISO strings, e.g.
 `PT1H30M`) or a `Duration` (years/months present). The golden pins an **explicit
 oracle descriptor**, never a blind string round-trip:
@@ -59,13 +59,13 @@ oracle descriptor**, never a blind string round-trip:
 - A Python contract test re-derives the descriptor from the vendored oracle to
   keep the golden in sync.
 
-## Adequacy criteria (frozen — design decision 3)
+## Adequacy criteria (frozen – design decision 3)
 Roots: `isoduration:parse_duration` (+ `isoduration:duration_isoformat` for the
 secondary formatter closure).
 - **must-reach:** the parser regex data + builders (`isoduration:ISO8601_PERIOD_REGEX`,
   `isodates:DATE_REGEX_CACHE`/`build_date_regexps`, `isotime:TIME_REGEX_CACHE`/
   `build_time_regexps`), `isodatetime:parse_datetime`, `isodates:parse_date`,
-  `isotime:parse_time`, `isoerror:ISO8601Error`, and — the mini-probe watch item —
+  `isotime:parse_time`, `isoerror:ISO8601Error`, and – the mini-probe watch item –
   **`duration:Duration.__init__`** and **`duration:Duration.__sub__`** (negative
   paths do `Duration(0) - ret`). A reached `Duration` *class* alone is NOT
   sufficient (classes are pack-excluded as broad spans).
@@ -85,7 +85,7 @@ pub enum Parsed { Timedelta { days:i64, seconds:i64, micros:i64 },
 pub fn parse_duration(s: &str) -> Result<Parsed, ()>;
 // secondary: pub fn duration_isoformat(...) -> String;
 ```
-A **regex crate is pre-provided to both arms** (per the sqlparse lesson — removes
+A **regex crate is pre-provided to both arms** (per the sqlparse lesson – removes
 hand-rolled-regex variance); exact crate (`regex` vs `fancy-regex`) chosen at
 mini-gate after checking the ISO regexes for lookbehind/backrefs.
 
@@ -109,17 +109,17 @@ result is retrofitted; the frozen decisions above are unchanged.
    the *union* closure (`parse_duration` + `duration_isoformat`, 20 entities)
    while the frozen API spec scopes this run to the parser. The spec is now
    parser-only: closure **16**, **13/13 must-reach**, 0 must-exclude leaked,
-   adequate — and the formatter entities (`isostrf:strftime`/`_strfduration`,
+   adequate – and the formatter entities (`isostrf:strftime`/`_strfduration`,
    `duration_isoformat`) moved to must-exclude, since packing them would hand the
    graph arm material the scored task does not need. Re-gating the formatter
    separately is only required if the secondary check is ever run.
 2. **`arm_raw` was contaminated.** `prep` copied `examples/isodate/PROVENANCE.md`
-   into the raw kit — our own experiment note, which names the slice under test
+   into the raw kit – our own experiment note, which names the slice under test
    and spells out the exact `timedelta`-vs-`Duration` type nuance the golden
    measures. Now excluded from the copy and flagged by the leak check.
 3. **Kit isolation in the graph arm.** Every pack embedded the absolute path of
    the original source (`/…/examples/isodate/isodates.py`) and a `usage_hint`
-   telling the agent to consult "the original source of the listed files" —
+   telling the agent to consult "the original source of the listed files" –
    jointly an invitation to break the kit-isolation rule the protocol relies on.
    Packs now carry the bare module name as provenance and no `usage_hint`; the
    leak check fails any kit file containing an absolute repo path.
@@ -127,7 +127,7 @@ result is retrofitted; the frozen decisions above are unchanged.
    did not define `days`/`seconds`/`microseconds` normalization, but the golden
    pins Python's `timedelta` carry (`-PT1H` → `days=-1, seconds=82800`, from
    `timedelta(0) - ret`). That rule lives in the CPython stdlib, so it is
-   invisible to **both** arms in their material — 3 of 24 cases would have scored
+   invisible to **both** arms in their material – 3 of 24 cases would have scored
    a shared guess about `datetime` internals rather than graph-vs-raw. The
    normalization invariant is now stated in the API spec, given identically to
    both arms, exactly as the strip contract was after v1.
@@ -138,7 +138,7 @@ OpenAI GPT-5.6 instead.** Recorded here before the runs so it cannot be read as 
 post-hoc explanation of whatever v3 shows.
 
 - **The within-v3 comparison is unaffected.** Both arms use the same model, so
-  graph-vs-raw remains the only manipulated variable — the pre-registration never
+  graph-vs-raw remains the only manipulated variable – the pre-registration never
   fixed a model family, only N, batching, hidden golden and infra-only
   invalidation.
 - **Upside:** if the graph advantage appears under a different model family, the
@@ -150,7 +150,7 @@ post-hoc explanation of whatever v3 shows.
 - **Binding condition:** all six runs use the same model. A split (graph on one
   model, raw on another) destroys the experiment and voids the result.
 
-## Reproduce (pinned — use these exact commands for all six runs)
+## Reproduce (pinned – use these exact commands for all six runs)
 `fancy-regex` is pinned to `0.13` (the version the earlier `sqlparse` arms were
 given) so the pre-provided-dependency variable is identical across v1 and v3.
 
@@ -180,5 +180,5 @@ run artifact, and `eval --record` stores the score; `report --runs D` renders th
 final table.
 
 ## Backup
-`packaging.SpecifierSet.contains` (20 modules, static, high spread) — strong, but
+`packaging.SpecifierSet.contains` (20 modules, static, high spread) – strong, but
 its version domain overlaps the earlier `semantic_version` port; kept as backup.

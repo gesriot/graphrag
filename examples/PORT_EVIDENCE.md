@@ -9,8 +9,8 @@ uv run python scripts/port_eval.py --all-gates --full
 The runner reads [`scripts/port_gates.json`](../scripts/port_gates.json) and
 fails closed in both directions: if an `examples/*_rust/Cargo.toml` directory
 lacks a profile, and if an `examples/` package carrying a golden contract has no
-profile at all. The second check exists because `jsonpatch` — 25 golden cases
-and a published graph, no Rust port — was omitted from the first version of this
+profile at all. The second check exists because `jsonpatch` – 25 golden cases
+and a published graph, no Rust port – was omitted from the first version of this
 manifest entirely, which is the failure mode a gap list is meant to prevent. A
 profile reindexes into ignored `output/port_gates/`, audits that fresh graph,
 generates context packs, runs the source oracle/contract command, then runs the

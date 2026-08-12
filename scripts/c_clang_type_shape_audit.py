@@ -11,8 +11,10 @@ not claim size, alignment, offsets, calling convention, Rust representation
 compatibility, or FFI safety. Raw Clang type spellings, enum values, and
 bit-field widths are diagnostic evidence fields only.
 
-No BYOG mutation, no index_c flags, no graph entities/relationships, no
-manifest blocks.
+This module itself performs no BYOG mutation and creates no graph entities or
+relationships. It is the single shared builder behind both the standalone
+diagnostic CLI and the optional ``--clang-type-shapes`` evidence overlay in
+``c_clang_type_shapes.py``.
 """
 from __future__ import annotations
 
@@ -640,11 +642,20 @@ def _classify_shape(
     }
 
 
-def build_type_shape_audit_from_capture(capture: Any) -> Dict[str, Any]:
+def build_type_shape_audit_from_capture(
+    capture: Any,
+    *,
+    type_report: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Build the type-shape audit from an in-memory capture.
 
     Never invokes the compiler or reloads ``compile_commands.json``.
     Reuses :func:`build_type_declaration_audit_from_capture` for owners.
+
+    An optional ``type_report`` must already have been built from this same
+    capture; it is validated against the capture census (package, digest,
+    toolchain identity, translation units) before reuse. When omitted it is
+    built here, so standalone CLI output stays byte-identical.
     """
     from c_clang_ast_capture import (  # type: ignore
         ClangAstCaptureError,
@@ -663,7 +674,25 @@ def build_type_shape_audit_from_capture(capture: Any) -> Dict[str, Any]:
         raise ClangTypeShapeAuditError(str(e)) from e
 
     try:
-        type_report = build_type_declaration_audit_from_capture(capture)
+        if type_report is None:
+            type_report = build_type_declaration_audit_from_capture(capture)
+        else:
+            if not isinstance(type_report, dict):
+                raise ClangTypeShapeAuditError(
+                    "type_report must be a dict when provided"
+                )
+            assert_audit_report_matches_capture(
+                type_report, capture, context="type-shape type_report"
+            )
+            if (
+                str(type_report.get("mode") or "")
+                != "clang_ast_json_type_declaration_audit"
+            ):
+                raise ClangTypeShapeAuditError(
+                    f"type_report has unexpected mode {type_report.get('mode')!r}"
+                )
+    except ClangAstCaptureError as e:
+        raise ClangTypeShapeAuditError(str(e)) from e
     except ClangTypeAuditError as e:
         raise ClangTypeShapeAuditError(str(e)) from e
 

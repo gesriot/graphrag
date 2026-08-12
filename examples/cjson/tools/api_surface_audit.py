@@ -419,11 +419,11 @@ def render(header: Path) -> str:
                 f"rejects it with {BACKTICK}{proof['diagnostic']}{BACKTICK}. "
                 f"{proof['closure']}"
             )
-            category = "Deliberately excluded — ownership blocked"
+            category = "Deliberately excluded – ownership blocked"
         elif name in GLOBAL_STATE_EXCLUDED:
             reason, scenario = GLOBAL_STATE_EXCLUDED[name]
             status = f"C refusal trace: `{scenario}`. {reason}"
-            category = "Deliberately excluded — global/process state"
+            category = "Deliberately excluded – global/process state"
         else:
             status = covered_status(name)
             category = "Covered"
@@ -438,7 +438,7 @@ def render(header: Path) -> str:
     for name in OWNERSHIP_BLOCKED:
         proof = COMPILER_REJECTIONS[name]
         compiler_rows.append(
-            f"| {BACKTICK}{name}{BACKTICK} | {BACKTICK}{proof['snippet']}{BACKTICK} — "
+            f"| {BACKTICK}{name}{BACKTICK} | {BACKTICK}{proof['snippet']}{BACKTICK} – "
             f"{proof['attempt']} | {BACKTICK}{proof['diagnostic']}{BACKTICK} | "
             f"{proof['closure']} |"
         )

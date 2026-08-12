@@ -940,6 +940,7 @@ def test_live_inih_type_use_query_and_pack(tmp_path: Path):
         clang_calls=False,
         clang_types=False,
         clang_type_uses=True,
+        clang_type_shapes=False,
         allow_toolchain_drift=False,
     )
     after = {p.relative_to(pkg).as_posix() for p in pkg.rglob("*") if p.is_file()}

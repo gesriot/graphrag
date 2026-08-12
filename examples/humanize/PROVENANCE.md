@@ -1,9 +1,9 @@
-# Provenance — vendored `humanize` (Phase 7 ablation v2 target)
+# Provenance – vendored `humanize` (Phase 7 ablation v2 target)
 
 Capability-ablation v2 target (see `PHASE7_HUMANIZE_V2_PREREG.md`): a multi-module,
 statically-structured Python slice (number formatters backed by data tables and a
 cross-module i18n helper), chosen deliberately so the graph closure can be made
-adequate — unlike the `jsonpatch` boundary case (dynamic dispatch).
+adequate – unlike the `jsonpatch` boundary case (dynamic dispatch).
 
 ## Source
 - `humanize` (github.com/python-humanize/humanize), vendored from `master`:
@@ -12,7 +12,7 @@ adequate — unlike the `jsonpatch` boundary case (dynamic dispatch).
   `_version.py` is build-generated (setuptools_scm) and not in the source tree.
   It only satisfies `__init__`'s `from ._version import __version__`.
 
-## License — gate step 1 (captured)
+## License – gate step 1 (captured)
 - **MIT** (`LICENSE`, vendored verbatim from upstream `LICENCE`).
 
 ## Common evidence status
@@ -22,7 +22,7 @@ adequate — unlike the `jsonpatch` boundary case (dynamic dispatch).
 consumer. It is listed in `examples/PORT_EVIDENCE.md` rather than being treated
 as a passing port.
 
-## Scope (bounded slice — gate step 2, frozen)
+## Scope (bounded slice – gate step 2, frozen)
 - `number.py` formatters, default locale: `intcomma(value, ndigits=None)`,
   `intword(value, format="%.1f")`, `apnumber(value)`, `ordinal(value, gender="male")`,
   `fractional(value)`, `scientific(value, precision=2)`.
@@ -44,7 +44,7 @@ as a passing port.
 - `byog_humanize`: `audit_call_edges` pass_rate 1.0, 0 anomalies/dangling/
   semantic suspicions; 56 calls / 58 contains / 25 uses_data.
 
-## Adequacy (gate step 4/6 — STANDALONE RESULT: not clean, two tractable boundaries)
+## Adequacy (gate step 4/6 – STANDALONE RESULT: not clean, two tractable boundaries)
 Closure from the 6 number roots (size 20) **correctly** reaches the data tables
 (`powers`/`human_powers`/`_ORDINAL_SUFFIXES`/`_APNUMBER_WORDS`/`_SUPERSCRIPT_TRANS`),
 non-aliased i18n (`_ngettext`/`decimal_separator`/`thousands_separator`), and leaks
@@ -55,7 +55,7 @@ from two precise, *tractable static* boundaries (not dynamic dispatch):
    are `from .i18n import _gettext as _, _pgettext as P_, _ngettext_noop as NS_`.
    The resolver tracks the call to the alias but does not map the alias back to the
    imported symbol, so `i18n:_gettext`, `i18n:_pgettext`, `i18n:_ngettext_noop` are
-   unreached. (Non-aliased `_ngettext` resolves fine — confirming the gap is the
+   unreached. (Non-aliased `_ngettext` resolves fine – confirming the gap is the
    alias, not cross-module imports per se.)
 2. **Data->data reference.** `_SUPERSCRIPT_TRANS = str.maketrans(_SUPERSCRIPT_MAP)`
    reads another data entity, but there is no edge from a data assignment's RHS to
@@ -63,7 +63,7 @@ from two precise, *tractable static* boundaries (not dynamic dispatch):
 
 Per the pre-registered go/no-go, N=3 is **not** run through this dirty closure.
 Both boundaries are principled static facts (aliased import resolution; data->data
-reference edges), fixed in the resolver before re-measuring — distinct from the
+reference edges), fixed in the resolver before re-measuring – distinct from the
 jsonpatch boundary, which was genuinely dynamic (higher-order/points-to).
 
 ### Resolution (both boundaries fixed; adequacy now clean)
@@ -75,14 +75,14 @@ mini-gate):
   entities emits `references` edges (`human_powers` -> `i18n:_ngettext_noop`,
   `_SUPERSCRIPT_TRANS` -> `_SUPERSCRIPT_MAP`).
 
-Re-measured: **adequacy clean** — closure size 24, all 19 must-reach present, 0
+Re-measured: **adequacy clean** – closure size 24, all 19 must-reach present, 0
 must-exclude leaked; `byog_humanize` audit pass_rate 1.0 (calls 56->80 are
 previously-dropped aliased/imported calls that now resolve), full suite green.
 Both fixes are general wins (any data-heavy Python graph, e.g. charset-normalizer).
 
 ### N=3 outcome (see PHASE7_ABLATION.md for the full table)
 Ran N=3 per arm after a clean dry-prep audit. Result: **near-parity, no capability
-gap** — arm_graph median 59/59, arm_raw median 58/59; the only recurring miss is
+gap** – arm_graph median 59/59, arm_raw median 58/59; the only recurring miss is
 the shared f64 `intword(1e100)` googol edge. Raw agents found the slice
 "well-contained" (`number.py`+`i18n.py` among 6 modules), so raw-assembly was easy
 and the graph showed no advantage. humanize's number slice is a weak capability

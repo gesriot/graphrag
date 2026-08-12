@@ -917,6 +917,7 @@ def test_live_inih_type_use_graph_audit_smoke(tmp_path: Path):
         clang_calls=False,
         clang_types=False,
         clang_type_uses=False,
+        clang_type_shapes=False,
         allow_toolchain_drift=False,
     )
     report_off = audit_graph_root(off_graph)
@@ -937,6 +938,7 @@ def test_live_inih_type_use_graph_audit_smoke(tmp_path: Path):
         clang_calls=False,
         clang_types=False,
         clang_type_uses=True,
+        clang_type_shapes=False,
         allow_toolchain_drift=False,
     )
     report_on = audit_graph_root(on_graph)

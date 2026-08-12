@@ -299,6 +299,7 @@ def test_default_index_unchanged_no_artifacts(tmp_path: Path):
         clang_calls=False,
         clang_types=False,
         clang_type_uses=False,
+        clang_type_shapes=False,
         allow_toolchain_drift=False,
     )
     snap = (graph / "current").read_text().strip()

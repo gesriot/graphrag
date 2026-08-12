@@ -1,4 +1,4 @@
-# Provenance — vendored `inih` (Phase 6 C frontend + second C→Rust port)
+# Provenance – vendored `inih` (Phase 6 C frontend + second C→Rust port)
 
 Second C target for Plan Phase 6, chosen to surface the next C-specific unknowns
 *before* the ownership-heavy `cJSON` milestone: callbacks, file/string input
@@ -12,7 +12,7 @@ string parser C→Rust port.
 - Vendored verbatim from `master`; exact upstream commit/tag is not recorded in
   the files, the local repository commit pins the reproducible snapshot.
 
-## License — gate step 1 (captured)
+## License – gate step 1 (captured)
 - **New BSD (BSD-3-Clause)**. Full text in `LICENSE.txt` (verbatim); SPDX
   `BSD-3-Clause` header is present in both `ini.c` and `ini.h`.
 
@@ -33,7 +33,7 @@ complete manifest and tool-skip policy.
 - The current extractor is tree-sitter-c only; clang/compile-database semantic
   facts remain a later Phase 6 layer.
 
-## C frontend finding — preprocessor fragmentation (and the fix)
+## C frontend finding – preprocessor fragmentation (and the fix)
 inih is preprocessor-heavy (configurability is implemented with `#if`/`#endif`).
 tree-sitter-c does **not** evaluate the preprocessor, so a function body split by
 `#if INI_ALLOW_MULTILINE ... #endif` is misparsed: the `else if (cond) { body }`
@@ -61,7 +61,7 @@ clang/preprocessor layer in Plan Phase 6.
 preprocessor-dependent facts as provenance (`preprocessor_dependent` /
 `preprocessor_reasons`) without demoting `is_deterministic` or changing audit
 pass rates. On inih it flags the `HANDLER` function-like macro observations and
-trusted calls inside `INI_ALLOW_MULTILINE` / related `#if` regions — the known
+trusted calls inside `INI_ALLOW_MULTILINE` / related `#if` regions – the known
 failure mode from this PROVENANCE note. A behaviour-preserving reindex
 published those columns into the live graph (counts unchanged: 19/54/38/35).
 Context packs for `ini:ini_parse_stream` now surface a top-level
@@ -97,8 +97,9 @@ The published graph now also contains the co-located golden runner
   Alternate sites are observation-only (not separate entities). Standard
   mismatch residuals fail closed. Independent `extra_manifest["clang_types"]`
   block (`mode=configured_clang_type_declarations` when on, `mode=off` when
-  disabled). Shares the in-memory AST capture with signatures/calls (N dumps
-  for N entries).
+  disabled). Shares the in-memory AST capture with signatures/calls/type-uses/
+  type-shapes (N dumps for N entries), and its report is reused rather than
+  rebuilt by the type-use and type-shape builders.
 - **Clang AST type-use audit (diagnostic):** measured matched_internal=**14**
   (ini_handler / ini_reader / ini_parse_string_ctx parameter and local uses),
   external_or_system=72, unsupported_type_form=2, owner_unmatched=0,
@@ -123,7 +124,18 @@ The published graph now also contains the co-located golden runner
 - **Type-shape audit (diagnostic):** configured type-declaration matches are
   typedef-only under the default compile DB, so shape owners classified = 0
   (no struct/enum shapes to compare). Outside-package residuals remain
-  observation-only. Not ABI/layout; no graph mutation.
+  observation-only (`outside_package_declarations=12`). Not ABI/layout; the
+  audit CLI performs no graph mutation.
+- **Optional `--clang-type-shapes` entity fields (default off):** enabling it
+  on inih is a clean no-op overlay: **0** decorated entities and **0**
+  `clang_shape_*` fields, because there are no matched struct/enum owners
+  under this compile DB (typedefs are not independent shapes). The graph
+  remains 21/56/21/38/35 and the independent
+  `extra_manifest["clang_type_shapes"]` block records
+  `mode=configured_clang_type_shapes` with all bucket counts, including the
+  observation-only `outside_package_declarations`. Hard equality would be
+  ordered direct member names only – never ABI, layout, FFI, or Rust `repr`
+  claims.
 - `audit_call_edges`: 38 calls, structural pass rate 1.0, 0 anomalies,
   0 dangling targets, 0 semantic suspicions.
 - The **library** subgraph (ini.c/ini.h) is 15 entities and 17 deterministic
@@ -135,14 +147,14 @@ The published graph now also contains the co-located golden runner
   - `ini_parse_stream -> {ini_rstrip, ini_lskip, ini_find_chars_or_comment,
     ini_strncpy0}`
 - Callbacks and libc stay weak observations (never core edges): `HANDLER` (the
-  macro wrapping the `handler` callback — tree-sitter sees the macro name), the
+  macro wrapping the `handler` callback – tree-sitter sees the macro name), the
   `reader` function pointer, plus `fopen`/`fclose`/`strlen`/`strchr`/`isspace`/
   `assert` and the `#if !INI_USE_STACK`-guarded `ini_malloc`/`ini_free`/
   `ini_realloc`.
 
 ## Regression
 - `examples/inih/tests/test_inih_extract.py` locks the library function set, the
-  library call graph, the callback/libc observations, and — importantly — that no
+  library call graph, the callback/libc observations, and – importantly – that no
   phantom keyword "function" leaks in from preprocessor fragmentation (incl. a
   focused unit test on a `#if`-split body).
 - `examples/inih/tests/test_inih_parse_contract.py` recompiles the dedicated C

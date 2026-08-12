@@ -19,11 +19,13 @@ call evidence fields to existing tree-sitter ``calls`` relationships (default
 off). Optional ``--clang-types`` attaches configured type-declaration evidence
 fields to existing tree-sitter ``struct`` / ``enum`` / ``typedef`` entities
 (default off). Optional ``--clang-type-uses`` publishes aggregated ``uses_type``
-edges from the type-use audit’s matched_internal rows (default off). When any
-of the four Clang overlays are enabled they share one in-memory AST capture
-(one dump per compile entry; no disk AST cache). Diagnostic AST audits remain
-standalone. Published graph counts stay tree-sitter-only unless an overlay is
-explicitly enabled.
+edges from the type-use audit’s matched_internal rows (default off). Optional
+``--clang-type-shapes`` attaches configured ordered direct member-name evidence
+to existing tree-sitter ``struct`` / ``enum`` entities (default off; not ABI,
+layout, FFI, or Rust repr evidence). When any of the five Clang overlays are
+enabled they share one in-memory AST capture (one dump per compile entry; no
+disk AST cache). Diagnostic AST audits remain standalone. Published graph
+counts stay tree-sitter-only unless an overlay is explicitly enabled.
 
 Usage:
     uv run python scripts/index_c.py --package examples/jsmn --graph byog_jsmn
@@ -66,6 +68,15 @@ from c_clang_signatures import (  # type: ignore
 from c_clang_type_audit import (  # type: ignore
     ClangTypeAuditError,
     build_type_declaration_audit_from_capture,
+)
+from c_clang_type_shape_audit import (  # type: ignore
+    ClangTypeShapeAuditError,
+    build_type_shape_audit_from_capture,
+)
+from c_clang_type_shapes import (  # type: ignore
+    ClangTypeShapeOverlayError,
+    append_clang_type_shapes,
+    build_disabled_provenance as build_disabled_type_shape_provenance,
 )
 from c_clang_type_use_audit import (  # type: ignore
     ClangTypeUseAuditError,
@@ -184,6 +195,22 @@ def main(
             "macro_location_unsupported) abort. Does not create entities."
         ),
     ),
+    clang_type_shapes: bool = typer.Option(
+        False,
+        "--clang-type-shapes/--no-clang-type-shapes",
+        help=(
+            "Attach configured Clang type-shape evidence fields to existing "
+            "tree-sitter struct/enum entities using the AST type-shape audit "
+            "(matched_shape rows only; ordered direct member names are the "
+            "only hard equality). Default is off. Residual shape buckets "
+            "(tree_sitter_only_members/clang_only_members/"
+            "member_order_mismatch/duplicate_or_ambiguous_members/"
+            "macro_location_unsupported/owner_unmatched) fail explicitly; "
+            "unsupported_member_form and outside_package_declarations stay "
+            "observation-only. Not ABI, layout, FFI, or Rust repr evidence. "
+            "Does not create entities, relationships, or uses_type edges."
+        ),
+    ),
     allow_toolchain_drift: bool = typer.Option(
         False,
         "--allow-toolchain-drift",
@@ -260,16 +287,23 @@ def main(
         inc_prov = build_disabled_include_provenance()
 
     # Clang AST overlays: share one in-memory capture when any are enabled.
-    if clang_signatures or clang_calls or clang_types or clang_type_uses:
+    if (
+        clang_signatures
+        or clang_calls
+        or clang_types
+        or clang_type_uses
+        or clang_type_shapes
+    ):
         try:
             ast_capture = capture_clang_ast_package(pkg_dir)
             sig_report = None
             call_report = None
             type_report = None
             type_use_report = None
+            type_shape_report = None
             # Build shared intermediate audits at most once each.
             need_function = clang_signatures or clang_type_uses
-            need_type_decl = clang_types or clang_type_uses
+            need_type_decl = clang_types or clang_type_uses or clang_type_shapes
             if need_function:
                 sig_report = build_function_audit_from_capture(ast_capture)
             if clang_calls:
@@ -277,6 +311,10 @@ def main(
             if need_type_decl:
                 type_report = build_type_declaration_audit_from_capture(
                     ast_capture
+                )
+            if clang_type_shapes:
+                type_shape_report = build_type_shape_audit_from_capture(
+                    ast_capture, type_report=type_report
                 )
             if clang_type_uses:
                 type_use_report = build_type_use_audit_from_capture(
@@ -316,15 +354,28 @@ def main(
                 )
             else:
                 type_use_prov = build_disabled_type_use_provenance()
+            if clang_type_shapes:
+                assert type_shape_report is not None
+                assert type_report is not None
+                shape_prov = append_clang_type_shapes(
+                    data,
+                    pkg_dir,
+                    report=type_shape_report,
+                    type_report=type_report,
+                )
+            else:
+                shape_prov = build_disabled_type_shape_provenance()
         except (
             ClangAstCaptureError,
             ClangAstAuditError,
             ClangCallAuditError,
             ClangTypeAuditError,
+            ClangTypeShapeAuditError,
             ClangTypeUseAuditError,
             ClangSignatureError,
             ClangCallOverlayError,
             ClangTypeOverlayError,
+            ClangTypeShapeOverlayError,
             ClangTypeUseOverlayError,
         ) as e:
             typer.secho(str(e), fg=typer.colors.RED, err=True)
@@ -334,6 +385,7 @@ def main(
         call_prov = build_disabled_call_provenance()
         type_prov = build_disabled_type_provenance()
         type_use_prov = build_disabled_type_use_provenance()
+        shape_prov = build_disabled_type_shape_provenance()
 
     ents_df = pd.DataFrame(data["entities"])
     rels_df = pd.DataFrame(data["relationships"])
@@ -425,6 +477,19 @@ def main(
         )
     else:
         print("  Clang type-uses: off (default tree-sitter-c graph)")
+    if shape_prov.get("enabled"):
+        counts = shape_prov.get("counts") or {}
+        print(
+            f"  Clang type-shapes: facts={shape_prov.get('n_facts')} "
+            f"matched_shape={counts.get('matched_shape')} "
+            f"owners={counts.get('type_declaration_matched_struct_enum')} "
+            f"unsupported_member_form={counts.get('unsupported_member_form')} "
+            f"outside={counts.get('outside_package_declarations')} "
+            f"digest={shape_prov.get('compile_commands_digest')} "
+            f"compiler={shape_prov.get('compiler_id')}"
+        )
+    else:
+        print("  Clang type-shapes: off (default tree-sitter-c graph)")
     extra = {
         "preprocessor_liveness": summary.get("liveness_provenance"),
         "compiler_dependencies": dep_prov,
@@ -433,6 +498,7 @@ def main(
         "clang_calls": call_prov,
         "clang_types": type_prov,
         "clang_type_uses": type_use_prov,
+        "clang_type_shapes": shape_prov,
     }
     snap_dir = publish_byog_snapshot(
         ents_df, rels_df, tus_df, graph_dir, SETTINGS,

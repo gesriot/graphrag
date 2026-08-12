@@ -1,18 +1,18 @@
-# Provenance — vendored `diff-match-patch` (fourth Python→Rust porting target)
+# Provenance – vendored `diff-match-patch` (fourth Python→Rust porting target)
 
 Fourth porting target, chosen to broaden the evidence base beyond the parser
 domain (mini_lang + semantic_version's two spec dialects): a different class of
-algorithm — Myers diff, Bitap fuzzy match, and patch make/apply.
+algorithm – Myers diff, Bitap fuzzy match, and patch make/apply.
 
 ## Source
-- Package: `diff-match-patch` 20241021 (PyPI) — a maintained repackaging of
+- Package: `diff-match-patch` 20241021 (PyPI) – a maintained repackaging of
   Google's Diff-Match-Patch libraries.
 - Upstream: https://github.com/diff-match-patch-python/diff-match-patch
 - Retrieved: 2026-06-17 from the PyPI wheel `diff_match_patch-20241021-py3-none-any.whl`
 - Wheel SHA-256: `93cea333fb8b2bc0d181b0de5e16df50dd344ce64828226bda07728818936782`
 - Pure Python; `diff_match_patch.py` imports only stdlib (`re`, `sys`, `time`, `urllib.parse`).
 
-## License — gate step 1 (captured)
+## License – gate step 1 (captured)
 - **Apache-2.0** (`License :: OSI Approved :: Apache Software License`). Full text in `LICENSE` (verbatim).
 
 ## Common evidence gate
@@ -23,11 +23,11 @@ golden contracts, then runs the Rust port-eval stages. See
 `examples/PORT_EVIDENCE.md` for the complete manifest and tool-skip policy.
 
 ## What was vendored / modified
-- `diff_match_patch.py` — **verbatim** upstream (2022 LOC): the single
+- `diff_match_patch.py` – **verbatim** upstream (2022 LOC): the single
   `diff_match_patch` class (diff / match / patch) plus `patch_obj`.
-- `__init__.py`, `__version__.py` — **verbatim** (no install-time machinery; both
+- `__init__.py`, `__version__.py` – **verbatim** (no install-time machinery; both
   import cleanly without the package being pip-installed).
-- `tests/` — **omitted**: upstream's own test suite, not part of the port target.
+- `tests/` – **omitted**: upstream's own test suite, not part of the port target.
 
 Vendored-file SHA-256 values (verified directly against the wheel):
 - `LICENSE`: `cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30`

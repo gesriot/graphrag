@@ -100,8 +100,8 @@ def _write_multi_entry_pkg(tmp_path: Path, n: int = 3) -> Path:
 
 @pytest.mark.skipif(_cc() is None, reason="no C compiler on PATH")
 @pytest.mark.parametrize(
-    "sigs,calls,types,tuses",
-    [flags for flags in product((False, True), repeat=4) if any(flags)],
+    "sigs,calls,types,tuses,shapes",
+    [flags for flags in product((False, True), repeat=5) if any(flags)],
 )
 def test_any_clang_flag_subset_one_dump_per_entry(
     tmp_path: Path,
@@ -110,12 +110,16 @@ def test_any_clang_flag_subset_one_dump_per_entry(
     calls: bool,
     types: bool,
     tuses: bool,
+    shapes: bool,
 ):
-    """Any non-empty subset of the four Clang flags dumps exactly N times."""
+    """Any non-empty subset of the five Clang flags dumps exactly N times."""
     n = 3
     pkg = _write_multi_entry_pkg(tmp_path, n=n)
     counter = _patch_dump_counter(monkeypatch)
-    graph = tmp_path / f"g_{int(sigs)}{int(calls)}{int(types)}{int(tuses)}"
+    graph = (
+        tmp_path
+        / f"g_{int(sigs)}{int(calls)}{int(types)}{int(tuses)}{int(shapes)}"
+    )
     index_c_main(
         package=pkg,
         graph=graph,
@@ -127,6 +131,7 @@ def test_any_clang_flag_subset_one_dump_per_entry(
         clang_calls=calls,
         clang_types=types,
         clang_type_uses=tuses,
+        clang_type_shapes=shapes,
         allow_toolchain_drift=False,
     )
     assert counter["n"] == n
@@ -139,6 +144,9 @@ def test_any_clang_flag_subset_one_dump_per_entry(
     assert manifest["clang_calls"]["enabled"] is calls
     assert manifest["clang_types"]["enabled"] is types
     assert manifest["clang_type_uses"]["enabled"] is tuses
+    assert manifest["clang_type_shapes"]["enabled"] is shapes
+    if shapes:
+        assert manifest["clang_type_shapes"]["n_compile_entries"] == n
     if sigs:
         assert manifest["clang_signatures"]["n_compile_entries"] == n
     if calls:
@@ -170,6 +178,7 @@ def test_neither_flag_zero_dumps(tmp_path: Path, monkeypatch):
         clang_calls=False,
         clang_types=False,
         clang_type_uses=False,
+        clang_type_shapes=False,
         allow_toolchain_drift=False,
     )
     assert counter["n"] == 0
@@ -294,6 +303,7 @@ def test_combined_parquet_smoke_inih(tmp_path: Path):
         clang_calls=True,
         clang_types=True,
         clang_type_uses=False,
+        clang_type_shapes=False,
         allow_toolchain_drift=False,
     )
     snap = (graph / "current").read_text(encoding="utf-8").strip()
@@ -349,6 +359,7 @@ def test_second_overlay_failure_publishes_no_snapshot(tmp_path: Path, monkeypatc
         clang_calls=False,
         clang_types=False,
         clang_type_uses=False,
+        clang_type_shapes=False,
         allow_toolchain_drift=False,
     )
     prior_current = (graph / "current").read_text(encoding="utf-8")
@@ -380,6 +391,7 @@ def test_second_overlay_failure_publishes_no_snapshot(tmp_path: Path, monkeypatc
             clang_calls=True,
             clang_types=False,
             clang_type_uses=False,
+            clang_type_shapes=False,
             allow_toolchain_drift=False,
         )
     code = getattr(ei.value, "exit_code", None)

@@ -1,4 +1,4 @@
-# Evidence audit — current claims (2026-07-28)
+# Evidence audit – current claims (2026-07-28)
 
 This audit reviews the present-tense capability language in
 [`PHASE7_WRITEUP.md`](../PHASE7_WRITEUP.md) and [`Plan.md`](../Plan.md) against

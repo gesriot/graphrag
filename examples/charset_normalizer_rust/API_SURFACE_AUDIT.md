@@ -24,13 +24,13 @@ rg -n '^pub (fn|struct|enum|const|type)' examples/charset_normalizer_rust/src/{l
 
 The category has a deliberately narrow meaning:
 
-- **Covered** — Rust exposes the behavior, sometimes in the idiomatic typed
+- **Covered** – Rust exposes the behavior, sometimes in the idiomatic typed
   shape shown in the status column.
-- **Deliberately out of scope** — an intentional difference recorded here and
+- **Deliberately out of scope** – an intentional difference recorded here and
   in `PORT_STATUS.md`, with its reason.
-- **Not applicable** — Python object-model or runtime-dispatch mechanics that
+- **Not applicable** – Python object-model or runtime-dispatch mechanics that
   have no direct Rust spelling. This does not disguise a missing behavioral API.
-- **Simply not done** — a real capability absent from the Rust public surface or
+- **Simply not done** – a real capability absent from the Rust public surface or
   behavior. These are not implied exclusions.
 
 ## Package-root exports (`charset_normalizer.__all__`)
@@ -41,18 +41,18 @@ The category has a deliberately narrow meaning:
 | `from_fp(fp, ...)` | `from_fp` plus `_with_options` and `_with_options_and_trace`. | Covered (typed adaptation) |
 | `from_path(path, ...)` | `from_path` plus `_with_options` and `_with_options_and_trace`. | Covered (typed adaptation) |
 | `is_binary(fp_or_path_or_payload, ...)` | Slice: `is_binary`/`is_binary_bytes`; reader: `is_binary_reader`; path: `is_binary_path`; all forms now have options, and reader/path have trace variants. | Covered (typed adaptation) |
-| `detect(byte_str, should_rename_legacy=False, **kwargs)` | `detect_legacy(byte_str, should_rename_legacy)` returns `LegacyDetectionResult`; `detect_chardet_compatible` is the default-Python spelling. Rust `detect` deliberately remains the pre-existing modern-best-match shortcut. | Deliberately out of scope for same-name behavior — documented migration entry points avoid a breaking change to the established Rust `detect`. |
-| `CharsetMatch` | Rust `CharsetMatch`. Member-by-member audit below. | Covered in part — see below. |
-| `CharsetMatches` | Rust `CharsetMatches`. Member-by-member audit below. | Covered in part — see below. |
+| `detect(byte_str, should_rename_legacy=False, **kwargs)` | `detect_legacy(byte_str, should_rename_legacy)` returns `LegacyDetectionResult`; `detect_chardet_compatible` is the default-Python spelling. Rust `detect` deliberately remains the pre-existing modern-best-match shortcut. | Deliberately out of scope for same-name behavior – documented migration entry points avoid a breaking change to the established Rust `detect`. |
+| `CharsetMatch` | Rust `CharsetMatch`. Member-by-member audit below. | Covered in part – see below. |
+| `CharsetMatches` | Rust `CharsetMatches`. Member-by-member audit below. | Covered in part – see below. |
 | `__version__` | `VERSION_STRING == "3.4.7"`. Rust identifiers cannot start with `__`. Oracle-backed by `test_api_surface_parity.py`. | Covered (Rust naming adaptation) |
 | `VERSION` (`["3", "4", "7"]`) | `VERSION == ["3", "4", "7"]`. Oracle-backed by `test_api_surface_parity.py`. | Covered |
-| `set_logging_handler(...)` | No global logger mutation. Use `from_*_with_options_and_trace(..., explain=true)` or CLI `--verbose`. | Deliberately out of scope — global Python logging state is not part of the typed Rust API. |
+| `set_logging_handler(...)` | No global logger mutation. Use `from_*_with_options_and_trace(..., explain=true)` or CLI `--verbose`. | Deliberately out of scope – global Python logging state is not part of the typed Rust API. |
 
 ## `CharsetMatch`
 
 | Python surface | Rust status | Category |
 | --- | --- | --- |
-| constructor `CharsetMatch(payload, guessed_encoding, mean_mess_ratio, has_sig_or_bom, languages, decoded_payload, preemptive_declaration)` | Public Rust struct fields support construction, but no Python-shaped constructor/lazy cache arguments. | Not applicable — Rust construction and ownership are explicit. |
+| constructor `CharsetMatch(payload, guessed_encoding, mean_mess_ratio, has_sig_or_bom, languages, decoded_payload, preemptive_declaration)` | Public Rust struct fields support construction, but no Python-shaped constructor/lazy cache arguments. | Not applicable – Rust construction and ownership are explicit. |
 | `multi_byte_usage` | `multi_byte_usage() -> Option<f64>`. | Covered (method/property adaptation) |
 | `encoding` | Public `encoding: String`. | Covered |
 | `encoding_aliases` | `encoding_aliases() -> Vec<String>`. | Covered |
@@ -72,8 +72,8 @@ The category has a deliberately narrow meaning:
 | `fingerprint` | `fingerprint() -> Option<u64>`. Hash width and process seeding are Rust-specific. | Covered (typed adaptation) |
 | `output(encoding="utf_8")` | `output(encoding)` follows Python replacement-mode encoding; `output_default()` is Rust's explicit zero-argument equivalent and `output_strict()` preserves the fallible codec operation. Oracle cases cover ASCII/CP1252, Shift-JIS, Johab, ISO-2022-KR, the UTF-8 default, HZ, all UTF output modes, and generated EUC-/Shift-JIS maps. `tools/generate_codecs.py` derives HZ's 7,445-pair strict GB2312 map, three EUC-JIS maps, and two Shift-JIS-X-0213 maps from the running Python codecs; codec/CD parity builds those expectations live. | Covered (typed adaptation). |
 | `add_submatch(other)` | `add_submatch(other) -> Result<(), AddSubmatchError>` appends a distinct owned match and rejects same encoding + decoded-fingerprint matches. | Covered (typed adaptation); Python's non-`CharsetMatch` runtime-type rejection is not applicable in a statically typed call. |
-| `__str__`, `__repr__` | `decoded()` returns the decoded string; no `Display`/`Debug` parity contract. | Not applicable — Python lazy string/repr semantics are object-model behavior. |
-| `__eq__`, `__lt__` | Rust derives structural `PartialEq`; sorting is internal to `CharsetMatches`. Python's string comparison and ranking protocol are not exposed. | Not applicable — Python operator protocol and cross-type equality have no direct typed equivalent. |
+| `__str__`, `__repr__` | `decoded()` returns the decoded string; no `Display`/`Debug` parity contract. | Not applicable – Python lazy string/repr semantics are object-model behavior. |
+| `__eq__`, `__lt__` | Rust derives structural `PartialEq`; sorting is internal to `CharsetMatches`. Python's string comparison and ranking protocol are not exposed. | Not applicable – Python operator protocol and cross-type equality have no direct typed equivalent. |
 
 ## `CharsetMatches`
 
@@ -84,7 +84,7 @@ The category has a deliberately narrow meaning:
 | `__getitem__(int)` | `get(index) -> Option<&CharsetMatch>`. | Covered (fallible access adaptation) |
 | `__getitem__(str)` | `get_by_encoding(encoding) -> Option<&CharsetMatch>`. | Covered (fallible access adaptation) |
 | `__len__` | `len()`. | Covered |
-| `__bool__` | `is_empty()`; callers negate it. | Not applicable — Rust has no implicit truthiness. |
+| `__bool__` | `is_empty()`; callers negate it. | Not applicable – Rust has no implicit truthiness. |
 | `append(item)` | `append(item)` preserves ordering and submatch factoring. | Covered |
 | `best()` | `best() -> Option<&CharsetMatch>`. | Covered |
 | `first()` | `first() -> Option<&CharsetMatch>`. | Covered |
@@ -113,8 +113,8 @@ errors, JSON, stdin, and normalize/replace behavior.
 | `-i`, `--no-preemptive` | supported. | Covered |
 | `-t`, `--threshold` | supported. | Covered |
 | `--version` | supported. | Covered |
-| Rust-only hidden `--cp-isolation`, `--cp-exclusion` | extra test/harness controls, intentionally omitted from shared help text. | Deliberately out of scope — additive Rust extension, not a claimed Python flag. |
-| `cli.__main__.query_yes_no`, `FileType`, `cli_detect(argv)` | The `normalizer` binary implements the observable prompt, file validation, argument parsing, and exit-status behavior; existing CLI snapshots exercise it. Rust does not expose Python's argparse callback or a process-global `argv` function as a library API. | Not applicable — these are Python CLI-framework entry/callback mechanics, not an independently usable package API. |
+| Rust-only hidden `--cp-isolation`, `--cp-exclusion` | extra test/harness controls, intentionally omitted from shared help text. | Deliberately out of scope – additive Rust extension, not a claimed Python flag. |
+| `cli.__main__.query_yes_no`, `FileType`, `cli_detect(argv)` | The `normalizer` binary implements the observable prompt, file validation, argument parsing, and exit-status behavior; existing CLI snapshots exercise it. Rust does not expose Python's argparse callback or a process-global `argv` function as a library API. | Not applicable – these are Python CLI-framework entry/callback mechanics, not an independently usable package API. |
 
 ## Non-root helper modules: audit boundary and outstanding work
 
@@ -127,7 +127,7 @@ this audit records their status rather than implying they are full-parity API.
 | `cd.encoding_languages`, `cd.mb_encoding_languages`, `cd.alphabet_languages`, `cd.characters_popularity_compare`, `cd.alpha_unicode_split`, `cd.merge_coherence_ratios`, `cd.coherence_ratio` | Same-named `pub` functions, covered by the exhaustive CD oracle tests where applicable. | Covered (module-local helper surface) |
 | `cd.encoding_unicode_range`, `cd.unicode_range_languages`, `cd.get_target_features`, `cd.filter_alt_coherence_matches` | Same-named public Rust functions; oracle checks cover Cyrillic/Latin ranges, French target features, and em-dash alternative filtering. | Covered (module-local helper surface) |
 | `md.unicode_range`, `md.remove_accent`, `md.is_suspiciously_successive_range`, `md.mess_ratio` | Same-named public Rust functions. | Covered (module-local helper surface) |
-| `md.CharInfo` and the `MessDetectorPlugin`/nine concrete plugin classes | Rust has concrete detector implementation structs but no Python subclass/override extension protocol. | Not applicable — Python inheritance/plugin extension semantics have no direct Rust equivalent. |
+| `md.CharInfo` and the `MessDetectorPlugin`/nine concrete plugin classes | Rust has concrete detector implementation structs but no Python subclass/override extension protocol. | Not applicable – Python inheritance/plugin extension semantics have no direct Rust equivalent. |
 | `utils.is_accentuated`, `remove_accent`, `unicode_range`, `is_latin`, `is_punctuation`, `is_symbol`, `is_emoticon`, `is_separator`, `is_case_variable`, `is_cjk`, `is_hiragana`, `is_katakana`, `is_hangul`, `is_thai`, `is_arabic`, `is_arabic_isolated_form`, `is_cjk_uncommon`, `is_unicode_range_secondary`, `is_unprintable` | Concrete public Rust helpers replace the former stubs. `remove_accent` returns `Result<char, RemoveAccentError>` because the Python reference can raise on compatibility decompositions. Oracle characters cover Latin, punctuation/symbols, CJK scripts, Arabic forms, controls, U+001A, U+FEFF, and the Python error case U+FEFB. | Covered (typed adaptation) |
 | `utils.any_specified_encoding`, `is_multi_byte_encoding`, `identify_sig_or_bom`, `should_strip_sig_or_bom`, `iana_name`, `cp_similarity`, `is_cp_similar`, `cut_sequence_chunks` | Concrete public Rust helpers now use `Option`, `Result`, and materialized `Vec<String>` rather than Python runtime dispatch/generator protocol. Oracle checks cover alias failure modes, multibyte classification, UTF BOMs, declared encodings, code-page similarity, and chunks. | Covered (typed adaptation) |
 | `utils.set_logging_handler` | See package-root row. | Deliberately out of scope |

@@ -6,7 +6,7 @@
 
 - Workspace initialized with `uv` (modern Python, pyproject.toml).
 - Core dependencies installed and verified: graphrag (CLI + library), pyarrow/pandas (BYOG parquets), duckdb/networkx, tree-sitter + tree-sitter-python, pytest (dev).
-- `examples/mini_game/` — small (~250 LOC total), pure-Python, fully deterministic side-scroller simulator split across modules:
+- `examples/mini_game/` – small (~250 LOC total), pure-Python, fully deterministic side-scroller simulator split across modules:
   - core.py, physics.py, sim.py, main.py, tests/test_sim.py
   - Golden traces for 4 input scenarios committed (`golden_*.json`).
   - 5/5 behavior-contract tests passing (`pytest`).

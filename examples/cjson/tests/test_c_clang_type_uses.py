@@ -845,6 +845,7 @@ def test_cli_default_off_manifest(tmp_path: Path):
         clang_calls=False,
         clang_types=False,
         clang_type_uses=False,
+        clang_type_shapes=False,
         allow_toolchain_drift=False,
     )
     snap = (graph / "current").read_text(encoding="utf-8").strip()
@@ -951,6 +952,7 @@ def test_live_index_type_use_only(tmp_path: Path):
         clang_calls=False,
         clang_types=False,
         clang_type_uses=True,
+        clang_type_shapes=False,
         allow_toolchain_drift=False,
     )
     snap = (graph / "current").read_text(encoding="utf-8").strip()
@@ -992,6 +994,7 @@ def test_combined_all_four_flags_inih(tmp_path: Path):
         clang_calls=True,
         clang_types=True,
         clang_type_uses=True,
+        clang_type_shapes=False,
         allow_toolchain_drift=False,
     )
     snap = (graph / "current").read_text(encoding="utf-8").strip()
@@ -1045,6 +1048,7 @@ def test_index_failure_no_snapshot(tmp_path: Path, monkeypatch):
         clang_calls=False,
         clang_types=False,
         clang_type_uses=False,
+        clang_type_shapes=False,
         allow_toolchain_drift=False,
     )
     prior_current = (graph / "current").read_text(encoding="utf-8")
@@ -1073,6 +1077,7 @@ def test_index_failure_no_snapshot(tmp_path: Path, monkeypatch):
             clang_calls=False,
             clang_types=False,
             clang_type_uses=True,
+            clang_type_shapes=False,
             allow_toolchain_drift=False,
         )
     code = getattr(ei.value, "exit_code", None)
@@ -1144,6 +1149,7 @@ def test_shared_capture_four_flags_n_dumps(tmp_path: Path, monkeypatch):
             clang_calls=calls,
             clang_types=types,
             clang_type_uses=tuses,
+            clang_type_shapes=False,
             allow_toolchain_drift=False,
         )
         assert counter["n"] == expect, (sigs, calls, types, tuses, counter["n"])

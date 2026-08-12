@@ -1,4 +1,4 @@
-# Phase 7 Ablation v1 — does the deterministic graph help a cold porting agent?
+# Phase 7 Ablation v1 – does the deterministic graph help a cold porting agent?
 
 **Date:** 2026-06-25. First ablation toward the Phase 7 question: the project has
 shown *we can drive ports through graph rails*, but not yet *causally* that the
@@ -11,9 +11,9 @@ planned follow-up to remove the "you picked a familiar base" objection.
 Two arms per target, each a self-contained Cargo *kit* filled in by a **cold
 sub-agent** (fresh context, no project history), via `scripts/ablation.py`:
 
-- **arm_graph** — only the graph-derived context packs (transitive callee closure
+- **arm_graph** – only the graph-derived context packs (transitive callee closure
   from the entry symbols: entities + call edges + code snippets + observations).
-- **arm_raw** — only the raw original source (the whole package, tests excluded).
+- **arm_raw** – only the raw original source (the whole package, tests excluded).
 
 Both arms get the *same* required public API spec (the interface the hidden golden
 needs) and the *same* fixed prompt with an allowed-path rule (read only inside the
@@ -27,7 +27,7 @@ Honest scope: kits share a filesystem, so this is an engineering ablation (promp
 rule + transcript audit), not a sealed lab. A fully blind run would need separate
 sandboxes.
 
-## Dry-run (jsmn) — harness validation
+## Dry-run (jsmn) – harness validation
 
 | arm | builds | golden | compile attempts | tool-uses | wall |
 |---|---|---|---|---|---|
@@ -37,7 +37,7 @@ sandboxes.
 Purpose was to debug the protocol, and it did: the graph arm had to **infer
 `jsmn_fill_token`** because a hand-picked symbol list under-packed the graph. Fix
 applied: the graph arm now packs the **transitive callee closure**, not a manual
-list. Also confirmed the obvious limitation — a single-file target is uninformative
+list. Also confirmed the obvious limitation – a single-file target is uninformative
 (raw = the whole implementation in one header), so the real run uses a multi-file
 component.
 
@@ -110,9 +110,9 @@ measurement without rewriting the historical result:
 The corrected `sqlparse.split` graph pack has 15 closure packs and includes the
 10 keyword/regex data tables in `Lexer.default_initialization`'s pack.
 
-## Corrected-v1 rerun — invalidated by a spec bug (honest)
+## Corrected-v1 rerun – invalidated by a spec bug (honest)
 
-Re-running arm_graph on the corrected packs scored **7/25** — far worse than the
+Re-running arm_graph on the corrected packs scored **7/25** – far worse than the
 prior 24/25. Diagnosing the surprise (rather than reporting it) showed it was **a
 bug in the ablation's API spec, not a real signal**:
 
@@ -120,13 +120,13 @@ bug in the ablation's API spec, not a real signal**:
   verbatim (the data gap is genuinely closed).
 - But every failure was the same systematic whitespace divergence (`"select 1; "`
   vs golden `"select 1;"`). The spec said *"preserve the original text/whitespace"*,
-  whereas `sqlparse.split` is `[str(stmt).strip() for stmt in stack.run(...)]` —
+  whereas `sqlparse.split` is `[str(stmt).strip() for stmt in stack.run(...)]` –
   it **strips each statement**. The corrected agent obeyed the (wrong) spec; the
   earlier agent had ignored it and stripped, which is the only reason it scored
   24/25.
 
 Consequences:
-- The corrected-v1 number (7/25) is **void** — it measures spec-compliance, not
+- The corrected-v1 number (7/25) is **void** – it measures spec-compliance, not
   graph-vs-raw.
 - The **original v1 was also partly confounded**: arm_raw saw the real strip in
   `__init__.py:split` while arm_graph (no pack for the top-level wrapper) had to
@@ -134,7 +134,7 @@ Consequences:
 
 Fixes applied: the API spec now states the strip/semicolon contract correctly as
 the *definition* of the public API (given equally to both arms). A second lesson:
-a single cold run is high-variance — the two arm_graph runs chose very different
+a single cold run is high-variance – the two arm_graph runs chose very different
 internal strategies (lean tokenizer vs hand-rolled `SQL_REGEX` with no regex
 crate), so a credible result needs several runs per arm and/or removing avoidable
 variance (e.g. pre-providing a `regex`/`fancy-regex` dependency so agents do not
@@ -172,7 +172,7 @@ graph runs completed first time.
   stripped only the *last* statement's `;` where sqlparse strips *per statement*.
   The `StripTrailingSemicolonFilter` body is not in the closure (it is wired
   conditionally inside `FilterStack` and was not reached from the 3 roots), so the
-  graph arm implemented strip from the spec wording — graph_1 got it right, graph_2
+  graph arm implemented strip from the spec wording – graph_1 got it right, graph_2
   and graph_3 did not. Raw had the filter source and all three were exact. So the
   gap is partly a still-missing closure element (the filter) and partly within-arm
   variance, not a fundamental graph weakness.
@@ -183,8 +183,8 @@ On a component the model already knows well, with the data/keyword gap closed an
 regex variance removed, **raw source ≥ graph on fidelity (25 vs median 23), and the
 graph's value is efficiency** (much less context, fewer tools, less time) at a
 small, traceable fidelity cost. This is an efficiency result, not a capability
-result. The capability claim — that the graph lets an agent succeed where
-raw-source assembly is genuinely costly — is still **not** demonstrated and needs
+result. The capability claim – that the graph lets an agent succeed where
+raw-source assembly is genuinely costly – is still **not** demonstrated and needs
 v2 on a fresh, larger, less-familiar target. Two concrete packer follow-ups also
 fell out of v1: include module-level data dependencies (done) and conditionally
 wired pipeline elements like filters (open).
@@ -236,7 +236,7 @@ Target `humanize.number` (default locale), 6 formatters, 59-case hidden golden
 from the Python oracle. Pre-registered in `PHASE7_HUMANIZE_V2_PREREG.md`; run only
 after the adequacy gate was clean (closure 24, 19/19 must-reach, 0 must-exclude
 leaked) and a manual dry-prep audit. The mini-gate itself was a real result: it
-surfaced two *tractable* closure boundaries, fixed as **general resolver wins** —
+surfaced two *tractable* closure boundaries, fixed as **general resolver wins** –
 aliased-import resolution (`_`/`P_`/`NS_` -> `i18n:_gettext`/`_pgettext`/
 `_ngettext_noop`) and data->reference edges (`human_powers` -> `i18n:_ngettext_noop`,
 `_SUPERSCRIPT_TRANS` -> `_SUPERSCRIPT_MAP`). All fixes kept every existing graph
@@ -258,17 +258,17 @@ the isodate v3 contract tests).
   and passed in the other 3, across *both* arms: the frozen `f64` value type cannot
   hold Python's bignum `10**100`, so the googol threshold is stochastic. It affects
   both arms equally.
-- **No efficiency win either — honestly, the opposite.** Raw used slightly *fewer*
+- **No efficiency win either – honestly, the opposite.** Raw used slightly *fewer*
   tools (median 19 vs 25). Every raw agent reported the slice was "well-contained"
   (`number.py` + `i18n.py`, obvious among only 6 modules), so the raw-assembly
   burden was low and the graph's focus advantage (seen in v1's 21-module
   `sqlparse`) did not manifest. **humanize's number slice is a weak capability
-  discriminator** — easy enough for raw that the graph adds no measurable edge.
+  discriminator** – easy enough for raw that the graph adds no measurable edge.
 
 ### Honest conclusion across v1 / jsonpatch / v2
 
-The capability claim — that the deterministic graph lets a cold agent succeed
-where raw-source assembly is genuinely costly — remains **undemonstrated**:
+The capability claim – that the deterministic graph lets a cold agent succeed
+where raw-source assembly is genuinely costly – remains **undemonstrated**:
 - v1 (`sqlparse.split`, familiar, 21 modules): efficiency signal only.
 - `jsonpatch`: documented dynamic-dispatch boundary (call graph under-captures).
 - v2 (`humanize.number`, fresh, but ~2 relevant modules): near-parity, no
@@ -278,8 +278,8 @@ What *is* solidly demonstrated: the adequacy-gated methodology is sound and drov
 real, general resolver/packer improvements (data-dependency packing from
 `sqlparse`; aliased-import + data-reference edges from `humanize`; closure-scoped,
 leak-audited graph-arm material). The missing ingredient for a capability win is a
-target that is simultaneously (a) genuinely high raw-assembly cost — a slice buried
-across many interdependent modules, not one obvious file — and (b) statically
+target that is simultaneously (a) genuinely high raw-assembly cost – a slice buried
+across many interdependent modules, not one obvious file – and (b) statically
 structured enough to be adequacy-clean (not a jsonpatch-style dynamic boundary).
 
 ## v3 result (isodate `parse_duration`, N=3 per arm)
@@ -291,7 +291,7 @@ satisfy the ingredient v1/v2 lacked: `parse_duration`'s implementation is spread
 across **8 interdependent modules**, so the raw arm must locate and assemble the
 slice out of a 10-file package, while the graph arm receives 13 closure packs.
 
-Arms were filled by **GPT-5.6 (Terra, High)** — a different model family from
+Arms were filled by **GPT-5.6 (Terra, High)** – a different model family from
 v1/v2's Claude sub-agents, recorded in the pre-registration before any run. Both
 arms used the same model at the same setting; only the material differed. Scores
 are harness-measured against the hidden 24-case golden; efficiency columns are
@@ -311,7 +311,7 @@ artifacts and evidence are archived in `examples/isodate/ablation_v3/`.
 - **No capability win, again.** Both arms reproduce the slice at median 24/24.
   Raw was perfect in all three runs; graph missed one case in one run. On the
   target designed specifically to make raw assembly expensive, raw was not merely
-  competitive — it was marginally more consistent.
+  competitive – it was marginally more consistent.
 - **No efficiency win either.** Graph's median tool-uses (13) versus raw's (15)
   is well inside the noise of three runs of self-reported "roughly N", and build
   attempts (3,3,2 vs 2,3,4) show no direction. v1's clear focus advantage did not
@@ -319,7 +319,7 @@ artifacts and evidence are archived in `examples/isodate/ablation_v3/`.
 - **The single graph miss is within-arm variance, not missing material.** Graph
   run 2 failed `P0003-06-04T12:30:05`, the alternative datetime form reached
   through the deepest part of the closure. The packs for `parse_datetime`,
-  `parse_date` and `parse_time` were all present in that kit — the other two
+  `parse_date` and `parse_time` were all present in that kit – the other two
   graph runs got the case right from the same material. So it is not a packer
   gap of the kind v1 surfaced.
 - **The design premise held; the prediction did not.** Raw genuinely had to
@@ -347,13 +347,13 @@ of the graph: **any slice small enough to be a clean benchmark is also small
 enough for the raw package to fit in the model's context.** Every target tried is
 under ~4k LOC with one obvious entry point, so "raw-assembly cost" was only ever
 locating code, never being unable to see it. The condition under which a code
-graph should matter — the condition the original demo implies at 1M LOC — is when
+graph should matter – the condition the original demo implies at 1M LOC – is when
 raw *cannot* be handed over at all and must be triaged.
 
 That reframes what a v4 would have to be, if one is run: a target whose raw
 material genuinely exceeds the arm's context budget, so `arm_raw` must choose
 what to read while `arm_graph` receives exactly the closure. Until such a design
-exists, the honest project claim is the one the evidence supports — the
+exists, the honest project claim is the one the evidence supports – the
 deterministic graph is a verification and context-assembly discipline that makes
 ports auditable and repeatable, not a demonstrated accuracy multiplier.
 
@@ -370,7 +370,7 @@ before they could contaminate a published number.
 > Ablations did not demonstrate that deterministic graph context improves
 > cold-agent porting accuracy over raw source for bounded, clean benchmark
 > slices. The graph remains valuable as an auditability, provenance,
-> adequacy-gating, and context-assembly discipline — not as a measured accuracy
+> adequacy-gating, and context-assembly discipline – not as a measured accuracy
 > multiplier.
 
 The reasoning for stopping rather than continuing: four attempts have already
@@ -382,27 +382,27 @@ hunting for a positive result. The strength of this project is that it can halt 
 hypothesis honestly, and the negative result is a real finding, not a failure.
 
 **Why a v4 would be a different experiment, not a continuation.** The reframing
-above — that raw material must exceed the arm's context budget — is not a target
+above – that raw material must exceed the arm's context budget – is not a target
 swap; it needs a different protocol: a hard material budget, a tool-call budget,
 a wall-clock budget, and isolation strict enough that an arm cannot incrementally
 pull in the repository. Without those, a raw agent simply assembles context
 through tool calls across iterations, and the experiment measures *"the model can
-search"* rather than *"the context did not fit"* — which is not the claim under
+search"* rather than *"the context did not fit"* – which is not the claim under
 test. Designing that protocol properly is a separate undertaking, to be
 pre-registered on its own terms if it is ever run.
 
 **`charset-normalizer` is deliberately not drafted into it.** It is already a
 strong stress-test artifact; turning it into a large ablation would require
 constraining both arms so artificially that the result would be arguable either
-way. Its role stays what it is — the data-heavy validation target — and it feeds
+way. Its role stays what it is – the data-heavy validation target – and it feeds
 Phase 3/7 productization instead.
 
 ## Next
 
 1. Phase 3 / product surface: one CLI over index / audit / adequacy /
-   context-pack / `port_eval` (done — `scripts/graphrag_code.py`).
-2. A write-up: what worked, what did not, and why the graph is still useful —
+   context-pack / `port_eval` (done – `scripts/graphrag_code.py`).
+2. A write-up: what worked, what did not, and why the graph is still useful –
    stated at the altitude the evidence supports.
 3. Optional: widen the golden value type beyond `f64` (int/float/bignum) for a
-   future numeric target — the cause of the shared `intword(1e100)` miss, not a
+   future numeric target – the cause of the shared `intword(1e100)` miss, not a
    porting failure.

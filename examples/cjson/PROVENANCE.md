@@ -1,4 +1,4 @@
-# Provenance — vendored `cJSON` (Phase 6 C frontend + ownership-slice Rust port)
+# Provenance – vendored `cJSON` (Phase 6 C frontend + ownership-slice Rust port)
 
 Third C target for Plan Phase 6 and the first **struct/pointer/ownership-heavy**
 one (~3.2k LOC). This checkpoint includes the graph bootstrap (frontend + audit
@@ -12,7 +12,7 @@ C→Rust ownership + owned-builder port.
 - Vendored verbatim from `master`; exact upstream commit/tag is not recorded in
   the files, the local repository commit pins the reproducible snapshot.
 
-## License — gate step 1 (captured)
+## License – gate step 1 (captured)
 - **MIT**. Full text in `LICENSE` (verbatim); the copyright header
   (`Copyright (c) 2009-2017 Dave Gamble and cJSON contributors`) and the MIT
   permission notice are present in both `cJSON.c` and `cJSON.h`.
@@ -111,7 +111,7 @@ explicit skip and the final status says `PASS WITH SKIPS`.
   package-local `CallExpr` sites (callee subtree only) to tree-sitter `calls`
   edges. Direct internal matches require a `DeclRefExpr` → `FunctionDecl` with
   unambiguous package definition/entity mapping; external and indirect
-  (parm/var/member function-pointer) calls stay observations — not points-to
+  (parm/var/member function-pointer) calls stay observations – not points-to
   analysis. Physical sites use Clang/tree-sitter byte offsets first and exact
   line/normalized-column only when an offset is unavailable; column-only
   matching is forbidden. Nested calls produced by one macro expansion remain
@@ -139,11 +139,15 @@ explicit skip and the final status says `PASS WITH SKIPS`.
   verification. `clang_call_confidence=1.0` is relative only to the recorded
   Clang + `compile_commands.json` configuration.
 - **Shared AST capture (execution only):** enabling any non-empty combination
-  of `--clang-signatures`, `--clang-calls`, and `--clang-types` uses one
+  of `--clang-signatures`, `--clang-calls`, `--clang-types`,
+  `--clang-type-uses`, and `--clang-type-shapes` uses one
   in-memory capture for the enabled overlays (one AST dump per compile entry
-  for this package’s single-entry compile DB; never 2N/3N). No disk AST
+  for this package’s single-entry compile DB; never 2N–5N). The
+  type-declaration audit is built once and reused by the type-use and
+  type-shape builders. No disk AST
   cache; standalone audit CLIs remain available; confidence boundaries and
-  independent `clang_signatures` / `clang_calls` / `clang_types` manifest
+  independent `clang_signatures` / `clang_calls` / `clang_types` /
+  `clang_type_uses` / `clang_type_shapes` manifest
   blocks are unchanged.
 - **C symbol identity (tree-sitter extractor, kind-aware titles):** within one
   module key, when `function` / `struct` / `enum` / `typedef` share a bare
@@ -169,7 +173,7 @@ explicit skip and the final status says `PASS WITH SKIPS`.
   tree_sitter_only=0, ambiguous=0, macro_location_unsupported=0,
   unsupported_declarations=0, out_of_compile_db_scope=0. The CLI does not
   mutate BYOG. `--fail-on-mismatch` fails only on tree_sitter_only /
-  clang_only / ambiguous / macro residuals — not on anonymous/outside-package
+  clang_only / ambiguous / macro residuals – not on anonymous/outside-package
   alone. Not layout/ABI, type-use analysis, points-to, C++, or multi-config.
 - **Optional `--clang-types` entity fields (default off):**
   `scripts/index_c.py --clang-types` attaches the audit’s **matched** type-
@@ -199,7 +203,7 @@ explicit skip and the final status says `PASS WITH SKIPS`.
   `cJSON:struct:cJSON -> cJSON:struct:cJSON` self-edge from fields). Entity
   count stays 148; pre-existing relationship IDs/endpoints/types are preserved.
   Independent `extra_manifest["clang_type_uses"]` block. Confidence is
-  configuration-relative only — not layout/ABI/multi-config/points-to proof.
+  configuration-relative only – not layout/ABI/multi-config/points-to proof.
   Local consumers: `types-used-by` / `type-users` / bounded `type-closure`
   queries and context-pack `type_dependencies` / `type_dependency_edges` /
   `type_user_edges` (bounded observation samples; struct vs typedef titles
@@ -216,13 +220,33 @@ explicit skip and the final status says `PASS WITH SKIPS`.
 - **Type-shape audit (diagnostic):** for the three matched named structs
   (`cJSON`, `cJSON_Hooks`, `internal_hooks`), ordered direct field names
   match tree-sitter at the configured site (`matched_shape=3`, shape
-  mismatch buckets 0). Nested bodies are not flattened. Not ABI/layout.
-  No graph mutation.
+  mismatch buckets 0, `unsupported_member_form=0`,
+  `outside_package_declarations=54`). Nested bodies are not flattened.
+  Not ABI/layout. The audit CLI performs no graph mutation.
+- **Optional `--clang-type-shapes` entity fields (default off):**
+  `scripts/index_c.py --clang-type-shapes` attaches ordered direct member-name
+  evidence as `clang_shape_*` fields onto existing `struct` / `enum` entities
+  only. Measured on this host: **3** decorated entities
+  (`cJSON:struct:cJSON` with 8 ordered fields
+  `next, prev, child, type, valuestring, valueint, valuedouble, string`;
+  `cJSON:struct:cJSON_Hooks` with `malloc_fn, free_fn`;
+  `cJSON:struct:internal_hooks` with `allocate, deallocate, reallocate`).
+  Entity/relationship counts stay 148 / 640; entity IDs, titles, spans,
+  `extractor`, `confidence`, and tree-sitter fields are unchanged, and no
+  `uses_type` edges or alternate-site entities are created. Attachment
+  requires exact `tree_sitter_title` + entity type + `symbol_name` +
+  package-relative path + **canonical graph span**, cross-checked against the
+  type-declaration owner; a missing, non-unique, or diverging target aborts the
+  whole overlay before mutation. Hard equality is the ordered member-name list
+  only: `qualType` / `desugaredQualType` / enum values / bit-field widths /
+  locations are configuration-relative diagnostic evidence, **not** ABI,
+  layout, FFI-safety, or Rust `repr` proof. Independent
+  `extra_manifest["clang_type_shapes"]` block.
 
-## C frontend result — clean on the first pass
+## C frontend result – clean on the first pass
 Unlike `inih`, cJSON does not fragment function bodies with `#if`/`#endif`, so the
 tree-sitter-c extractor parsed all 116 functions without phantom/keyword
-misparses. The audit is clean on the first index — the largest and most
+misparses. The audit is clean on the first index – the largest and most
 pointer-heavy C target so far passes the same rails unchanged.
 
 The bootstrap captures the facts that matter for ownership analysis:
@@ -230,7 +254,7 @@ The bootstrap captures the facts that matter for ownership analysis:
   they share a C name (kind-qualified titles). Anonymous-struct typedefs
   (`error` / `parse_buffer` / `printbuffer`) remain typedef-only.
 - **Recursive ownership/traversal:** `cJSON_Delete`, `cJSON_Compare`, and
-  `cJSON_Duplicate_rec` are captured as deterministic self-edges — the recursive
+  `cJSON_Duplicate_rec` are captured as deterministic self-edges – the recursive
   free/compare/duplicate that define cJSON's tree ownership.
 - **Allocation primitives stay observations:** `malloc`/`free`/`realloc`/
   `memcpy`/`memset`/`strlen` are weak observations, never core deterministic
@@ -242,9 +266,9 @@ Two figures matter; do not mix them:
 
 | scope | entities | relationships | calls | observations | when to quote |
 |---|---:|---:|---:|---:|---|
-| **Full graph (source-derived, kind-aware titles)** — library + golden runner | **148** | **640** | **495** | 144 | live extract/`build_c_byog`, type audit, post-identity-fix claims |
+| **Full graph (source-derived, kind-aware titles)** – library + golden runner | **148** | **640** | **495** | 144 | live extract/`build_c_byog`, type audit, post-identity-fix claims |
 | **Full graph (historical published snapshot `20260726-040744-fcee0a70`)** | 145 | 637 | **495** | 144 | frozen snapshot identity; do not rewrite |
-| **Library subgraph** — `cJSON.c` / `cJSON.h` only (cJSON→cJSON calls) | — | — | **188** | — | ownership/API claims about the ported library itself |
+| **Library subgraph** – `cJSON.c` / `cJSON.h` only (cJSON→cJSON calls) | – | – | **188** | – | ownership/API claims about the ported library itself |
 | **Pre-mutation-runner snapshot** (historical; e.g. `20260625-123603` / provenance-stamped `20260726-030425`) | 131 | 367 | **239** | 125 | bootstrap and pre-mutation evidence; ownership slice before mutation traces landed |
 
 The source-derived full graph co-indexes `tests/parse/runner.c` the same way `jsmn`/`inih` do, now including the mutation-scenario helpers:
@@ -261,7 +285,7 @@ The source-derived full graph co-indexes `tests/parse/runner.c` the same way `js
 - Resolved entry chains: `cJSON_Parse -> cJSON_ParseWithOpts`,
   `cJSON_ParseWithLength -> cJSON_ParseWithLengthOpts`.
 - Preprocessor provenance: 6/145 entities, **0/495** trusted call edges, 71/144
-  observations flagged. Library trusted calls remain **0/188** flagged — the
+  observations flagged. Library trusted calls remain **0/188** flagged – the
   port rests on unconditional internal library calls; the mutation runner did
   not introduce preprocessor-dependent call edges.
 - Branch liveness (2026-07-26): under `compile_commands.json` (no `-D`) plus
@@ -287,15 +311,15 @@ The source-derived full graph co-indexes `tests/parse/runner.c` the same way `js
   implementation was not: a `#define` is a default only when it sits outside
   every conditional (include guards excepted) or forms the `#ifndef X` /
   `#define X v` idiom, and it is applied in source order within its own file.
-  Harvesting nested defines made `#define __WINDOWS__` — which lives inside
-  `#if !defined(__WINDOWS__) && (defined(WIN32) || …)` — read as set on a POSIX
+  Harvesting nested defines made `#define __WINDOWS__` – which lives inside
+  `#if !defined(__WINDOWS__) && (defined(WIN32) || …)` – read as set on a POSIX
   build, and made every `#ifndef INI_*` default region in `inih` read as dead
   because the `#define` it guards had already been scraped. Liveness also
   propagates: a branch inside a dead region is dead, and inside an undecidable
   region it is undecidable however evaluable its own condition is.
 - Checked against the real compiler (`scripts/c_preprocessor.py --vs-compiler`,
   test `examples/cjson/tests/test_c_liveness_vs_compiler.py`). The oracle is
-  `clang -E` with the `compile_commands.json` flags — line survival via the
+  `clang -E` with the `compile_commands.json` flags – line survival via the
   `# linenum "file"` markers, plus `-E -dM` for directive-only regions, whose
   `#define` leaves no output line to count. **0 disagreements** on all three
   compile-database packages, but the count that matters is how much is actually
@@ -311,8 +335,8 @@ The source-derived full graph co-indexes `tests/parse/runner.c` the same way `js
   | `jsmn` | 20 | `compiler_builtins` | 20 (18 / 2) | 0 | 0 (0.0%) |
 
   *Vacuous* is a separate column on purpose. Directive-only regions that define
-  nothing attributable — function-like macros, and names several exclusive
-  branches define to the same replacement (`INI_API`, the `CJSON_PUBLIC` arms) —
+  nothing attributable – function-like macros, and names several exclusive
+  branches define to the same replacement (`INI_API`, the `CJSON_PUBLIC` arms) –
   cannot be judged in either direction, and counting them as agreements made
   cJSON read 15/15 when 7 regions were really checked. *Unknown* is what
   `no_compiler` mode cannot decide without the toolchain's macro environment:
@@ -326,7 +350,7 @@ The source-derived full graph co-indexes `tests/parse/runner.c` the same way `js
   `#ifndef isnan` and `#ifndef NAN` in `cJSON.c` *live* when `math.h` had
   already defined all three, so those blocks never run. The labeller therefore
   also reads the real compile command's `-E -dM` table, attributing a name to an
-  include only when no package `#define` of it matches the final replacement —
+  include only when no package `#define` of it matches the final replacement –
   which keeps the inference non-circular, since our own macros can never make
   themselves look external. Scoring, not excusing, is the rule here: an earlier
   revision detected exactly this mismatch and filed it as an unscoreable "model
@@ -345,7 +369,7 @@ diffs).
   (`cJSON_Delete`), and that allocation primitives stay observations (scoped to
   the library subgraph, so it is stable against runner changes).
 - `examples/cjson/tests/test_cjson_parse_contract.py` recompiles the C golden
-  runner, re-derives the contract, and — when the toolchain supports it —
+  runner, re-derives the contract, and – when the toolchain supports it –
   recompiles under AddressSanitizer to verify the parse+print+delete and
   mutation ownership paths are leak/double-free clean (skips and records if
   ASan is unavailable).
@@ -369,7 +393,7 @@ diffs).
   precision boundaries that round under 15 digits, negative zero (prints `0`),
   very large/small magnitudes, and overflow→±inf→`null` (`1e400` / `-1e400`).
   Deliberately omitted: `ENABLE_LOCALES` decimal-point variants (default build
-  has locales off); bare JSON `NaN` tokens (parser rejects them — overflow
+  has locales off); bare JSON `NaN` tokens (parser rejects them – overflow
   exponents cover the print-null path); malformed-number partial `strtod`
   consumption.
 - **Owned builder/mutation and structural API** (`golden_mutation.json`, 7 fixed
@@ -397,7 +421,7 @@ diffs).
   the *platform* libc for `%1.15g`/`%1.17g`, so byte-parity between them holds on
   any single machine by construction. The committed golden, however, is a capture
   from one platform (macOS/Darwin). A libc whose `%g` rounding differs would make
-  the checked-in expectations fail rather than silently diverge — the Python
+  the checked-in expectations fail rather than silently diverge – the Python
   contract re-derives every case from the C runner, so such a platform shows up
   as a test failure and the golden would need regeneration there. Cross-libc
   invariance is **not** claimed or tested.
@@ -434,7 +458,7 @@ diffs).
   `valuedouble` IEEE-754 bits exactly like the C runner.
 - Float printing: `print_number` matches cJSON's two-step `%1.15g` then
   `%1.17g` (with the same relative `compare_double` recovery check) by calling
-  libc `snprintf`/`sscanf` — Rust's `Display` for `f64` is a different algorithm
+  libc `snprintf`/`sscanf` – Rust's `Display` for `f64` is a different algorithm
   and does not agree byte-for-byte with the C oracle. Default build (no
   `ENABLE_LOCALES`) keeps the decimal point as `'.'`.
 - `port_eval`: graph pass rate 1.0 (495 calls full graph / 188 library-only,
@@ -443,7 +467,7 @@ diffs).
   Rust fmt/check/golden_test/run all ok; 59 golden cases (22 ownership + 30
   float-print + 7 mutation); `manual_fixes=0`; `OVERALL PASS=True`.
 - **Rust hardening (Miri + properties):**
-  - **Miri:** `cargo +nightly miri test --test ownership_props` — 11 property
+  - **Miri:** `cargo +nightly miri test --test ownership_props` – 11 property
     tests, all pass. Covers parse → walk → print → drop of randomly shaped
     trees, wide sibling lists, deep-nesting rejection, garbage inputs, and
     add → insert → detach → delete → replace ownership transfer plus independent
@@ -452,19 +476,19 @@ diffs).
     `snprintf`/`sscanf` float-print path. That code is compiled only under
     `cfg(not(miri))`; under Miri a pure-Rust `Display` stand-in is used so
     ownership tests can print numbers without foreign calls. The stand-in is
-    **not** golden-faithful and is never linked into a normal build — float
+    **not** golden-faithful and is never linked into a normal build – float
     byte-parity remains a non-Miri, libc check (`parse_contract` is
     `#[ignore]` under Miri for that reason). No ownership UB was found.
   - **Property tests:** `tests/ownership_props.rs` with `proptest` (32 cases
     per randomised property on normal builds, 16 under Miri; seed printed by
     proptest on failure). Invariants are labelled in-file as Phase 5 requires:
-    - *deterministic* — public type tags, `Is*` partition, array-size vs
+    - *deterministic* – public type tags, `Is*` partition, array-size vs
       sibling chain, parse+print+drop no-panic, garbage no-panic, mutation
       add/insert/detach/delete/replace ownership transfer, and independent
       recursive duplicate/compare behavior
-    - *inferred* — printed output is UTF-8 and re-parsable (not byte-identical
+    - *inferred* – printed output is UTF-8 and re-parsable (not byte-identical
       to the input); wide-array drop is iterative-safe
-    - *human-approved* — nesting past the default limit (1000) is rejected
+    - *human-approved* – nesting past the default limit (1000) is rejected
   - **Still untested:** concurrent use, Miri over the FFI float path, fuzzing
     against adversarial multi-MB inputs, and cross-libc float golden invariance.
 
@@ -502,7 +526,7 @@ same later source mutation. `rustc --edition=2021 --crate-type=lib` rejects
 that mutation with the recorded `E0502` error; the pytest audit compiles every
 candidate, checks the exact diagnostic, and parses rustc JSON to require its
 primary span to fall inside `c_oracle_mutation_trace`. This proves safe shared
-borrows do not close these C traces over the present owned tree — not that
+borrows do not close these C traces over the present owned tree – not that
 another Rust representation is impossible. The generated audit names the
 concrete closure and cost for each: shared mutable bytes for string/key aliases,
 and shared nodes or a handle arena for child aliases; each changes existing
@@ -514,8 +538,8 @@ adding an afternoon-scale helper.
 that a `&CJson` borrowed from the tree cannot coexist with `&mut parent`. That
 is true of a reference and false of an address. Both are now covered by
 `detach_item_via_pointer` / `replace_item_via_pointer`, which take a
-`*const CJson` identity token that is compared and never dereferenced — no
-`unsafe`, no handle arena, no interior mutability — and both appear in the
+`*const CJson` identity token that is compared and never dereferenced – no
+`unsafe`, no handle arena, no interior mutability – and both appear in the
 byte-compared safe C/Rust trace, including detach identity (`detached == item`)
 and the surviving array shape. This is the second time an "impossible under
 exclusive `Box` ownership" claim on this port covered more ground than the
@@ -545,6 +569,6 @@ The header inventory is closed at the current representation: all safe
 non-aliasing functions are covered, and every remaining function has an
 executable, quantified refusal. Further cJSON work would be a deliberate
 representation/policy change (shared/borrowed nodes or handles; allocator/error
-state), locale decimal-point support, or partial-`strtod` malformation work —
+state), locale decimal-point support, or partial-`strtod` malformation work –
 not a hidden API-parity TODO. The Phase 6 checkpoint can stand while the project
 moves to productization/benchmarking or clang-backed C/C++ semantic extraction.

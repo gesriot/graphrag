@@ -1,4 +1,4 @@
-# Phase 5 Evidence Report — Scaled, Multi-Package Python→Rust Port
+# Phase 5 Evidence Report – Scaled, Multi-Package Python→Rust Port
 
 **Date:** 2026-06-25. Frozen snapshot of the deterministic-graph + golden-contract
 porting methodology, now validated at scale on a real external multi-package
@@ -10,17 +10,17 @@ Deterministic source graph (tree-sitter + AST resolver: tiers/observations,
 import/annotation/ctor tracking) is the ground truth; a verifiable, repeatable
 harness drives Python→Rust ports. Two rails separate *means* from *ends*:
 
-- `scripts/audit_call_edges.py` — graph quality: structural pass rate of CALLS
+- `scripts/audit_call_edges.py` – graph quality: structural pass rate of CALLS
   edges, dangling targets, seeded precision sample, and an **import-aware**
   semantic-suspicion check.
-- `scripts/port_eval.py` — end-to-end port: graph quality → context packs →
+- `scripts/port_eval.py` – end-to-end port: graph quality → context packs →
   `cargo fmt/check/test/run` → golden cases → manual-fix count, with contract
   coverage required per nested golden suite.
 
 **Per-project gate:** (1) license captured → (2) golden/contract before any Rust
 → (3) graph clean (`semantic_suspicions == 0`) → (4) `port_eval` OVERALL PASS.
 
-## Results — five Python→Rust ports, 0 manual fixes each
+## Results – five Python→Rust ports, 0 manual fixes each
 
 | Project | Class | Golden cases | manual_fixes | OVERALL |
 |---|---|---|---|---|
@@ -42,13 +42,13 @@ prerelease/build precedence, fuzzy patch apply, and splitter quirks).
 - Audit: 229 resolved calls, structural pass rate 1.0, 0 anomalies, 0 dangling,
   0 semantic suspicions (after the heuristic was made import-aware for
   `from pkg import module; module.func()`); manual precision sample 12/12.
-- Bottleneck found at scale was **audit-heuristic precision, not the resolver** —
+- Bottleneck found at scale was **audit-heuristic precision, not the resolver** –
   the resolver stayed precision-clean across packages.
 
 ### `sqlparse.split` port (staged)
 
 1. token type tree + 811 keyword entries (generated from Python, first-match-wins).
-2. lexer parity — `fancy-regex` `captures_from_pos` + `start==pos` (= Python
+2. lexer parity – `fancy-regex` `captures_from_pos` + `start==pos` (= Python
    `re.match(text, pos)` with full lookbehind context); differential gate of
    341 tokens, 0 divergences.
 3. `StatementSplitter` state machine + `Statement` stringification + `split()`.
@@ -70,7 +70,7 @@ uv run python -m pytest examples -q   # full suite (currently 348 passed)
 
 ## Caveats (honest scope)
 
-- **Core scope, not full API:** `sqlparse.split` only — `parse`, `grouping`,
+- **Core scope, not full API:** `sqlparse.split` only – `parse`, `grouping`,
   `formatter` are out of scope.
 - The graph has no entity for `__init__.py:split`, so the 3/3 context packs go
   through `lexer:tokenize`, `FilterStack.run`, `StatementSplitter.process`.

@@ -909,6 +909,7 @@ def test_live_inih_type_closure_smoke(tmp_path: Path):
         clang_calls=False,
         clang_types=False,
         clang_type_uses=True,
+        clang_type_shapes=False,
         allow_toolchain_drift=False,
     )
     g = ByogGraph(graph)
@@ -985,6 +986,7 @@ def test_live_cjson_type_closure_smoke(tmp_path: Path):
         clang_calls=False,
         clang_types=False,
         clang_type_uses=True,
+        clang_type_shapes=False,
         allow_toolchain_drift=False,
     )
     g = ByogGraph(graph)

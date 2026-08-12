@@ -545,9 +545,9 @@ def _health_class(item: Mapping[str, Any]) -> str:
             (str(declaration["reason"]) for declaration in declarations if declaration.get("reason")),
             "deliberately frozen",
         )
-        return f"frozen exemption — {reason}"
+        return f"frozen exemption – {reason}"
     profiles = ", ".join(f"`{declaration['id']}`" for declaration in declarations)
-    return f"mutable — full aggregate health check ({profiles})"
+    return f"mutable – full aggregate health check ({profiles})"
 
 
 def _probe_command(probe: Mapping[str, Any], root: Path) -> list[str]:
@@ -669,8 +669,8 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         "",
         "Availability is not the only way a local graph stops being evidence: it can "
         "also fall behind the code that generates it.  On 2026-07-30 two semantic "
-        "extractor changes — the cross-module import resolver, then registry-dispatch "
-        "promotion — turned out to have been published to some graphs and not others, "
+        "extractor changes – the cross-module import resolver, then registry-dispatch "
+        "promotion – turned out to have been published to some graphs and not others, "
         "leaving four published roots disagreeing with a fresh index by 2 to 72 calls "
         "(`byog_semver` 185/187, `byog_mini_game` 16/27, `byog_dmp` 55/60, "
         "`byog_charset_normalizer` 110/182).",
@@ -697,8 +697,8 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         consumers: list[str] = [_claim_use_text(use) for use in item["claim_uses"]]
         consumers.extend(f"call oracle: `{name}`" for name in item["oracle_uses"])
         if not consumers:
-            consumers.append("—")
-        docs = ", ".join(f"`{path}`" for path in item["documents"]) or "—"
+            consumers.append("–")
+        docs = ", ".join(f"`{path}`" for path in item["documents"]) or "–"
         lines.append(
             "| `{artifact}` | {consumers} | {availability} | {replay} | {health} | {docs} |".format(
                 artifact=item["artifact"],
@@ -723,7 +723,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         "| --- | --- | --- |",
     ]
     for gate in report["gate_outputs"]:
-        output = f"`{gate['output']}`" if gate["output"] else "—"
+        output = f"`{gate['output']}`" if gate["output"] else "–"
         lines.append(f"| `{gate['id']}` | {output} | {gate['replay']} |")
 
     probe_groups: dict[tuple[str, str, str], tuple[Mapping[str, Any], list[Mapping[str, Any]]]] = {}
@@ -767,7 +767,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         "- `disposable output` can be deleted: run the corresponding port gate again.",
         "- `published oracle input` is required to replay that exact call-observation comparison; "
         "reindexing is useful, but changes the baseline under comparison.",
-        "- `mutable — full aggregate health check` means the graph is local current evidence: "
+        "- `mutable – full aggregate health check` means the graph is local current evidence: "
         "run `uv run python scripts/port_eval.py --all-gates --full` with the artifact present "
         "before relying on it.",
         "- `local-frozen-snapshot` and `historical record` are the durable-evidence risk.  The "

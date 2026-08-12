@@ -6,7 +6,7 @@ source-language behavior contract, rebuilds and audits a graph, assembles contex
 packs, and checks the Rust port against that contract. The goal is auditable
 evidence, not a claim that a graph makes a model intrinsically better at coding.
 
-## What this demonstrates — and what it does not
+## What this demonstrates – and what it does not
 
 The declared port profiles show that this process can produce repeatable,
 high-fidelity results **within explicit target contracts**. The evidence is
@@ -17,7 +17,7 @@ contracts, Rust checks, and `port_eval` make each result inspectable.
 The closed, pre-registered graph-vs-raw ablation series found **no measured
 accuracy or efficiency advantage** for the graph arm on its tested benchmark
 class. The graph is therefore supported here as a discipline for auditability,
-provenance, adequacy gates, and focused context assembly — **not** as a measured
+provenance, adequacy gates, and focused context assembly – **not** as a measured
 accuracy multiplier or a demonstrated general porting advantage. It also does
 not claim full upstream-library parity, complete static semantics, or a full C
 ABI migration beyond each target's stated boundary.
@@ -94,25 +94,25 @@ provenance files and the [evidence audit](docs/EVIDENCE_AUDIT_20260728.md).
 **Optional C compiler overlays (each default off):** independently selectable
 flags on `scripts/index_c.py`:
 
-- `--compiler-dependencies` — flattened TU `depends_on` edges
+- `--compiler-dependencies` – flattened TU `depends_on` edges
   (`fact_kind=translation_unit_dependency`) via per-entry `compiler -M` and
   package-path filtering (may be transitive).
-- `--compiler-includes` — direct `includes` edges
+- `--compiler-includes` – direct `includes` edges
   (`fact_kind=configured_direct_include`) via per-entry `compiler -E -H`
   hierarchy reconstruction (parent → only its direct includes).
-- `--clang-signatures` — attach configured Clang `qualType` / storage metadata
+- `--clang-signatures` – attach configured Clang `qualType` / storage metadata
   to **existing** tree-sitter function entities from the AST audit’s
   unambiguously matched, line-confirmed rows only (no new entities/edges).
-- `--clang-calls` — attach configured Clang direct-call evidence metadata to
+- `--clang-calls` – attach configured Clang direct-call evidence metadata to
   **existing** tree-sitter `calls` relationships from the AST call-site audit’s
   `matched_internal` rows only (exact span + byte-offset attachment; no new
   entities/edges; base `confidence`/`extractor` unchanged).
-- `--clang-types` — attach configured Clang type-declaration evidence metadata
+- `--clang-types` – attach configured Clang type-declaration evidence metadata
   to **existing** tree-sitter `struct` / `enum` / `typedef` entities from the
   AST type-declaration audit’s matched rows only (exact `tree_sitter_title` +
   entity type + `symbol_name` + path + canonical graph span; no new entities,
   no alternate-site entities).
-- `--clang-type-uses` — publish aggregated `uses_type` relationships from the
+- `--clang-type-uses` – publish aggregated `uses_type` relationships from the
   type-use audit’s `matched_internal` rows only (one edge per owner/target
   entity-id pair; recursive self-edges allowed). Observation counts and edge
   counts differ; fail-closed residuals abort. Default off. When present, query
@@ -128,17 +128,34 @@ flags on `scripts/index_c.py`:
   `type_user_closure` with min depths and the same observation/text bounds.
   Missing or non-unique closure endpoints remain explicit node payloads so
   returned counts and truncation flags stay honest.
+- `--clang-type-shapes` – attach configured Clang **ordered direct member-name**
+  evidence to **existing** tree-sitter `struct` / `enum` entities from the
+  type-shape audit’s `matched_shape` rows only (`clang_shape_*` namespace;
+  exact `tree_sitter_title` + entity type + `symbol_name` + package-relative
+  path + canonical graph span). Hard equality is the ordered member-name list
+  and nothing else: `qualType`, `desugaredQualType`, enum values, bit-field
+  widths, and member locations are published as configuration-relative
+  diagnostic evidence, **not** ABI, layout, size, alignment, offset, FFI-safety,
+  or Rust `repr` claims. Residual buckets (`tree_sitter_only_members`,
+  `clang_only_members`, `member_order_mismatch`,
+  `duplicate_or_ambiguous_members`, `macro_location_unsupported`,
+  `owner_unmatched`) fail closed; `unsupported_member_form` and
+  `outside_package_declarations` stay observation-only and are counted in the
+  manifest. No new entities, relationships, `uses_type` edges, or alternate-site
+  entities. Default off.
 
 When any non-empty combination of `--clang-signatures`, `--clang-calls`,
-`--clang-types`, and `--clang-type-uses` is enabled, `index_c` builds **one
-shared in-memory AST capture** (one `-ast-dump=json` per
-`compile_commands.json` entry) and every enabled overlay consumes it. There is
-**no** persistent AST cache and AST JSON is never written to manifests or
-parquet. Enabling any non-empty subset still dumps once per entry (N dumps for
-N entries, never 2N–4N); none of the flags dumps nothing. Trust/confidence
-boundaries are independent per overlay manifest block.
+`--clang-types`, `--clang-type-uses`, and `--clang-type-shapes` is enabled,
+`index_c` builds **one shared in-memory AST capture** (one `-ast-dump=json` per
+`compile_commands.json` entry) and every enabled overlay consumes it. The
+type-declaration audit is likewise built at most once and reused by the
+type-use and type-shape builders. There is **no** persistent AST cache and AST
+JSON is never written to manifests or parquet. Enabling any non-empty subset
+still dumps once per entry (N dumps for N entries, never 2N–5N); none of the
+flags dumps nothing. Trust/confidence boundaries are independent per overlay
+manifest block.
 
-These are narrow configuration-derived layers on top of tree-sitter-c — not
+These are narrow configuration-derived layers on top of tree-sitter-c – not
 full type resolution, ABI verification, multi-config coverage, points-to
 analysis, type-use / `uses_type` proof, macro-complete call proof, or
 production C/C++ completeness. `-M` / `-H` / AST-dump are GNU/Clang-specific
@@ -148,15 +165,15 @@ modules, plugins, and PCH fail explicitly. See
 
 **Clang AST audits (standalone diagnostics):**
 
-- `scripts/c_clang_ast_audit.py` — function definitions / signatures vs
+- `scripts/c_clang_ast_audit.py` – function definitions / signatures vs
   tree-sitter entities. Publishing selected matched signature *fields* into
   BYOG requires the separate explicit `--clang-signatures` flag.
-- `scripts/c_clang_call_audit.py` — call sites vs tree-sitter `calls` edges
+- `scripts/c_clang_call_audit.py` – call sites vs tree-sitter `calls` edges
   (direct internal matches; external/indirect remain observations). Call-site
   matching is byte-offset-first with strict line/column fallback and complete
   tree-sitter edge accounting. Publishing selected matched call *evidence
   fields* into BYOG requires the separate explicit `--clang-calls` flag.
-- `scripts/c_clang_type_audit.py` — type *declarations* (named complete
+- `scripts/c_clang_type_audit.py` – type *declarations* (named complete
   structs, named complete enums, package-local typedefs) vs tree-sitter
   `struct` / `enum` / `typedef` entities. Collision-safe identity is
   kind + path + name + exact start line/column. The CLI remains diagnostic
@@ -167,7 +184,7 @@ modules, plugins, and PCH fail explicitly. See
   1 only for `tree_sitter_only` / `clang_only` / `ambiguous` /
   `macro_location_unsupported` (not for out-of-scope, anonymous, unsupported,
   outside-package, or alternate sites alone).
-- `scripts/c_clang_type_use_audit.py` — type *uses* on declaration-bearing
+- `scripts/c_clang_type_use_audit.py` – type *uses* on declaration-bearing
   AST nodes (function returns, parameters, locals, fields, globals, typedef
   underlying types). The CLI is diagnostic; publishing aggregated `uses_type`
   edges requires the separate explicit `--clang-type-uses` flag. Owners/targets
@@ -177,7 +194,7 @@ modules, plugins, and PCH fail explicitly. See
   while `struct T` / `enum T` use explicit tag spelling. `--fail-on-mismatch`
   exits 1 for `owner_unmatched` / `target_unresolved` / `ambiguous_target` /
   `macro_location_unsupported` only.
-- `scripts/c_clang_type_use_graph_audit.py` — **read-only integrity audit** for
+- `scripts/c_clang_type_use_graph_audit.py` – **read-only integrity audit** for
   already-persisted configured `uses_type` edges and the
   `clang_type_uses` manifest block. Does not invoke Clang, reindex, publish,
   or rewrite graphs. Exit 0 = valid (including legacy/off with zero configured
@@ -185,14 +202,16 @@ modules, plugins, and PCH fail explicitly. See
   Shared producer-contract helpers live in `c_clang_type_uses.py`
   (`relationship_id`, `validate_persisted_type_use_overlay`). Published C
   graph health also runs this pure check without changing extractor comparison.
-- `scripts/c_clang_type_shape_audit.py` — **diagnostic type-shape audit** for
+- `scripts/c_clang_type_shape_audit.py` – **diagnostic type-shape audit** for
   package-local named complete structs/enums already matched by the
   type-declaration audit. Compares **ordered direct member names** (fields /
   enumerators) between Clang and tree-sitter at the exact configured site.
-  Raw qualType, enum values, and bit-field widths are evidence only — **not**
-  size/alignment/offset/ABI/layout/FFI claims. No BYOG mutation, no
-  `index_c` flag, no graph edges. Exit 1 only for internal shape mismatch
-  buckets under `--fail-on-mismatch`.
+  Raw qualType, enum values, and bit-field widths are evidence only – **not**
+  size/alignment/offset/ABI/layout/FFI claims. The CLI itself performs no BYOG
+  mutation and creates no graph edges; publishing selected `matched_shape`
+  member evidence into BYOG requires the separate explicit
+  `--clang-type-shapes` flag. Exit 1 only for internal shape mismatch buckets
+  under `--fail-on-mismatch`.
 
 AST audit CLIs remain available (each captures once internally). They are
 **Clang only** (`cc` accepted only when `--version` proves Clang/Apple Clang).
@@ -206,10 +225,10 @@ bare C name, every colliding kind uses the qualified title
 `cJSON:typedef:cJSON`). Non-colliding symbols keep the legacy
 `module_key:name`. Typedef aliases nested in declarators (including
 function-pointer typedefs such as `typedef int (*handler)(...)`) are extracted
-by walking only declarator structure — not by scanning parameter lists. The
+by walking only declarator structure – not by scanning parameter lists. The
 type audit / `--clang-types` overlay may match any exact tree-sitter
 declaration site owned by a semantic graph entity (the graph still keeps one
 canonical source-derived span; fields record both graph-canonical and
 matched-site coordinates). Alternate unselected sites are observation-only
 and are not claimed dead/inactive. This is single-config declaration evidence
-— not a multi-config type graph and not a `uses_type` overlay.
+– not a multi-config type graph and not a `uses_type` overlay.

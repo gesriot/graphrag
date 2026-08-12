@@ -1,4 +1,4 @@
-# charset_normalizer_rust — Port Readiness / Productization Status
+# charset_normalizer_rust – Port Readiness / Productization Status
 
 Date: 2026-07-26
 
@@ -117,7 +117,7 @@ cargo test --quiet   # expects 83 passing tests (see breakdown above)
 From repo root:
 ```bash
 PYTHONPATH=. uv run pytest examples -q --tb=no
-# expected current summary: 948 passed, 2 xfailed
+# expected current summary: 1006 passed, 2 xfailed
 # xfails are the documented adversarial detector cases (bom8_badcont, short_high)
 # (short_20 xfail burned down via narrow is_printable fix matching Python source)
 # MB codec note: exact generated maps cover HZ, EUC-JIS, and Shift-JIS-X-0213; the five quantified ISO-2022 extension profiles are the only named non-exact codec boundary.
@@ -158,7 +158,7 @@ uv run python scripts/context_pack.py "__main__:cli_detect" --graph byog_charset
 uv run python scripts/context_pack.py "api:from_bytes" --graph byog_charset_normalizer --full-text
 ```
 
-## Generated tables / artifacts — regeneration instructions
+## Generated tables / artifacts – regeneration instructions
 
 - Single-byte + special codecs (`src/python_codecs.rs`, `src/korean_codecs.rs`):
   ```bash

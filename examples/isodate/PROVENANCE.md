@@ -1,8 +1,8 @@
-# Provenance — vendored `isodate` (Phase 7 ablation v3 mini-probe)
+# Provenance – vendored `isodate` (Phase 7 ablation v3 mini-probe)
 
 Step-2 cheap mini-probe candidate for v3 (see `PHASE7_ABLATION.md` Next). Goal: a
 target with **genuinely high raw-assembly cost** (slice spread across many small
-interdependent modules) that is still **statically adequacy-clean** — the
+interdependent modules) that is still **statically adequacy-clean** – the
 combination v1/jsonpatch/v2 never hit together.
 
 ## Source / license
@@ -29,7 +29,7 @@ does not index or run the protected `ablation_v3` archive; see
 - `byog_isodate` audit: 36 calls, pass_rate 1.0, 0 anomalies/dangling/suspicions.
 - Closure from `parse_duration`+`duration_isoformat`: **17 entities across 9
   modules** (isoduration, isodatetime, isodates, isotime, isotzinfo, tzinfo,
-  duration, isostrf, isoerror) — reaches the real logic: `Duration`, the regex
+  duration, isostrf, isoerror) – reaches the real logic: `Duration`, the regex
   caches + builders (`ISO8601_PERIOD_REGEX`, `DATE_REGEX_CACHE`/`build_date_regexps`,
   `TIME_REGEX_CACHE`/`build_time_regexps`), `parse_date`/`parse_time`/
   `parse_datetime`, `strftime`/`_strfduration`/`_strfdt`, `FixedOffset`.
@@ -47,6 +47,6 @@ does not index or run the protected `ablation_v3` archive; see
   / data-reference fixes.
 
 ## Backup
-- `packaging.SpecifierSet.contains` (20 modules, high spread, static) — technically
+- `packaging.SpecifierSet.contains` (20 modules, high spread, static) – technically
   strong but its version-domain overlaps the earlier `semantic_version` port,
   weakening freshness; kept as v3 backup.
