@@ -135,6 +135,44 @@ the include overlay emits `main.c → direct.h` and `direct.h → transitive.h`,
 **not** `main.c → transitive.h`. The depends_on overlay may still emit the
 flattened `main.c → transitive.h` edge.
 
+**Persisted integrity audit (read-only):**
+`scripts/c_compiler_include_graph_audit.py` validates already-published
+direct `includes` relationships against the producer contract without
+invoking a compiler, reading `compile_commands.json`, reading C/header
+sources, running `compiler -E -H`, reconstructing include hierarchies,
+reindexing, or repairing rows.
+
+| State | Condition | Expected |
+| --- | --- | --- |
+| `legacy_absent` | No `compiler_includes` block and no include-overlay evidence | valid |
+| `off` | exact `mode=off` / `enabled=false` / `n_facts=0` / `n_translation_units=0` | zero include-overlay relationships |
+| `enabled` | `mode=compiler_eh` + `enabled=true` | full relationship + manifest census |
+
+A present `compiler_includes` key that is null, a list, a string, or any
+other non-object is invalid, not legacy. Extra or missing enabled-block keys,
+inconsistent enablement, evidence without a block, an enabled block without
+the declared relationships, and an off block with include evidence are
+violations. Relationship checks: unique relationship IDs, complete identity
+(`type=includes` + `fact_kind=configured_direct_include` +
+`extractor=c-compiler-includes`), the exact producer payload (including
+nullable `compiler_id` present as null), file-entity endpoints (header →
+header is valid; sources need not all be TUs), source-file agreement,
+deterministic producer IDs (digest includes `FACT_KIND`), exact description,
+`weight=1.0` / `confidence=1.0` / `is_deterministic=true`, empty span and
+metadata lists, digest agreement, and preprocessor provenance
+`["compiler_configuration_direct_include"]`. Flattened `depends_on` /
+`compiler_dependencies` rows are not include carriers. Manifest checks:
+exact producer key set, canonical compiler census, singular/multi-compiler
+agreement, compiler/TU censuses that do not exceed `n_compile_entries`,
+`n_facts ==` decorated include count, sorted unique
+`translation_unit_titles` that name persisted file entities (a configured TU
+may have zero package-local include edges), and pinned confidence-boundary
+text. The graph-root entry point SHA-256-fingerprints `manifest.json`, the
+three parquet tables, the `current` pointer, and the snapshot directory
+listing. `--output` must be outside the audited graph root.
+`published_graph_health.py` attaches this status as
+`compiler_include_integrity` for C graphs only.
+
 #### Configured function signatures (entity fields, not edges)
 
 When `scripts/index_c.py --clang-signatures` is enabled (default **off**),

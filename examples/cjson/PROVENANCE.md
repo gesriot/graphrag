@@ -99,6 +99,17 @@ explicit skip and the final status says `PASS WITH SKIPS`.
   `byog_cjson` root (indexed with compiler dependencies default-off) audits
   as `off` and is never rewritten. C `published_graph_health` attaches the
   same check as `compiler_dependency_integrity`.
+- **Persisted compiler-include integrity (read-only):**
+  `scripts/c_compiler_include_graph_audit.py --graph <root>` re-validates
+  already-published direct `includes` relationships and the
+  `compiler_includes` block against the producer contract without a
+  compiler, `compile_commands.json`, C/header source reads, `compiler -E -H`,
+  hierarchy reconstruction, reindexing, or any graph mutation. Disposable
+  `--compiler-includes` cJSON snapshots are measured at audit time rather
+  than hard-coded here (counts follow the host toolchain). The published
+  `byog_cjson` root (indexed with compiler includes default-off) audits as
+  `off` and is never rewritten. C `published_graph_health` attaches the same
+  check as `compiler_include_integrity`.
 - **Clang AST function-definition audit (standalone diagnostic):**
   `scripts/c_clang_ast_audit.py --package examples/cjson` runs the recorded
   Clang from `compile_commands.json` with

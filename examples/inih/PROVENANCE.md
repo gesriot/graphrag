@@ -47,6 +47,20 @@ complete manifest and tool-skip policy.
   `off`. All report `read_only_verified=true`, and `byog_inih` is never
   rewritten. C `published_graph_health` attaches
   `compiler_dependency_integrity`.
+- **Optional `--compiler-includes` (default off):** direct `includes` edges
+  (`configured_direct_include`) via `compiler -E -H` hierarchy
+  reconstruction. Independent `extra_manifest["compiler_includes"]` block
+  (`mode=compiler_eh` when on, exact `mode=off` when disabled).
+- **Persisted compiler-include integrity (read-only):**
+  `scripts/c_compiler_include_graph_audit.py --graph <root>` validates the
+  published `includes` overlay and the `compiler_includes` block without a
+  compiler, `compile_commands.json`, C source reads, `-E -H` reconstruction,
+  reindexing, or graph mutation. Measured states for inih: a disposable
+  `--compiler-includes` snapshot audits as `status=enabled` with producer
+  `n_facts` / `n_translation_units` (host-measured, not hard-coded); a
+  default snapshot and the published `byog_inih` root audit as `off`. All
+  report `read_only_verified=true`, and `byog_inih` is never rewritten. C
+  `published_graph_health` attaches `compiler_include_integrity`.
 
 ## C frontend finding – preprocessor fragmentation (and the fix)
 inih is preprocessor-heavy (configurability is implemented with `#if`/`#endif`).

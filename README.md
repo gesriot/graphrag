@@ -219,6 +219,22 @@ modules, plugins, and PCH fail explicitly. See
   (`validate_persisted_compiler_dependency_overlay`). Published C graph
   health attaches the same check as `compiler_dependency_integrity`. Non-C
   graphs do not gain this C-only failure.
+- `scripts/c_compiler_include_graph_audit.py` – **read-only integrity audit**
+  for already-persisted compiler direct `includes` /
+  `configured_direct_include` relationships and the `compiler_includes`
+  manifest block. Does not invoke a compiler, read `compile_commands.json`,
+  read C/header sources, run `compiler -E -H`, reconstruct include
+  hierarchies, reindex, publish, or rewrite graphs, and never repairs data.
+  `--graph` (plus optional `--snapshot` / `--output`) SHA-256-fingerprints
+  every graph input before and after the run. `--output` is refused inside
+  the audited graph root. Exit 0 = valid (`legacy_absent` / exact `off` /
+  enabled `mode=compiler_eh`), 1 = integrity violations, 2 = unreadable
+  graph/snapshot/manifest. Shared producer-contract helpers live in
+  `c_compiler_includes.py`
+  (`validate_persisted_compiler_include_overlay`). Published C graph health
+  attaches the same check as `compiler_include_integrity`. Non-C graphs do
+  not gain this C-only failure. The dependency overlay remains a separate
+  layer.
 - `scripts/c_clang_type_audit.py` – type *declarations* (named complete
   structs, named complete enums, package-local typedefs) vs tree-sitter
   `struct` / `enum` / `typedef` entities. Collision-safe identity is
