@@ -136,6 +136,17 @@ The published graph now also contains the co-located golden runner
   observation-only `outside_package_declarations`. Hard equality would be
   ordered direct member names only – never ABI, layout, FFI, or Rust `repr`
   claims.
+- **Persisted type-shape integrity (read-only):**
+  `scripts/c_clang_type_shape_graph_audit.py --graph <root>` validates the
+  published `clang_shape_*` fields and the `clang_type_shapes` block without
+  Clang, `compile_commands.json`, an AST capture, reindexing, or graph
+  mutation. Measured states for inih: a disposable `--clang-type-shapes`
+  snapshot audits as `status=enabled` with **0** decorated entities, **0**
+  members and zero anomalies (an enabled-but-empty overlay is valid); a
+  default snapshot audits as `off`; the published `byog_inih` root (indexed
+  before the overlay existed) audits as `legacy_absent`. All three report
+  `read_only_verified=true`, and `byog_inih` is never rewritten. C
+  `published_graph_health` runs the same pure check.
 - `audit_call_edges`: 38 calls, structural pass rate 1.0, 0 anomalies,
   0 dangling targets, 0 semantic suspicions.
 - The **library** subgraph (ini.c/ini.h) is 15 entities and 17 deterministic

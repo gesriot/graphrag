@@ -212,6 +212,24 @@ modules, plugins, and PCH fail explicitly. See
   member evidence into BYOG requires the separate explicit
   `--clang-type-shapes` flag. Exit 1 only for internal shape mismatch buckets
   under `--fail-on-mismatch`.
+- `scripts/c_clang_type_shape_graph_audit.py` – **read-only integrity audit**
+  for already-persisted `clang_shape_*` entity fields and the
+  `clang_type_shapes` manifest block. Does not invoke Clang, read
+  `compile_commands.json`, build an AST capture, reindex, publish, or rewrite
+  graphs, and never repairs data. `--graph` (plus optional `--snapshot` /
+  `--output`) resolves the snapshot, SHA-256-fingerprints every graph input
+  before and after the run, and reports that read-only verification alongside
+  the findings. `--output` is refused inside the audited graph root so report
+  generation cannot invalidate that guarantee. The deterministic JSON exposes
+  `state`, `classification`, `violations`, counts, provenance and limitations.
+  Exit 0 = valid (including `legacy_absent` and `off` with zero
+  shape fields), 1 = integrity violations, 2 = unreadable
+  graph/snapshot/manifest. A missing manifest block never legitimizes existing
+  `clang_shape_*` fields, `mode=off` with shape fields is an error, and an
+  enabled block with partial, corrupted, or extra fields is an error. Shared
+  producer-contract helpers live in `c_clang_type_shapes.py`
+  (`validate_persisted_type_shape_overlay`). Published C graph health runs the
+  same pure check without changing extractor comparison.
 
 AST audit CLIs remain available (each captures once internally). They are
 **Clang only** (`cc` accepted only when `--version` proves Clang/Apple Clang).

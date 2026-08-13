@@ -238,6 +238,41 @@ def _type_use_integrity(
     }
 
 
+def _type_shape_integrity(
+    published: dict[str, list[dict[str, Any]]],
+    manifest: Mapping[str, Any],
+    *,
+    indexer: str,
+) -> dict[str, Any] | None:
+    """Read-only configured type-shape integrity for C published graphs.
+
+    Never invokes Clang, never re-runs the overlay, never reindexes. Legacy /
+    default-off C graphs with zero ``clang_shape_*`` fields pass as
+    ``legacy_absent`` / ``off``. Non-C indexers skip this check (returns None).
+    """
+    if indexer != "c":
+        return None
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from c_clang_type_shapes import (  # type: ignore
+        validate_persisted_type_shape_overlay,
+    )
+
+    result = validate_persisted_type_shape_overlay(
+        published.get("entities") or [], manifest
+    )
+    return {
+        "ok": bool(result["ok"]),
+        "status": str(result["status"]),
+        "mode": str(result["mode"]),
+        "n_decorated_entities": int(result["n_decorated_entities"]),
+        "n_members_validated": int(result["n_members_validated"]),
+        "n_anomalies": int(result["n_anomalies"]),
+        "n_anomaly_samples": int(result["n_anomaly_samples"]),
+        "anomalies_truncated": bool(result["anomalies_truncated"]),
+        "anomalies": list(result["anomalies"]),
+    }
+
+
 def check_spec(
     spec: PublishedGraphSpec,
     *,
@@ -292,39 +327,59 @@ def check_spec(
     type_use = _type_use_integrity(
         published, published_manifest, indexer=spec.indexer
     )
+    type_shape = _type_shape_integrity(
+        published, published_manifest, indexer=spec.indexer
+    )
 
-    if mismatches:
-        result: dict[str, Any] = {
-            "id": spec.ident,
-            "graph": spec.graph,
-            "snapshot": snapshot,
-            "status": "fail",
-            "reason": "published graph disagrees with current extractor",
-            "mismatches": mismatches,
-        }
+    def _with_overlays(result: dict[str, Any]) -> dict[str, Any]:
         if type_use is not None:
             result["clang_type_use_integrity"] = type_use
+        if type_shape is not None:
+            result["clang_type_shape_integrity"] = type_shape
         return result
 
+    if mismatches:
+        return _with_overlays(
+            {
+                "id": spec.ident,
+                "graph": spec.graph,
+                "snapshot": snapshot,
+                "status": "fail",
+                "reason": "published graph disagrees with current extractor",
+                "mismatches": mismatches,
+            }
+        )
+
     if type_use is not None and not type_use["ok"]:
-        return {
+        return _with_overlays(
+            {
+                "id": spec.ident,
+                "graph": spec.graph,
+                "snapshot": snapshot,
+                "status": "fail",
+                "reason": "configured uses_type integrity anomalies",
+            }
+        )
+
+    if type_shape is not None and not type_shape["ok"]:
+        return _with_overlays(
+            {
+                "id": spec.ident,
+                "graph": spec.graph,
+                "snapshot": snapshot,
+                "status": "fail",
+                "reason": "configured type-shape integrity anomalies",
+            }
+        )
+
+    return _with_overlays(
+        {
             "id": spec.ident,
             "graph": spec.graph,
             "snapshot": snapshot,
-            "status": "fail",
-            "reason": "configured uses_type integrity anomalies",
-            "clang_type_use_integrity": type_use,
+            "status": "pass",
         }
-
-    result = {
-        "id": spec.ident,
-        "graph": spec.graph,
-        "snapshot": snapshot,
-        "status": "pass",
-    }
-    if type_use is not None:
-        result["clang_type_use_integrity"] = type_use
-    return result
+    )
 
 
 def build_report(manifest: Path = DEFAULT_MANIFEST, root: Path = ROOT) -> dict[str, Any]:
@@ -361,6 +416,14 @@ def format_report(report: Mapping[str, Any]) -> str:
                 f"    clang_type_use_integrity: status={type_use.get('status')} "
                 f"ok={type_use.get('ok')} edges={type_use.get('n_configured_edges')} "
                 f"anomalies={type_use.get('n_anomalies')}"
+            )
+        type_shape = result.get("clang_type_shape_integrity")
+        if isinstance(type_shape, Mapping):
+            lines.append(
+                f"    clang_type_shape_integrity: status={type_shape.get('status')} "
+                f"ok={type_shape.get('ok')} "
+                f"decorated={type_shape.get('n_decorated_entities')} "
+                f"anomalies={type_shape.get('n_anomalies')}"
             )
     lines.append(
         f"  declared mutable={report['mutable']} frozen-exempt={report['frozen']} "

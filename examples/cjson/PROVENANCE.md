@@ -242,6 +242,18 @@ explicit skip and the final status says `PASS WITH SKIPS`.
   locations are configuration-relative diagnostic evidence, **not** ABI,
   layout, FFI-safety, or Rust `repr` proof. Independent
   `extra_manifest["clang_type_shapes"]` block.
+- **Persisted type-shape integrity (read-only):**
+  `scripts/c_clang_type_shape_graph_audit.py --graph <root>` re-validates
+  already-published `clang_shape_*` fields and the `clang_type_shapes` block
+  against the producer contract without Clang, `compile_commands.json`, an AST
+  capture, reindexing, or any graph mutation. Measured on a disposable
+  `--clang-type-shapes` cJSON snapshot: `status=enabled`, **3** validated
+  decorated entities, **13** validated members (8 + 2 + 3), zero anomalies,
+  and `read_only_verified=true` from a SHA-256 fingerprint of the manifest,
+  parquet tables, `current` pointer and snapshot listing taken before and after
+  the run. The published `byog_cjson` root (indexed without the overlay)
+  audits as `legacy_absent` and is never rewritten. C `published_graph_health`
+  runs the same pure check.
 
 ## C frontend result – clean on the first pass
 Unlike `inih`, cJSON does not fragment function bodies with `#if`/`#endif`, so the

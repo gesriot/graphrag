@@ -393,6 +393,55 @@ compile-entry count, every bucket count, the number of decorated entities, the
 explicit confidence boundary, and the limitations (not ABI, not layout, not FFI
 proof, not Rust `repr` proof, not multi-config, not C++).
 
+**Persisted integrity audit (read-only):**
+`scripts/c_clang_type_shape_graph_audit.py` validates already-published
+`clang_shape_*` entity fields against the producer contract without invoking
+Clang, reading `compile_commands.json`, building an AST capture, reindexing, or
+re-running the overlay. It never repairs data.
+
+| State | Condition | Expected |
+| --- | --- | --- |
+| `legacy_absent` | No `clang_type_shapes` block and no `clang_shape_*` fields | valid |
+| `off` | `mode=off` and `enabled=false` | zero `clang_shape_*` fields required |
+| `enabled` | `mode=configured_clang_type_shapes` + `enabled=true` | full entity + manifest census |
+
+A missing block in a readable manifest never legitimizes existing shape fields;
+`mode=off` with shape fields is a violation; an enabled block with partial,
+corrupted, or extra fields is a violation. Entity checks: unique entity IDs,
+`struct` / `enum` type only, the exact full set of known `clang_shape_*` fields
+with no unknown material ones, `clang_shape_members_validated=true`,
+`clang_shape_entity_kind == entity.type`,
+`clang_shape_graph_canonical_span == entity.span`, pinned `fact_kind` /
+`extractor` / `confidence=1.0` / `is_deterministic=true`, well-typed
+matched-site line/column/span, a non-negative member count, member names and
+member evidence that decode as **canonical deterministic JSON** (NaN, Infinity,
+duplicate object keys and non-canonical encodings are refused), name/evidence
+census equal to the member count, non-empty unique names, per-member
+`order == position` with a matching name, no residual member forms, boolean
+`is_bitfield`, integer-or-null bit widths and enum values, sorted unique
+`entry_indices` inside the manifest compile-entry census, entity/manifest
+agreement on compiler identities and `compile_commands_digest` (singular
+compiler fields only for a single identity), and description text that keeps
+its evidence boundary and claims no ABI/layout/FFI/`repr` proof. Manifest
+checks: mode/enabled, `fact_kind` / `extractor`,
+`n_facts == n_decorated_entities == counts.matched_shape ==` the actual
+decorated-entity count, all six fail-closed bucket counts zero, non-negative
+observation-only counts, an internally consistent owner census, a valid
+compile-entry/translation-unit census, non-empty unique internally consistent
+compiler provenance, a non-empty digest, `hard_equality` equal to
+`ordered direct member names only`, and the pinned `evidence_only`,
+`limitations`, and confidence-boundary text with no ABI/layout/FFI/`repr`/
+multi-config/C++ guarantee. The graph-root entry point SHA-256-fingerprints
+`manifest.json`, the three parquet tables, the `current` pointer, and the
+snapshot directory listing before and after the audit and publishes that
+read-only verification in its report. Exit 0 = passed, 1 = violations,
+2 = unreadable graph/snapshot/manifest. `published_graph_health.py` attaches
+this status for C published graphs; legacy/default-off roots continue to pass.
+The deterministic JSON names `state`, `classification`, `violations`, counts,
+compiler/configuration provenance, limitations and the read-only result;
+`anomalies` remains an equivalent compatibility field. `--output` must be
+outside the audited graph root.
+
 **Shared out of scope:** multi-config coverage, MSVC/wrappers/response files
 (fail closed), system/outside endpoints after filtering, production C/C++
 completeness. Snapshot manifests record separate `compiler_dependencies`,
