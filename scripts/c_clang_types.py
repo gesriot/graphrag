@@ -52,6 +52,23 @@ CONFIDENCE_BOUNDARY = (
     "invented type entities or uses_type edges."
 )
 
+# Audit-report contract text only; not a persisted manifest field.
+LIMITATIONS = (
+    "Type-declaration confirmation of existing struct/enum/typedef entities only",
+    "Not a type graph or uses_type relationship layer",
+    "Not layout or ABI proof",
+    "Not type-use proof",
+    "Not multi-config coverage",
+    "Not macro-complete proof",
+    "Observation-only residuals invent no entities or alternate-site entities",
+)
+
+# Substrings every published clang_type_description must keep.
+DESCRIPTION_REQUIRED_SUBSTRINGS = (
+    "configured Clang type declaration for",
+    "deterministic only relative to recorded Clang + compile_commands.json",
+)
+
 # Fields written onto type entities (scalar / list / JSON text).
 # Optional type-string fields may be null when Clang did not supply them.
 _TYPE_FIELDS = (
@@ -994,3 +1011,1338 @@ def append_clang_types(
         except ClangTypeAuditError as e:
             raise ClangTypeOverlayError(str(e)) from e
     return apply_clang_types_from_report(data, report, package_dir)
+
+
+# ---------------------------------------------------------------------------
+# Persisted-overlay integrity contract (read-only; no Clang, no reindex)
+# ---------------------------------------------------------------------------
+
+_MAX_ANOMALY_SAMPLES = 40
+_MAX_ANOMALY_MESSAGE = 400
+
+ANOMALY_CODES = frozenset(
+    {
+        "empty_entity_id",
+        "duplicate_entity_id",
+        "legacy_block_missing_with_fields",
+        "off_with_decorated_entities",
+        "invalid_enabled_block",
+        "stale_type_metadata",
+        "partial_type_payload",
+        "unknown_type_field",
+        "type_field_type",
+        "identity_mismatch",
+        "canonical_span_mismatch",
+        "graph_span_mismatch",
+        "matched_span_mismatch",
+        "canonical_site_marker",
+        "optional_type_string",
+        "entry_index_census",
+        "compiler_json",
+        "compiler_mismatch",
+        "digest_mismatch",
+        "forbidden_claim",
+        "confidence_boundary",
+        "manifest_mode_mismatch",
+        "manifest_identity_mismatch",
+        "manifest_count_mismatch",
+        "manifest_contract_claim",
+        "residual_bucket_nonzero",
+    }
+)
+
+_OPTIONAL_TYPE_STRING_FIELDS = (
+    "clang_type_qual_type",
+    "clang_type_desugared_qual_type",
+    "clang_type_fixed_underlying_type",
+)
+
+_SINGULAR_COMPILER_FIELDS = (
+    "clang_type_compiler_path",
+    "clang_type_compiler_id",
+)
+
+# Affirmative proof claims that must never appear in persisted type evidence.
+# Honest producer text only ever *denies* these.
+_FORBIDDEN_CLAIM_PATTERNS = (
+    re.compile(r"\bABI[- ](?:proof|proven|guarantee[ds]?|compatib\w*)\b", re.I),
+    re.compile(r"\blayout[- ](?:proof|proven|guarantee[ds]?|compatib\w*)\b", re.I),
+    re.compile(r"\btype[- ]use[- ](?:proof|proven|guarantee[ds]?)\b", re.I),
+    re.compile(r"\bmulti-config\s+(?:proof|coverage\s+guaranteed)\b", re.I),
+    re.compile(r"\bmacro[- ]complete(?:\s+proof)?\b", re.I),
+    re.compile(
+        r"\b(?:proves|proven|guarantee[ds]?|verifie[ds])\s+"
+        r"(?:the\s+)?(?:ABI|layout|type[- ]use|multi-config|macro[- ]complete)\b",
+        re.I,
+    ),
+)
+
+
+def is_material_value(value: Any) -> bool:
+    """True when a parquet/JSON cell holds a real value (not null/NaN/NA)."""
+    if value is None:
+        return False
+    if isinstance(value, float) and math.isnan(value):
+        return False
+    try:
+        import pandas as pd  # local: optional for pure-dict unit tests
+
+        if value is pd.NA:
+            return False
+    except Exception:
+        pass
+    return True
+
+
+def strict_json_loads(text: str) -> Any:
+    """Decode standards-compliant JSON; reject NaN/Infinity and dup keys."""
+
+    def reject_constant(token: str) -> None:
+        raise ValueError(f"non-finite JSON constant {token}")
+
+    def unique_object(pairs: List[Tuple[str, Any]]) -> Dict[str, Any]:
+        out: Dict[str, Any] = {}
+        for key, value in pairs:
+            if key in out:
+                raise ValueError(f"duplicate JSON object key {key!r}")
+            out[key] = value
+        return out
+
+    return json.loads(
+        text, parse_constant=reject_constant, object_pairs_hook=unique_object
+    )
+
+
+def _contains_non_finite(value: Any) -> bool:
+    """True for a nested NaN/Infinity without coercing the value."""
+    if isinstance(value, float):
+        return not math.isfinite(value)
+    if isinstance(value, dict):
+        return any(
+            _contains_non_finite(key) or _contains_non_finite(item)
+            for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple)):
+        return any(_contains_non_finite(item) for item in value)
+    return False
+
+
+def _strict_canonical_json(value: Any) -> str:
+    """Canonical JSON that refuses NaN/Infinity (audit re-encode contract)."""
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    )
+
+
+def _scalar(value: Any) -> Any:
+    """Unwrap numpy scalars without coercing Python values."""
+    if hasattr(value, "item") and not isinstance(value, (str, bytes)):
+        try:
+            return value.item()
+        except Exception:
+            return value
+    return value
+
+
+def _as_int(value: Any) -> Optional[int]:
+    """Integer view of a cell; parquet widens ints with nulls to float64."""
+    value = _scalar(value)
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, float):
+        if not math.isfinite(value) or not float(value).is_integer():
+            return None
+        return int(value)
+    return None
+
+
+def _as_bool(value: Any) -> Optional[bool]:
+    value = _scalar(value)
+    return value if isinstance(value, bool) else None
+
+
+def _is_one(value: Any) -> bool:
+    value = _scalar(value)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    if isinstance(value, float) and not math.isfinite(value):
+        return False
+    return float(value) == 1.0
+
+
+def _clip(text: Any, limit: int = _MAX_ANOMALY_MESSAGE) -> str:
+    s = str(text)
+    return s if len(s) <= limit else s[: limit - 3] + "..."
+
+
+def _row_get(row: Any, key: str, default: Any = None) -> Any:
+    try:
+        return row.get(key, default)
+    except Exception:
+        try:
+            return row[key]
+        except Exception:
+            return default
+
+
+def _row_keys(row: Any) -> List[str]:
+    try:
+        return [str(k) for k in row.keys()]
+    except Exception:
+        return []
+
+
+def _table_rows(table: Any, *, name: str) -> List[Dict[str, Any]]:
+    """Accept a dataframe or a sequence of mapping rows without mutation."""
+    if hasattr(table, "to_dict") and not isinstance(table, dict):
+        try:
+            records = table.to_dict("records")
+        except (TypeError, ValueError, AttributeError) as error:
+            raise TypeError(f"{name} dataframe cannot produce records") from error
+    else:
+        if isinstance(table, (str, bytes, dict)):
+            raise TypeError(f"{name} must be a dataframe or sequence of rows")
+        try:
+            records = list(table)
+        except TypeError as error:
+            raise TypeError(
+                f"{name} must be a dataframe or sequence of rows"
+            ) from error
+    out: List[Dict[str, Any]] = []
+    for row in records:
+        if isinstance(row, dict):
+            out.append(row)
+        elif hasattr(row, "items"):
+            out.append(dict(row))
+        else:
+            raise TypeError(f"expected mapping row in {name}, got {type(row)!r}")
+    return out
+
+
+def _normalize_list_field(value: Any) -> Optional[List[Any]]:
+    """List view of a parquet ndarray/list cell; never invents content."""
+    if not is_material_value(value):
+        return None
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    if hasattr(value, "tolist") and not isinstance(value, (str, bytes)):
+        try:
+            converted = value.tolist()
+        except Exception:
+            return None
+        return converted if isinstance(converted, list) else None
+    return None
+
+
+def _anomaly(
+    code: str,
+    message: str,
+    *,
+    entity_id: Optional[str] = None,
+    extra: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    if code not in ANOMALY_CODES:
+        raise AssertionError(f"unknown type integrity anomaly code {code!r}")
+    row: Dict[str, Any] = {"code": code, "message": _clip(message)}
+    if entity_id is not None:
+        row["entity_id"] = entity_id
+    if extra:
+        for key, value in sorted(extra.items()):
+            row[key] = _clip(value) if isinstance(value, str) else value
+    return row
+
+
+def _forbidden_claims(text: Any) -> List[str]:
+    """Affirmative ABI/layout/type-use/multi-config/macro-complete claims."""
+    if not isinstance(text, str):
+        return []
+    return sorted(
+        {
+            pattern.search(text).group(0)  # type: ignore[union-attr]
+            for pattern in _FORBIDDEN_CLAIM_PATTERNS
+            if pattern.search(text)
+        }
+    )
+
+
+def _has_material_type_fields(entity: Any) -> bool:
+    for key in _row_keys(entity):
+        if key.startswith("clang_type_") and is_material_value(
+            _row_get(entity, key)
+        ):
+            return True
+    return False
+
+
+def _span_start_coords(value: Any) -> Optional[Tuple[int, int]]:
+    if not isinstance(value, str):
+        return None
+    match = _SPAN_START_RE.match(value)
+    if match is None:
+        return None
+    return int(match.group("line")), int(match.group("col"))
+
+
+def _decoded_compiler_json(
+    raw: Any,
+    *,
+    entity_id: Optional[str],
+    anomalies: List[Dict[str, Any]],
+) -> Any:
+    """Strictly decode persisted ``clang_type_compilers`` canonical JSON."""
+    if not isinstance(raw, str) or not raw:
+        anomalies.append(
+            _anomaly(
+                "compiler_json",
+                "clang_type_compilers is not a non-empty JSON string: "
+                f"{type(raw).__name__}",
+                entity_id=entity_id,
+            )
+        )
+        return None
+    try:
+        decoded = strict_json_loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        anomalies.append(
+            _anomaly(
+                "compiler_json",
+                f"clang_type_compilers is not strict JSON: {error}",
+                entity_id=entity_id,
+            )
+        )
+        return None
+    if _contains_non_finite(decoded):
+        anomalies.append(
+            _anomaly(
+                "compiler_json",
+                "clang_type_compilers contains NaN/Infinity",
+                entity_id=entity_id,
+            )
+        )
+        return None
+    try:
+        canonical = _strict_canonical_json(decoded)
+    except (TypeError, ValueError) as error:
+        anomalies.append(
+            _anomaly(
+                "compiler_json",
+                f"clang_type_compilers is not canonical-encodable: {error}",
+                entity_id=entity_id,
+            )
+        )
+        return None
+    if canonical != raw:
+        anomalies.append(
+            _anomaly(
+                "compiler_json",
+                "clang_type_compilers is not producer-canonical JSON",
+                entity_id=entity_id,
+            )
+        )
+        return None
+    return decoded
+
+
+def _validate_decorated_entity(
+    entity: Any,
+    *,
+    entity_id: Optional[str],
+    manifest_digest: Optional[str],
+    manifest_compilers: Set[Tuple[str, str]],
+    n_compile_entries: Optional[int],
+    anomalies: List[Dict[str, Any]],
+) -> None:
+    """Validate one decorated type-declaration entity."""
+    row_keys = set(_row_keys(entity))
+    material = {
+        key
+        for key in row_keys
+        if key.startswith("clang_type_")
+        and is_material_value(_row_get(entity, key))
+    }
+    unknown = sorted(material - set(_TYPE_FIELDS))
+    if unknown:
+        anomalies.append(
+            _anomaly(
+                "unknown_type_field",
+                f"unknown clang_type_* fields: {unknown}",
+                entity_id=entity_id,
+            )
+        )
+    optional_null = set(_OPTIONAL_TYPE_STRING_FIELDS) | set(
+        _SINGULAR_COMPILER_FIELDS
+    )
+    missing_keys = {field for field in _TYPE_FIELDS if field not in row_keys}
+    null_required = {
+        field
+        for field in _TYPE_FIELDS
+        if field not in optional_null and field not in material
+    }
+    missing = sorted(missing_keys | null_required)
+    if missing:
+        anomalies.append(
+            _anomaly(
+                "partial_type_payload",
+                f"decorated entity is missing required fields: {missing}",
+                entity_id=entity_id,
+            )
+        )
+
+    if _as_bool(_row_get(entity, "clang_type_declaration_confirmed")) is not True:
+        anomalies.append(
+            _anomaly(
+                "type_field_type",
+                "clang_type_declaration_confirmed is not boolean true",
+                entity_id=entity_id,
+            )
+        )
+    if _row_get(entity, "clang_type_fact_kind") != FACT_KIND:
+        anomalies.append(
+            _anomaly(
+                "identity_mismatch",
+                f"clang_type_fact_kind="
+                f"{_row_get(entity, 'clang_type_fact_kind')!r} expected "
+                f"{FACT_KIND!r}",
+                entity_id=entity_id,
+            )
+        )
+    if _row_get(entity, "clang_type_extractor") != EXTRACTOR:
+        anomalies.append(
+            _anomaly(
+                "identity_mismatch",
+                f"clang_type_extractor="
+                f"{_row_get(entity, 'clang_type_extractor')!r} expected "
+                f"{EXTRACTOR!r}",
+                entity_id=entity_id,
+            )
+        )
+    entity_type = str(_row_get(entity, "type") or "")
+    type_kind = _row_get(entity, "clang_type_entity_kind")
+    if type_kind != entity_type:
+        anomalies.append(
+            _anomaly(
+                "identity_mismatch",
+                f"clang_type_entity_kind={type_kind!r} != entity type "
+                f"{entity_type!r}",
+                entity_id=entity_id,
+            )
+        )
+    graph_span = _row_get(entity, "clang_type_graph_canonical_span")
+    entity_span = _row_get(entity, "span")
+    if (
+        not isinstance(graph_span, str)
+        or not graph_span
+        or not isinstance(entity_span, str)
+        or graph_span != entity_span
+    ):
+        anomalies.append(
+            _anomaly(
+                "canonical_span_mismatch",
+                f"clang_type_graph_canonical_span={graph_span!r} != entity "
+                f"span {entity_span!r}",
+                entity_id=entity_id,
+            )
+        )
+
+    graph_line = _as_int(_row_get(entity, "clang_type_graph_canonical_line"))
+    graph_col = _as_int(_row_get(entity, "clang_type_graph_canonical_col0"))
+    if graph_line is None or graph_line < 1:
+        anomalies.append(
+            _anomaly(
+                "type_field_type",
+                f"clang_type_graph_canonical_line="
+                f"{_row_get(entity, 'clang_type_graph_canonical_line')!r} "
+                "is not a positive integer",
+                entity_id=entity_id,
+            )
+        )
+    if graph_col is None or graph_col < 0:
+        anomalies.append(
+            _anomaly(
+                "type_field_type",
+                f"clang_type_graph_canonical_col0="
+                f"{_row_get(entity, 'clang_type_graph_canonical_col0')!r} "
+                "is not a non-negative integer",
+                entity_id=entity_id,
+            )
+        )
+    graph_coords = _span_start_coords(graph_span)
+    if (
+        graph_coords is None
+        or graph_line is None
+        or graph_col is None
+        or graph_coords != (graph_line, graph_col)
+    ):
+        anomalies.append(
+            _anomaly(
+                "graph_span_mismatch",
+                f"graph canonical span={graph_span!r} disagrees with "
+                f"line={graph_line!r} col0={graph_col!r}",
+                entity_id=entity_id,
+            )
+        )
+
+    matched_span = _row_get(entity, "clang_type_matched_site_span")
+    matched_line = _as_int(_row_get(entity, "clang_type_matched_site_line"))
+    matched_col = _as_int(_row_get(entity, "clang_type_matched_site_col0"))
+    if not isinstance(matched_span, str) or not matched_span.strip():
+        anomalies.append(
+            _anomaly(
+                "type_field_type",
+                "clang_type_matched_site_span is not a non-empty string",
+                entity_id=entity_id,
+            )
+        )
+    if matched_line is None or matched_line < 1:
+        anomalies.append(
+            _anomaly(
+                "type_field_type",
+                f"clang_type_matched_site_line="
+                f"{_row_get(entity, 'clang_type_matched_site_line')!r} "
+                "is not a positive integer",
+                entity_id=entity_id,
+            )
+        )
+    if matched_col is None or matched_col < 0:
+        anomalies.append(
+            _anomaly(
+                "type_field_type",
+                f"clang_type_matched_site_col0="
+                f"{_row_get(entity, 'clang_type_matched_site_col0')!r} "
+                "is not a non-negative integer",
+                entity_id=entity_id,
+            )
+        )
+    matched_coords = _span_start_coords(matched_span)
+    if (
+        matched_coords is None
+        or matched_line is None
+        or matched_col is None
+        or matched_coords != (matched_line, matched_col)
+    ):
+        anomalies.append(
+            _anomaly(
+                "matched_span_mismatch",
+                f"matched-site span={matched_span!r} disagrees with "
+                f"line={matched_line!r} col0={matched_col!r}",
+                entity_id=entity_id,
+            )
+        )
+
+    same_site = (
+        isinstance(graph_span, str)
+        and isinstance(matched_span, str)
+        and graph_span == matched_span
+        and graph_line is not None
+        and matched_line is not None
+        and graph_col is not None
+        and matched_col is not None
+        and (graph_line, graph_col) == (matched_line, matched_col)
+    )
+    is_canonical = _as_bool(
+        _row_get(entity, "clang_type_matched_site_is_canonical")
+    )
+    if is_canonical is None:
+        anomalies.append(
+            _anomaly(
+                "type_field_type",
+                "clang_type_matched_site_is_canonical is not boolean",
+                entity_id=entity_id,
+            )
+        )
+    elif is_canonical is not same_site:
+        anomalies.append(
+            _anomaly(
+                "canonical_site_marker",
+                f"clang_type_matched_site_is_canonical={is_canonical!r} "
+                f"but canonical/matched sites equal={same_site}",
+                entity_id=entity_id,
+            )
+        )
+
+    for field in _OPTIONAL_TYPE_STRING_FIELDS:
+        value = _row_get(entity, field)
+        if not is_material_value(value):
+            continue
+        if not isinstance(value, str) or not value.strip():
+            anomalies.append(
+                _anomaly(
+                    "optional_type_string",
+                    f"{field} must be a non-empty string or null: {value!r}",
+                    entity_id=entity_id,
+                )
+            )
+
+    origin = _row_get(entity, "clang_type_location_origin")
+    if not isinstance(origin, str) or not origin.strip():
+        anomalies.append(
+            _anomaly(
+                "type_field_type",
+                "clang_type_location_origin is not a non-empty string",
+                entity_id=entity_id,
+            )
+        )
+
+    if not _is_one(_row_get(entity, "clang_type_confidence")):
+        anomalies.append(
+            _anomaly(
+                "type_field_type",
+                f"clang_type_confidence="
+                f"{_row_get(entity, 'clang_type_confidence')!r} expected 1.0",
+                entity_id=entity_id,
+            )
+        )
+    if _as_bool(_row_get(entity, "clang_type_is_deterministic")) is not True:
+        anomalies.append(
+            _anomaly(
+                "type_field_type",
+                "clang_type_is_deterministic is not boolean true",
+                entity_id=entity_id,
+            )
+        )
+
+    entry_indices = _normalize_list_field(
+        _row_get(entity, "clang_type_entry_indices")
+    )
+    if entry_indices is None or not entry_indices:
+        anomalies.append(
+            _anomaly(
+                "entry_index_census",
+                "clang_type_entry_indices is not a non-empty list",
+                entity_id=entity_id,
+            )
+        )
+    else:
+        decoded_indices = [_as_int(index) for index in entry_indices]
+        if any(index is None or index < 0 for index in decoded_indices):
+            anomalies.append(
+                _anomaly(
+                    "entry_index_census",
+                    f"clang_type_entry_indices has non-integer entries: "
+                    f"{entry_indices!r}",
+                    entity_id=entity_id,
+                )
+            )
+        else:
+            values = [int(index) for index in decoded_indices]  # type: ignore[arg-type]
+            if values != sorted(set(values)):
+                anomalies.append(
+                    _anomaly(
+                        "entry_index_census",
+                        f"clang_type_entry_indices is not sorted/unique: "
+                        f"{values!r}",
+                        entity_id=entity_id,
+                    )
+                )
+            if n_compile_entries is not None and any(
+                index >= n_compile_entries for index in values
+            ):
+                anomalies.append(
+                    _anomaly(
+                        "entry_index_census",
+                        f"clang_type_entry_indices {values!r} outside manifest "
+                        f"compile-entry census (n={n_compile_entries})",
+                        entity_id=entity_id,
+                    )
+                )
+
+    digest = _row_get(entity, "clang_type_compile_commands_digest")
+    if not isinstance(digest, str) or not digest.strip():
+        anomalies.append(
+            _anomaly(
+                "digest_mismatch",
+                f"clang_type_compile_commands_digest is empty: {digest!r}",
+                entity_id=entity_id,
+            )
+        )
+        digest = None
+    elif manifest_digest is not None and digest.strip() != manifest_digest:
+        anomalies.append(
+            _anomaly(
+                "digest_mismatch",
+                f"entity digest {digest.strip()!r} != manifest "
+                f"{manifest_digest!r}",
+                entity_id=entity_id,
+            )
+        )
+
+    compilers_decoded = _decoded_compiler_json(
+        _row_get(entity, "clang_type_compilers"),
+        entity_id=entity_id,
+        anomalies=anomalies,
+    )
+    identities: List[Tuple[str, str]] = []
+    if compilers_decoded is not None:
+        if (
+            not isinstance(compilers_decoded, list)
+            or not compilers_decoded
+            or not all(isinstance(row, dict) for row in compilers_decoded)
+        ):
+            anomalies.append(
+                _anomaly(
+                    "compiler_mismatch",
+                    "clang_type_compilers must be a non-empty list of objects",
+                    entity_id=entity_id,
+                )
+            )
+        else:
+            expected_keys = {
+                "compiler_path",
+                "compiler_id",
+                "compile_commands_digest",
+            }
+            for position, compiler in enumerate(compilers_decoded):
+                if set(compiler) != expected_keys:
+                    anomalies.append(
+                        _anomaly(
+                            "compiler_mismatch",
+                            f"clang_type_compilers[{position}] keys "
+                            f"{sorted(compiler)} != {sorted(expected_keys)}",
+                            entity_id=entity_id,
+                        )
+                    )
+                    continue
+                path = compiler.get("compiler_path")
+                cid = compiler.get("compiler_id")
+                if (
+                    not isinstance(path, str)
+                    or not path.strip()
+                    or not Path(path.strip()).is_absolute()
+                    or not isinstance(cid, str)
+                    or not cid.strip()
+                ):
+                    anomalies.append(
+                        _anomaly(
+                            "compiler_mismatch",
+                            f"clang_type_compilers[{position}] has incomplete "
+                            "or non-absolute identity",
+                            entity_id=entity_id,
+                        )
+                    )
+                    continue
+                if digest is not None and compiler.get(
+                    "compile_commands_digest"
+                ) != digest.strip():
+                    anomalies.append(
+                        _anomaly(
+                            "digest_mismatch",
+                            f"clang_type_compilers[{position}] digest disagrees "
+                            "with the entity digest",
+                            entity_id=entity_id,
+                        )
+                    )
+                identity = (path.strip(), cid.strip())
+                if identity in identities:
+                    anomalies.append(
+                        _anomaly(
+                            "compiler_mismatch",
+                            f"clang_type_compilers contains duplicate "
+                            f"{identity!r}",
+                            entity_id=entity_id,
+                        )
+                    )
+                    continue
+                identities.append(identity)
+            if manifest_compilers:
+                outside = sorted(set(identities) - manifest_compilers)
+                if outside:
+                    anomalies.append(
+                        _anomaly(
+                            "compiler_mismatch",
+                            f"entity compilers absent from manifest census: "
+                            f"{outside!r}",
+                            entity_id=entity_id,
+                        )
+                    )
+
+    singular_path = _row_get(entity, "clang_type_compiler_path")
+    singular_id = _row_get(entity, "clang_type_compiler_id")
+    has_singular = is_material_value(singular_path) or is_material_value(
+        singular_id
+    )
+    if len(identities) == 1:
+        if (
+            not isinstance(singular_path, str)
+            or not isinstance(singular_id, str)
+            or (singular_path.strip(), singular_id.strip()) != identities[0]
+        ):
+            anomalies.append(
+                _anomaly(
+                    "compiler_mismatch",
+                    "singular compiler fields disagree with "
+                    "clang_type_compilers",
+                    entity_id=entity_id,
+                )
+            )
+    elif len(identities) > 1 and has_singular:
+        anomalies.append(
+            _anomaly(
+                "compiler_mismatch",
+                "multi-compiler entity exposes singular compiler fields",
+                entity_id=entity_id,
+            )
+        )
+
+    description = _row_get(entity, "clang_type_description")
+    if not isinstance(description, str) or not description.strip():
+        anomalies.append(
+            _anomaly(
+                "confidence_boundary",
+                "clang_type_description is empty",
+                entity_id=entity_id,
+            )
+        )
+    else:
+        absent = [
+            required
+            for required in DESCRIPTION_REQUIRED_SUBSTRINGS
+            if required not in description
+        ]
+        if absent:
+            anomalies.append(
+                _anomaly(
+                    "confidence_boundary",
+                    f"clang_type_description drops its evidence boundary: "
+                    f"{absent}",
+                    entity_id=entity_id,
+                )
+            )
+        claims = _forbidden_claims(description)
+        if claims:
+            anomalies.append(
+                _anomaly(
+                    "forbidden_claim",
+                    f"clang_type_description claims {claims}",
+                    entity_id=entity_id,
+                )
+            )
+
+
+def _validate_type_manifest_block(
+    block: Dict[str, Any],
+    *,
+    n_decorated: int,
+    n_entities: int,
+    manifest_obj: Dict[str, Any],
+    anomalies: List[Dict[str, Any]],
+) -> Tuple[Optional[str], Set[Tuple[str, str]], Optional[int], Dict[str, int]]:
+    """Validate the enabled manifest block; return its census for entities."""
+    if block.get("mode") != MODE:
+        anomalies.append(
+            _anomaly(
+                "manifest_mode_mismatch",
+                f"enabled block mode={block.get('mode')!r} expected {MODE!r}",
+            )
+        )
+    if block.get("enabled") is not True:
+        anomalies.append(
+            _anomaly(
+                "manifest_mode_mismatch",
+                f"enabled block enabled={block.get('enabled')!r} expected True",
+            )
+        )
+    for field, expected in (
+        ("fact_kind", FACT_KIND),
+        ("extractor", EXTRACTOR),
+    ):
+        if block.get(field) != expected:
+            anomalies.append(
+                _anomaly(
+                    "manifest_identity_mismatch",
+                    f"manifest {field}={block.get(field)!r} expected {expected!r}",
+                )
+            )
+
+    counts_raw = block.get("counts")
+    counts: Dict[str, int] = {}
+    if not isinstance(counts_raw, dict):
+        anomalies.append(
+            _anomaly(
+                "manifest_count_mismatch",
+                f"manifest counts is not an object: {type(counts_raw).__name__}",
+            )
+        )
+    else:
+        for key in _ALL_REPORT_BUCKETS:
+            value = counts_raw.get(key)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value < 0
+            ):
+                anomalies.append(
+                    _anomaly(
+                        "manifest_count_mismatch",
+                        f"manifest counts.{key}={value!r} is not a "
+                        "non-negative integer",
+                    )
+                )
+            else:
+                counts[key] = value
+        for key in _FAIL_CLOSED_BUCKETS:
+            if counts.get(key):
+                anomalies.append(
+                    _anomaly(
+                        "residual_bucket_nonzero",
+                        f"fail-closed residual counts.{key}={counts[key]} must "
+                        "be zero in a published overlay",
+                    )
+                )
+        if "matched" in counts and counts["matched"] != n_decorated:
+            anomalies.append(
+                _anomaly(
+                    "manifest_count_mismatch",
+                    f"manifest counts.matched={counts['matched']} "
+                    f"!= {n_decorated} decorated entities",
+                )
+            )
+
+    n_facts = block.get("n_facts")
+    if (
+        isinstance(n_facts, bool)
+        or not isinstance(n_facts, int)
+        or n_facts != n_decorated
+    ):
+        anomalies.append(
+            _anomaly(
+                "manifest_count_mismatch",
+                f"manifest n_facts={n_facts!r} != {n_decorated} decorated "
+                "entities",
+            )
+        )
+    n_changed = block.get("n_facts_changed")
+    upper = n_facts if isinstance(n_facts, int) and not isinstance(n_facts, bool) else n_decorated
+    if (
+        isinstance(n_changed, bool)
+        or not isinstance(n_changed, int)
+        or n_changed < 0
+        or n_changed > upper
+    ):
+        anomalies.append(
+            _anomaly(
+                "manifest_count_mismatch",
+                f"manifest n_facts_changed={n_changed!r} is not within "
+                f"[0, {upper}]",
+            )
+        )
+
+    n_compile_entries = block.get("n_compile_entries")
+    n_translation_units = block.get("n_translation_units")
+    if (
+        isinstance(n_compile_entries, bool)
+        or not isinstance(n_compile_entries, int)
+        or n_compile_entries <= 0
+        or isinstance(n_translation_units, bool)
+        or not isinstance(n_translation_units, int)
+        or n_translation_units != n_compile_entries
+    ):
+        anomalies.append(
+            _anomaly(
+                "manifest_count_mismatch",
+                f"compile-entry/TU census is invalid: "
+                f"n_compile_entries={n_compile_entries!r} "
+                f"n_translation_units={n_translation_units!r}",
+            )
+        )
+        n_compile_entries = None
+
+    raw_digest = block.get("compile_commands_digest")
+    digest: Optional[str] = None
+    if not isinstance(raw_digest, str) or not raw_digest.strip():
+        anomalies.append(
+            _anomaly(
+                "digest_mismatch",
+                f"manifest compile_commands_digest missing: {raw_digest!r}",
+            )
+        )
+    else:
+        digest = raw_digest.strip()
+
+    compilers_block = block.get("compilers")
+    identities: Set[Tuple[str, str]] = set()
+    valid_compilers: List[Dict[str, Any]] = []
+    if (
+        not isinstance(compilers_block, list)
+        or not compilers_block
+        or not all(isinstance(row, dict) for row in compilers_block)
+        or _contains_non_finite(compilers_block)
+    ):
+        anomalies.append(
+            _anomaly(
+                "manifest_identity_mismatch",
+                "manifest compilers must be a non-empty finite list of objects",
+            )
+        )
+    else:
+        for position, compiler in enumerate(compilers_block):
+            path = compiler.get("compiler_path")
+            cid = compiler.get("compiler_id")
+            if (
+                not isinstance(path, str)
+                or not path.strip()
+                or not Path(path.strip()).is_absolute()
+                or not isinstance(cid, str)
+                or not cid.strip()
+            ):
+                anomalies.append(
+                    _anomaly(
+                        "manifest_identity_mismatch",
+                        f"manifest compilers[{position}] has incomplete identity",
+                    )
+                )
+                continue
+            identity = (path.strip(), cid.strip())
+            if identity in identities:
+                anomalies.append(
+                    _anomaly(
+                        "manifest_identity_mismatch",
+                        f"manifest compilers contains duplicate {identity!r}",
+                    )
+                )
+                continue
+            identities.add(identity)
+            valid_compilers.append(compiler)
+        try:
+            encoded = [
+                _strict_canonical_json(compiler) for compiler in compilers_block
+            ]
+            if encoded != sorted(encoded):
+                anomalies.append(
+                    _anomaly(
+                        "manifest_identity_mismatch",
+                        "manifest compilers is not in producer canonical order",
+                    )
+                )
+        except (TypeError, ValueError):
+            anomalies.append(
+                _anomaly(
+                    "manifest_identity_mismatch",
+                    "manifest compilers is not canonical JSON evidence",
+                )
+            )
+
+    if len(valid_compilers) == 1:
+        only = valid_compilers[0]
+        for field in ("compiler_path", "compiler_id"):
+            if block.get(field) != only.get(field):
+                anomalies.append(
+                    _anomaly(
+                        "manifest_identity_mismatch",
+                        f"manifest {field}={block.get(field)!r} != "
+                        f"compilers[0].{field}={only.get(field)!r}",
+                    )
+                )
+        if block.get("compiler_version") is not None and block.get(
+            "compiler_version"
+        ) != only.get("compiler_version"):
+            anomalies.append(
+                _anomaly(
+                    "manifest_identity_mismatch",
+                    "manifest compiler_version disagrees with compilers[0]",
+                )
+            )
+    elif len(valid_compilers) > 1:
+        for field in ("compiler_path", "compiler_id", "compiler_version"):
+            if block.get(field) is not None:
+                anomalies.append(
+                    _anomaly(
+                        "manifest_identity_mismatch",
+                        f"multi-compiler manifest exposes singular "
+                        f"{field}={block.get(field)!r}",
+                    )
+                )
+
+    if block.get("confidence_boundary") != CONFIDENCE_BOUNDARY:
+        anomalies.append(
+            _anomaly(
+                "manifest_contract_claim",
+                "manifest confidence_boundary differs from the producer contract",
+            )
+        )
+        claims = _forbidden_claims(block.get("confidence_boundary"))
+        if claims:
+            anomalies.append(
+                _anomaly(
+                    "forbidden_claim",
+                    f"manifest confidence_boundary claims {claims}",
+                )
+            )
+    extra_claim_text: List[Any] = []
+    for field in ("limitations", "hard_equality", "description", "notes"):
+        extra_claim_text.append(block.get(field))
+    claims = sorted(
+        {
+            claim
+            for text in extra_claim_text
+            for claim in (
+                _forbidden_claims(text)
+                if isinstance(text, str)
+                else [
+                    c
+                    for item in (text if isinstance(text, list) else [])
+                    for c in _forbidden_claims(item)
+                ]
+            )
+        }
+    )
+    if claims:
+        anomalies.append(
+            _anomaly(
+                "forbidden_claim",
+                f"manifest block claims {claims}",
+            )
+        )
+
+    declared = manifest_obj.get("counts")
+    declared_entities = (
+        declared.get("entities") if isinstance(declared, dict) else None
+    )
+    if (
+        isinstance(declared_entities, bool)
+        or not isinstance(declared_entities, int)
+        or declared_entities != n_entities
+    ):
+        anomalies.append(
+            _anomaly(
+                "manifest_count_mismatch",
+                f"manifest counts.entities={declared_entities!r} != entity "
+                f"table length {n_entities}",
+            )
+        )
+    return digest, identities, n_compile_entries, counts
+
+
+def validate_persisted_type_overlay(
+    entities: Any,
+    manifest: Optional[Any] = None,
+    *,
+    max_anomaly_samples: int = _MAX_ANOMALY_SAMPLES,
+) -> Dict[str, Any]:
+    """Validate already-persisted ``clang_type_*`` entity evidence.
+
+    Pure and non-mutating. Never invokes Clang, loads compile_commands.json,
+    reindexes, or rewrites graphs.
+
+    Compatibility states:
+      * no ``clang_types`` block and zero type fields -> ``legacy_absent``
+      * ``mode=off`` / ``enabled=false`` -> requires zero type fields
+      * enabled ``configured_clang_type_declarations`` -> full census
+
+    A missing manifest block never legitimizes existing ``clang_type_*``
+    fields. A present ``clang_types`` key that is null/list/string is
+    invalid, not legacy. Nothing is ever repaired.
+    """
+    if max_anomaly_samples < 0:
+        max_anomaly_samples = 0
+
+    entities_list = _table_rows(entities, name="entities")
+    manifest_obj: Dict[str, Any] = {}
+    if manifest is not None:
+        if isinstance(manifest, dict):
+            manifest_obj = manifest
+        elif hasattr(manifest, "items"):
+            manifest_obj = dict(manifest)
+        else:
+            raise TypeError("manifest must be a mapping or None")
+
+    anomalies: List[Dict[str, Any]] = []
+
+    seen_ids: Dict[str, int] = {}
+    for index, entity in enumerate(entities_list):
+        raw_id = _row_get(entity, "id")
+        if not is_material_value(raw_id) or not str(raw_id).strip():
+            anomalies.append(
+                _anomaly(
+                    "empty_entity_id",
+                    f"entity at index {index} has empty id",
+                )
+            )
+            continue
+        entity_id = str(raw_id)
+        if entity_id in seen_ids:
+            anomalies.append(
+                _anomaly(
+                    "duplicate_entity_id",
+                    f"duplicate entity id {entity_id!r}",
+                    entity_id=entity_id,
+                    extra={"other_index": seen_ids[entity_id]},
+                )
+            )
+        else:
+            seen_ids[entity_id] = index
+
+    carrying: List[Dict[str, Any]] = []
+    decorated: List[Dict[str, Any]] = []
+    for entity in entities_list:
+        if not _has_material_type_fields(entity):
+            continue
+        carrying.append(entity)
+        entity_id = str(_row_get(entity, "id") or "") or None
+        if str(_row_get(entity, "type") or "") in TYPE_ENTITY_KINDS:
+            decorated.append(entity)
+        else:
+            anomalies.append(
+                _anomaly(
+                    "stale_type_metadata",
+                    f"non-type entity carries clang_type_* fields "
+                    f"(type={_row_get(entity, 'type')!r})",
+                    entity_id=entity_id,
+                )
+            )
+
+    has_block = "clang_types" in manifest_obj
+    block = manifest_obj.get("clang_types")
+    mode_state = "legacy_absent"
+    block_enabled = False
+
+    if not has_block:
+        if carrying:
+            anomalies.append(
+                _anomaly(
+                    "legacy_block_missing_with_fields",
+                    f"manifest lacks clang_types but graph has "
+                    f"{len(carrying)} entity/entities with clang_type_* fields",
+                    extra={"n_entities": len(carrying)},
+                )
+            )
+            mode_state = "invalid"
+    elif not isinstance(block, dict):
+        anomalies.append(
+            _anomaly(
+                "invalid_enabled_block",
+                f"clang_types manifest block is not an object: "
+                f"{type(block).__name__}",
+            )
+        )
+        mode_state = "invalid"
+    else:
+        mode = block.get("mode")
+        enabled = block.get("enabled")
+        if mode == "off" and enabled is False:
+            mode_state = "off"
+            if carrying:
+                anomalies.append(
+                    _anomaly(
+                        "off_with_decorated_entities",
+                        f"clang_types is off/disabled but graph has "
+                        f"{len(carrying)} entity/entities with clang_type_* "
+                        "fields",
+                        extra={"n_entities": len(carrying)},
+                    )
+                )
+            disabled_counts = {
+                key: block.get(key)
+                for key in ("n_facts", "n_translation_units")
+            }
+            if any(
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value != 0
+                for value in disabled_counts.values()
+            ):
+                anomalies.append(
+                    _anomaly(
+                        "manifest_count_mismatch",
+                        f"off block has invalid zero census {disabled_counts!r}",
+                    )
+                )
+        elif mode == MODE and enabled is True:
+            mode_state = "enabled"
+            block_enabled = True
+        else:
+            anomalies.append(
+                _anomaly(
+                    "invalid_enabled_block",
+                    f"clang_types enablement inconsistent: mode={mode!r} "
+                    f"enabled={enabled!r}",
+                )
+            )
+            mode_state = "invalid"
+            block_enabled = bool(enabled) or mode == MODE
+
+    manifest_digest: Optional[str] = None
+    manifest_compilers: Set[Tuple[str, str]] = set()
+    n_compile_entries: Optional[int] = None
+    counts: Dict[str, int] = {}
+    if block_enabled and isinstance(block, dict):
+        (
+            manifest_digest,
+            manifest_compilers,
+            n_compile_entries,
+            counts,
+        ) = _validate_type_manifest_block(
+            block,
+            n_decorated=len(decorated),
+            n_entities=len(entities_list),
+            manifest_obj=manifest_obj,
+            anomalies=anomalies,
+        )
+
+    if block_enabled or (mode_state == "invalid" and carrying):
+        for entity in sorted(
+            decorated,
+            key=lambda e: (
+                str(_row_get(e, "title") or ""),
+                str(_row_get(e, "id") or ""),
+            ),
+        ):
+            _validate_decorated_entity(
+                entity,
+                entity_id=str(_row_get(entity, "id") or "") or None,
+                manifest_digest=manifest_digest,
+                manifest_compilers=manifest_compilers,
+                n_compile_entries=n_compile_entries,
+                anomalies=anomalies,
+            )
+
+    anomalies.sort(
+        key=lambda a: (
+            str(a.get("code") or ""),
+            str(a.get("entity_id") or ""),
+            str(a.get("message") or ""),
+            _strict_canonical_json(
+                {
+                    key: a[key]
+                    for key in sorted(a)
+                    if key not in {"code", "message", "entity_id"}
+                }
+            ),
+        )
+    )
+    total = len(anomalies)
+    samples = anomalies[:max_anomaly_samples]
+    ok = total == 0 and mode_state in {"legacy_absent", "off", "enabled"}
+    status = mode_state if ok else "invalid"
+
+    return {
+        "ok": ok,
+        "status": status,
+        "mode": mode_state,
+        "n_entities": len(entities_list),
+        "n_decorated_entities": len(decorated),
+        "n_type_field_carriers": len(carrying),
+        "n_anomalies": total,
+        "n_anomaly_samples": len(samples),
+        "anomalies_truncated": total > len(samples),
+        "anomalies": samples,
+        "counts": dict(sorted(counts.items())),
+        "provenance": {
+            "compile_commands_digest": manifest_digest,
+            "n_compile_entries": n_compile_entries,
+            "compilers": [
+                {"compiler_path": path, "compiler_id": cid}
+                for path, cid in sorted(manifest_compilers)
+            ],
+        },
+        "overlay_mode": MODE,
+        "fact_kind": FACT_KIND,
+        "extractor": EXTRACTOR,
+        "limitations": list(LIMITATIONS),
+        "confidence_boundary": CONFIDENCE_BOUNDARY,
+    }

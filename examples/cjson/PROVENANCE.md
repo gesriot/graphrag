@@ -187,6 +187,18 @@ explicit skip and the final status says `PASS WITH SKIPS`.
   (anonymous/outside-package/alternate sites) do not invent entities.
   **No** `uses_type` edges. `clang_type_confidence=1.0` is relative only to
   the recorded Clang + `compile_commands.json` configuration.
+- **Persisted type-declaration integrity (read-only):**
+  `scripts/c_clang_type_graph_audit.py --graph <root>` re-validates
+  already-published `clang_type_*` fields and the `clang_types` block
+  against the producer contract without Clang, `compile_commands.json`, an
+  AST capture, reindexing, or any graph mutation. Measured on a disposable
+  `--clang-types` cJSON snapshot: `status=enabled`, **10** validated
+  decorated entities, zero anomalies, and `read_only_verified=true` from a
+  SHA-256 fingerprint of the manifest, parquet tables, `current` pointer and
+  snapshot listing taken before and after the run. The published
+  `byog_cjson` root (indexed without the overlay) audits as `legacy_absent`
+  and is never rewritten. C `published_graph_health` runs the same pure
+  check.
 - **Clang AST type-use audit (diagnostic):**
   `scripts/c_clang_type_use_audit.py --package examples/cjson` inventories
   declaration-bearing type uses (returns/params/locals/fields/globals/typedef

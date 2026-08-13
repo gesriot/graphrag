@@ -100,6 +100,18 @@ The published graph now also contains the co-located golden runner
   disabled). Shares the in-memory AST capture with signatures/calls/type-uses/
   type-shapes (N dumps for N entries), and its report is reused rather than
   rebuilt by the type-use and type-shape builders.
+- **Persisted type-declaration integrity (read-only):**
+  `scripts/c_clang_type_graph_audit.py --graph <root>` validates the
+  published `clang_type_*` fields and the `clang_types` block without
+  Clang, `compile_commands.json`, an AST capture, reindexing, or graph
+  mutation. Measured states for inih: a disposable `--clang-types`
+  snapshot audits as `status=enabled` with **3** decorated typedef
+  entities (`ini_handler` keeps `clang_type_graph_canonical_line=58` and
+  `clang_type_matched_site_line=62`) and zero anomalies; a default
+  snapshot audits as `off`; the published `byog_inih` root (indexed
+  before the overlay existed) audits as `legacy_absent`. All three report
+  `read_only_verified=true`, and `byog_inih` is never rewritten. C
+  `published_graph_health` runs the same pure check.
 - **Clang AST type-use audit (diagnostic):** measured matched_internal=**14**
   (ini_handler / ini_reader / ini_parse_string_ctx parameter and local uses),
   external_or_system=72, unsupported_type_form=2, owner_unmatched=0,

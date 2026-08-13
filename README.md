@@ -184,6 +184,25 @@ modules, plugins, and PCH fail explicitly. See
   1 only for `tree_sitter_only` / `clang_only` / `ambiguous` /
   `macro_location_unsupported` (not for out-of-scope, anonymous, unsupported,
   outside-package, or alternate sites alone).
+- `scripts/c_clang_type_graph_audit.py` – **read-only integrity audit** for
+  already-persisted `clang_type_*` entity fields and the `clang_types`
+  manifest block. Does not invoke Clang, read `compile_commands.json`, build
+  an AST capture, reindex, publish, or rewrite graphs, and never repairs
+  data. `--graph` (plus optional `--snapshot` / `--output`) resolves the
+  snapshot, SHA-256-fingerprints every graph input before and after the run,
+  and reports that read-only verification alongside the findings. `--output`
+  is refused inside the audited graph root so report generation cannot
+  invalidate that guarantee. The deterministic JSON exposes `state`,
+  `classification`, `violations`, counts, provenance and limitations. Exit
+  0 = valid (including `legacy_absent` and `off` with zero type fields),
+  1 = integrity violations, 2 = unreadable graph/snapshot/manifest. A
+  missing manifest block never legitimizes existing `clang_type_*` fields,
+  a present `clang_types` key that is null/list/string is invalid (not
+  legacy), `mode=off` with type fields is an error, and an enabled block
+  with partial, corrupted, or extra fields is an error. Shared
+  producer-contract helpers live in `c_clang_types.py`
+  (`validate_persisted_type_overlay`). Published C graph health runs the
+  same pure check without changing extractor comparison.
 - `scripts/c_clang_type_use_audit.py` – type *uses* on declaration-bearing
   AST nodes (function returns, parameters, locals, fields, globals, typedef
   underlying types). The CLI is diagnostic; publishing aggregated `uses_type`

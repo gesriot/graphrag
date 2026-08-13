@@ -178,6 +178,56 @@ only for single-compiler rows; multi-compiler rows keep the canonical
 `is_deterministic` / text-unit IDs are never rewritten. Alternate declaration
 sites are never published as separate entities.
 
+**Persisted integrity audit (read-only):**
+`scripts/c_clang_type_graph_audit.py` validates already-published
+`clang_type_*` entity fields against the producer contract without invoking
+Clang, reading `compile_commands.json`, building an AST capture, reindexing, or
+re-running the overlay. It never repairs data.
+
+| State | Condition | Expected |
+| --- | --- | --- |
+| `legacy_absent` | No `clang_types` block and no `clang_type_*` fields | valid |
+| `off` | `mode=off` and `enabled=false` | zero `clang_type_*` fields required |
+| `enabled` | `mode=configured_clang_type_declarations` + `enabled=true` | full entity + manifest census |
+
+A present `clang_types` key that is null, a list, a string, or any other
+non-object is invalid, not legacy. A missing block in a readable manifest
+never legitimizes existing type fields; `mode=off` with type fields is a
+violation; an enabled block with partial, corrupted, or extra fields is a
+violation. Entity checks: unique entity IDs, `struct` / `enum` / `typedef`
+type only, the exact full set of known `clang_type_*` fields with no unknown
+material ones, `clang_type_declaration_confirmed=true`,
+`clang_type_entity_kind == entity.type`,
+`clang_type_graph_canonical_span == entity.span`, pinned `fact_kind` /
+`extractor` / `confidence=1.0` / `is_deterministic=true`, internally
+consistent graph-canonical and matched-site span/line/col0, a boolean
+`clang_type_matched_site_is_canonical` that equals the actual site equality,
+optional type-string fields null or non-empty strings, a non-empty location
+origin, sorted unique `entry_indices` inside the manifest compile-entry
+census, `clang_type_compilers` as **canonical deterministic JSON** (NaN,
+Infinity, duplicate object keys and non-canonical encodings are refused),
+entity/manifest agreement on compiler identities and
+`compile_commands_digest` (singular compiler fields only for a single
+identity), and description text that keeps its evidence boundary and claims
+no ABI/layout/type-use/multi-config/macro-complete proof. Manifest checks:
+mode/enabled, `fact_kind` / `extractor`,
+`n_facts == counts.matched ==` the actual decorated-entity count,
+`n_facts_changed` in `[0, n_facts]`, all four fail-closed bucket counts
+zero, non-negative observation-only counts, a valid
+compile-entry/translation-unit census, non-empty unique internally consistent
+compiler provenance, a non-empty digest, and the pinned confidence-boundary
+text with no ABI/layout/type-use/multi-config/macro-complete guarantee. The
+graph-root entry point SHA-256-fingerprints `manifest.json`, the three
+parquet tables, the `current` pointer, and the snapshot directory listing
+before and after the audit and publishes that read-only verification in its
+report. Exit 0 = passed, 1 = violations, 2 = unreadable
+graph/snapshot/manifest. `published_graph_health.py` attaches this status for
+C published graphs; legacy/default-off roots continue to pass. The
+deterministic JSON names `state`, `classification`, `violations`, counts,
+compiler/configuration provenance, limitations and the read-only result;
+`anomalies` remains an equivalent compatibility field. `--output` must be
+outside the audited graph root.
+
 #### Shared in-memory AST capture (execution only)
 
 When any of `--clang-signatures` / `--clang-calls` / `--clang-types` /

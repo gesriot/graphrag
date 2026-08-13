@@ -273,6 +273,38 @@ def _type_shape_integrity(
     }
 
 
+def _type_integrity(
+    published: dict[str, list[dict[str, Any]]],
+    manifest: Mapping[str, Any],
+    *,
+    indexer: str,
+) -> dict[str, Any] | None:
+    """Read-only configured type-declaration integrity for C published graphs.
+
+    Never invokes Clang, never re-runs the overlay, never reindexes. Legacy /
+    default-off C graphs with zero ``clang_type_*`` fields pass as
+    ``legacy_absent`` / ``off``. Non-C indexers skip this check (returns None).
+    """
+    if indexer != "c":
+        return None
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from c_clang_types import validate_persisted_type_overlay  # type: ignore
+
+    result = validate_persisted_type_overlay(
+        published.get("entities") or [], manifest
+    )
+    return {
+        "ok": bool(result["ok"]),
+        "status": str(result["status"]),
+        "mode": str(result["mode"]),
+        "n_decorated_entities": int(result["n_decorated_entities"]),
+        "n_anomalies": int(result["n_anomalies"]),
+        "n_anomaly_samples": int(result["n_anomaly_samples"]),
+        "anomalies_truncated": bool(result["anomalies_truncated"]),
+        "anomalies": list(result["anomalies"]),
+    }
+
+
 def check_spec(
     spec: PublishedGraphSpec,
     *,
@@ -330,12 +362,17 @@ def check_spec(
     type_shape = _type_shape_integrity(
         published, published_manifest, indexer=spec.indexer
     )
+    type_decl = _type_integrity(
+        published, published_manifest, indexer=spec.indexer
+    )
 
     def _with_overlays(result: dict[str, Any]) -> dict[str, Any]:
         if type_use is not None:
             result["clang_type_use_integrity"] = type_use
         if type_shape is not None:
             result["clang_type_shape_integrity"] = type_shape
+        if type_decl is not None:
+            result["clang_type_integrity"] = type_decl
         return result
 
     if mismatches:
@@ -369,6 +406,17 @@ def check_spec(
                 "snapshot": snapshot,
                 "status": "fail",
                 "reason": "configured type-shape integrity anomalies",
+            }
+        )
+
+    if type_decl is not None and not type_decl["ok"]:
+        return _with_overlays(
+            {
+                "id": spec.ident,
+                "graph": spec.graph,
+                "snapshot": snapshot,
+                "status": "fail",
+                "reason": "configured type-declaration integrity anomalies",
             }
         )
 
@@ -424,6 +472,14 @@ def format_report(report: Mapping[str, Any]) -> str:
                 f"ok={type_shape.get('ok')} "
                 f"decorated={type_shape.get('n_decorated_entities')} "
                 f"anomalies={type_shape.get('n_anomalies')}"
+            )
+        type_decl = result.get("clang_type_integrity")
+        if isinstance(type_decl, Mapping):
+            lines.append(
+                f"    clang_type_integrity: status={type_decl.get('status')} "
+                f"ok={type_decl.get('ok')} "
+                f"decorated={type_decl.get('n_decorated_entities')} "
+                f"anomalies={type_decl.get('n_anomalies')}"
             )
     lines.append(
         f"  declared mutable={report['mutable']} frozen-exempt={report['frozen']} "
