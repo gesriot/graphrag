@@ -106,6 +106,17 @@ explicit skip and the final status says `PASS WITH SKIPS`.
   (`clang_only` / `ambiguous` / macro multi-file locations) fail the overlay
   explicitly. This is not full type resolution, ABI verification, multi-config
   coverage, or C++ support.
+- **Persisted function-signature integrity (read-only):**
+  `scripts/c_clang_signature_graph_audit.py --graph <root>` re-validates
+  already-published signature fields and the `clang_signatures` block
+  against the producer contract without Clang, `compile_commands.json`, an
+  AST capture, reindexing, or any graph mutation. Measured on a disposable
+  `--clang-signatures` cJSON snapshot: `status=enabled`, decorated-entity
+  count equal to the producer `n_facts` / `counts.matched` (113 on this
+  host), zero fail-closed residuals, and `read_only_verified=true`. The
+  published `byog_cjson` root (indexed with signatures default-off) audits
+  as `off` and is never rewritten. C `published_graph_health`
+  attaches the same pure check as `clang_signature_integrity`.
 - **Clang AST call-site audit (standalone diagnostic):**
   `scripts/c_clang_call_audit.py --package examples/cjson` compares
   package-local `CallExpr` sites (callee subtree only) to tree-sitter `calls`

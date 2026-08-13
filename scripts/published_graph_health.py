@@ -305,6 +305,39 @@ def _type_integrity(
     }
 
 
+def _signature_integrity(
+    published: dict[str, list[dict[str, Any]]],
+    manifest: Mapping[str, Any],
+    *,
+    indexer: str,
+) -> dict[str, Any] | None:
+    """Read-only configured function-signature integrity for C published graphs.
+
+    Never invokes Clang, never re-runs the overlay, never reindexes. Legacy /
+    default-off C graphs with zero signature fields pass as ``legacy_absent``
+    / ``off``. Non-C indexers skip this check (returns None).
+    """
+    if indexer != "c":
+        return None
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from c_clang_signatures import validate_persisted_signature_overlay  # type: ignore
+
+    result = validate_persisted_signature_overlay(
+        published.get("entities") or [],
+        manifest,
+    )
+    return {
+        "ok": bool(result["ok"]),
+        "status": str(result["status"]),
+        "mode": str(result["mode"]),
+        "n_decorated_entities": int(result["n_decorated_entities"]),
+        "n_anomalies": int(result["n_anomalies"]),
+        "n_anomaly_samples": int(result["n_anomaly_samples"]),
+        "anomalies_truncated": bool(result["anomalies_truncated"]),
+        "anomalies": list(result["anomalies"]),
+    }
+
+
 def check_spec(
     spec: PublishedGraphSpec,
     *,
@@ -365,6 +398,9 @@ def check_spec(
     type_decl = _type_integrity(
         published, published_manifest, indexer=spec.indexer
     )
+    signature = _signature_integrity(
+        published, published_manifest, indexer=spec.indexer
+    )
 
     def _with_overlays(result: dict[str, Any]) -> dict[str, Any]:
         if type_use is not None:
@@ -373,6 +409,8 @@ def check_spec(
             result["clang_type_shape_integrity"] = type_shape
         if type_decl is not None:
             result["clang_type_integrity"] = type_decl
+        if signature is not None:
+            result["clang_signature_integrity"] = signature
         return result
 
     if mismatches:
@@ -417,6 +455,17 @@ def check_spec(
                 "snapshot": snapshot,
                 "status": "fail",
                 "reason": "configured type-declaration integrity anomalies",
+            }
+        )
+
+    if signature is not None and not signature["ok"]:
+        return _with_overlays(
+            {
+                "id": spec.ident,
+                "graph": spec.graph,
+                "snapshot": snapshot,
+                "status": "fail",
+                "reason": "configured function-signature integrity anomalies",
             }
         )
 
@@ -480,6 +529,14 @@ def format_report(report: Mapping[str, Any]) -> str:
                 f"ok={type_decl.get('ok')} "
                 f"decorated={type_decl.get('n_decorated_entities')} "
                 f"anomalies={type_decl.get('n_anomalies')}"
+            )
+        signature = result.get("clang_signature_integrity")
+        if isinstance(signature, Mapping):
+            lines.append(
+                f"    clang_signature_integrity: status={signature.get('status')} "
+                f"ok={signature.get('ok')} "
+                f"decorated={signature.get('n_decorated_entities')} "
+                f"anomalies={signature.get('n_anomalies')}"
             )
     lines.append(
         f"  declared mutable={report['mutable']} frozen-exempt={report['frozen']} "

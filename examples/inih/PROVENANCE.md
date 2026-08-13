@@ -80,6 +80,23 @@ The published graph now also contains the co-located golden runner
 - Entity mix (source-derived): 15 functions (10 library + 5 runner), 3 files,
   3 typedefs (`ini_parse_string_ctx`, `ini_handler`, `ini_reader`).
 - Relationship mix: 38 `calls`, 18 `contains`.
+- **Optional `--clang-signatures` entity fields (default off):** when
+  enabled, attaches matched + line-confirmed Clang `qualType` / storage
+  metadata onto the 10 library function entities. The 5 runner functions
+  stay `out_of_compile_db_scope` and receive no invented signatures.
+  Independent `extra_manifest["clang_signatures"]` block
+  (`mode=clang_ast_signatures` when on, `mode=off` when disabled).
+- **Persisted function-signature integrity (read-only):**
+  `scripts/c_clang_signature_graph_audit.py --graph <root>` validates the
+  published signature fields and the `clang_signatures` block without
+  Clang, `compile_commands.json`, an AST capture, reindexing, or graph
+  mutation. Measured states for inih: a disposable `--clang-signatures`
+  snapshot audits as `status=enabled` with **10** decorated function
+  entities and zero fail-closed residuals; a default snapshot and the
+  published `byog_inih` root (signatures default-off) both audit as `off`.
+  All three report `read_only_verified=true`, and `byog_inih` is never
+  rewritten. C `published_graph_health` attaches
+  `clang_signature_integrity`.
 - **Type-declaration audit (measured, multi-site exact matching):** matched=3
   (`ini_parse_string_ctx`, `ini_handler`, `ini_reader`);
   `ambiguous=0`, `clang_only=0`, `tree_sitter_only=0`,

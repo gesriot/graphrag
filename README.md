@@ -168,6 +168,26 @@ modules, plugins, and PCH fail explicitly. See
 - `scripts/c_clang_ast_audit.py` – function definitions / signatures vs
   tree-sitter entities. Publishing selected matched signature *fields* into
   BYOG requires the separate explicit `--clang-signatures` flag.
+- `scripts/c_clang_signature_graph_audit.py` – **read-only integrity audit**
+  for already-persisted `clang_signature_*` / `clang_qual_type` entity fields
+  and the `clang_signatures` manifest block. Does not invoke Clang, read
+  `compile_commands.json`, build an AST capture, reindex, publish, or rewrite
+  graphs, and never repairs data. `--graph` (plus optional `--snapshot` /
+  `--output`) resolves the snapshot, SHA-256-fingerprints every graph input
+  before and after the run, and reports that read-only verification
+  alongside the findings. `--output` is refused inside the audited graph
+  root so report generation cannot invalidate that guarantee. The
+  deterministic JSON exposes `state`, `classification`, `violations`,
+  counts, provenance and limitations. Exit 0 = valid (including
+  `legacy_absent` and `off` with zero signature fields), 1 = integrity
+  violations, 2 = unreadable graph/snapshot/manifest. A missing manifest
+  block never legitimizes existing signature fields, a present
+  `clang_signatures` key that is null/list/string is invalid (not
+  legacy), `mode=off` with signature fields is an error, and an enabled
+  block with partial, corrupted, or extra fields is an error. Shared
+  producer-contract helpers live in `c_clang_signatures.py`
+  (`validate_persisted_signature_overlay`). Published C graph health runs
+  the same pure check without changing extractor comparison.
 - `scripts/c_clang_call_audit.py` – call sites vs tree-sitter `calls` edges
   (direct internal matches; external/indirect remain observations). Call-site
   matching is byte-offset-first with strict line/column fallback and complete

@@ -122,6 +122,48 @@ Base tree-sitter `extractor` / `confidence` / `is_deterministic` / title / id
 are unchanged. The standalone audit remains a diagnostic CLI; only this flag
 publishes selected matched metadata into BYOG.
 
+**Persisted integrity audit (read-only):**
+`scripts/c_clang_signature_graph_audit.py` validates already-published
+function-signature entity fields against the producer contract without
+invoking Clang, reading `compile_commands.json`, building an AST capture,
+reindexing, or re-running the overlay. It never repairs data.
+
+| State | Condition | Expected |
+| --- | --- | --- |
+| `legacy_absent` | No `clang_signatures` block and no signature fields | valid |
+| `off` | `mode=off` and `enabled=false` | zero signature fields required |
+| `enabled` | `mode=clang_ast_signatures` + `enabled=true` | full entity + manifest census |
+
+A present `clang_signatures` key that is null, a list, a string, or any other
+non-object is invalid, not legacy. A missing block never legitimizes existing
+signature fields; `mode=off` with signature fields is a violation; an enabled
+block with partial, corrupted, or extra fields is a violation. Entity checks:
+unique entity IDs, function type only, the exact full set of known producer
+keys (including nullable `clang_storage_class` / `clang_inline` /
+`clang_variadic` / `clang_mangled_name`) with no unknown material
+`clang_signature_*` fields, `clang_signature_status=matched`, pinned
+`fact_kind` / `extractor` / `confidence=1.0` / `is_deterministic=true`,
+non-empty `clang_qual_type` and `clang_location_origin`, absolute compiler
+path, nonempty compiler id and digest, sorted unique `entry_indices` inside
+the manifest compile-entry census, `clang_signature_observations_json` as
+**canonical deterministic JSON** (NaN, Infinity, duplicate object keys and
+non-canonical encodings are refused), observation/entity/manifest agreement
+on qualType, digest, compiler identities and entry-index union, and an
+exact producer-owned description. Manifest checks: mode/enabled,
+`fact_kind` / `extractor`, `n_facts == counts.matched ==` the actual
+decorated-entity count, `n_facts_changed` in `[0, n_facts]`, fail-closed
+`clang_only` / `ambiguous` / `macro_location_unsupported` counts zero,
+non-negative `tree_sitter_only` / `out_of_compile_db_scope` counts, a
+valid compile-entry/translation-unit census, non-empty unique internally
+consistent compiler provenance, a non-empty digest, and the pinned
+confidence-boundary text. The graph-root entry point SHA-256-fingerprints
+`manifest.json`, the three parquet tables, the `current` pointer, and the
+snapshot directory listing before and after the audit. Exit 0 = passed,
+1 = violations, 2 = unreadable graph/snapshot/manifest.
+`published_graph_health.py` attaches this status as
+`clang_signature_integrity` for C published graphs; Python graphs are
+unchanged. `--output` must be outside the audited graph root.
+
 #### Configured direct-call evidence (relationship fields, not new edges)
 
 When `scripts/index_c.py --clang-calls` is enabled (default **off**), existing

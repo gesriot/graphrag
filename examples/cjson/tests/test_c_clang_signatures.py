@@ -185,6 +185,36 @@ def test_apply_synthetic_matched_signature(tmp_path: Path):
     # File entity untouched
     assert "clang_qual_type" not in data["entities"][1]
 
+    null_data = {
+        "entities": [
+            _base_entity(title="a:null_helper", source_file=str(src)),
+        ],
+        "relationships": [],
+    }
+    null_report = _clean_report(
+        [
+            _matched_row(
+                title="a:null_helper",
+                source_path="a.c",
+                name="null_helper",
+                storageClass=None,
+                inline=None,
+                variadic=None,
+                mangledName=None,
+            )
+        ]
+    )
+    apply_clang_signatures_from_report(null_data, null_report, pkg)
+    null_helper = null_data["entities"][0]
+    for field in (
+        "clang_storage_class",
+        "clang_inline",
+        "clang_variadic",
+        "clang_mangled_name",
+    ):
+        assert field in null_helper
+        assert null_helper[field] is None
+
 
 def test_collision_safe_same_basename(tmp_path: Path):
     pkg = tmp_path / "pkg"
