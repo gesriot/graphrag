@@ -80,6 +80,23 @@ The published graph now also contains the co-located golden runner
 - Entity mix (source-derived): 15 functions (10 library + 5 runner), 3 files,
   3 typedefs (`ini_parse_string_ctx`, `ini_handler`, `ini_reader`).
 - Relationship mix: 38 `calls`, 18 `contains`.
+- **Optional `--clang-calls` relationship fields (default off):** when
+  enabled, attaches matched internal Clang call evidence onto existing
+  tree-sitter `calls` relationships. Measured on this host: **16**
+  configured facts, `tree_sitter_only_internal=1`,
+  `out_of_compile_db_scope=21`, `total_calls=38`. Fail-closed residuals
+  stay zero. Independent `extra_manifest["clang_calls"]` block
+  (`mode=clang_configured_call_overlay` when on, `mode=off` when disabled).
+- **Persisted configured-call integrity (read-only):**
+  `scripts/c_clang_call_graph_audit.py --graph <root>` validates the
+  published `clang_call_*` fields and the `clang_calls` block without
+  Clang, `compile_commands.json`, C source reads, byte-offset
+  reconstruction, reindexing, or graph mutation. Measured states for
+  inih: a disposable `--clang-calls` snapshot audits as `status=enabled`
+  with **16** decorated `calls` relationships; a default snapshot and the
+  published `byog_inih` root audit as `off`. All report
+  `read_only_verified=true`, and `byog_inih` is never rewritten. C
+  `published_graph_health` attaches `clang_call_integrity`.
 - **Optional `--clang-signatures` entity fields (default off):** when
   enabled, attaches matched + line-confirmed Clang `qualType` / storage
   metadata onto the 10 library function entities. The 5 runner functions

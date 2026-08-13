@@ -193,6 +193,17 @@ modules, plugins, and PCH fail explicitly. See
   matching is byte-offset-first with strict line/column fallback and complete
   tree-sitter edge accounting. Publishing selected matched call *evidence
   fields* into BYOG requires the separate explicit `--clang-calls` flag.
+- `scripts/c_clang_call_graph_audit.py` – **read-only integrity audit** for
+  already-persisted `clang_call_*` relationship fields and the `clang_calls`
+  manifest block. Does not invoke Clang, read `compile_commands.json`, read C
+  sources, reconstruct byte offsets, reindex, publish, or rewrite graphs, and
+  never repairs data. `--graph` (plus optional `--snapshot` / `--output`)
+  SHA-256-fingerprints every graph input before and after the run. `--output`
+  is refused inside the audited graph root. Exit 0 = valid (`legacy_absent` /
+  `off` / enabled), 1 = integrity violations, 2 = unreadable
+  graph/snapshot/manifest. Shared producer-contract helpers live in
+  `c_clang_calls.py` (`validate_persisted_call_overlay`). Published C graph
+  health attaches the same check as `clang_call_integrity`.
 - `scripts/c_clang_type_audit.py` – type *declarations* (named complete
   structs, named complete enums, package-local typedefs) vs tree-sitter
   `struct` / `enum` / `typedef` entities. Collision-safe identity is

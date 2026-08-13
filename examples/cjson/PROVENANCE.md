@@ -149,6 +149,18 @@ explicit skip and the final status says `PASS WITH SKIPS`.
   analysis, macro-complete call proof, multi-config coverage, C++, or ABI
   verification. `clang_call_confidence=1.0` is relative only to the recorded
   Clang + `compile_commands.json` configuration.
+- **Persisted configured-call integrity (read-only):**
+  `scripts/c_clang_call_graph_audit.py --graph <root>` re-validates
+  already-published `clang_call_*` fields and the `clang_calls` block
+  against the producer contract without Clang, `compile_commands.json`, C
+  source reads, byte-offset reconstruction, reindexing, or any graph
+  mutation. Measured on a disposable `--clang-calls` cJSON snapshot:
+  `status=enabled`, decorated-relationship count equal to the producer
+  `n_facts` / `counts.matched_internal` (188 on this host),
+  `tree_sitter_accounting.total_calls=495`, zero fail-closed residuals, and
+  `read_only_verified=true`. The published `byog_cjson` root (signatures /
+  calls default-off) audits as `off` and is never rewritten. C
+  `published_graph_health` attaches the same check as `clang_call_integrity`.
 - **Shared AST capture (execution only):** enabling any non-empty combination
   of `--clang-signatures`, `--clang-calls`, `--clang-types`,
   `--clang-type-uses`, and `--clang-type-shapes` uses one

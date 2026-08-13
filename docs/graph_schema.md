@@ -192,6 +192,42 @@ multi-config coverage, C++, or ABI verification. The standalone call audit
 remains a diagnostic CLI; only this flag publishes selected matched metadata
 into BYOG.
 
+**Persisted integrity audit (read-only):**
+`scripts/c_clang_call_graph_audit.py` validates already-published
+`clang_call_*` relationship fields against the producer contract without
+invoking Clang, reading `compile_commands.json`, reading C sources,
+reconstructing byte offsets, reindexing, or repairing rows.
+
+| State | Condition | Expected |
+| --- | --- | --- |
+| `legacy_absent` | No `clang_calls` block and no `clang_call_*` fields | valid |
+| `off` | `mode=off` and `enabled=false` | zero `clang_call_*` fields required |
+| `enabled` | `mode=clang_configured_call_overlay` + `enabled=true` | full relationship + manifest census |
+
+A present `clang_calls` key that is null, a list, a string, or any other
+non-object is invalid, not legacy. Extra or missing enabled-block keys, extra
+count/accounting keys, evidence without a block, an enabled block without the
+declared evidence, and `mode=off` with call fields are violations. Relationship
+checks: unique relationship IDs, `type=calls` only, the exact full producer key
+set (including nullable `clang_call_resolve_reason` / `clang_call_ref_type` /
+singular compiler fields), no unknown material `clang_call_*` fields, pinned
+`status` / `fact_kind` / `extractor` / `confidence=1.0` /
+`is_deterministic=true` / `ref_kind=FunctionDecl`, a valid match basis and
+non-negative byte offset, sorted unique `entry_indices` inside the compile-entry
+census, canonical `clang_call_compilers_json` and
+`clang_call_observations_json`, observation/relationship/manifest agreement on
+target, ref type, digest, compiler identities and entry-index coverage, and an
+exact producer-owned description. Manifest checks: exact key set, `n_facts ==
+counts.matched_internal ==` decorated count, fail-closed residuals zero
+(including `covered_by_noninternal_clang_observation`), observation-only counts
+non-negative and arithmetically consistent, `tree_sitter_accounting.total_calls`
+equal to the actual `calls` relationship count, and pinned confidence-boundary
+text. The graph-root entry point SHA-256-fingerprints `manifest.json`, the three
+parquet tables, the `current` pointer, and the snapshot directory listing.
+`--output` must be outside the audited graph root.
+`published_graph_health.py` attaches this status as `clang_call_integrity` for C
+graphs only.
+
 #### Configured type-declaration evidence (entity fields, not a type graph)
 
 When `scripts/index_c.py --clang-types` is enabled (default **off**), existing

@@ -281,6 +281,43 @@ def test_exact_matched_relationship_receives_metadata(tmp_path: Path):
     assert rel["is_deterministic"] is True
 
 
+def test_apply_materializes_absent_nullable_keys(tmp_path: Path):
+    """Absent nullable payload keys must be written even when the value is None."""
+    pkg, data, row, _bo = _pkg_with_call(tmp_path)
+    row["clang_resolve_reason"] = None
+    row["ref_type"] = None
+    row["clang_observations"][0]["resolve_reason"] = None
+    row["clang_observations"][0]["ref_type"] = None
+    rel = data["relationships"][0]
+    assert "clang_call_resolve_reason" not in rel
+    assert "clang_call_ref_type" not in rel
+    apply_clang_calls_from_report(data, _clean_report([row], total_calls=1), pkg)
+    assert "clang_call_resolve_reason" in rel
+    assert rel["clang_call_resolve_reason"] is None
+    assert "clang_call_ref_type" in rel
+    assert rel["clang_call_ref_type"] is None
+    for field in (
+        "clang_call_status",
+        "clang_call_fact_kind",
+        "clang_call_extractor",
+        "clang_call_confidence",
+        "clang_call_is_deterministic",
+        "clang_call_match_basis",
+        "clang_call_byte_offset",
+        "clang_call_entry_indices",
+        "clang_call_compile_commands_digest",
+        "clang_call_compiler_path",
+        "clang_call_compiler_id",
+        "clang_call_compilers_json",
+        "clang_call_resolve_reason",
+        "clang_call_ref_kind",
+        "clang_call_ref_type",
+        "clang_call_observations_json",
+        "clang_call_description",
+    ):
+        assert field in rel
+
+
 def test_graph_shape_and_base_fields_unchanged(tmp_path: Path):
     pkg, data, row, _bo = _pkg_with_call(tmp_path)
     other = _base_call(
