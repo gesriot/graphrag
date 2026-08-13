@@ -15,6 +15,7 @@ No clang dependency — only ``compile_commands.json`` + source text.
 from __future__ import annotations
 
 import json
+import math
 import re
 import sys
 from collections import defaultdict
@@ -2219,3 +2220,1067 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
 if __name__ == "__main__":
     main()
+
+
+# ---------------------------------------------------------------------------
+# Persisted-liveness integrity contract (read-only; no reanalyse, no compiler)
+# ---------------------------------------------------------------------------
+
+_MAX_ANOMALY_SAMPLES = 40
+_MAX_ANOMALY_MESSAGE = 400
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_LIVENESS_MANIFEST_KEYS = (
+    "eval_mode",
+    "compiler_path",
+    "compiler_id",
+    "compiler_version",
+    "macro_seed_digest",
+    "n_compiler_builtins",
+    "n_include_macros",
+    "host_independent",
+)
+_STAMP_FIELDS = (
+    "preprocessor_dependent",
+    "preprocessor_reasons",
+    "preprocessor_eval_mode",
+    "preprocessor_macro_seed_digest",
+    "preprocessor_branches",
+)
+_BRANCH_KEYS = (
+    "kind",
+    "condition",
+    "start_line",
+    "end_line",
+    "liveness",
+    "basis",
+)
+_BRANCH_KINDS = frozenset({"if", "ifdef", "ifndef", "elif", "else"})
+_LIVENESS_VALUES = frozenset({"live", "dead", "unknown"})
+_INSIDE_REASON_RE = re.compile(
+    r"^inside_conditional:(if|ifdef|ifndef|elif|else)(\(.*\))?$"
+)
+_BRANCH_REASON_RE = re.compile(
+    r"^branch_(live|dead|unknown):(if|ifdef|ifndef|elif|else)(\(.*\))?$"
+)
+_REASON_PATTERNS = (
+    re.compile(r"^function_like_macro:[A-Za-z_]\w*$"),
+    _INSIDE_REASON_RE,
+    _BRANCH_REASON_RE,
+    re.compile(r"^compile_define_condition:[A-Za-z_]\w*$"),
+    re.compile(r"^header_default:[A-Za-z_]\w*$"),
+    re.compile(r"^macro_condition:[A-Za-z_]\w*$"),
+    re.compile(r"^entity_body_has_preprocessor$"),
+)
+
+LIMITATIONS = (
+    "Persisted preprocessor-liveness stamp consistency only",
+    "Does not reanalyse sources or reconstruct branch decisions",
+    "Does not compare the recorded digest with the current host",
+    "Does not invoke a compiler or read compile_commands.json",
+    "Post-annotation overlay edges are exempt from the five-field stamp",
+)
+
+ANOMALY_CODES = frozenset(
+    {
+        "legacy_block_missing_with_fields",
+        "invalid_liveness_block",
+        "extra_manifest_key",
+        "missing_manifest_key",
+        "manifest_mode_mismatch",
+        "manifest_count_mismatch",
+        "digest_mismatch",
+        "compiler_mismatch",
+        "partial_liveness_payload",
+        "liveness_field_type",
+        "reason_contract",
+        "branch_contract",
+        "dependent_reasons_mismatch",
+        "stamp_manifest_disagreement",
+        "observation_file_mismatch",
+    }
+)
+
+
+def is_material_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, float) and math.isnan(value):
+        return False
+    try:
+        import pandas as pd
+
+        if value is pd.NA:
+            return False
+    except Exception:
+        pass
+    return True
+
+
+def strict_json_loads(text: str) -> Any:
+    def reject_constant(token: str) -> None:
+        raise ValueError(f"non-finite JSON constant {token}")
+
+    def unique_object(pairs: List[Tuple[str, Any]]) -> Dict[str, Any]:
+        out: Dict[str, Any] = {}
+        for key, value in pairs:
+            if key in out:
+                raise ValueError(f"duplicate JSON object key {key!r}")
+            out[key] = value
+        return out
+
+    return json.loads(
+        text, parse_constant=reject_constant, object_pairs_hook=unique_object
+    )
+
+
+def _strict_canonical_json(value: Any) -> str:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    )
+
+
+def _scalar(value: Any) -> Any:
+    if hasattr(value, "item") and not isinstance(value, (str, bytes)):
+        try:
+            return value.item()
+        except Exception:
+            return value
+    return value
+
+
+def _as_int(value: Any) -> Optional[int]:
+    value = _scalar(value)
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return int(value)
+
+
+def _as_bool(value: Any) -> Optional[bool]:
+    value = _scalar(value)
+    return value if isinstance(value, bool) else None
+
+
+def _unexpected_keys(mapping: Any, allowed: Sequence[str]) -> List[Any]:
+    try:
+        keys = list(mapping)
+    except Exception:
+        return []
+    return sorted(
+        (key for key in keys if key not in allowed), key=lambda key: repr(key)
+    )
+
+
+def _clip(text: Any, limit: int = _MAX_ANOMALY_MESSAGE) -> str:
+    s = str(text)
+    return s if len(s) <= limit else s[: limit - 3] + "..."
+
+
+def _row_get(row: Any, key: str, default: Any = None) -> Any:
+    try:
+        return row.get(key, default)
+    except Exception:
+        try:
+            return row[key]
+        except Exception:
+            return default
+
+
+def _row_keys(row: Any) -> List[str]:
+    try:
+        return [str(k) for k in row.keys()]
+    except Exception:
+        return []
+
+
+def _table_rows(table: Any, *, name: str) -> List[Dict[str, Any]]:
+    if table is None:
+        return []
+    if hasattr(table, "to_dict") and not isinstance(table, dict):
+        try:
+            records = table.to_dict("records")
+        except (TypeError, ValueError, AttributeError) as error:
+            raise TypeError(f"{name} dataframe cannot produce records") from error
+    else:
+        if isinstance(table, (str, bytes, dict)):
+            raise TypeError(f"{name} must be a dataframe or sequence of rows")
+        try:
+            records = list(table)
+        except TypeError as error:
+            raise TypeError(
+                f"{name} must be a dataframe or sequence of rows"
+            ) from error
+    out: List[Dict[str, Any]] = []
+    for row in records:
+        if isinstance(row, dict):
+            out.append(row)
+        elif hasattr(row, "items"):
+            out.append(dict(row))
+        else:
+            raise TypeError(f"expected mapping row in {name}, got {type(row)!r}")
+    return out
+
+
+def _normalize_list_field(value: Any) -> Optional[List[Any]]:
+    if not is_material_value(value):
+        return None
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    if hasattr(value, "tolist") and not isinstance(value, (str, bytes)):
+        try:
+            converted = value.tolist()
+        except Exception:
+            return None
+        return converted if isinstance(converted, list) else None
+    return None
+
+
+def _canonical_abs_path(value: Any) -> Optional[str]:
+    if not isinstance(value, str) or not value.strip() or value != value.strip():
+        return None
+    path = Path(value)
+    if not path.is_absolute():
+        return None
+    if any(part in {".", ".."} for part in path.parts):
+        return None
+    if value.startswith("/") and value != path.as_posix():
+        return None
+    return path.as_posix() if value.startswith("/") else str(path)
+
+
+def _anomaly(
+    code: str,
+    message: str,
+    *,
+    table: Optional[str] = None,
+    row_index: Optional[int] = None,
+    extra: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    if code not in ANOMALY_CODES:
+        raise AssertionError(
+            f"unknown preprocessor-liveness integrity anomaly code {code!r}"
+        )
+    row: Dict[str, Any] = {"code": code, "message": _clip(message)}
+    if table is not None:
+        row["table"] = table
+    if row_index is not None:
+        row["row_index"] = row_index
+    if extra:
+        for key, value in sorted(extra.items(), key=lambda item: repr(item[0])):
+            row[key] = _clip(value) if isinstance(value, str) else value
+    return row
+
+
+def _locator(row: Any, *, table: str, row_index: int) -> Dict[str, Any]:
+    extra: Dict[str, Any] = {}
+    rid = _row_get(row, "id")
+    if isinstance(rid, str) and rid.strip():
+        extra["id"] = rid
+    title = _row_get(row, "title")
+    if isinstance(title, str) and title.strip():
+        extra["title"] = title
+    extra["table"] = table
+    extra["row_index"] = row_index
+    return extra
+
+
+def _reason_accepted(reason: str) -> bool:
+    return any(pattern.fullmatch(reason) for pattern in _REASON_PATTERNS)
+
+
+def _has_material_liveness_stamp(row: Any) -> bool:
+    dependent = _row_get(row, "preprocessor_dependent")
+    if is_material_value(dependent) and _as_bool(dependent) is not False:
+        return True
+    eval_mode = _row_get(row, "preprocessor_eval_mode")
+    if is_material_value(eval_mode):
+        return True
+    digest = _row_get(row, "preprocessor_macro_seed_digest")
+    if is_material_value(digest):
+        return True
+    raw_reasons = _row_get(row, "preprocessor_reasons")
+    reasons = _normalize_list_field(raw_reasons)
+    if is_material_value(raw_reasons) and (reasons is None or bool(reasons)):
+        return True
+    raw_branches = _row_get(row, "preprocessor_branches")
+    branches = _normalize_list_field(raw_branches)
+    if is_material_value(raw_branches) and (branches is None or bool(branches)):
+        return True
+    return False
+
+
+def _complete_dependency_identity(row: Any) -> bool:
+    return (
+        str(_row_get(row, "type") or "") == "depends_on"
+        and str(_row_get(row, "fact_kind") or "") == "translation_unit_dependency"
+        and str(_row_get(row, "extractor") or "") == "c-compiler-deps"
+    )
+
+
+def _complete_include_identity(row: Any) -> bool:
+    return (
+        str(_row_get(row, "type") or "") == "includes"
+        and str(_row_get(row, "fact_kind") or "") == "configured_direct_include"
+        and str(_row_get(row, "extractor") or "") == "c-compiler-includes"
+    )
+
+
+def _complete_type_use_identity(row: Any) -> bool:
+    return (
+        str(_row_get(row, "type") or "") == "uses_type"
+        and str(_row_get(row, "fact_kind") or "") == "configured_type_use"
+        and str(_row_get(row, "extractor") or "") == "clang-ast-json"
+        and str(_row_get(row, "clang_type_use_status") or "") == "matched"
+        and str(_row_get(row, "clang_type_use_fact_kind") or "")
+        == "configured_type_use"
+        and str(_row_get(row, "clang_type_use_extractor") or "") == "clang-ast-json"
+    )
+
+
+def _is_post_stamp_exempt(row: Any) -> bool:
+    return (
+        _complete_dependency_identity(row)
+        or _complete_include_identity(row)
+        or _complete_type_use_identity(row)
+    )
+
+
+def _validate_liveness_manifest_block(
+    block: Dict[str, Any],
+    *,
+    n_entities: int,
+    n_relationships: int,
+    n_observations: Optional[int],
+    observations_present: bool,
+    manifest_obj: Dict[str, Any],
+    anomalies: List[Dict[str, Any]],
+) -> Optional[str]:
+    extra = _unexpected_keys(block, _LIVENESS_MANIFEST_KEYS)
+    missing = [key for key in _LIVENESS_MANIFEST_KEYS if key not in block]
+    if extra:
+        anomalies.append(
+            _anomaly(
+                "extra_manifest_key",
+                f"preprocessor_liveness block has extra keys: {extra}",
+            )
+        )
+    if missing:
+        anomalies.append(
+            _anomaly(
+                "missing_manifest_key",
+                f"preprocessor_liveness block is missing keys: {missing}",
+            )
+        )
+
+    eval_mode = block.get("eval_mode")
+    if eval_mode not in {"no_compiler", "compiler_builtins"}:
+        anomalies.append(
+            _anomaly(
+                "manifest_mode_mismatch",
+                f"eval_mode={eval_mode!r} is not no_compiler or compiler_builtins",
+            )
+        )
+
+    digest = block.get("macro_seed_digest")
+    if not isinstance(digest, str) or not _SHA256_RE.fullmatch(digest):
+        anomalies.append(
+            _anomaly(
+                "digest_mismatch",
+                f"macro_seed_digest is not a lowercase SHA-256 hex string: "
+                f"{digest!r}",
+            )
+        )
+        digest = None
+
+    host_independent = block.get("host_independent")
+    n_builtins = block.get("n_compiler_builtins")
+    n_includes = block.get("n_include_macros")
+    if (
+        isinstance(n_builtins, bool)
+        or not isinstance(n_builtins, int)
+        or n_builtins < 0
+    ):
+        anomalies.append(
+            _anomaly(
+                "manifest_count_mismatch",
+                f"n_compiler_builtins={n_builtins!r} is not a non-negative integer",
+            )
+        )
+        n_builtins = None
+    if (
+        isinstance(n_includes, bool)
+        or not isinstance(n_includes, int)
+        or n_includes < 0
+    ):
+        anomalies.append(
+            _anomaly(
+                "manifest_count_mismatch",
+                f"n_include_macros={n_includes!r} is not a non-negative integer",
+            )
+        )
+        n_includes = None
+
+    compiler_path = block.get("compiler_path")
+    compiler_id = block.get("compiler_id")
+    compiler_version = block.get("compiler_version")
+    for field, value in (
+        ("compiler_id", compiler_id),
+        ("compiler_version", compiler_version),
+    ):
+        if value is not None and (
+            not isinstance(value, str) or not value.strip() or value != value.strip()
+        ):
+            anomalies.append(
+                _anomaly(
+                    "compiler_mismatch",
+                    f"{field} is not null or a nonempty canonical string: "
+                    f"{value!r}",
+                )
+            )
+
+    if eval_mode == "no_compiler":
+        if host_independent is not True:
+            anomalies.append(
+                _anomaly(
+                    "manifest_mode_mismatch",
+                    f"no_compiler host_independent={host_independent!r} "
+                    "expected True",
+                )
+            )
+        if compiler_path is not None or compiler_id is not None or compiler_version is not None:
+            anomalies.append(
+                _anomaly(
+                    "compiler_mismatch",
+                    "no_compiler singular compiler fields must all be null",
+                )
+            )
+        if n_builtins is not None and n_builtins != 0:
+            anomalies.append(
+                _anomaly(
+                    "manifest_count_mismatch",
+                    f"no_compiler n_compiler_builtins={n_builtins} expected 0",
+                )
+            )
+        if n_includes is not None and n_includes != 0:
+            anomalies.append(
+                _anomaly(
+                    "manifest_count_mismatch",
+                    f"no_compiler n_include_macros={n_includes} expected 0",
+                )
+            )
+    elif eval_mode == "compiler_builtins":
+        if host_independent is not False:
+            anomalies.append(
+                _anomaly(
+                    "manifest_mode_mismatch",
+                    f"compiler_builtins host_independent={host_independent!r} "
+                    "expected False",
+                )
+            )
+        if _canonical_abs_path(compiler_path) is None:
+            anomalies.append(
+                _anomaly(
+                    "compiler_mismatch",
+                    f"compiler_builtins compiler_path is not a canonical "
+                    f"absolute path: {compiler_path!r}",
+                )
+            )
+        if n_builtins is not None and n_builtins <= 0:
+            anomalies.append(
+                _anomaly(
+                    "manifest_count_mismatch",
+                    f"compiler_builtins n_compiler_builtins={n_builtins} "
+                    "must be positive",
+                )
+            )
+
+    declared = manifest_obj.get("counts")
+    if isinstance(declared, dict):
+        for key, actual, present in (
+            ("entities", n_entities, True),
+            ("relationships", n_relationships, True),
+            (
+                "call_observations",
+                n_observations if observations_present else 0,
+                observations_present,
+            ),
+        ):
+            if key not in declared:
+                anomalies.append(
+                    _anomaly(
+                        "manifest_count_mismatch",
+                        f"manifest counts.{key} is missing",
+                    )
+                )
+                continue
+            value = declared[key]
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value < 0
+            ):
+                anomalies.append(
+                    _anomaly(
+                        "manifest_count_mismatch",
+                        f"manifest counts.{key}={value!r} is not a "
+                        "non-negative integer",
+                    )
+                )
+                continue
+            if key == "call_observations":
+                if value > 0 and not observations_present:
+                    anomalies.append(
+                        _anomaly(
+                            "observation_file_mismatch",
+                            f"counts.call_observations={value} but "
+                            "call_observations.parquet is absent",
+                        )
+                    )
+                elif observations_present and value != (n_observations or 0):
+                    anomalies.append(
+                        _anomaly(
+                            "manifest_count_mismatch",
+                            f"manifest counts.call_observations={value} != "
+                            f"observation table length {n_observations}",
+                        )
+                    )
+                elif not observations_present and value != 0:
+                    anomalies.append(
+                        _anomaly(
+                            "observation_file_mismatch",
+                            f"counts.call_observations={value} but "
+                            "call_observations.parquet is absent",
+                        )
+                    )
+            elif value != actual:
+                anomalies.append(
+                    _anomaly(
+                        "manifest_count_mismatch",
+                        f"manifest counts.{key}={value} != {key} table "
+                        f"length {actual}",
+                    )
+                )
+    else:
+        anomalies.append(
+            _anomaly(
+                "manifest_count_mismatch",
+                f"manifest counts is not an object: {type(declared).__name__}",
+            )
+        )
+    return digest if eval_mode in {"no_compiler", "compiler_builtins"} else None
+
+
+def _validate_stamp_row(
+    row: Any,
+    *,
+    table: str,
+    row_index: int,
+    eval_mode: str,
+    manifest_digest: Optional[str],
+    anomalies: List[Dict[str, Any]],
+) -> None:
+    extra = _locator(row, table=table, row_index=row_index)
+    present = set(_row_keys(row))
+    missing = [field for field in _STAMP_FIELDS if field not in present]
+    if missing:
+        anomalies.append(
+            _anomaly(
+                "partial_liveness_payload",
+                f"{table} row is missing required liveness keys: {missing}",
+                table=table,
+                row_index=row_index,
+                extra=extra,
+            )
+        )
+
+    dependent = _as_bool(_row_get(row, "preprocessor_dependent"))
+    if dependent is None and "preprocessor_dependent" in present:
+        anomalies.append(
+            _anomaly(
+                "liveness_field_type",
+                "preprocessor_dependent is not a strict boolean",
+                table=table,
+                row_index=row_index,
+                extra=extra,
+            )
+        )
+
+    raw_reasons = _row_get(row, "preprocessor_reasons")
+    reasons = _normalize_list_field(raw_reasons)
+    if "preprocessor_reasons" in present:
+        if reasons is None:
+            anomalies.append(
+                _anomaly(
+                    "liveness_field_type",
+                    "preprocessor_reasons is not a list",
+                    table=table,
+                    row_index=row_index,
+                    extra=extra,
+                )
+            )
+            reasons = []
+        seen: Set[str] = set()
+        valid_reasons: List[str] = []
+        for reason in reasons:
+            if not isinstance(reason, str) or not reason or reason != reason.strip():
+                anomalies.append(
+                    _anomaly(
+                        "reason_contract",
+                        f"preprocessor_reasons contains a noncanonical entry: "
+                        f"{reason!r}",
+                        table=table,
+                        row_index=row_index,
+                        extra=extra,
+                    )
+                )
+                continue
+            if not _reason_accepted(reason):
+                anomalies.append(
+                    _anomaly(
+                        "reason_contract",
+                        f"unknown preprocessor reason family: {reason!r}",
+                        table=table,
+                        row_index=row_index,
+                        extra=extra,
+                    )
+                )
+                continue
+            if reason in seen:
+                anomalies.append(
+                    _anomaly(
+                        "reason_contract",
+                        f"duplicate preprocessor reason: {reason!r}",
+                        table=table,
+                        row_index=row_index,
+                        extra=extra,
+                    )
+                )
+                continue
+            seen.add(reason)
+            valid_reasons.append(reason)
+        reasons = valid_reasons
+
+    if dependent is not None and reasons is not None and dependent != bool(reasons):
+        anomalies.append(
+            _anomaly(
+                "dependent_reasons_mismatch",
+                f"preprocessor_dependent={dependent} disagrees with "
+                f"bool(preprocessor_reasons)={bool(reasons)}",
+                table=table,
+                row_index=row_index,
+                extra=extra,
+            )
+        )
+
+    row_mode = _row_get(row, "preprocessor_eval_mode")
+    if "preprocessor_eval_mode" in present and row_mode != eval_mode:
+        anomalies.append(
+            _anomaly(
+                "stamp_manifest_disagreement",
+                f"preprocessor_eval_mode={row_mode!r} != manifest "
+                f"eval_mode={eval_mode!r}",
+                table=table,
+                row_index=row_index,
+                extra=extra,
+            )
+        )
+    row_digest = _row_get(row, "preprocessor_macro_seed_digest")
+    if (
+        "preprocessor_macro_seed_digest" in present
+        and manifest_digest is not None
+        and row_digest != manifest_digest
+    ):
+        anomalies.append(
+            _anomaly(
+                "stamp_manifest_disagreement",
+                f"preprocessor_macro_seed_digest={row_digest!r} != manifest "
+                f"digest={manifest_digest!r}",
+                table=table,
+                row_index=row_index,
+                extra=extra,
+            )
+        )
+
+    raw_branches = _row_get(row, "preprocessor_branches")
+    branches = _normalize_list_field(raw_branches)
+    if "preprocessor_branches" in present:
+        if branches is None:
+            anomalies.append(
+                _anomaly(
+                    "liveness_field_type",
+                    "preprocessor_branches is not a list",
+                    table=table,
+                    row_index=row_index,
+                    extra=extra,
+                )
+            )
+            branches = []
+        seen_ids: Set[Tuple[Any, Any, Any]] = set()
+        valid_branch_kinds: Set[str] = set()
+        valid_branch_pairs: Set[Tuple[str, str]] = set()
+        for position, branch in enumerate(branches):
+            if not isinstance(branch, dict):
+                anomalies.append(
+                    _anomaly(
+                        "branch_contract",
+                        f"preprocessor_branches[{position}] is not an object",
+                        table=table,
+                        row_index=row_index,
+                        extra=extra,
+                    )
+                )
+                continue
+            extra_keys = _unexpected_keys(branch, _BRANCH_KEYS)
+            missing_keys = [key for key in _BRANCH_KEYS if key not in branch]
+            if extra_keys or missing_keys:
+                anomalies.append(
+                    _anomaly(
+                        "branch_contract",
+                        f"preprocessor_branches[{position}] keys extra="
+                        f"{extra_keys} missing={missing_keys}",
+                        table=table,
+                        row_index=row_index,
+                        extra=extra,
+                    )
+                )
+            kind = branch.get("kind")
+            liveness = branch.get("liveness")
+            condition = branch.get("condition")
+            basis = branch.get("basis")
+            start = _as_int(branch.get("start_line"))
+            end = _as_int(branch.get("end_line"))
+            if kind not in _BRANCH_KINDS:
+                anomalies.append(
+                    _anomaly(
+                        "branch_contract",
+                        f"preprocessor_branches[{position}].kind={kind!r}",
+                        table=table,
+                        row_index=row_index,
+                        extra=extra,
+                    )
+                )
+            if liveness not in _LIVENESS_VALUES:
+                anomalies.append(
+                    _anomaly(
+                        "branch_contract",
+                        f"preprocessor_branches[{position}].liveness="
+                        f"{liveness!r}",
+                        table=table,
+                        row_index=row_index,
+                        extra=extra,
+                    )
+                )
+            if not isinstance(condition, str) or condition != condition.strip():
+                anomalies.append(
+                    _anomaly(
+                        "branch_contract",
+                        f"preprocessor_branches[{position}].condition is not "
+                        f"a canonical string: {condition!r}",
+                        table=table,
+                        row_index=row_index,
+                        extra=extra,
+                    )
+                )
+            if not isinstance(basis, str) or basis != basis.strip():
+                anomalies.append(
+                    _anomaly(
+                        "branch_contract",
+                        f"preprocessor_branches[{position}].basis is not "
+                        f"a canonical string: {basis!r}",
+                        table=table,
+                        row_index=row_index,
+                        extra=extra,
+                    )
+                )
+            if start is None or start < 1 or end is None or end < 1:
+                anomalies.append(
+                    _anomaly(
+                        "branch_contract",
+                        f"preprocessor_branches[{position}] line coordinates "
+                        f"are not strict positive integers: "
+                        f"{branch.get('start_line')!r}-{branch.get('end_line')!r}",
+                        table=table,
+                        row_index=row_index,
+                        extra=extra,
+                    )
+                )
+            elif start > end:
+                anomalies.append(
+                    _anomaly(
+                        "branch_contract",
+                        f"preprocessor_branches[{position}] start_line "
+                        f"{start} > end_line {end}",
+                        table=table,
+                        row_index=row_index,
+                        extra=extra,
+                    )
+                )
+            ident = (start, end, kind)
+            if start is not None and end is not None and kind in _BRANCH_KINDS:
+                if ident in seen_ids:
+                    anomalies.append(
+                        _anomaly(
+                            "branch_contract",
+                            f"duplicate branch identity {ident}",
+                            table=table,
+                            row_index=row_index,
+                            extra=extra,
+                        )
+                    )
+                seen_ids.add(ident)
+            if kind in _BRANCH_KINDS and liveness in _LIVENESS_VALUES:
+                valid_branch_kinds.add(kind)
+                valid_branch_pairs.add((kind, liveness))
+            if (
+                kind in _BRANCH_KINDS
+                and liveness in _LIVENESS_VALUES
+                and reasons is not None
+            ):
+                prefix = f"branch_{liveness}:{kind}"
+                if not any(
+                    reason == prefix or reason.startswith(prefix + "(")
+                    for reason in reasons
+                ):
+                    anomalies.append(
+                        _anomaly(
+                            "branch_contract",
+                            f"branch {kind}/{liveness} has no compatible "
+                            f"{prefix} reason",
+                            table=table,
+                            row_index=row_index,
+                            extra=extra,
+                        )
+                    )
+                inside_prefix = f"inside_conditional:{kind}"
+                if not any(
+                    reason == inside_prefix
+                    or reason.startswith(inside_prefix + "(")
+                    for reason in reasons
+                ):
+                    anomalies.append(
+                        _anomaly(
+                            "branch_contract",
+                            f"branch {kind}/{liveness} has no compatible "
+                            f"{inside_prefix} reason",
+                            table=table,
+                            row_index=row_index,
+                            extra=extra,
+                        )
+                    )
+        for reason in reasons or []:
+            branch_match = _BRANCH_REASON_RE.fullmatch(reason)
+            if branch_match is not None:
+                pair = (branch_match.group(2), branch_match.group(1))
+                if pair not in valid_branch_pairs:
+                    anomalies.append(
+                        _anomaly(
+                            "branch_contract",
+                            f"reason {reason!r} has no compatible branch object",
+                            table=table,
+                            row_index=row_index,
+                            extra=extra,
+                        )
+                    )
+                continue
+            inside_match = _INSIDE_REASON_RE.fullmatch(reason)
+            if (
+                inside_match is not None
+                and inside_match.group(1) not in valid_branch_kinds
+            ):
+                anomalies.append(
+                    _anomaly(
+                        "branch_contract",
+                        f"reason {reason!r} has no compatible branch object",
+                        table=table,
+                        row_index=row_index,
+                        extra=extra,
+                    )
+                )
+        if branches and not reasons:
+            anomalies.append(
+                _anomaly(
+                    "branch_contract",
+                    "nonempty preprocessor_branches cannot coexist with an "
+                    "empty reasons list",
+                    table=table,
+                    row_index=row_index,
+                    extra=extra,
+                )
+            )
+
+
+def validate_persisted_preprocessor_liveness(
+    entities: Any,
+    relationships: Any,
+    call_observations: Any = None,
+    manifest: Optional[Any] = None,
+    *,
+    max_anomaly_samples: int = _MAX_ANOMALY_SAMPLES,
+) -> Dict[str, Any]:
+    """Validate already-persisted preprocessor-liveness stamps.
+
+    Pure and non-mutating. Never reanalyses sources, reconstructs macro
+    tables or branch decisions, invokes a compiler, or compares the
+    recorded digest with the current host.
+    """
+    if max_anomaly_samples < 0:
+        max_anomaly_samples = 0
+
+    entities_list = _table_rows(entities, name="entities")
+    relationships_list = _table_rows(relationships, name="relationships")
+    observations_present = call_observations is not None
+    observations_list = (
+        _table_rows(call_observations, name="call_observations")
+        if observations_present
+        else []
+    )
+    manifest_obj: Dict[str, Any] = {}
+    if manifest is not None:
+        if isinstance(manifest, dict):
+            manifest_obj = manifest
+        elif hasattr(manifest, "items"):
+            manifest_obj = dict(manifest)
+        else:
+            raise TypeError("manifest must be a mapping or None")
+
+    anomalies: List[Dict[str, Any]] = []
+    has_block = "preprocessor_liveness" in manifest_obj
+    block = manifest_obj.get("preprocessor_liveness")
+    mode_state = "legacy_absent"
+
+    stamped_tables = (
+        ("entities", entities_list),
+        ("relationships", relationships_list),
+        ("call_observations", observations_list),
+    )
+    material_rows = 0
+    for table, rows in stamped_tables:
+        for row in rows:
+            if table == "relationships" and _is_post_stamp_exempt(row):
+                continue
+            if _has_material_liveness_stamp(row):
+                material_rows += 1
+
+    if not has_block:
+        if material_rows:
+            anomalies.append(
+                _anomaly(
+                    "legacy_block_missing_with_fields",
+                    "manifest lacks preprocessor_liveness but graph has "
+                    f"{material_rows} material liveness stamp(s)",
+                    extra={"n_stamped_rows": material_rows},
+                )
+            )
+            mode_state = "invalid"
+    elif not isinstance(block, dict):
+        anomalies.append(
+            _anomaly(
+                "invalid_liveness_block",
+                f"preprocessor_liveness manifest block is not an object: "
+                f"{type(block).__name__}",
+            )
+        )
+        mode_state = "invalid"
+    else:
+        eval_mode = block.get("eval_mode")
+        if eval_mode in {"no_compiler", "compiler_builtins"}:
+            mode_state = str(eval_mode)
+        else:
+            mode_state = "invalid"
+        digest = _validate_liveness_manifest_block(
+            block,
+            n_entities=len(entities_list),
+            n_relationships=len(relationships_list),
+            n_observations=len(observations_list) if observations_present else None,
+            observations_present=observations_present,
+            manifest_obj=manifest_obj,
+            anomalies=anomalies,
+        )
+        if mode_state in {"no_compiler", "compiler_builtins"}:
+            for table, rows in stamped_tables:
+                for index, row in enumerate(rows):
+                    if table == "relationships" and _is_post_stamp_exempt(row):
+                        continue
+                    _validate_stamp_row(
+                        row,
+                        table=table,
+                        row_index=index,
+                        eval_mode=mode_state,
+                        manifest_digest=digest,
+                        anomalies=anomalies,
+                    )
+
+    anomalies.sort(
+        key=lambda item: (
+            str(item.get("code") or ""),
+            str(item.get("table") or ""),
+            item.get("row_index") if isinstance(item.get("row_index"), int) else -1,
+            str(item.get("message") or ""),
+            _strict_canonical_json(
+                {
+                    key: item[key]
+                    for key in sorted(item, key=lambda name: repr(name))
+                    if key not in {"code", "message", "table", "row_index"}
+                }
+            ),
+        )
+    )
+    total = len(anomalies)
+    samples = anomalies[:max_anomaly_samples]
+    ok = total == 0 and mode_state in {
+        "legacy_absent",
+        "no_compiler",
+        "compiler_builtins",
+    }
+    status = mode_state if ok else "invalid"
+    n_stamped = 0
+    if mode_state in {"no_compiler", "compiler_builtins"} and has_block:
+        for table, rows in stamped_tables:
+            for row in rows:
+                if table == "relationships" and _is_post_stamp_exempt(row):
+                    continue
+                n_stamped += 1
+    return {
+        "ok": ok,
+        "status": status,
+        "mode": mode_state,
+        "eval_mode": mode_state,
+        "n_entities": len(entities_list),
+        "n_relationships": len(relationships_list),
+        "n_call_observations": len(observations_list) if observations_present else 0,
+        "observations_present": observations_present,
+        "n_stamped_rows": n_stamped,
+        "n_anomalies": total,
+        "n_anomaly_samples": len(samples),
+        "anomalies_truncated": total > len(samples),
+        "anomalies": samples,
+        "counts": {
+            "n_entities": len(entities_list),
+            "n_relationships": len(relationships_list),
+            "n_call_observations": (
+                len(observations_list) if observations_present else 0
+            ),
+            "n_stamped_rows": n_stamped,
+        },
+        "provenance": {
+            "eval_mode": (
+                block.get("eval_mode") if isinstance(block, dict) else None
+            ),
+            "macro_seed_digest": (
+                block.get("macro_seed_digest") if isinstance(block, dict) else None
+            ),
+            "host_independent": (
+                block.get("host_independent") if isinstance(block, dict) else None
+            ),
+            "n_compiler_builtins": (
+                block.get("n_compiler_builtins") if isinstance(block, dict) else None
+            ),
+            "n_include_macros": (
+                block.get("n_include_macros") if isinstance(block, dict) else None
+            ),
+        },
+        "limitations": list(LIMITATIONS),
+    }

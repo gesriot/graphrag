@@ -235,6 +235,22 @@ modules, plugins, and PCH fail explicitly. See
   attaches the same check as `compiler_include_integrity`. Non-C graphs do
   not gain this C-only failure. The dependency overlay remains a separate
   layer.
+- `scripts/c_preprocessor_liveness_graph_audit.py` – **read-only integrity
+  audit** for already-persisted C preprocessor-liveness row stamps and the
+  `preprocessor_liveness` manifest block. Does not invoke a compiler, read
+  `compile_commands.json`, read C/header sources, reconstruct macro tables
+  or branch decisions, compare the recorded digest with the current host,
+  reindex, restamp, publish, or rewrite graphs, and never repairs data.
+  `--graph` (plus optional `--snapshot` / `--output`) SHA-256-fingerprints
+  every graph input, including optional `call_observations.parquet`, before
+  and after the run. `--output` is refused inside the audited graph root.
+  Exit 0 = valid (`legacy_absent` / `no_compiler` / `compiler_builtins`),
+  1 = integrity violations, 2 = unreadable graph/snapshot/manifest. Shared
+  producer-contract helpers live in `c_preprocessor.py`
+  (`validate_persisted_preprocessor_liveness`). Published C graph health
+  attaches the same check as `preprocessor_liveness_integrity`. Non-C
+  graphs do not gain this C-only failure. This checks persisted internal
+  consistency only, not source-correctness of recorded liveness.
 - `scripts/c_clang_type_audit.py` – type *declarations* (named complete
   structs, named complete enums, package-local typedefs) vs tree-sitter
   `struct` / `enum` / `typedef` entities. Collision-safe identity is

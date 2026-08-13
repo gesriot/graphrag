@@ -644,9 +644,43 @@ compiler/configuration provenance, limitations and the read-only result;
 `anomalies` remains an equivalent compatibility field. `--output` must be
 outside the audited graph root.
 
+**Persisted preprocessor-liveness integrity (read-only):**
+`scripts/c_preprocessor_liveness_graph_audit.py` validates already-published
+`preprocessor_*` row stamps and the `preprocessor_liveness` manifest block
+against the producer contract without invoking a compiler, reading
+`compile_commands.json`, reading C/header sources, reconstructing macro
+tables or branch decisions, comparing the recorded digest with the current
+host, reindexing, or repairing rows.
+
+| State | Condition | Expected |
+| --- | --- | --- |
+| `legacy_absent` | No `preprocessor_liveness` block and no material stamp evidence | valid |
+| `no_compiler` | `eval_mode=no_compiler`, host-independent, zero builtin/include census | full five-field stamps on entities, base relationships, and observations |
+| `compiler_builtins` | `eval_mode=compiler_builtins`, host-specific, positive builtin census | full five-field stamps matching the recorded digest |
+
+A present `preprocessor_liveness` key that is null, a list, a string, or any
+other non-object is invalid, not legacy. Manifest absence never legitimizes
+material eval-mode/digest/branch stamps. Row checks: all five producer keys
+present, `preprocessor_dependent` is a strict boolean equal to
+`bool(preprocessor_reasons)`, unique canonical reason families, exact branch
+objects (`kind` / `condition` / `start_line` / `end_line` / `liveness` /
+`basis`) with compatible `branch_<liveness>:<kind>(...)` reasons, and stamp
+mode/digest agreement with the manifest. The publisher's `counts.entities`,
+`counts.relationships`, and `counts.call_observations` census is mandatory
+and must agree with the loaded tables (including absence of the optional
+observation parquet). Complete post-annotation overlay
+identities (`depends_on` / `includes` / configured `uses_type`) are exempt
+from the five-field stamp; partial overlay markers are not. The graph-root
+entry point SHA-256-fingerprints `manifest.json`, the parquet tables
+including optional `call_observations.parquet`, the `current` pointer, and
+the snapshot directory listing. `--output` must be outside the audited
+graph root. `published_graph_health.py` attaches this status as
+`preprocessor_liveness_integrity` for C graphs only.
+
 **Shared out of scope:** multi-config coverage, MSVC/wrappers/response files
 (fail closed), system/outside endpoints after filtering, production C/C++
-completeness. Snapshot manifests record separate `compiler_dependencies`,
+completeness. Snapshot manifests record separate `preprocessor_liveness`,
+`compiler_dependencies`,
 `compiler_includes`, `clang_signatures`, `clang_calls`, `clang_types`,
 `clang_type_uses`, and `clang_type_shapes` blocks with their applicable mode, compiler
 identity/identities, digest, fact/observation/TU counts, and residual counts;

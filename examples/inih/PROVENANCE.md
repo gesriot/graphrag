@@ -96,6 +96,16 @@ published those columns into the live graph (counts unchanged: 19/54/38/35).
 Context packs for `ini:ini_parse_stream` now surface a top-level
 `preprocessor_warning`. See also
 `examples/inih/tests/test_c_preprocessor_flags.py`.
+- **Persisted preprocessor-liveness integrity (read-only):**
+  `scripts/c_preprocessor_liveness_graph_audit.py --graph <root>`
+  validates the published `preprocessor_*` stamps and the
+  `preprocessor_liveness` block without a compiler, `compile_commands.json`,
+  C source reads, macro/branch reconstruction, host-digest comparison,
+  reindexing, or graph mutation. Disposable default `no_compiler` and
+  optional `--compiler-builtins` inih snapshots are measured at audit time
+  (host-dependent builtin counts are not hard-coded). The published
+  `byog_inih` root audits as `no_compiler` and is never rewritten. C
+  `published_graph_health` attaches `preprocessor_liveness_integrity`.
 
 ## Verified graph result (`byog_inih`, snapshot `20260726-030424-9e3862f6`)
 The published graph now also contains the co-located golden runner

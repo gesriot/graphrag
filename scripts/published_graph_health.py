@@ -201,6 +201,9 @@ def _published_data(
         if not path.is_file():
             raise FileNotFoundError(f"current snapshot missing {table}: {path}")
         data[table] = pd.read_parquet(path).to_dict("records")
+    obs_path = base / "call_observations.parquet"
+    if obs_path.is_file():
+        data["call_observations"] = pd.read_parquet(obs_path).to_dict("records")
     return snapshot, data, manifest
 
 
@@ -445,6 +448,45 @@ def _compiler_include_integrity(
     }
 
 
+def _preprocessor_liveness_integrity(
+    published: dict[str, list[dict[str, Any]]],
+    manifest: Mapping[str, Any],
+    *,
+    indexer: str,
+) -> dict[str, Any] | None:
+    """Read-only persisted preprocessor-liveness integrity for C graphs.
+
+    Never reanalyses sources, never invokes a compiler, never restamps.
+    Legacy C graphs with no material stamps pass as ``legacy_absent``.
+    Non-C indexers skip this check (returns None).
+    """
+    if indexer != "c":
+        return None
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from c_preprocessor import (  # type: ignore
+        validate_persisted_preprocessor_liveness,
+    )
+
+    result = validate_persisted_preprocessor_liveness(
+        published.get("entities") or [],
+        published.get("relationships") or [],
+        published.get("call_observations"),
+        manifest,
+    )
+    return {
+        "ok": bool(result["ok"]),
+        "status": str(result["status"]),
+        "mode": str(result["mode"]),
+        "eval_mode": str(result["eval_mode"]),
+        "n_stamped_rows": int(result["n_stamped_rows"]),
+        "n_call_observations": int(result["n_call_observations"]),
+        "n_anomalies": int(result["n_anomalies"]),
+        "n_anomaly_samples": int(result["n_anomaly_samples"]),
+        "anomalies_truncated": bool(result["anomalies_truncated"]),
+        "anomalies": list(result["anomalies"]),
+    }
+
+
 def check_spec(
     spec: PublishedGraphSpec,
     *,
@@ -517,6 +559,9 @@ def check_spec(
     compiler_includes = _compiler_include_integrity(
         published, published_manifest, indexer=spec.indexer
     )
+    liveness = _preprocessor_liveness_integrity(
+        published, published_manifest, indexer=spec.indexer
+    )
 
     def _with_overlays(result: dict[str, Any]) -> dict[str, Any]:
         if type_use is not None:
@@ -533,6 +578,8 @@ def check_spec(
             result["compiler_dependency_integrity"] = compiler_deps
         if compiler_includes is not None:
             result["compiler_include_integrity"] = compiler_includes
+        if liveness is not None:
+            result["preprocessor_liveness_integrity"] = liveness
         return result
 
     if mismatches:
@@ -621,6 +668,17 @@ def check_spec(
                 "snapshot": snapshot,
                 "status": "fail",
                 "reason": "compiler-include integrity anomalies",
+            }
+        )
+
+    if liveness is not None and not liveness["ok"]:
+        return _with_overlays(
+            {
+                "id": spec.ident,
+                "graph": spec.graph,
+                "snapshot": snapshot,
+                "status": "fail",
+                "reason": "preprocessor-liveness integrity anomalies",
             }
         )
 
@@ -718,6 +776,15 @@ def format_report(report: Mapping[str, Any]) -> str:
                 f"ok={compiler_includes.get('ok')} "
                 f"decorated={compiler_includes.get('n_decorated_relationships')} "
                 f"anomalies={compiler_includes.get('n_anomalies')}"
+            )
+        liveness = result.get("preprocessor_liveness_integrity")
+        if isinstance(liveness, Mapping):
+            lines.append(
+                f"    preprocessor_liveness_integrity: "
+                f"status={liveness.get('status')} "
+                f"ok={liveness.get('ok')} "
+                f"stamped={liveness.get('n_stamped_rows')} "
+                f"anomalies={liveness.get('n_anomalies')}"
             )
     lines.append(
         f"  declared mutable={report['mutable']} frozen-exempt={report['frozen']} "

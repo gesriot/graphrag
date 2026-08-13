@@ -374,7 +374,18 @@ The source-derived full graph co-indexes `tests/parse/runner.c` the same way `js
   (`eval_mode`, `compiler_id` / `compiler_version` when host-specific,
   `macro_seed_digest`, `host_independent`). Re-stamping when the recorded
   digest/mode does not match this host refuses unless
-  `--allow-toolchain-drift` is set. Context packs surface
+  `--allow-toolchain-drift` is set.
+- **Persisted preprocessor-liveness integrity (read-only):**
+  `scripts/c_preprocessor_liveness_graph_audit.py --graph <root>`
+  re-validates already-published `preprocessor_*` stamps and the
+  `preprocessor_liveness` block against the producer contract without a
+  compiler, `compile_commands.json`, C/header source reads, macro-table
+  reconstruction, host-digest comparison, reindexing, or any graph
+  mutation. Disposable default `no_compiler` and optional
+  `--compiler-builtins` cJSON snapshots are measured at audit time rather
+  than hard-coded here. The published `byog_cjson` root audits as
+  `no_compiler` and is never rewritten. C `published_graph_health`
+  attaches the same check as `preprocessor_liveness_integrity`. Context packs surface
   `preprocessor.branch_liveness` and the digest. A compiler-oracle check
   (`--vs-compiler`) locks agreement on scored regions (typically run under
   `compiler_builtins` for denser coverage).
