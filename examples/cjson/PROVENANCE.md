@@ -86,6 +86,19 @@ explicit skip and the final status says `PASS WITH SKIPS`.
   missing `compile_commands.json` or a broken/unsupported compiler fails
   explicitly; wrappers, response files, and MSVC are unsupported. The default
   off path keeps published graph counts unchanged.
+- **Persisted compiler-dependency integrity (read-only):**
+  `scripts/c_compiler_dependency_graph_audit.py --graph <root>` re-validates
+  already-published flattened `depends_on` relationships and the
+  `compiler_dependencies` block against the producer contract without a
+  compiler, `compile_commands.json`, C/header source reads, `compiler -M`,
+  dependency reconstruction, reindexing, or any graph mutation. Measured on
+  the established synthetic fixture: `status=enabled`, `n_facts=2`,
+  `n_translation_units=1`, and `read_only_verified=true`. Disposable
+  `--compiler-dependencies` cJSON snapshots are measured at audit time rather
+  than hard-coded here (counts follow the host toolchain). The published
+  `byog_cjson` root (indexed with compiler dependencies default-off) audits
+  as `off` and is never rewritten. C `published_graph_health` attaches the
+  same check as `compiler_dependency_integrity`.
 - **Clang AST function-definition audit (standalone diagnostic):**
   `scripts/c_clang_ast_audit.py --package examples/cjson` runs the recorded
   Clang from `compile_commands.json` with

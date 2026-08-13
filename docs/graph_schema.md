@@ -77,6 +77,42 @@ visible while system/outside-package paths do not).
 | `confidence` / `is_deterministic` | `1.0` / `true` **only** relative to the recorded toolchain + compile DB |
 | Description | Compiler/configuration-derived; may be **transitive** |
 
+**Persisted integrity audit (read-only):**
+`scripts/c_compiler_dependency_graph_audit.py` validates already-published
+flattened `depends_on` relationships against the producer contract without
+invoking a compiler, reading `compile_commands.json`, reading C/header
+sources, running `compiler -M`, reconstructing dependency sets, reindexing,
+or repairing rows.
+
+| State | Condition | Expected |
+| --- | --- | --- |
+| `legacy_absent` | No `compiler_dependencies` block and no dependency-overlay evidence | valid |
+| `off` | exact `mode=off` / `enabled=false` / `n_facts=0` / `n_translation_units=0` | zero dependency-overlay relationships |
+| `enabled` | `mode=compiler_m` + `enabled=true` | full relationship + manifest census |
+
+A present `compiler_dependencies` key that is null, a list, a string, or any
+other non-object is invalid, not legacy. Extra or missing enabled-block keys,
+inconsistent enablement, evidence without a block, an enabled block without
+the declared relationships, and an off block with dependency evidence are
+violations. Relationship checks: unique relationship IDs, complete
+identity (`type=depends_on` + `fact_kind=translation_unit_dependency` +
+`extractor=c-compiler-deps`), the exact producer payload (including nullable
+`compiler_id` present as null), file-entity endpoints, source-file agreement,
+deterministic producer IDs, exact description, `weight=1.0` /
+`confidence=1.0` / `is_deterministic=true`, empty span and metadata lists,
+digest agreement, and preprocessor provenance
+`["compiler_configuration_dependency"]`. `compiler_includes` relationships
+are not dependency carriers. Manifest checks: exact producer key set,
+canonical compiler census, singular/multi-compiler agreement,
+`n_facts ==` decorated relationship count, sorted unique
+`translation_unit_titles` that name persisted file entities (a configured TU
+may have zero package-local edges), and pinned confidence-boundary text. The
+graph-root entry point SHA-256-fingerprints `manifest.json`, the three
+parquet tables, the `current` pointer, and the snapshot directory listing.
+`--output` must be outside the audited graph root.
+`published_graph_health.py` attaches this status as
+`compiler_dependency_integrity` for C graphs only.
+
 #### Direct include hierarchy (`includes`)
 
 When `scripts/index_c.py --compiler-includes` is enabled (default **off**), the

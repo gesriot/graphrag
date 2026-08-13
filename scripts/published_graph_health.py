@@ -371,6 +371,43 @@ def _call_integrity(
     }
 
 
+def _compiler_dependency_integrity(
+    published: dict[str, list[dict[str, Any]]],
+    manifest: Mapping[str, Any],
+    *,
+    indexer: str,
+) -> dict[str, Any] | None:
+    """Read-only compiler-dependency integrity for C published graphs.
+
+    Never invokes a compiler, never re-runs the overlay, never reindexes.
+    Legacy / default-off C graphs with zero dependency edges pass as
+    ``legacy_absent`` / ``off``. Non-C indexers skip this check (returns None).
+    """
+    if indexer != "c":
+        return None
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from c_compiler_facts import (  # type: ignore
+        validate_persisted_compiler_dependency_overlay,
+    )
+
+    result = validate_persisted_compiler_dependency_overlay(
+        published.get("entities") or [],
+        published.get("relationships") or [],
+        manifest,
+    )
+    return {
+        "ok": bool(result["ok"]),
+        "status": str(result["status"]),
+        "mode": str(result["mode"]),
+        "n_decorated_relationships": int(result["n_decorated_relationships"]),
+        "n_translation_units": int(result["n_translation_units"]),
+        "n_anomalies": int(result["n_anomalies"]),
+        "n_anomaly_samples": int(result["n_anomaly_samples"]),
+        "anomalies_truncated": bool(result["anomalies_truncated"]),
+        "anomalies": list(result["anomalies"]),
+    }
+
+
 def check_spec(
     spec: PublishedGraphSpec,
     *,
@@ -437,6 +474,9 @@ def check_spec(
     call = _call_integrity(
         published, published_manifest, indexer=spec.indexer
     )
+    compiler_deps = _compiler_dependency_integrity(
+        published, published_manifest, indexer=spec.indexer
+    )
 
     def _with_overlays(result: dict[str, Any]) -> dict[str, Any]:
         if type_use is not None:
@@ -449,6 +489,8 @@ def check_spec(
             result["clang_signature_integrity"] = signature
         if call is not None:
             result["clang_call_integrity"] = call
+        if compiler_deps is not None:
+            result["compiler_dependency_integrity"] = compiler_deps
         return result
 
     if mismatches:
@@ -515,6 +557,17 @@ def check_spec(
                 "snapshot": snapshot,
                 "status": "fail",
                 "reason": "configured call integrity anomalies",
+            }
+        )
+
+    if compiler_deps is not None and not compiler_deps["ok"]:
+        return _with_overlays(
+            {
+                "id": spec.ident,
+                "graph": spec.graph,
+                "snapshot": snapshot,
+                "status": "fail",
+                "reason": "compiler-dependency integrity anomalies",
             }
         )
 
@@ -594,6 +647,15 @@ def format_report(report: Mapping[str, Any]) -> str:
                 f"ok={call.get('ok')} "
                 f"decorated={call.get('n_decorated_relationships')} "
                 f"anomalies={call.get('n_anomalies')}"
+            )
+        compiler_deps = result.get("compiler_dependency_integrity")
+        if isinstance(compiler_deps, Mapping):
+            lines.append(
+                f"    compiler_dependency_integrity: "
+                f"status={compiler_deps.get('status')} "
+                f"ok={compiler_deps.get('ok')} "
+                f"decorated={compiler_deps.get('n_decorated_relationships')} "
+                f"anomalies={compiler_deps.get('n_anomalies')}"
             )
     lines.append(
         f"  declared mutable={report['mutable']} frozen-exempt={report['frozen']} "

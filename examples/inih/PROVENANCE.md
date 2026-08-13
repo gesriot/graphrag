@@ -32,6 +32,21 @@ complete manifest and tool-skip policy.
   `INI_CALL_HANDLER_ON_NEW_SECTION=0`, `INI_ALLOW_NO_VALUE=0`.
 - The current extractor is tree-sitter-c only; clang/compile-database semantic
   facts remain a later Phase 6 layer.
+- **Optional `--compiler-dependencies` (default off):** flattened TU
+  `depends_on` edges (`translation_unit_dependency`) via `compiler -M` and
+  package-path filtering. Independent `extra_manifest["compiler_dependencies"]`
+  block (`mode=compiler_m` when on, exact `mode=off` when disabled).
+- **Persisted compiler-dependency integrity (read-only):**
+  `scripts/c_compiler_dependency_graph_audit.py --graph <root>` validates the
+  published `depends_on` overlay and the `compiler_dependencies` block
+  without a compiler, `compile_commands.json`, C source reads, `-M`
+  reconstruction, reindexing, or graph mutation. Measured states for inih: a
+  disposable `--compiler-dependencies` snapshot audits as `status=enabled`
+  with producer `n_facts` / `n_translation_units` (host-measured, not
+  hard-coded); a default snapshot and the published `byog_inih` root audit as
+  `off`. All report `read_only_verified=true`, and `byog_inih` is never
+  rewritten. C `published_graph_health` attaches
+  `compiler_dependency_integrity`.
 
 ## C frontend finding – preprocessor fragmentation (and the fix)
 inih is preprocessor-heavy (configurability is implemented with `#if`/`#endif`).
