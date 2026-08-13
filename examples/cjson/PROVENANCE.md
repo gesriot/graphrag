@@ -385,10 +385,17 @@ The source-derived full graph co-indexes `tests/parse/runner.c` the same way `js
   `--compiler-builtins` cJSON snapshots are measured at audit time rather
   than hard-coded here. The published `byog_cjson` root audits as
   `no_compiler` and is never rewritten. C `published_graph_health`
-  attaches the same check as `preprocessor_liveness_integrity`. Context packs surface
-  `preprocessor.branch_liveness` and the digest. A compiler-oracle check
-  (`--vs-compiler`) locks agreement on scored regions (typically run under
-  `compiler_builtins` for denser coverage).
+  attaches the same check as `preprocessor_liveness_integrity`. Context packs
+  surface `preprocessor.branch_liveness` and the digest. A compiler-oracle
+  check (`--vs-compiler`) locks agreement on scored regions (typically run
+  under `compiler_builtins` for denser coverage).
+- **Persisted overlay coherence (read-only):**
+  `scripts/c_overlay_coherence_graph_audit.py --graph <root>` reuses the
+  seven compiler-backed component validators and checks that every enabled
+  subset shares one compile-database digest, compile-entry census, and
+  compiler identity. The published `byog_cjson` root (all compiler overlays
+  default-off) audits as `off` and is never rewritten. C
+  `published_graph_health` attaches `c_overlay_coherence_integrity`.
 - What counts as a "header default" is deliberately narrow, because the first
   implementation was not: a `#define` is a default only when it sits outside
   every conditional (include guards excepted) or forms the `#ifndef X` /

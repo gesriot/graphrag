@@ -106,6 +106,12 @@ Context packs for `ini:ini_parse_stream` now surface a top-level
   (host-dependent builtin counts are not hard-coded). The published
   `byog_inih` root audits as `no_compiler` and is never rewritten. C
   `published_graph_health` attaches `preprocessor_liveness_integrity`.
+- **Persisted overlay coherence (read-only):**
+  `scripts/c_overlay_coherence_graph_audit.py --graph <root>` checks that
+  enabled compiler-backed overlays in one snapshot share one compile
+  configuration. The published `byog_inih` root audits as `off` and is
+  never rewritten. C `published_graph_health` attaches
+  `c_overlay_coherence_integrity`.
 
 ## Verified graph result (`byog_inih`, snapshot `20260726-030424-9e3862f6`)
 The published graph now also contains the co-located golden runner

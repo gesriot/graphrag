@@ -487,6 +487,43 @@ def _preprocessor_liveness_integrity(
     }
 
 
+def _overlay_coherence_integrity(
+    published: dict[str, list[dict[str, Any]]],
+    manifest: Mapping[str, Any],
+    *,
+    indexer: str,
+) -> dict[str, Any] | None:
+    """Read-only cross-overlay configuration coherence for C graphs.
+
+    Never invokes a compiler, never reindexes, never restamps. Non-C
+    indexers skip this check (returns None).
+    """
+    if indexer != "c":
+        return None
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from c_overlay_coherence import (  # type: ignore
+        validate_persisted_c_overlay_coherence,
+    )
+
+    result = validate_persisted_c_overlay_coherence(
+        published.get("entities") or [],
+        published.get("relationships") or [],
+        published.get("call_observations"),
+        manifest,
+    )
+    return {
+        "ok": bool(result["ok"]),
+        "status": str(result["status"]),
+        "mode": str(result["mode"]),
+        "n_anomalies": int(result["n_anomalies"]),
+        "n_anomaly_samples": int(result["n_anomaly_samples"]),
+        "anomalies_truncated": bool(result["anomalies_truncated"]),
+        "anomalies": list(result["anomalies"]),
+        "census": dict(result["census"]),
+        "shared": result.get("shared"),
+    }
+
+
 def check_spec(
     spec: PublishedGraphSpec,
     *,
@@ -562,6 +599,9 @@ def check_spec(
     liveness = _preprocessor_liveness_integrity(
         published, published_manifest, indexer=spec.indexer
     )
+    coherence = _overlay_coherence_integrity(
+        published, published_manifest, indexer=spec.indexer
+    )
 
     def _with_overlays(result: dict[str, Any]) -> dict[str, Any]:
         if type_use is not None:
@@ -580,6 +620,8 @@ def check_spec(
             result["compiler_include_integrity"] = compiler_includes
         if liveness is not None:
             result["preprocessor_liveness_integrity"] = liveness
+        if coherence is not None:
+            result["c_overlay_coherence_integrity"] = coherence
         return result
 
     if mismatches:
@@ -679,6 +721,17 @@ def check_spec(
                 "snapshot": snapshot,
                 "status": "fail",
                 "reason": "preprocessor-liveness integrity anomalies",
+            }
+        )
+
+    if coherence is not None and not coherence["ok"]:
+        return _with_overlays(
+            {
+                "id": spec.ident,
+                "graph": spec.graph,
+                "snapshot": snapshot,
+                "status": "fail",
+                "reason": "compiler-overlay coherence anomalies",
             }
         )
 
@@ -785,6 +838,14 @@ def format_report(report: Mapping[str, Any]) -> str:
                 f"ok={liveness.get('ok')} "
                 f"stamped={liveness.get('n_stamped_rows')} "
                 f"anomalies={liveness.get('n_anomalies')}"
+            )
+        coherence = result.get("c_overlay_coherence_integrity")
+        if isinstance(coherence, Mapping):
+            lines.append(
+                f"    c_overlay_coherence_integrity: "
+                f"status={coherence.get('status')} "
+                f"ok={coherence.get('ok')} "
+                f"anomalies={coherence.get('n_anomalies')}"
             )
     lines.append(
         f"  declared mutable={report['mutable']} frozen-exempt={report['frozen']} "

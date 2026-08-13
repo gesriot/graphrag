@@ -677,6 +677,30 @@ the snapshot directory listing. `--output` must be outside the audited
 graph root. `published_graph_health.py` attaches this status as
 `preprocessor_liveness_integrity` for C graphs only.
 
+**Persisted overlay coherence (read-only):**
+`scripts/c_overlay_coherence_graph_audit.py` reuses the seven compiler-backed
+component validators and additionally requires every enabled subset to share
+one compile-database digest, compile-entry count, and normalized compiler
+census (`compiler_path` / `compiler_id` / `compiler_version`). When both
+`compiler_dependencies` and `compiler_includes` are enabled their
+translation-unit titles and counts must also agree. Off and legacy-absent
+blocks do not participate. `preprocessor_liveness` remains an aggregate
+integrity component, but its provenance is reported independently and is
+never compared with overlay identities.
+
+| State | Condition | Expected |
+| --- | --- | --- |
+| `legacy_absent` | All seven compiler-backed blocks absent, no carrier evidence | valid |
+| `off` | Every present compiler-backed overlay is `off` | valid |
+| `coherent` | One or more overlays enabled and shared fields agree | valid |
+| `invalid` | Component integrity failure or cross-overlay mismatch | fail |
+
+A snapshot can have independently valid enabled blocks that still fail
+coherence when they were produced from different compile databases or
+compiler captures. The audit proves persisted configuration agreement, not
+correctness against live sources. `published_graph_health.py` attaches
+`c_overlay_coherence_integrity` for C graphs only.
+
 **Shared out of scope:** multi-config coverage, MSVC/wrappers/response files
 (fail closed), system/outside endpoints after filtering, production C/C++
 completeness. Snapshot manifests record separate `preprocessor_liveness`,

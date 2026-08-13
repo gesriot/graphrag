@@ -251,6 +251,22 @@ modules, plugins, and PCH fail explicitly. See
   attaches the same check as `preprocessor_liveness_integrity`. Non-C
   graphs do not gain this C-only failure. This checks persisted internal
   consistency only, not source-correctness of recorded liveness.
+- `scripts/c_overlay_coherence_graph_audit.py` – **read-only snapshot-wide
+  coherence audit** for the seven compiler-backed overlays
+  (`compiler_dependencies`, `compiler_includes`, `clang_signatures`,
+  `clang_calls`, `clang_types`, `clang_type_uses`, `clang_type_shapes`).
+  Reuses the existing component validators and additionally requires every
+  enabled subset to share one `compile_commands_digest`, `n_compile_entries`,
+  and normalized compiler census. Off/legacy blocks are ignored;
+  `preprocessor_liveness` remains an aggregate integrity component but its
+  provenance is reported independently and is never compared with compiler
+  overlay identities.
+  Does not invoke a compiler, read sources or `compile_commands.json`,
+  reconstruct overlay facts, or rewrite graphs. Exit 0 = valid
+  (`legacy_absent` / `off` / `coherent`), 1 = integrity or coherence
+  violations, 2 = unreadable graph/snapshot/manifest. Published C graph
+  health attaches `c_overlay_coherence_integrity`. Non-C graphs do not gain
+  this C-only failure.
 - `scripts/c_clang_type_audit.py` – type *declarations* (named complete
   structs, named complete enums, package-local typedefs) vs tree-sitter
   `struct` / `enum` / `typedef` entities. Collision-safe identity is
