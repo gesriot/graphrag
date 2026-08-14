@@ -294,6 +294,21 @@ modules, plugins, and PCH fail explicitly. See
   snapshot. A crash may leave a private staging directory; retention
   does not reap those by guessed age. Readers that retain a retired
   snapshot path across later retention are not leased.
+- `scripts/persisted_graph_doctor.py` / `graphrag-code doctor` – **read-only
+  persisted-integrity doctor** for any BYOG graph. Selects one snapshot,
+  validates the language-independent envelope, then runs every applicable
+  C overlay contract against that same loaded snapshot. `--indexer python`
+  runs the envelope only; `--indexer c` runs the nine existing C component
+  names; `--indexer auto` uses persisted `source_file` extensions and
+  extractor provenance and fails closed on empty, mixed, or contradictory
+  evidence. Does not invoke an extractor, compiler, or Clang; does not
+  compare the graph with a fresh extraction; does not acquire
+  `.publish.lock`, remove `.staging-*` remnants, or rewrite graphs.
+  A stable staging directory is reported as a publication notice, not as
+  proven corruption. Exit 0 = every applicable persisted contract is
+  valid, 1 = integrity violation or concurrent mutation, 2 = unsafe path /
+  ambiguous auto-indexer / unreadable input. This is a persisted-state
+  verifier, not a repair tool or a proof of semantic equivalence.
 - `scripts/c_clang_type_audit.py` – type *declarations* (named complete
   structs, named complete enums, package-local typedefs) vs tree-sitter
   `struct` / `enum` / `typedef` entities. Collision-safe identity is

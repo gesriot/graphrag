@@ -460,6 +460,48 @@ def context_pack(
 # ---------------------------------------------------------------------------
 
 
+@app.command("doctor")
+def doctor(
+    graph: Path = typer.Option(..., "--graph", "-g", help="BYOG graph root"),
+    indexer: str = typer.Option(
+        ...,
+        "--indexer",
+        help="python, c, or auto (fail closed if persisted evidence is ambiguous)",
+    ),
+    snapshot: Optional[str] = typer.Option(
+        None, "--snapshot", help="audit this snapshot id instead of current"
+    ),
+    output: Optional[Path] = typer.Option(
+        None, "--output", "-o", help="write the deterministic JSON report"
+    ),
+    json_out: bool = typer.Option(
+        False, "--json", help="same JSON shape as persisted_graph_doctor.py --json"
+    ),
+    max_anomaly_samples: int = typer.Option(40, "--max-anomaly-samples"),
+):
+    """Read-only persisted-integrity doctor (delegates to persisted_graph_doctor.py).
+
+    Validates the selected snapshot envelope and every applicable overlay
+    contract without invoking an extractor, compiler, or publisher.
+    """
+    lang = indexer.strip().lower()
+    args = [
+        "--graph",
+        str(graph),
+        "--indexer",
+        lang,
+        "--max-anomaly-samples",
+        str(max_anomaly_samples),
+    ]
+    if snapshot is not None:
+        args.extend(["--snapshot", snapshot])
+    if output is not None:
+        args.extend(["--output", str(output)])
+    if json_out:
+        args.append("--json")
+    _delegate("persisted_graph_doctor.py", args)
+
+
 @app.command("audit-graph")
 def audit_graph(
     graph: Path = typer.Option(..., "--graph", "-g", help="BYOG graph root"),

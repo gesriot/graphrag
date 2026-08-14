@@ -613,6 +613,147 @@ def _overlay_coherence_integrity(
     }
 
 
+_HEALTH_COMPONENT_KEYS: dict[str, tuple[str, ...]] = {
+    "snapshot_integrity": (
+        "ok",
+        "status",
+        "mode",
+        "directory_identity",
+        "n_anomalies",
+        "n_anomaly_samples",
+        "anomalies_truncated",
+        "anomalies",
+    ),
+    "clang_type_use_integrity": (
+        "ok",
+        "status",
+        "mode",
+        "n_configured_edges",
+        "n_anomalies",
+        "n_anomaly_samples",
+        "anomalies_truncated",
+        "anomalies",
+    ),
+    "clang_type_shape_integrity": (
+        "ok",
+        "status",
+        "mode",
+        "n_decorated_entities",
+        "n_members_validated",
+        "n_anomalies",
+        "n_anomaly_samples",
+        "anomalies_truncated",
+        "anomalies",
+    ),
+    "clang_type_integrity": (
+        "ok",
+        "status",
+        "mode",
+        "n_decorated_entities",
+        "n_anomalies",
+        "n_anomaly_samples",
+        "anomalies_truncated",
+        "anomalies",
+    ),
+    "clang_signature_integrity": (
+        "ok",
+        "status",
+        "mode",
+        "n_decorated_entities",
+        "n_anomalies",
+        "n_anomaly_samples",
+        "anomalies_truncated",
+        "anomalies",
+    ),
+    "clang_call_integrity": (
+        "ok",
+        "status",
+        "mode",
+        "n_decorated_relationships",
+        "n_calls",
+        "n_anomalies",
+        "n_anomaly_samples",
+        "anomalies_truncated",
+        "anomalies",
+    ),
+    "compiler_dependency_integrity": (
+        "ok",
+        "status",
+        "mode",
+        "n_decorated_relationships",
+        "n_translation_units",
+        "n_anomalies",
+        "n_anomaly_samples",
+        "anomalies_truncated",
+        "anomalies",
+    ),
+    "compiler_include_integrity": (
+        "ok",
+        "status",
+        "mode",
+        "n_decorated_relationships",
+        "n_translation_units",
+        "n_anomalies",
+        "n_anomaly_samples",
+        "anomalies_truncated",
+        "anomalies",
+    ),
+    "preprocessor_liveness_integrity": (
+        "ok",
+        "status",
+        "mode",
+        "eval_mode",
+        "n_stamped_rows",
+        "n_call_observations",
+        "n_anomalies",
+        "n_anomaly_samples",
+        "anomalies_truncated",
+        "anomalies",
+    ),
+    "c_overlay_coherence_integrity": (
+        "ok",
+        "status",
+        "mode",
+        "n_anomalies",
+        "n_anomaly_samples",
+        "anomalies_truncated",
+        "anomalies",
+        "census",
+        "shared",
+    ),
+}
+
+
+def _slim_integrity(name: str, result: Mapping[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key in _HEALTH_COMPONENT_KEYS[name]:
+        if key not in result:
+            continue
+        value = result[key]
+        if key in {"ok", "anomalies_truncated"}:
+            out[key] = bool(value)
+        elif key in {
+            "n_anomalies",
+            "n_anomaly_samples",
+            "n_configured_edges",
+            "n_decorated_entities",
+            "n_members_validated",
+            "n_decorated_relationships",
+            "n_calls",
+            "n_translation_units",
+            "n_stamped_rows",
+            "n_call_observations",
+        }:
+            out[key] = int(value)
+        elif key == "anomalies":
+            out[key] = list(value or [])
+        elif key == "census":
+            out[key] = dict(value or {})
+        else:
+            out[key] = value
+    return out
+
+
 def check_spec(
     spec: PublishedGraphSpec,
     *,
@@ -671,15 +812,31 @@ def check_spec(
             "snapshot_integrity": _snapshot_integrity_error(error),
         }
 
-    snapshot_integrity = _snapshot_integrity(
-        published,
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from persisted_graph_integrity import (  # type: ignore
+        validate_persisted_graph_integrity,
+    )
+
+    integrity = validate_persisted_graph_integrity(
+        published.get("entities") or [],
+        published.get("relationships") or [],
+        published.get("text_units") or [],
+        published.get("call_observations"),
         published_manifest,
+        indexer=spec.indexer,
         snapshot_id=snapshot,
         present_files=present_files,
         file_sizes=file_sizes,
         symlinked_files=symlinked_files,
         unexpected_entries=unexpected_entries,
     )
+    snapshot_integrity = _slim_integrity(
+        "snapshot_integrity", integrity["snapshot_integrity"]
+    )
+    components = {
+        name: _slim_integrity(name, result)
+        for name, result in integrity["components"].items()
+    }
 
     if not snapshot_integrity["ok"]:
         return {
@@ -717,33 +874,15 @@ def check_spec(
                 "extra_in_published": extra,
             }
 
-    type_use = _type_use_integrity(
-        published, published_manifest, indexer=spec.indexer
-    )
-    type_shape = _type_shape_integrity(
-        published, published_manifest, indexer=spec.indexer
-    )
-    type_decl = _type_integrity(
-        published, published_manifest, indexer=spec.indexer
-    )
-    signature = _signature_integrity(
-        published, published_manifest, indexer=spec.indexer
-    )
-    call = _call_integrity(
-        published, published_manifest, indexer=spec.indexer
-    )
-    compiler_deps = _compiler_dependency_integrity(
-        published, published_manifest, indexer=spec.indexer
-    )
-    compiler_includes = _compiler_include_integrity(
-        published, published_manifest, indexer=spec.indexer
-    )
-    liveness = _preprocessor_liveness_integrity(
-        published, published_manifest, indexer=spec.indexer
-    )
-    coherence = _overlay_coherence_integrity(
-        published, published_manifest, indexer=spec.indexer
-    )
+    type_use = components.get("clang_type_use_integrity")
+    type_shape = components.get("clang_type_shape_integrity")
+    type_decl = components.get("clang_type_integrity")
+    signature = components.get("clang_signature_integrity")
+    call = components.get("clang_call_integrity")
+    compiler_deps = components.get("compiler_dependency_integrity")
+    compiler_includes = components.get("compiler_include_integrity")
+    liveness = components.get("preprocessor_liveness_integrity")
+    coherence = components.get("c_overlay_coherence_integrity")
 
     def _with_overlays(result: dict[str, Any]) -> dict[str, Any]:
         result["snapshot_integrity"] = snapshot_integrity

@@ -50,6 +50,32 @@ in the selected snapshot, `current`, and the snapshots-directory listing.
 for every non-frozen published graph and short-circuits a broken envelope
 before fresh extraction or language-specific overlay checks.
 
+### Persisted-integrity doctor (read-only)
+
+`scripts/persisted_graph_doctor.py` and `graphrag-code doctor` select one
+snapshot, fingerprint it, load it once, and run the shared aggregator
+`validate_persisted_graph_integrity()`. The envelope is always first. An
+invalid envelope short-circuits every C validator so a broken base
+snapshot cannot masquerade as an overlay problem. `--indexer python`
+attaches only `snapshot_integrity`. `--indexer c` then runs the nine
+existing C components in documented order. `--indexer auto` accepts a
+complete, unambiguous persisted signal from `source_file` extensions
+(`.py` / `.pyi` / `.c` / `.h`) and extractor provenance (`tree-sitter-python` vs
+`tree-sitter-c` / compiler / Clang extractors). C overlay manifest
+blocks, including `mode=off`, are C evidence; their absence is not a
+Python signal. Empty, mixed, unknown-extractor, or contradictory
+evidence requires an explicit `--indexer`.
+
+Top-level `n_anomalies` is the sum of the envelope total, each run
+component total, and any top-level concurrency anomalies. Compatibility
+aliases such as `violations` are not added again. A stable
+`snapshots/.staging-*` entry is an informational publication notice. A
+change to the snapshots listing, `current`, snapshot files, or
+`.publish.lock` during the audit is a concurrent mutation. The doctor
+never acquires the publication lock and never creates that file. This
+is a persisted-state verifier, not extractor freshness, repair,
+compiler re-audit, or semantic equivalence.
+
 ### Snapshot publication transaction
 
 `publish_byog_snapshot()` writes parquet, optional `settings.yaml`, and
