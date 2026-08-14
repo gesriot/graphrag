@@ -84,9 +84,11 @@ def test_inventory_derives_frozen_lost_and_oracle_consumers():
         }
     ]
 
-    # byog_graph is the implementation module, not an ignored artifact.  A
-    # Markdown search that cannot tell those apart creates a phantom risk row.
+    # Helper modules, not ignored artifacts. A Markdown search that cannot
+    # tell those apart creates a phantom risk row.
     assert "byog_graph" not in artifacts
+    assert "byog_snapshot_graph_audit" not in artifacts
+    assert "byog_snapshot_integrity" not in artifacts
 
 
 def test_inventory_moves_when_claim_manifest_gains_a_local_snapshot(tmp_path: Path):

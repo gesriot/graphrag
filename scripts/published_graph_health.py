@@ -178,33 +178,82 @@ def _published_data(
     graph_root: Path,
 ) -> tuple[str, dict[str, list[dict[str, Any]]], dict[str, Any]]:
     pointer = graph_root / "current"
+    if pointer.is_symlink():
+        raise ValueError(f"unsafe symlinked current pointer: {pointer}")
     if not pointer.is_file():
         raise FileNotFoundError(f"missing current pointer: {pointer}")
     snapshot = pointer.read_text(encoding="utf-8").strip()
     if not snapshot:
         raise ValueError(f"empty current pointer: {pointer}")
-    if Path(snapshot).name != snapshot or snapshot in {".", ".."}:
+    if (
+        Path(snapshot).name != snapshot
+        or snapshot in {".", ".."}
+        or "/" in snapshot
+        or "\\" in snapshot
+        or "\x00" in snapshot
+    ):
         raise ValueError(f"unsafe current snapshot id: {snapshot!r}")
-    snapshots_dir = (graph_root / "snapshots").resolve()
-    base = (snapshots_dir / snapshot).resolve()
+    snapshots_path = graph_root / "snapshots"
+    if snapshots_path.is_symlink():
+        raise ValueError(f"unsafe symlinked snapshots directory: {snapshots_path}")
+    snapshots_dir = snapshots_path.resolve()
+    snapshot_path = snapshots_path / snapshot
+    if snapshot_path.is_symlink():
+        raise ValueError(f"unsafe symlinked snapshot directory: {snapshot_path}")
+    base = snapshot_path.resolve()
     if base.parent != snapshots_dir:
         raise ValueError(f"current snapshot escapes snapshots directory: {snapshot!r}")
     if not base.is_dir():
         raise FileNotFoundError(f"current snapshot not found: {base}")
     manifest_path = base / "manifest.json"
+    if manifest_path.is_symlink():
+        raise ValueError(f"unsafe symlinked core snapshot input: {manifest_path}")
     if not manifest_path.is_file():
         raise FileNotFoundError(f"current snapshot missing manifest: {manifest_path}")
     manifest = _strict_manifest_object(manifest_path)
     data: dict[str, list[dict[str, Any]]] = {}
     for table in TABLE_FIELDS:
         path = base / f"{table}.parquet"
+        if path.is_symlink():
+            raise ValueError(f"unsafe symlinked core snapshot input: {path}")
         if not path.is_file():
             raise FileNotFoundError(f"current snapshot missing {table}: {path}")
-        data[table] = pd.read_parquet(path).to_dict("records")
+        try:
+            data[table] = pd.read_parquet(path).to_dict("records")
+        except Exception as error:
+            raise ValueError(
+                f"could not read current snapshot table {path}: {error}"
+            ) from error
     obs_path = base / "call_observations.parquet"
+    if obs_path.is_symlink():
+        raise ValueError(f"unsafe symlinked core snapshot input: {obs_path}")
     if obs_path.is_file():
-        data["call_observations"] = pd.read_parquet(obs_path).to_dict("records")
+        try:
+            data["call_observations"] = pd.read_parquet(obs_path).to_dict("records")
+        except Exception as error:
+            raise ValueError(
+                f"could not read current snapshot table {obs_path}: {error}"
+            ) from error
     return snapshot, data, manifest
+
+
+def _snapshot_integrity_error(error: Exception) -> dict[str, Any]:
+    """Represent an unreadable envelope in the health report."""
+    return {
+        "ok": False,
+        "status": "error",
+        "mode": "error",
+        "directory_identity": "unavailable",
+        "n_anomalies": 1,
+        "n_anomaly_samples": 1,
+        "anomalies_truncated": False,
+        "anomalies": [
+            {
+                "code": "snapshot_load_error",
+                "message": str(error),
+            }
+        ],
+    }
 
 
 def _type_use_integrity(
@@ -487,6 +536,46 @@ def _preprocessor_liveness_integrity(
     }
 
 
+def _snapshot_integrity(
+    published: dict[str, list[dict[str, Any]]],
+    manifest: Mapping[str, Any],
+    *,
+    snapshot_id: str,
+    present_files: list[str],
+    file_sizes: Mapping[str, int],
+    symlinked_files: list[str],
+    unexpected_entries: list[str] | None = None,
+) -> dict[str, Any]:
+    """Read-only snapshot-envelope integrity for every published indexer."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from byog_snapshot_integrity import (  # type: ignore
+        validate_persisted_byog_snapshot,
+    )
+
+    result = validate_persisted_byog_snapshot(
+        published.get("entities") or [],
+        published.get("relationships") or [],
+        published.get("text_units") or [],
+        published.get("call_observations"),
+        manifest,
+        snapshot_id=snapshot_id,
+        present_files=present_files,
+        file_sizes=file_sizes,
+        symlinked_files=symlinked_files,
+        unexpected_entries=unexpected_entries,
+    )
+    return {
+        "ok": bool(result["ok"]),
+        "status": str(result["status"]),
+        "mode": str(result["mode"]),
+        "directory_identity": str(result["directory_identity"]),
+        "n_anomalies": int(result["n_anomalies"]),
+        "n_anomaly_samples": int(result["n_anomaly_samples"]),
+        "anomalies_truncated": bool(result["anomalies_truncated"]),
+        "anomalies": list(result["anomalies"]),
+    }
+
+
 def _overlay_coherence_integrity(
     published: dict[str, list[dict[str, Any]]],
     manifest: Mapping[str, Any],
@@ -552,13 +641,66 @@ def check_spec(
 
     try:
         snapshot, published, published_manifest = _published_data(published_root)
-        fresh = _fresh_data(spec, root)
-    except (OSError, ValueError, KeyError) as error:
+    except (OSError, UnicodeError, ValueError, KeyError) as error:
         return {
             "id": spec.ident,
             "graph": spec.graph,
             "status": "fail",
             "reason": str(error),
+            "snapshot_integrity": _snapshot_integrity_error(error),
+        }
+
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from byog_snapshot_graph_audit import (  # type: ignore
+        SnapshotGraphAuditError,
+        inventory_snapshot,
+    )
+
+    snap_dir = (published_root / "snapshots" / snapshot).resolve()
+    try:
+        present_files, file_sizes, symlinked_files, unexpected_entries = (
+            inventory_snapshot(snap_dir)
+        )
+    except (OSError, ValueError, SnapshotGraphAuditError) as error:
+        return {
+            "id": spec.ident,
+            "graph": spec.graph,
+            "snapshot": snapshot,
+            "status": "fail",
+            "reason": str(error),
+            "snapshot_integrity": _snapshot_integrity_error(error),
+        }
+
+    snapshot_integrity = _snapshot_integrity(
+        published,
+        published_manifest,
+        snapshot_id=snapshot,
+        present_files=present_files,
+        file_sizes=file_sizes,
+        symlinked_files=symlinked_files,
+        unexpected_entries=unexpected_entries,
+    )
+
+    if not snapshot_integrity["ok"]:
+        return {
+            "id": spec.ident,
+            "graph": spec.graph,
+            "snapshot": snapshot,
+            "status": "fail",
+            "reason": "persisted snapshot envelope integrity anomalies",
+            "snapshot_integrity": snapshot_integrity,
+        }
+
+    try:
+        fresh = _fresh_data(spec, root)
+    except (OSError, ValueError, KeyError) as error:
+        return {
+            "id": spec.ident,
+            "graph": spec.graph,
+            "snapshot": snapshot,
+            "status": "fail",
+            "reason": str(error),
+            "snapshot_integrity": snapshot_integrity,
         }
 
     mismatches: dict[str, dict[str, int]] = {}
@@ -604,6 +746,7 @@ def check_spec(
     )
 
     def _with_overlays(result: dict[str, Any]) -> dict[str, Any]:
+        result["snapshot_integrity"] = snapshot_integrity
         if type_use is not None:
             result["clang_type_use_integrity"] = type_use
         if type_shape is not None:
@@ -768,6 +911,13 @@ def format_report(report: Mapping[str, Any]) -> str:
         suffix = f" — {result.get('reason')}" if result.get("reason") else ""
         snapshot = f" @ {result['snapshot']}" if result.get("snapshot") else ""
         lines.append(f"  [{result['status'].upper()}] {result['id']}: {result['graph']}{snapshot}{suffix}")
+        envelope = result.get("snapshot_integrity")
+        if isinstance(envelope, Mapping):
+            lines.append(
+                f"    snapshot_integrity: status={envelope.get('status')} "
+                f"ok={envelope.get('ok')} "
+                f"anomalies={envelope.get('n_anomalies')}"
+            )
         for table, mismatch in result.get("mismatches", {}).items():
             lines.append(
                 f"    {table}: fresh={mismatch['fresh_rows']} published={mismatch['published_rows']} "

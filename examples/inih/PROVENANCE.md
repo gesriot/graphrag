@@ -112,6 +112,16 @@ Context packs for `ini:ini_parse_stream` now surface a top-level
   configuration. The published `byog_inih` root audits as `off` and is
   never rewritten. C `published_graph_health` attaches
   `c_overlay_coherence_integrity`.
+- **Persisted snapshot envelope (read-only):**
+  `scripts/byog_snapshot_graph_audit.py --graph <root>` checks the
+  language-independent snapshot directory, core `manifest.json` fields, and
+  parquet census written by `publish_byog_snapshot()`. It does not invoke
+  an extractor or compiler, reconstruct overlays, or compare `source_root` /
+  `git_commit` / `created_at` with the host. The published `byog_inih`
+  root is audited read-only and is never rewritten.
+  `published_graph_health` attaches `snapshot_integrity` for every
+  non-frozen graph, including this C root, and runs that check before
+  overlay failures.
 
 ## Verified graph result (`byog_inih`, snapshot `20260726-030424-9e3862f6`)
 The published graph now also contains the co-located golden runner

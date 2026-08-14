@@ -16,6 +16,40 @@ We extend with code-specific columns (present on both entities and relationships
 - `confidence`: float [0,1] – 1.0 for deterministic parser facts
 - `is_deterministic`: bool – true when the fact can be re-derived from source without LLM
 
+### Persisted snapshot envelope (read-only)
+
+`scripts/byog_snapshot_graph_audit.py` validates the directory, core
+`manifest.json` fields, and parquet census written by
+`publish_byog_snapshot()` without invoking an extractor, compiler, or
+overlay reconstruction. The check is language-independent and applies to
+every BYOG indexer. Extra top-level manifest keys are allowed because
+overlay blocks are stored there.
+
+| Field | Producer contract |
+| --- | --- |
+| `schema_version` | strict integer `1` |
+| `id` | nonempty safe snapshot id; equals `snapshots/<id>` when that layout is used |
+| `created_at` | finite producer-style ISO datetime string; never compared with now |
+| `counts` | exact keys `entities`, `relationships`, `text_units`, `call_observations`; strict non-negative integers equal to loaded row counts |
+| `files` | exact ordered parquet list: the three required tables, then `call_observations.parquet` only when that table is nonempty |
+| `total_size_bytes` | sum of those named parquet files only; excludes `manifest.json` and optional `settings.yaml` |
+| `corpus_hash` | always `null`; the audit does not invent hashing semantics |
+| `git_commit` | `null` or a canonical lowercase Git object id; never compared with the checkout |
+| `source_root` | `null` or the persisted producer string; the path need not exist on the host |
+
+`settings.yaml` is optional and is deliberately absent from `files` and
+`total_size_bytes`. A flat graph without `snapshots/<id>` still validates
+the manifest and tables; directory-identity comparison is reported
+`unavailable` rather than fabricated. Undeclared parquet files, symlinked
+snapshot entries, unexpected non-file entries, atomic `*.tmp` remnants,
+and unsafe snapshot paths fail closed. Core file symlinks are rejected
+before their targets are read. The graph-root entry point SHA-256-fingerprints every regular file
+in the selected snapshot, `current`, and the snapshots-directory listing.
+`--output` must be outside the audited graph root.
+`published_graph_health.py` attaches this status as `snapshot_integrity`
+for every non-frozen published graph and short-circuits a broken envelope
+before fresh extraction or language-specific overlay checks.
+
 ## Entity Types (code domain, start with these)
 - file
 - module / package

@@ -352,10 +352,14 @@ def _markdown_references(root: Path) -> dict[str, list[str]]:
         except OSError as error:
             raise RuntimeError(f"could not read Markdown document {path}: {error}") from error
         for name in BYOG_NAME.findall(text):
-            # ``byog_graph`` is the helper module, not a graph root.  It is
-            # deliberately mentioned in provenance documents and must not turn
-            # a code reference into a phantom local artifact.
-            if name == "byog_graph":
+            # Helper modules, not graph roots. They are deliberately mentioned
+            # in provenance documents and must not turn a code reference into
+            # a phantom local artifact.
+            if name in {
+                "byog_graph",
+                "byog_snapshot_graph_audit",
+                "byog_snapshot_integrity",
+            }:
                 continue
             refs.setdefault(name, set()).add(str(path.relative_to(root)))
     return {name: sorted(paths) for name, paths in refs.items()}

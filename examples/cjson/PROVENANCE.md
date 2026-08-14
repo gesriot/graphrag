@@ -396,6 +396,16 @@ The source-derived full graph co-indexes `tests/parse/runner.c` the same way `js
   compiler identity. The published `byog_cjson` root (all compiler overlays
   default-off) audits as `off` and is never rewritten. C
   `published_graph_health` attaches `c_overlay_coherence_integrity`.
+- **Persisted snapshot envelope (read-only):**
+  `scripts/byog_snapshot_graph_audit.py --graph <root>` checks the
+  language-independent snapshot directory, core `manifest.json` fields, and
+  parquet census written by `publish_byog_snapshot()`. It does not invoke
+  an extractor or compiler, reconstruct overlays, or compare `source_root` /
+  `git_commit` / `created_at` with the host. The published `byog_cjson`
+  root is audited read-only and is never rewritten.
+  `published_graph_health` attaches `snapshot_integrity` for every
+  non-frozen graph, including this C root, and runs that check before
+  overlay failures.
 - What counts as a "header default" is deliberately narrow, because the first
   implementation was not: a `#define` is a default only when it sits outside
   every conditional (include guards excepted) or forms the `#ifndef X` /

@@ -46,6 +46,14 @@ for the complete manifest and tool-skip policy.
   rather than a live derivation. `byog_graph.pinned_snapshot_ids` now
   protects every snapshot a doc claim pins, so retention cannot destroy
   another one.
+- **Persisted snapshot envelope (read-only):**
+  `scripts/byog_snapshot_graph_audit.py --graph <root>` checks that the
+  snapshot directory, core `manifest.json` fields, and parquet census still
+  agree with `publish_byog_snapshot()`. This is the same language-independent
+  contract used for C graphs; it does not invoke the Python extractor or
+  compare `source_root` / `git_commit` / `created_at` with the host.
+  `published_graph_health` attaches `snapshot_integrity` on this Python
+  root and runs it before any language-specific checks.
 - Size: 4,146 Python LOC across 21 modules (`engine/` + `filters/` included).
 - Graph: 243 entities, 454 relationships, 242 text units, 253 call observations.
 - Resolved call audit: 229 calls, structural pass rate 1.0, 0 anomalies,

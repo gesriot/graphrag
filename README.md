@@ -267,6 +267,24 @@ modules, plugins, and PCH fail explicitly. See
   violations, 2 = unreadable graph/snapshot/manifest. Published C graph
   health attaches `c_overlay_coherence_integrity`. Non-C graphs do not gain
   this C-only failure.
+- `scripts/byog_snapshot_graph_audit.py` – **read-only language-independent
+  snapshot-envelope audit** for the persisted BYOG directory, core
+  `manifest.json` fields, and parquet census written by
+  `publish_byog_snapshot()`. Applies to every BYOG indexer, not only C.
+  Does not invoke an extractor, compiler, or Clang; read source packages or
+  `compile_commands.json`; reconstruct overlays; reindex, repair, publish, or
+  rewrite graphs; or compare `source_root`, `git_commit`, or `created_at`
+  with the current host. `--graph` (plus optional `--snapshot` / `--output`)
+  SHA-256-fingerprints every regular file in the selected snapshot
+  (including optional `settings.yaml`), the `current` pointer, and the
+  snapshots-directory listing. `--output` is refused inside the audited
+  graph root, including through symlink aliases. Exit 0 = valid envelope,
+  1 = integrity violations, 2 = unsafe path / malformed JSON / unreadable
+  parquet / missing required input. Shared producer-contract helpers live in
+  `byog_snapshot_integrity.py` (`validate_persisted_byog_snapshot`).
+  Published graph health attaches `snapshot_integrity` for every non-frozen
+  graph and short-circuits a broken envelope before fresh extraction or
+  language-specific overlay checks.
 - `scripts/c_clang_type_audit.py` – type *declarations* (named complete
   structs, named complete enums, package-local typedefs) vs tree-sitter
   `struct` / `enum` / `typedef` entities. Collision-safe identity is
