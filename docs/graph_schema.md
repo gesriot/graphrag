@@ -50,6 +50,39 @@ in the selected snapshot, `current`, and the snapshots-directory listing.
 for every non-frozen published graph and short-circuits a broken envelope
 before fresh extraction or language-specific overlay checks.
 
+### Snapshot publication transaction
+
+`publish_byog_snapshot()` writes parquet, optional `settings.yaml`, and
+`manifest.json` in a private `snapshots/.staging-<id>/` directory on the
+same filesystem as `snapshots/`. Those staging writes are concurrent
+across publisher processes. After the payload is complete, one
+cross-process exclusive lock on the graph-root `.publish.lock` covers:
+
+1. atomic same-filesystem rename of the staging directory to
+   `snapshots/<id>/`;
+2. atomic replace of the `current` pointer;
+3. keep-last-N retention of **published** snapshot ids only.
+
+Staging names start with `.staging-` and are not published snapshot
+ids. Standalone `cleanup_old_snapshots()` uses the same lock and never
+deletes an active writer's staging directory. A normal exception before
+publication leaves `current` unchanged and removes only that writer's
+staging directory. If the rename succeeds but publishing `current`
+fails, the unpublished final directory is removed and `current` stays
+on the previous snapshot.
+
+Publication and retention refuse a symlinked `snapshots/` directory or
+`.publish.lock` instead of following either outside the graph root. A
+retention call against a missing graph remains a filesystem no-op.
+
+A process crash may leave a private staging directory. Retention does
+not reap staging directories by guessed age. This protocol does not
+claim active-reader leases: a reader that keeps a retired snapshot path
+across later retention can see that directory disappear. The lock and
+staging convention belong to the graph-root publication protocol, not
+to `manifest.files` or `total_size_bytes`. An explicitly selected
+staging path is not a valid published snapshot for the envelope audit.
+
 ## Entity Types (code domain, start with these)
 - file
 - module / package

@@ -14,12 +14,14 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import uuid
 from collections import defaultdict, deque
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import pandas as pd
 import pyarrow as pa
@@ -30,6 +32,32 @@ TYPE_CLOSURE_DIRECTIONS = frozenset({"dependencies", "users", "both"})
 DEFAULT_TYPE_CLOSURE_MAX_DEPTH = 3
 DEFAULT_TYPE_CLOSURE_MAX_NODES = 50
 DEFAULT_TYPE_CLOSURE_MAX_EDGES = 100
+
+PUBLICATION_LOCK_NAME = ".publish.lock"
+STAGING_NAME_PREFIX = ".staging-"
+
+
+class ByogPublicationLockError(RuntimeError):
+    """Raised when a cross-process publication lock cannot be taken honestly."""
+
+
+def is_staging_snapshot_name(name: str) -> bool:
+    """Return True for a private publisher staging directory name."""
+    return bool(name) and name.startswith(STAGING_NAME_PREFIX)
+
+
+def is_published_snapshot_id(name: str) -> bool:
+    """Return True for a final snapshot id the publisher may retain or point at.
+
+    Staging, lock, and other hidden protocol names are not published ids.
+    """
+    if not name or name in {".", ".."}:
+        return False
+    if name.startswith(".") or is_staging_snapshot_name(name):
+        return False
+    if "/" in name or "\\" in name or "\x00" in name:
+        return False
+    return Path(name).name == name
 
 
 def _resolve_output_base(base: Path) -> Path:
@@ -49,9 +77,10 @@ def _resolve_output_base(base: Path) -> Path:
     if current_file.exists():
         try:
             snap_id = current_file.read_text().strip()
-            snap_dir = base / "snapshots" / snap_id
-            if snap_dir.exists():
-                return snap_dir
+            if is_published_snapshot_id(snap_id):
+                snap_dir = base / "snapshots" / snap_id
+                if snap_dir.exists():
+                    return snap_dir
         except Exception:
             pass
     # flat fallback (direct writes in tests, old byog dirs, etc.)
@@ -119,49 +148,107 @@ def _atomic_write_text(text: str, final_path: Path) -> None:
                 pass
 
 
-def publish_byog_snapshot(
+def _available_lock_backend() -> Optional[str]:
+    try:
+        import fcntl  # noqa: F401
+    except ImportError:
+        fcntl = None
+    else:
+        return "fcntl"
+    try:
+        import msvcrt  # noqa: F401
+    except ImportError:
+        return None
+    return "msvcrt"
+
+
+def _acquire_exclusive_lock(fd: int) -> str:
+    backend = _available_lock_backend()
+    if backend == "fcntl":
+        import fcntl
+
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        return backend
+    if backend == "msvcrt":
+        import msvcrt
+
+        os.lseek(fd, 0, os.SEEK_SET)
+        if os.fstat(fd).st_size < 1:
+            os.write(fd, b"\0")
+            os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+        return backend
+    raise ByogPublicationLockError(
+        f"cross-process publication lock is unsupported on {sys.platform!r}; "
+        "refusing to publish or retain snapshots without an exclusive lock"
+    )
+
+
+def _release_exclusive_lock(fd: int, backend: str) -> None:
+    if backend == "fcntl":
+        import fcntl
+
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return
+    if backend == "msvcrt":
+        import msvcrt
+
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+
+
+@contextmanager
+def _publication_lock(out_root: Path) -> Iterator[None]:
+    """Exclusive cross-process lock for snapshot promotion, current, and retention."""
+    lock_path = Path(out_root) / PUBLICATION_LOCK_NAME
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    if lock_path.is_symlink():
+        raise ByogPublicationLockError(
+            f"unsafe symlinked publication lock is unsupported: {lock_path}"
+        )
+    open_flags = os.O_RDWR | os.O_CREAT
+    if hasattr(os, "O_NOFOLLOW"):
+        open_flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(str(lock_path), open_flags, 0o644)
+    except OSError as error:
+        raise ByogPublicationLockError(
+            f"cannot open publication lock {lock_path}: {error}"
+        ) from error
+    backend: Optional[str] = None
+    try:
+        backend = _acquire_exclusive_lock(fd)
+        yield
+    finally:
+        if backend is not None:
+            try:
+                _release_exclusive_lock(fd, backend)
+            except OSError:
+                pass
+        os.close(fd)
+
+
+def _remove_staging_dir(stage_dir: Path) -> None:
+    if not stage_dir.exists():
+        return
+    if not is_staging_snapshot_name(stage_dir.name):
+        return
+    shutil.rmtree(stage_dir)
+
+
+def _write_snapshot_payload(
+    snap_dir: Path,
     entities_df: pd.DataFrame,
     relationships_df: pd.DataFrame,
     text_units_df: pd.DataFrame,
+    *,
+    settings_text: str | None,
+    source_root: Optional[Path],
+    call_observations_df: Optional[pd.DataFrame],
+    extra_manifest: Optional[Dict[str, Any]],
+    snap_id: str,
     out_root: Path,
-    settings_text: str | None = None,
-    keep_last: int = 5,
-    source_root: Optional[Path] = None,
-    call_observations_df: Optional[pd.DataFrame] = None,
-    extra_manifest: Optional[Dict[str, Any]] = None,
-) -> Path:
-    """Write a complete BYOG snapshot atomically and publish a 'current' pointer.
-
-    Layout created:
-        out_root/
-            current                 # text file with the snapshot id
-            snapshots/
-                <id>/
-                    entities.parquet
-                    relationships.parquet
-                    text_units.parquet
-                    call_observations.parquet (if provided)
-                    settings.yaml   (if provided)
-                    manifest.json
-
-    All writes inside the snapshot dir use per-file atomic .tmp + replace.
-    The pointer 'current' is updated atomically with a tmp file + replace.
-
-    This allows concurrent readers to always see a consistent previous snapshot
-    while a new one is being built (e.g. by agent_port_loop).
-
-    After publishing, automatically runs keep-last-N cleanup (default 5),
-    always protecting the newly published current snapshot.
-    """
-    out_root = Path(out_root)
-    snapshots_dir = out_root / "snapshots"
-    snapshots_dir.mkdir(parents=True, exist_ok=True)
-
-    snap_id = datetime.now().strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:8]
-    snap_dir = snapshots_dir / snap_id
-    snap_dir.mkdir(parents=True, exist_ok=True)
-
-    # Write files atomically inside the new snapshot dir
+) -> None:
     _atomic_write_parquet(entities_df, snap_dir / "entities.parquet")
     _atomic_write_parquet(relationships_df, snap_dir / "relationships.parquet")
     _atomic_write_parquet(text_units_df, snap_dir / "text_units.parquet")
@@ -173,7 +260,6 @@ def publish_byog_snapshot(
     if settings_text:
         _atomic_write_text(settings_text, snap_dir / "settings.yaml")
 
-    # manifest
     files_list = ["entities.parquet", "relationships.parquet", "text_units.parquet"]
     if has_obs:
         files_list.append("call_observations.parquet")
@@ -193,13 +279,11 @@ def publish_byog_snapshot(
         "total_size_bytes": None,
         "corpus_hash": None,
     }
-    # Optional provenance blocks (e.g. preprocessor_liveness for C graphs).
     if extra_manifest:
         for k, v in extra_manifest.items():
             if k not in manifest:
                 manifest[k] = v
 
-    # Try to capture git commit (best effort)
     try:
         git_commit = subprocess.check_output(
             ["git", "rev-parse", "HEAD"],
@@ -211,7 +295,6 @@ def publish_byog_snapshot(
     except Exception:
         pass
 
-    # Total size of the snapshot
     total_size = 0
     size_files = ["entities.parquet", "relationships.parquet", "text_units.parquet"]
     if has_obs:
@@ -224,14 +307,100 @@ def publish_byog_snapshot(
 
     _atomic_write_text(json.dumps(manifest, indent=2), snap_dir / "manifest.json")
 
-    # Atomically publish the pointer. Use a unique temp file so concurrent
-    # snapshot writers do not race on a shared current.tmp path.
-    _atomic_write_text(snap_id, out_root / "current")
 
-    # Cleanup old snapshots (always protect current)
-    cleanup_old_snapshots(out_root, keep_last=keep_last)
+def publish_byog_snapshot(
+    entities_df: pd.DataFrame,
+    relationships_df: pd.DataFrame,
+    text_units_df: pd.DataFrame,
+    out_root: Path,
+    settings_text: str | None = None,
+    keep_last: int = 5,
+    source_root: Optional[Path] = None,
+    call_observations_df: Optional[pd.DataFrame] = None,
+    extra_manifest: Optional[Dict[str, Any]] = None,
+) -> Path:
+    """Write a complete BYOG snapshot and publish a 'current' pointer.
 
-    return snap_dir
+    Layout created:
+        out_root/
+            current                 # text file with the snapshot id
+            .publish.lock           # exclusive publication/retention lock
+            snapshots/
+                <id>/
+                    entities.parquet
+                    relationships.parquet
+                    text_units.parquet
+                    call_observations.parquet (if provided)
+                    settings.yaml   (if provided)
+                    manifest.json
+
+    Payload files are written first in a private ``.staging-<id>`` directory
+    under snapshots/. Promotion of that directory, the ``current`` pointer
+    update, and keep-last-N retention share one cross-process exclusive lock.
+    Staging writes are not serialized. Staging names are not published ids
+    and are never retention candidates.
+
+    ``current`` is only updated after the staging directory has been renamed
+    into place, so it never names a staging directory or a partial snapshot.
+    A reader that keeps a retired snapshot path across later retention is
+    not leased; that remains a separate limitation.
+
+    A crash may leave a private staging directory. Retention does not reap
+    staging dirs by guessed age.
+    """
+    out_root = Path(out_root)
+    snapshots_dir = out_root / "snapshots"
+    if snapshots_dir.is_symlink():
+        raise ValueError(
+            f"unsafe symlinked snapshots directory is unsupported: {snapshots_dir}"
+        )
+    snapshots_dir.mkdir(parents=True, exist_ok=True)
+    if snapshots_dir.is_symlink() or not snapshots_dir.is_dir():
+        raise ValueError(f"snapshots path is not a real directory: {snapshots_dir}")
+
+    snap_id = datetime.now().strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:8]
+    if not is_published_snapshot_id(snap_id):
+        raise RuntimeError(f"producer generated an unpublished snapshot id: {snap_id!r}")
+    stage_dir = snapshots_dir / f"{STAGING_NAME_PREFIX}{snap_id}"
+    final_dir = snapshots_dir / snap_id
+    stage_dir.mkdir(parents=True, exist_ok=False)
+    try:
+        _write_snapshot_payload(
+            stage_dir,
+            entities_df,
+            relationships_df,
+            text_units_df,
+            settings_text=settings_text,
+            source_root=source_root,
+            call_observations_df=call_observations_df,
+            extra_manifest=extra_manifest,
+            snap_id=snap_id,
+            out_root=out_root,
+        )
+        with _publication_lock(out_root):
+            try:
+                os.rename(stage_dir, final_dir)
+            except OSError:
+                raise
+            try:
+                _atomic_write_text(snap_id, out_root / "current")
+            except Exception:
+                if final_dir.exists() and is_published_snapshot_id(final_dir.name):
+                    current_file = out_root / "current"
+                    current_id = ""
+                    if current_file.is_file():
+                        try:
+                            current_id = current_file.read_text(encoding="utf-8").strip()
+                        except OSError:
+                            current_id = ""
+                    if current_id != snap_id:
+                        shutil.rmtree(final_dir)
+                raise
+            _cleanup_old_snapshots_locked(out_root, keep_last=keep_last)
+        return final_dir
+    except Exception:
+        _remove_staging_dir(stage_dir)
+        raise
 
 
 def pinned_snapshot_ids(out_root: Path) -> set[str]:
@@ -272,12 +441,34 @@ def cleanup_old_snapshots(out_root: Path, keep_last: int = 5) -> int:
     - `keep_last` is clamped to at least 1 because current must be retained.
     - Keeps current plus the newest remaining snapshots up to the total limit.
     - Snapshot dirs are sorted by name (timestamped names sort chronologically).
-    - Only directories under snapshots/ are considered for deletion.
+    - Only published snapshot directories under snapshots/ are considered.
+      Staging directories are ignored and are never deleted by retention.
+    - Coordinates with publish_byog_snapshot() through the same exclusive lock.
     - Returns the number of deleted snapshot directories.
     """
     out_root = Path(out_root)
+    snapshots_dir = out_root / "snapshots"
+    if snapshots_dir.is_symlink():
+        raise ValueError(
+            f"unsafe symlinked snapshots directory is unsupported: {snapshots_dir}"
+        )
+    # Preserve the historical no-op contract: retention on a graph with no
+    # snapshots must not create the graph root or a persistent lock artifact.
+    if not snapshots_dir.exists():
+        return 0
+    with _publication_lock(out_root):
+        return _cleanup_old_snapshots_locked(out_root, keep_last=keep_last)
+
+
+def _cleanup_old_snapshots_locked(out_root: Path, keep_last: int = 5) -> int:
+    """Retention body. Caller must already hold ``_publication_lock``."""
+    out_root = Path(out_root)
     keep_last = max(1, keep_last)
     snapshots_dir = out_root / "snapshots"
+    if snapshots_dir.is_symlink():
+        raise ValueError(
+            f"unsafe symlinked snapshots directory is unsupported: {snapshots_dir}"
+        )
     if not snapshots_dir.exists():
         return 0
 
@@ -290,8 +481,14 @@ def cleanup_old_snapshots(out_root: Path, keep_last: int = 5) -> int:
             current_id = current_file.read_text().strip()
         except Exception:
             current_id = None
+    if current_id and not is_published_snapshot_id(current_id):
+        current_id = None
 
-    snap_dirs = [d for d in snapshots_dir.iterdir() if d.is_dir()]
+    snap_dirs = [
+        d
+        for d in snapshots_dir.iterdir()
+        if not d.is_symlink() and d.is_dir() and is_published_snapshot_id(d.name)
+    ]
     if not snap_dirs:
         return 0
 
@@ -303,12 +500,14 @@ def cleanup_old_snapshots(out_root: Path, keep_last: int = 5) -> int:
     keep: set[Path] = set()
     if current_id:
         current_dir = snapshots_dir / current_id
-        if current_dir.exists():
+        if current_dir.exists() and is_published_snapshot_id(current_dir.name):
             keep.add(current_dir)
 
     for snapshot_id in pinned:
+        if not is_published_snapshot_id(snapshot_id):
+            continue
         pinned_dir = snapshots_dir / snapshot_id
-        if pinned_dir.exists():
+        if not pinned_dir.is_symlink() and pinned_dir.is_dir():
             keep.add(pinned_dir)
 
     slots_left = max(0, keep_last - len(keep))

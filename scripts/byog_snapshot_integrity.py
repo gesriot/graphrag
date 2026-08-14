@@ -160,6 +160,10 @@ def _is_non_negative_int(value: Any) -> bool:
 def _is_safe_snapshot_id(value: str) -> bool:
     if not value or value in {".", ".."}:
         return False
+    if value.startswith("."):
+        return False
+    if value.startswith(".staging-"):
+        return False
     if "/" in value or "\\" in value or "\x00" in value:
         return False
     return Path(value).name == value

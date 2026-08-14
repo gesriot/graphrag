@@ -59,6 +59,24 @@ def test_pinned_snapshot_survives_retention(tmp_path: Path, monkeypatch):
     assert ids[1] not in survivors, survivors
 
 
+def test_staging_directories_are_not_retention_candidates(tmp_path: Path, monkeypatch):
+    import byog_graph
+
+    graph = tmp_path / "byog_other"
+    ids = [f"2026070{n}-000000-ccccccc{n}" for n in range(1, 5)]
+    _make_graph(graph, ids, current=ids[-1])
+    staging = graph / "snapshots" / ".staging-20260709-000000-deadbeef"
+    staging.mkdir()
+    (staging / "entities.parquet").write_text("partial", encoding="utf-8")
+    monkeypatch.setattr(byog_graph, "pinned_snapshot_ids", lambda _root: set())
+
+    byog_graph.cleanup_old_snapshots(graph, keep_last=1)
+    survivors = {d.name for d in (graph / "snapshots").iterdir()}
+    assert staging.name in survivors
+    assert ids[-1] in survivors
+    assert ids[0] not in survivors
+
+
 def test_unpinned_snapshots_are_still_collected(tmp_path: Path, monkeypatch):
     import byog_graph
 

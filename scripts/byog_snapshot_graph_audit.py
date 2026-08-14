@@ -33,6 +33,10 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from byog_graph import (  # type: ignore
+    is_published_snapshot_id,
+    is_staging_snapshot_name,
+)
 from byog_snapshot_integrity import (  # type: ignore
     LIMITATIONS,
     validate_persisted_byog_snapshot,
@@ -164,6 +168,10 @@ def resolve_snapshot(
             or "\x00" in snap_id
         ):
             raise SnapshotGraphAuditError(f"unsafe snapshot id: {snap_id!r}")
+        if is_staging_snapshot_name(snap_id) or not is_published_snapshot_id(snap_id):
+            raise SnapshotGraphAuditError(
+                f"staging path is not a published snapshot: {snap_id!r}"
+            )
         if snapshots_path.is_symlink():
             raise SnapshotGraphAuditError(
                 f"unsafe symlinked snapshots directory: {snapshots_path}"
@@ -209,6 +217,10 @@ def resolve_snapshot(
             ):
                 raise SnapshotGraphAuditError(
                     f"unsafe current snapshot id: {snap_id!r}"
+                )
+            if is_staging_snapshot_name(snap_id) or not is_published_snapshot_id(snap_id):
+                raise SnapshotGraphAuditError(
+                    f"current names a staging path, not a published snapshot: {snap_id!r}"
                 )
             if snapshots_path.is_symlink():
                 raise SnapshotGraphAuditError(

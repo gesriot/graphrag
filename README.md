@@ -285,6 +285,15 @@ modules, plugins, and PCH fail explicitly. See
   Published graph health attaches `snapshot_integrity` for every non-frozen
   graph and short-circuits a broken envelope before fresh extraction or
   language-specific overlay checks.
+  `publish_byog_snapshot()` builds payload files in a private
+  `snapshots/.staging-<id>/` directory, then takes a graph-root
+  `.publish.lock` only for the atomic staging-to-final rename, the
+  `current` pointer update, and keep-last retention. Staging names are
+  not published snapshot ids and are never retention candidates.
+  `current` is never updated to a staging directory or a partial
+  snapshot. A crash may leave a private staging directory; retention
+  does not reap those by guessed age. Readers that retain a retired
+  snapshot path across later retention are not leased.
 - `scripts/c_clang_type_audit.py` – type *declarations* (named complete
   structs, named complete enums, package-local typedefs) vs tree-sitter
   `struct` / `enum` / `typedef` entities. Collision-safe identity is
