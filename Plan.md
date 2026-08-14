@@ -119,7 +119,7 @@ definitions are all present; 113 re-exports are reported separately rather
 than inflated into duplicate graph entities. The `sqlparse.split` target named
 by the Rust port is therefore an actual graph entity, not merely a module API
 outside the graph. See `examples/sqlparse/PROVENANCE.md` for the census and
-call-oracle effect. The current full-suite expectation is **1328 passed, 2 xfailed**;
+call-oracle effect. The current full-suite expectation is **1329 passed, 2 xfailed**;
 this 2026-08-13 snapshot-envelope integrity-audit update supersedes the earlier 721-passed /
 2026-07-26 gate snapshot.
 

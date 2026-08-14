@@ -848,6 +848,43 @@ def test_concurrent_fingerprint_change_respects_max_samples(
     assert one["anomalies"][0]["code"] == "read_only_violation"
 
 
+def test_current_switch_before_initial_fingerprint_is_detected(
+    tmp_path: Path, monkeypatch
+):
+    graph = _publish(tmp_path, n_obs=0)
+    first_id = (graph / "current").read_text(encoding="utf-8").strip()
+    _publish(tmp_path, n_obs=0)
+    second_id = (graph / "current").read_text(encoding="utf-8").strip()
+    assert first_id != second_id
+    (graph / "current").write_text(first_id, encoding="utf-8")
+
+    import byog_snapshot_graph_audit as audit_module  # type: ignore
+
+    original = audit_module.read_only_fingerprint
+
+    def switch_before_fingerprint(graph_root, snap_dir):
+        if switch_before_fingerprint.calls == 0:
+            (Path(graph_root) / "current").write_text(second_id, encoding="utf-8")
+        switch_before_fingerprint.calls += 1
+        return original(graph_root, snap_dir)
+
+    switch_before_fingerprint.calls = 0
+    monkeypatch.setattr(
+        audit_module, "read_only_fingerprint", switch_before_fingerprint
+    )
+    report = audit_module.audit_graph_root(graph, max_anomaly_samples=1)
+    assert report["ok"] is False
+    assert report["status"] == report["state"] == "invalid"
+    assert report["classification"] == "invalid"
+    assert report["n_anomalies"] == 1
+    assert report["n_anomaly_samples"] == 1
+    assert report["anomalies"][0]["code"] == "read_only_violation"
+    assert report["read_only_verification"]["verified"] is False
+    assert report["read_only_verification"]["changed_inputs"] == [
+        "graph/current_selection"
+    ]
+
+
 def test_output_containment_through_symlinks(tmp_path: Path, capsys):
     graph = _publish(tmp_path)
     forbidden = _snap_dir(graph) / "audit.json"

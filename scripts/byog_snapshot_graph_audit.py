@@ -420,8 +420,24 @@ def audit_graph_root(
     max_anomaly_samples: int = 40,
 ) -> Dict[str, Any]:
     graph_root = Path(graph_root)
-    snap_dir, snap_id, manifest = resolve_snapshot(graph_root, snapshot)
+    snap_dir, snap_id, _ = resolve_snapshot(graph_root, snapshot)
     before = read_only_fingerprint(graph_root, snap_dir)
+
+    # Resolve and read the manifest again after the initial fingerprint.  The
+    # first resolution identifies which directory must be fingerprinted, but
+    # its manifest/current reads happen before that fingerprint.  Rechecking
+    # here makes those reads part of the protected interval and closes the
+    # window where ``current`` could otherwise switch snapshots just before
+    # the initial fingerprint without appearing in the before/after diff.
+    confirmed_dir, confirmed_id, manifest = resolve_snapshot(graph_root, snapshot)
+    selection_changed = confirmed_dir != snap_dir or confirmed_id != snap_id
+    if selection_changed:
+        # Continue auditing the directory selected at entry.  An explicit
+        # snapshot lookup re-reads its manifest without following a changed
+        # current pointer; the report is invalidated below in every case.
+        if snap_id is not None:
+            _, _, manifest = resolve_snapshot(graph_root, snap_id)
+
     present_files, file_sizes, symlinked_files, unexpected_entries = inventory_snapshot(
         snap_dir
     )
@@ -448,6 +464,9 @@ def audit_graph_root(
     changed = sorted(name for name in before if before[name] != after.get(name))
     extra_after = sorted(name for name in after if name not in before)
     changed.extend(extra_after)
+    if selection_changed:
+        changed.append("graph/current_selection")
+    changed = sorted(set(changed))
     report["read_only_verification"] = {
         "verified": not changed,
         "method": "sha256 of snapshot regular files, current, and snapshots listing",
