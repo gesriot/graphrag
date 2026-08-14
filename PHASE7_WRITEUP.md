@@ -7,7 +7,7 @@ files; this document does not replace them.
 
 **Related:** [Plan.md](Plan.md) · [PHASE7_ABLATION.md](PHASE7_ABLATION.md) ·
 [PHASE5_REPORT.md](PHASE5_REPORT.md) · [README.md](README.md) · per-target
-`examples/*/PROVENANCE.md` · product CLI `scripts/graphrag_code.py`
+`examples/*/PROVENANCE.md` · product CLI `graphrag-code` / `python -m graphrag_code` (source-checkout: `scripts/graphrag_code.py`)
 
 **Series status:** the graph-vs-raw ablation series is **closed** (2026-07-25)
 with a **negative** finding on the headline capability claim. See
@@ -56,9 +56,11 @@ Optional later: official GraphRAG LLM workflows (community reports, global/local
 search). They are **not** required for the default path
 ([Plan.md](Plan.md): “no external API by default”).
 
-A single product entry point over these scripts is `scripts/graphrag_code.py`
-(Phase 3 surface). The scripts themselves remain the stable automation layer
-([README.md](README.md)).
+A single product entry point over these scripts is the installable
+`graphrag-code` console command (`python -m graphrag_code`; source-checkout
+`scripts/graphrag_code.py`). The scripts themselves remain the stable
+automation layer ([README.md](README.md)). The wheel does not bundle
+published `byog_*` graphs or port evidence; `port-eval` stays checkout-only.
 
 ### 1.2 What the ports demonstrate
 
@@ -157,8 +159,13 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`1376 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`1383 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
+
+The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
+from the project wheel. Source-checkout `scripts/*.py` commands remain
+compatible. The wheel does not bundle published `byog_*` graphs or
+`examples/`; `port-eval --all-gates` stays a repository evidence gate.
 
 **Live re-check (2026-07-26):** `538 passed, 2 xfailed`.
 
@@ -392,8 +399,8 @@ or efficiency boost when the whole package already fits in context.
 - Graph audits and ablation adequacy/material checks catch **real defects**
   before numbers ship.  
 - The same rails produced **general extractor/packer improvements**.  
-- A product CLI (`scripts/graphrag_code.py`) makes the rails operable as one
-  surface without changing underlying scripts.
+- A product CLI (`graphrag-code` / `python -m graphrag_code`) makes the rails
+  operable as one surface without changing underlying script behavior.
 
 **Not fair to claim (on current evidence):**
 
@@ -441,4 +448,4 @@ from [PHASE7_ABLATION.md](PHASE7_ABLATION.md) and the archived v3 artifacts.
 | Ablation scores, medians, series close, no v4 | [PHASE7_ABLATION.md](PHASE7_ABLATION.md) |
 | v2/v3 prereg (adequacy criteria, frozen scope) | [PHASE7_HUMANIZE_V2_PREREG.md](PHASE7_HUMANIZE_V2_PREREG.md), [PHASE7_ISODATE_V3_PREREG.md](PHASE7_ISODATE_V3_PREREG.md) |
 | Per-target graph counts, deferred scope | `examples/*/PROVENANCE.md` |
-| Product CLI | [README.md](README.md), `scripts/graphrag_code.py` |
+| Product CLI | [README.md](README.md), `graphrag-code`, `scripts/graphrag_code.py` |

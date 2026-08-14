@@ -22,6 +22,52 @@ accuracy multiplier or a demonstrated general porting advantage. It also does
 not claim full upstream-library parity, complete static semantics, or a full C
 ABI migration beyond each target's stated boundary.
 
+## Product CLI
+
+The installable console command is `graphrag-code`. From this repository:
+
+```bash
+uv sync
+uv run graphrag-code --help
+uv run python -m graphrag_code --help
+```
+
+A wheel/sdist build is `uv build`. Installing that wheel provides the same
+command without the checkout. Relative `--graph` / `--package` / `--output`
+paths are resolved from the invoking working directory, not from a guessed
+repository root. The wheel ships the indexer, query, context-pack, and
+persisted-integrity doctor modules. It does **not** bundle published `byog_*`
+graphs, `examples/`, or experimental evidence.
+
+These generic installed commands operate on user-supplied directories:
+
+- `graphrag-code doctor`
+- `graphrag-code query-symbol` / `callers` / `callees`
+- `graphrag-code context-pack`
+- `graphrag-code index-python` / `index-c`
+
+`graphrag-code port-eval` is source-checkout only. Gate mode reads
+`scripts/port_gates.json` and `examples/`; even an explicit `--graph` /
+`--source` / `--port` invocation writes packs under the checkout `output/`
+tree and shells the checkout scripts. A wheel install without those
+checkout assets exits 2 with a diagnostic. That is not standalone port
+evaluation.
+
+Source-checkout script paths remain supported:
+
+```bash
+uv run python scripts/graphrag_code.py --help
+uv run python scripts/persisted_graph_doctor.py --graph <root> --indexer python
+uv run python scripts/index_python.py --package <pkg> --graph <out>
+uv run python scripts/index_c.py --package <pkg> --graph <out>
+uv run python scripts/graph_query.py symbol <title> --graph <root>
+uv run python scripts/context_pack.py <title> --graph <root>
+uv run python scripts/port_eval.py --all-gates --full
+```
+
+This is not a PyPI publication, a production service, or a claim of semantic
+equivalence.
+
 ## Verify the repository
 
 From the repository root, run the portable full-evidence gate:
