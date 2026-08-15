@@ -33,8 +33,22 @@ from graphrag_code.byog_graph import load_byog  # common loader
 app = typer.Typer(help="Assemble a context pack for a code symbol from a BYOG graph (entities/rels/tus parquets).")
 
 
-def find_entity(ents: pd.DataFrame, symbol: str) -> pd.Series | None:
+def find_entity(
+    ents: pd.DataFrame,
+    symbol: str,
+    *,
+    errors: Optional[List[str]] = None,
+) -> pd.Series | None:
     """Exact match preferred. On ambiguous partial matches, error with candidates list."""
+    def report(message: str, *, warning: bool = False) -> None:
+        if errors is not None:
+            errors.append(message)
+            return
+        typer.secho(
+            message,
+            fg=typer.colors.YELLOW if warning else typer.colors.RED,
+        )
+
     titles = ents["title"].astype(str)
     types = ents["type"].astype(str).str.lower() if "type" in ents.columns else pd.Series([], dtype=str)
 
@@ -43,7 +57,7 @@ def find_entity(ents: pd.DataFrame, symbol: str) -> pd.Series | None:
         return exact.iloc[0]
     if len(exact) > 1:
         cands = list(exact["title"].astype(str))
-        typer.secho(f"Multiple exact matches for '{symbol}': {cands}", fg=typer.colors.RED)
+        report(f"Multiple exact matches for '{symbol}': {cands}")
         return None
 
     # Bare module aliases: "sim" should resolve to the module entity "sim:sim",
@@ -62,7 +76,10 @@ def find_entity(ents: pd.DataFrame, symbol: str) -> pd.Series | None:
             return module_alias.iloc[0]
         if len(module_alias) > 1:
             cands = list(module_alias["title"].astype(str))
-            typer.secho(f"Ambiguous module alias '{symbol}'. Candidates: {cands}", fg=typer.colors.YELLOW)
+            report(
+                f"Ambiguous module alias '{symbol}'. Candidates: {cands}",
+                warning=True,
+            )
             return None
 
     partial = ents[titles.str.contains(symbol, case=False, na=False)]
@@ -70,10 +87,10 @@ def find_entity(ents: pd.DataFrame, symbol: str) -> pd.Series | None:
         return None
     if len(partial) > 1:
         cands = list(partial["title"].astype(str))
-        typer.secho(
+        report(
             f"Ambiguous symbol '{symbol}'. Candidates: {cands}. "
             "Use a more precise title (e.g. 'sim:run_simulation' or 'core:Config').",
-            fg=typer.colors.YELLOW,
+            warning=True,
         )
         return None
     return partial.iloc[0]
@@ -373,42 +390,19 @@ def get_text_units(tus: pd.DataFrame, entity_row: pd.Series, neighbor_rels: List
     return tus[mask].to_dict(orient="records") if mask.any() else []
 
 
-@app.command()
-def pack(
-    symbol: str = typer.Argument(..., help="Symbol title or partial, e.g. sim:run_simulation or update_player"),
-    graph: Path = typer.Option(Path("byog_mini_game"), "--graph", "-g", help="BYOG graph root (snapshot layout or legacy output/ layout)"),
-    purpose: str = typer.Option("port-to-rust", "--purpose", "-p"),
-    output: Path | None = typer.Option(None, "--output", "-o", help="Write JSON to this path instead of stdout"),
-    max_text_chars: int = typer.Option(300, "--max-text-chars", help="Truncate text units to this many chars (0 or negative = no limit)"),
-    full_text: bool = typer.Option(False, "--full-text", help="Equivalent to --max-text-chars 0 (no truncation)"),
-    neighbor_text: bool = typer.Option(
-        True,
-        "--neighbor-text/--no-neighbor-text",
-        help="Include text units attached to neighbor relationships",
-    ),
-    max_type_edges: int = typer.Option(
-        20,
-        "--max-type-edges",
-        help=(
-            "Max uses_type edges per direction; at depth > 1 this also caps "
-            "returned closure-node payloads"
-        ),
-    ),
-    max_type_observations: int = typer.Option(
-        5,
-        "--max-type-observations",
-        help="Max observations sampled per uses_type edge in the pack",
-    ),
-    type_depth: int = typer.Option(
-        1,
-        "--type-depth",
-        help=(
-            "uses_type depth for context packs (default 1 = direct only; "
-            "depth > 1 adds transitive type_*_closure sections)"
-        ),
-    ),
-):
-    """Assemble and print (or save) a context pack for the given symbol."""
+def assemble_context_pack(
+    symbol: str,
+    graph: Path,
+    *,
+    purpose: str = "port-to-rust",
+    max_text_chars: int = 300,
+    full_text: bool = False,
+    neighbor_text: bool = True,
+    max_type_edges: int = 20,
+    max_type_observations: int = 5,
+    type_depth: int = 1,
+) -> Dict[str, Any]:
+    """Build a context pack without writing files or process streams."""
     if full_text:
         max_text_chars = 0
     if max_type_edges < 0:
@@ -416,25 +410,24 @@ def pack(
     if max_type_observations < 0:
         max_type_observations = 0
     if isinstance(type_depth, bool) or not isinstance(type_depth, int) or type_depth < 1:
-        typer.secho(
-            f"--type-depth must be a positive integer, got {type_depth!r}",
-            fg=typer.colors.RED,
+        raise ValueError(
+            f"--type-depth must be a positive integer, got {type_depth!r}"
         )
-        raise typer.Exit(2)
 
     try:
         data = load_byog(graph)
-    except FileNotFoundError:
-        typer.secho(f"BYOG not found under {graph}. Run an indexer or bridge first.", fg=typer.colors.RED)
-        raise typer.Exit(1)
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            f"BYOG not found under {graph}. Run an indexer or bridge first."
+        ) from exc
     ents, rels, tus = data["entities"], data["relationships"], data["text_units"]
 
-    ent = find_entity(ents, symbol)
+    lookup_errors: List[str] = []
+    ent = find_entity(ents, symbol, errors=lookup_errors)
     if ent is None:
-        typer.secho(f"No entity found for {symbol}", fg=typer.colors.RED)
-        # show some available titles for help
-        print("Available (sample):", list(ents["title"].astype(str).head(8)))
-        raise typer.Exit(2)
+        detail = "; ".join(lookup_errors) or f"No entity found for {symbol}"
+        available = list(ents["title"].astype(str).head(8))
+        raise ValueError(f"{detail}. Available (sample): {available}")
 
     ent_dict = ent.to_dict()
 
@@ -906,16 +899,12 @@ def pack(
                 "edges_truncated": bool(closure.get("edges_truncated")),
             }
 
-        try:
-            dep_section = _closure_section("dependencies")
-            if dep_section is not None:
-                pack["type_dependency_closure"] = dep_section
-            user_section = _closure_section("users")
-            if user_section is not None:
-                pack["type_user_closure"] = user_section
-        except ValueError as e:
-            typer.secho(str(e), fg=typer.colors.RED, err=True)
-            raise typer.Exit(2) from e
+        dep_section = _closure_section("dependencies")
+        if dep_section is not None:
+            pack["type_dependency_closure"] = dep_section
+        user_section = _closure_section("users")
+        if user_section is not None:
+            pack["type_user_closure"] = user_section
 
     packed_texts = []
     for t in texts[:10]:
@@ -1033,7 +1022,64 @@ def pack(
         except Exception:
             pass  # best-effort; observations are supplemental
 
-    result = json.dumps(pack, indent=2, ensure_ascii=False)
+    return pack
+
+
+@app.command()
+def pack(
+    symbol: str = typer.Argument(..., help="Symbol title or partial, e.g. sim:run_simulation or update_player"),
+    graph: Path = typer.Option(Path("byog_mini_game"), "--graph", "-g", help="BYOG graph root (snapshot layout or legacy output/ layout)"),
+    purpose: str = typer.Option("port-to-rust", "--purpose", "-p"),
+    output: Path | None = typer.Option(None, "--output", "-o", help="Write JSON to this path instead of stdout"),
+    max_text_chars: int = typer.Option(300, "--max-text-chars", help="Truncate text units to this many chars (0 or negative = no limit)"),
+    full_text: bool = typer.Option(False, "--full-text", help="Equivalent to --max-text-chars 0 (no truncation)"),
+    neighbor_text: bool = typer.Option(
+        True,
+        "--neighbor-text/--no-neighbor-text",
+        help="Include text units attached to neighbor relationships",
+    ),
+    max_type_edges: int = typer.Option(
+        20,
+        "--max-type-edges",
+        help=(
+            "Max uses_type edges per direction; at depth > 1 this also caps "
+            "returned closure-node payloads"
+        ),
+    ),
+    max_type_observations: int = typer.Option(
+        5,
+        "--max-type-observations",
+        help="Max observations sampled per uses_type edge in the pack",
+    ),
+    type_depth: int = typer.Option(
+        1,
+        "--type-depth",
+        help=(
+            "uses_type depth for context packs (default 1 = direct only; "
+            "depth > 1 adds transitive type_*_closure sections)"
+        ),
+    ),
+):
+    """Assemble and print (or save) a context pack for the given symbol."""
+    try:
+        data = assemble_context_pack(
+            symbol,
+            Path(graph),
+            purpose=purpose,
+            max_text_chars=max_text_chars,
+            full_text=full_text,
+            neighbor_text=neighbor_text,
+            max_type_edges=max_type_edges,
+            max_type_observations=max_type_observations,
+            type_depth=type_depth,
+        )
+    except FileNotFoundError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from exc
+    except ValueError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from exc
+    result = json.dumps(data, indent=2, ensure_ascii=False)
     if output:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(result)

@@ -7,6 +7,9 @@ requires-python = ">=3.12"
 dependencies = [
     "duckdb>=1.5.3",
     "graphrag>=3.1.0",
+    # Generated strict argument models use the 2.0 SDK surface; upgrade deliberately.
+    "mcp==2.0.0",
+    "mcp-types==2.0.0",
     "networkx>=3.6.1",
     "pandas>=2.3.3",
     "pyarrow>=22.0.0",

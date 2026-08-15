@@ -90,6 +90,7 @@ def test_python_module_help():
     assert "doctor" in proc.stdout
     assert "query-symbol" in proc.stdout
     assert "index-python" in proc.stdout
+    assert "mcp" in proc.stdout
 
 
 def test_source_script_and_package_expose_same_commands():
@@ -110,6 +111,7 @@ def test_source_script_and_package_expose_same_commands():
         "index-python",
         "index-c",
         "port-eval",
+        "mcp",
     )
     for name in required:
         assert name in packaged
@@ -131,41 +133,15 @@ def test_packaged_doc_claims_matches_checkout_manifest():
     assert packaged == checkout
 
 
-def _build_artifacts(tmp_path: Path) -> tuple[Path, Path]:
-    dist = tmp_path / "dist"
-    dist.mkdir()
-    env = os.environ.copy()
-    env["UV_CACHE_DIR"] = str(tmp_path / "uv-build-cache")
-    proc = subprocess.run(
-        [
-            "uv",
-            "build",
-            "--offline",
-            "--no-build-isolation",
-            "--out-dir",
-            str(dist),
-        ],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    assert proc.returncode == 0, proc.stderr + proc.stdout
-    wheels = list(dist.glob("*.whl"))
-    sdists = list(dist.glob("*.tar.gz"))
-    assert len(wheels) == 1, wheels
-    assert len(sdists) == 1, sdists
-    return wheels[0], sdists[0]
-
-
-def test_wheel_and_sdist_contents(tmp_path: Path):
-    wheel, sdist = _build_artifacts(tmp_path)
+def test_wheel_and_sdist_contents(built_wheel_and_sdist):
+    wheel, sdist = built_wheel_and_sdist
     with zipfile.ZipFile(wheel) as zf:
         names = zf.namelist()
         assert "graphrag_code/cli.py" in names
         assert "graphrag_code/persisted_graph_doctor.py" in names
         assert "graphrag_code/index_reuse.py" in names
         assert "graphrag_code/python_inputs.py" in names
+        assert "graphrag_code/mcp_server.py" in names
         assert "graphrag_code/doc_claims.json" in names
         assert not any(
             "scripts/" in name
@@ -200,51 +176,11 @@ def test_wheel_and_sdist_contents(tmp_path: Path):
     assert not any(name.endswith(".pyc") for name in snames)
 
 
-def _install_wheel(wheel: Path, target: Path) -> dict[str, str]:
-    """Install the wheel into an isolated prefix; reuse the test interpreter's deps."""
-    install_env = os.environ.copy()
-    install_env["UV_CACHE_DIR"] = str(target.parent / "uv-install-cache")
-    proc = subprocess.run(
-        [
-            "uv",
-            "pip",
-            "install",
-            "--python",
-            sys.executable,
-            "--no-deps",
-            "--offline",
-            "--target",
-            str(target),
-            str(wheel),
-        ],
-        capture_output=True,
-        text=True,
-        env=install_env,
-    )
-    assert proc.returncode == 0, proc.stderr
-    env = os.environ.copy()
-    env["PATH"] = str(target / "bin") + os.pathsep + str(Path(sys.executable).parent) + os.pathsep + env.get("PATH", "")
-    env["PYTHONPATH"] = str(target)
-    loc = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "import graphrag_code, graphrag_code.byog_graph as b; print(b.__file__)",
-        ],
-        capture_output=True,
-        text=True,
-        env=env,
-        cwd=str(Path.home()),
-    )
-    assert loc.returncode == 0, loc.stderr
-    assert str(target) in loc.stdout
-    assert str(ROOT / "src") not in loc.stdout
-    return env
+def test_installed_cli_from_outside_checkout(tmp_path: Path, built_wheel_and_sdist):
+    from conftest import install_wheel
 
-
-def test_installed_cli_from_outside_checkout(tmp_path: Path):
-    wheel, _ = _build_artifacts(tmp_path)
-    env = _install_wheel(wheel, tmp_path / "site")
+    wheel, _ = built_wheel_and_sdist
+    env = install_wheel(wheel, tmp_path / "site")
     outside = tmp_path / "outside"
     outside.mkdir()
     graph = _publish(tmp_path / "graphs")

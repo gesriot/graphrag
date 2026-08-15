@@ -45,6 +45,30 @@ These generic installed commands operate on user-supplied directories:
 - `graphrag-code query-symbol` / `callers` / `callees`
 - `graphrag-code context-pack`
 - `graphrag-code index-python` / `index-c`
+- `graphrag-code mcp --graph <root> --indexer auto`
+
+`graphrag-code mcp` is a local stdio MCP adapter over one existing graph.
+It needs no network, no LLM, and no HTTP port. Relative `--graph` is
+resolved from the invoking working directory. The process does not infer
+a checkout root. stdout is MCP protocol traffic only; diagnostics go to
+stderr.
+
+The server exposes a fixed read-only tool set: `graph_status`,
+`graph_doctor`, `query_symbol`, `callers`, `callees`, `neighbors`,
+`impact`, `type_closure`, and `context_pack`. Tool arguments cannot
+select another graph. There is no indexing, publishing, retention,
+port-eval, compiler/Clang, SQL, or shell tool.
+
+Each tool call resolves `current` once and stays on that published
+snapshot for the rest of the call. There is still no reader lease: if
+retention removes that snapshot mid-call the tool returns an error.
+This is agent access to a local graph, not a UI, HTTP service, or
+semantic search backend.
+
+Tool schemas reject unknown fields. List and traversal sizes, context-pack
+text/type evidence, doctor samples, and the serialized response envelope all
+have hard limits; the MCP context-pack tool deliberately does not expose the
+unbounded CLI `--full-text` mode.
 
 `index-python`, `index-c`, and `index` accept opt-in `--reuse-unchanged`.
 That is content-addressed whole-snapshot reuse, not per-file delta

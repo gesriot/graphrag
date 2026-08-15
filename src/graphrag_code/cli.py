@@ -570,6 +570,35 @@ def audit_graph(
     _delegate("audit_call_edges.py", args)
 
 
+@app.command("mcp")
+def mcp(
+    graph: Path = typer.Option(..., "--graph", "-g", help="BYOG graph root"),
+    indexer: str = typer.Option(
+        "auto",
+        "--indexer",
+        help="python, c, or auto (fail closed if persisted evidence is ambiguous)",
+    ),
+):
+    """Read-only MCP stdio server for one existing BYOG graph.
+
+    stdout is protocol traffic only. Diagnostics go to stderr. The process
+    does not index, publish, or run port-eval.
+    """
+    lang = indexer.strip().lower()
+    if lang not in {"auto", "python", "c"}:
+        raise SystemExit(f"unknown --indexer {indexer!r}; use auto, python, or c")
+    cmd = [
+        sys.executable,
+        "-m",
+        "graphrag_code.mcp_server",
+        "--graph",
+        str(graph),
+        "--indexer",
+        lang,
+    ]
+    raise SystemExit(subprocess.call(cmd, env=_child_env()))
+
+
 @app.command("port-eval")
 def port_eval(
     graph: Optional[Path] = typer.Option(None, "--graph", "-g"),

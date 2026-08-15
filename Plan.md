@@ -119,7 +119,7 @@ definitions are all present; 113 re-exports are reported separately rather
 than inflated into duplicate graph entities. The `sqlparse.split` target named
 by the Rust port is therefore an actual graph entity, not merely a module API
 outside the graph. See `examples/sqlparse/PROVENANCE.md` for the census and
-call-oracle effect. The current full-suite expectation is **1400 passed, 2 xfailed**;
+call-oracle effect. The current full-suite expectation is **1420 passed, 2 xfailed**;
 this 2026-08-14 persisted-integrity doctor update supersedes the earlier 721-passed /
 2026-07-26 gate snapshot. The product CLI is the installable ``graphrag-code``
 console command (`python -m graphrag_code`); source-checkout ``scripts/*.py``
@@ -130,7 +130,11 @@ supported deterministic configurations (Python without ``use_advanced``; C
 without compiler/Clang overlays). It is not per-file incremental indexing or
 a watcher. Unsupported modes rebuild normally or reject explicit reuse with
 exit 2. ``corpus_hash`` semantics are unchanged. ``port-eval`` still performs
-fresh disposable indexing.
+fresh disposable indexing. ``graphrag-code mcp --graph <root> --indexer auto``
+is a local stdio MCP adapter over one existing graph (no network, no HTTP,
+no indexing/publishing/port-eval). Tools are read-only and scoped to the
+startup graph root. Each call pins one published snapshot; there is still
+no reader lease.
 
 **Re-export namespace boundary (2026-07-30):** the 113 non-direct initializer
 bindings are now measured separately from direct definitions: 73 have a unique
