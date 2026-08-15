@@ -19,7 +19,6 @@ Then (with key later):
 
 from __future__ import annotations
 
-import ast
 import json
 import re
 import sys
@@ -37,6 +36,7 @@ import tempfile
 from graphrag_code.extract_python import extract_from_file  # type: ignore
 from graphrag_code.byog_graph import publish_byog_snapshot  # full snapshot atomic publish + current pointer
 from graphrag_code.paths import source_checkout_root
+from graphrag_code.python_inputs import list_indexed_python_files
 
 _CHECKOUT = source_checkout_root()
 PACKAGE_DIR = (
@@ -101,32 +101,7 @@ def build_byog_for_package(use_advanced: bool = False, package_dir: Path | None 
     all_entities: List[Dict[str, Any]] = []
     all_relationships: List[Dict[str, Any]] = []
     all_text_units: List[Dict[str, Any]] = []
-
-    def indexable_initializer(path: Path) -> bool:
-        """Whether an initializer defines an API symbol rather than re-exporting.
-
-        Re-export-only ``__init__.py`` modules deliberately stay out of the
-        graph: adding a second root entity for every imported symbol would make
-        aliases look like duplicate definitions. A direct public function or
-        class is different—it is an executable entry point and needs a graph
-        entity (for example ``sqlparse:split``). Runtime audit coverage lives
-        in ``scripts/init_api_runtime_audit.py``.
-        """
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        except (OSError, SyntaxError) as exc:
-            raise RuntimeError(f"cannot parse initializer {path}: {exc}") from exc
-        return any(
-            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-            and not node.name.startswith("_")
-            for node in tree.body
-        )
-
-    py_files = sorted(
-        p for p in pkg_dir.rglob("*.py")
-        if "tests" not in p.parts
-        and (p.name != "__init__.py" or indexable_initializer(p))
-    )
+    py_files = list_indexed_python_files(pkg_dir)
 
     human_id = 0
     tu_id = 0

@@ -338,7 +338,8 @@ def publish_byog_snapshot(
     under snapshots/. Promotion of that directory, the ``current`` pointer
     update, and keep-last-N retention share one cross-process exclusive lock.
     Staging writes are not serialized. Staging names are not published ids
-    and are never retention candidates.
+    and are never retention candidates. CLI indexers take ``.index.lock``
+    first and never hold this publication lock during extraction.
 
     ``current`` is only updated after the staging directory has been renamed
     into place, so it never names a staging directory or a partial snapshot.

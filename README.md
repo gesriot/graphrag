@@ -46,6 +46,23 @@ These generic installed commands operate on user-supplied directories:
 - `graphrag-code context-pack`
 - `graphrag-code index-python` / `index-c`
 
+`index-python`, `index-c`, and `index` accept opt-in `--reuse-unchanged`.
+That is content-addressed whole-snapshot reuse, not per-file delta
+indexing and not a watcher. When the supported deterministic inputs, the
+producer sources/runtime versions, and `source_root` still match a doctor-valid current
+snapshot, the command reprints that snapshot and does not extract or
+publish. Default indexing without the flag still rebuilds.
+
+Reuse is supported only for host-independent modes: Python
+`use_advanced=false`, and C with every compiler/Clang overlay off. Those
+unsupported flags still rebuild when `--reuse-unchanged` is omitted. An
+explicit `--reuse-unchanged` combined with them exits 2 and does not
+pretend a toolchain-complete cache key exists. `manifest.corpus_hash`
+stays the existing nullable field; reuse records a separate
+`index_input` block. `port-eval` still performs fresh disposable
+indexing. CLI indexers take `.index.lock` for the whole index operation
+and only take `.publish.lock` inside publication, never during extraction.
+
 `graphrag-code port-eval` is source-checkout only. Gate mode reads
 `scripts/port_gates.json` and `examples/`; even an explicit `--graph` /
 `--source` / `--port` invocation writes packs under the checkout `output/`

@@ -108,11 +108,18 @@ def index_python(
     graph: Path = typer.Option(..., "--graph", "-g", help="Target BYOG graph root"),
     keep_snapshots: int = typer.Option(5, "--keep-snapshots", "--keep-last"),
     use_advanced: bool = typer.Option(False, "--use-advanced", "--use-jedi-pyright"),
+    reuse_unchanged: bool = typer.Option(
+        False,
+        "--reuse-unchanged",
+        help="Reuse the current snapshot when supported deterministic inputs are unchanged.",
+    ),
 ):
     """Index a Python package into a BYOG graph (delegates to index_python.py)."""
     args = ["--package", str(package), "--graph", str(graph), "--keep-snapshots", str(keep_snapshots)]
     if use_advanced:
         args.append("--use-advanced")
+    if reuse_unchanged:
+        args.append("--reuse-unchanged")
     _delegate("index_python.py", args)
 
 
@@ -121,9 +128,16 @@ def index_c(
     package: Path = typer.Option(..., "--package", "-p", help="C package/dir to index"),
     graph: Path = typer.Option(..., "--graph", "-g", help="Target BYOG graph root"),
     keep_snapshots: int = typer.Option(5, "--keep-snapshots", "--keep-last"),
+    reuse_unchanged: bool = typer.Option(
+        False,
+        "--reuse-unchanged",
+        help="Reuse the current snapshot when supported deterministic inputs are unchanged.",
+    ),
 ):
     """Index a C tree into a BYOG graph (delegates to index_c.py)."""
     args = ["--package", str(package), "--graph", str(graph), "--keep-snapshots", str(keep_snapshots)]
+    if reuse_unchanged:
+        args.append("--reuse-unchanged")
     _delegate("index_c.py", args)
 
 
@@ -136,6 +150,11 @@ def index(
     use_advanced: bool = typer.Option(
         False, "--use-advanced", help="Python only: enable Jedi/Pyright advanced resolution"
     ),
+    reuse_unchanged: bool = typer.Option(
+        False,
+        "--reuse-unchanged",
+        help="Reuse the current snapshot when supported deterministic inputs are unchanged.",
+    ),
 ):
     """Index a repo (dispatches to index-python or index-c by --lang)."""
     lang_n = lang.strip().lower()
@@ -143,11 +162,15 @@ def index(
         args = ["--package", str(package), "--graph", str(graph), "--keep-snapshots", str(keep_snapshots)]
         if use_advanced:
             args.append("--use-advanced")
+        if reuse_unchanged:
+            args.append("--reuse-unchanged")
         _delegate("index_python.py", args)
     elif lang_n == "c":
         if use_advanced:
             raise SystemExit("index --lang c does not support --use-advanced (that is Python-only)")
         args = ["--package", str(package), "--graph", str(graph), "--keep-snapshots", str(keep_snapshots)]
+        if reuse_unchanged:
+            args.append("--reuse-unchanged")
         _delegate("index_c.py", args)
     else:
         raise SystemExit(f"unknown --lang {lang!r}; use python or c")

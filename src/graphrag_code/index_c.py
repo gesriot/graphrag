@@ -40,6 +40,17 @@ import typer
 
 from graphrag_code.extract_c import build_c_byog  # type: ignore
 from graphrag_code.byog_graph import publish_byog_snapshot  # type: ignore
+from graphrag_code.index_reuse import (  # type: ignore
+    IndexBuildLockError,
+    canonical_c_options,
+    compute_index_fingerprint,
+    index_build_lock,
+    lookup_reusable_snapshot,
+    raise_if_source_changed,
+    reject_unsupported_reuse,
+    reuse_supported,
+    unsupported_index_input,
+)
 from graphrag_code.c_clang_ast_audit import (  # type: ignore
     ClangAstAuditError,
     build_function_audit_from_capture,
@@ -217,9 +228,91 @@ def main(
             "digest does not match this host. Default refuses silent relabels."
         ),
     ),
+    reuse_unchanged: bool = typer.Option(
+        False,
+        "--reuse-unchanged",
+        help=(
+            "Reuse the current snapshot when supported deterministic inputs "
+            "and the producer are unchanged. Not per-file incremental indexing."
+        ),
+    ),
 ) -> None:
+    reuse_unchanged = reuse_unchanged is True
+    compiler_builtins = compiler_builtins is True
+    compiler_dependencies = compiler_dependencies is True
+    compiler_includes = compiler_includes is True
+    clang_signatures = clang_signatures is True
+    clang_calls = clang_calls is True
+    clang_types = clang_types is True
+    clang_type_uses = clang_type_uses is True
+    clang_type_shapes = clang_type_shapes is True
+    allow_toolchain_drift = allow_toolchain_drift is True
     pkg_dir = package.resolve()
     graph_dir = graph.resolve()
+    options = canonical_c_options(
+        compiler_builtins=compiler_builtins,
+        compiler_dependencies=compiler_dependencies,
+        compiler_includes=compiler_includes,
+        clang_signatures=clang_signatures,
+        clang_calls=clang_calls,
+        clang_types=clang_types,
+        clang_type_uses=clang_type_uses,
+        clang_type_shapes=clang_type_shapes,
+    )
+    if reuse_unchanged:
+        reject_unsupported_reuse("c", options)
+    try:
+        with index_build_lock(graph_dir):
+            _run_index_c(
+                pkg_dir=pkg_dir,
+                graph_dir=graph_dir,
+                keep_snapshots=keep_snapshots,
+                options=options,
+                compiler_builtins=compiler_builtins,
+                compiler_dependencies=compiler_dependencies,
+                compiler_includes=compiler_includes,
+                clang_signatures=clang_signatures,
+                clang_calls=clang_calls,
+                clang_types=clang_types,
+                clang_type_uses=clang_type_uses,
+                clang_type_shapes=clang_type_shapes,
+                allow_toolchain_drift=allow_toolchain_drift,
+                reuse_unchanged=reuse_unchanged,
+            )
+    except IndexBuildLockError as e:
+        print(f"graphrag-code: {e}", file=sys.stderr)
+        raise SystemExit(2) from e
+
+
+def _run_index_c(
+    *,
+    pkg_dir,
+    graph_dir,
+    keep_snapshots: int,
+    options,
+    compiler_builtins: bool,
+    compiler_dependencies: bool,
+    compiler_includes: bool,
+    clang_signatures: bool,
+    clang_calls: bool,
+    clang_types: bool,
+    clang_type_uses: bool,
+    clang_type_shapes: bool,
+    allow_toolchain_drift: bool,
+    reuse_unchanged: bool,
+) -> None:
+    if reuse_unchanged:
+        expected = compute_index_fingerprint("c", pkg_dir, options)
+        hit = lookup_reusable_snapshot(graph_dir, pkg_dir, "c", options, expected)
+        if hit is not None:
+            print(f"Unchanged. Reusing snapshot: {hit}")
+            return
+
+    before = (
+        compute_index_fingerprint("c", pkg_dir, options)
+        if reuse_supported("c", options)
+        else None
+    )
 
     # Refuse silent relabel when a prior stamp recorded a different seed.
     if graph_dir.exists() and (graph_dir / "current").exists():
@@ -488,6 +581,12 @@ def main(
         )
     else:
         print("  Clang type-shapes: off (default tree-sitter-c graph)")
+    if before is not None:
+        after = compute_index_fingerprint("c", pkg_dir, options)
+        raise_if_source_changed(before, after)
+        index_input = after
+    else:
+        index_input = unsupported_index_input("c", options)
     extra = {
         "preprocessor_liveness": summary.get("liveness_provenance"),
         "compiler_dependencies": dep_prov,
@@ -497,6 +596,7 @@ def main(
         "clang_types": type_prov,
         "clang_type_uses": type_use_prov,
         "clang_type_shapes": shape_prov,
+        "index_input": index_input,
     }
     snap_dir = publish_byog_snapshot(
         ents_df, rels_df, tus_df, graph_dir, SETTINGS,

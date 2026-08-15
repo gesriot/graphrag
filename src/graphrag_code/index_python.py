@@ -33,6 +33,17 @@ import typer
 
 from graphrag_code.mini_game_to_byog import build_byog_for_package  # type: ignore
 from graphrag_code.byog_graph import publish_byog_snapshot  # type: ignore
+from graphrag_code.index_reuse import (  # type: ignore
+    IndexBuildLockError,
+    canonical_python_options,
+    compute_index_fingerprint,
+    index_build_lock,
+    lookup_reusable_snapshot,
+    raise_if_source_changed,
+    reject_unsupported_reuse,
+    reuse_supported,
+    unsupported_index_input,
+)
 
 app = typer.Typer(help="Generic Python -> BYOG indexer (replaces mini_game_to_byog for general use).")
 
@@ -83,41 +94,82 @@ def main(
         "--use-jedi-pyright",
         help="Enable optional local Jedi/Pyright for richer resolution.",
     ),
+    reuse_unchanged: bool = typer.Option(
+        False,
+        "--reuse-unchanged",
+        help=(
+            "Reuse the current snapshot when supported deterministic inputs "
+            "and the producer are unchanged. Not per-file incremental indexing."
+        ),
+    ),
 ) -> None:
     """Index a Python package into a BYOG graph with full provenance and observations."""
+    reuse_unchanged = reuse_unchanged is True
+    use_advanced = use_advanced is True
     pkg_dir = package.resolve()
     graph_root = graph.resolve()
+    options = canonical_python_options(use_advanced=use_advanced)
+    if reuse_unchanged:
+        reject_unsupported_reuse("python", options)
+    try:
+        with index_build_lock(graph_root):
+            if reuse_unchanged:
+                expected = compute_index_fingerprint("python", pkg_dir, options)
+                hit = lookup_reusable_snapshot(
+                    graph_root, pkg_dir, "python", options, expected
+                )
+                if hit is not None:
+                    print(f"Unchanged. Reusing snapshot: {hit}")
+                    return
 
-    data: Dict[str, Any] = build_byog_for_package(
-        use_advanced=use_advanced, package_dir=pkg_dir
-    )
+            before = (
+                compute_index_fingerprint("python", pkg_dir, options)
+                if reuse_supported("python", options)
+                else None
+            )
+            data: Dict[str, Any] = build_byog_for_package(
+                use_advanced=use_advanced, package_dir=pkg_dir
+            )
+            if before is not None:
+                after = compute_index_fingerprint("python", pkg_dir, options)
+                raise_if_source_changed(before, after)
+                index_input = after
+            else:
+                index_input = unsupported_index_input("python", options)
 
-    ents_df = pd.DataFrame(data["entities"])
-    rels_df = pd.DataFrame(data["relationships"])
-    tus_df = pd.DataFrame(data["text_units"])
-    obs_df = pd.DataFrame(data.get("call_observations", []))
+            ents_df = pd.DataFrame(data["entities"])
+            rels_df = pd.DataFrame(data["relationships"])
+            tus_df = pd.DataFrame(data["text_units"])
+            obs_df = pd.DataFrame(data.get("call_observations", []))
 
-    # Ensure required columns for BYOG compatibility
-    for df in (ents_df, rels_df, tus_df):
-        for col in ("document_ids", "covariate_ids"):
-            if col not in df.columns:
-                df[col] = [[] for _ in range(len(df))]
+            # Ensure required columns for BYOG compatibility
+            for df in (ents_df, rels_df, tus_df):
+                for col in ("document_ids", "covariate_ids"):
+                    if col not in df.columns:
+                        df[col] = [[] for _ in range(len(df))]
 
-    print(f"Indexing {pkg_dir} -> {graph_root}")
-    print(f"  Entities: {len(ents_df)}, Relationships: {len(rels_df)}, TextUnits: {len(tus_df)}")
-    if len(obs_df):
-        print(f"  Call observations (weak/ambiguous/container/etc.): {len(obs_df)}")
+            print(f"Indexing {pkg_dir} -> {graph_root}")
+            print(
+                f"  Entities: {len(ents_df)}, Relationships: {len(rels_df)}, "
+                f"TextUnits: {len(tus_df)}"
+            )
+            if len(obs_df):
+                print(f"  Call observations (weak/ambiguous/container/etc.): {len(obs_df)}")
 
-    snap_dir = publish_byog_snapshot(
-        ents_df,
-        rels_df,
-        tus_df,
-        graph_root,
-        SETTINGS,
-        keep_last=keep_snapshots,
-        source_root=pkg_dir,
-        call_observations_df=obs_df if len(obs_df) > 0 else None,
-    )
+            snap_dir = publish_byog_snapshot(
+                ents_df,
+                rels_df,
+                tus_df,
+                graph_root,
+                SETTINGS,
+                keep_last=keep_snapshots,
+                source_root=pkg_dir,
+                call_observations_df=obs_df if len(obs_df) > 0 else None,
+                extra_manifest={"index_input": index_input},
+            )
+    except IndexBuildLockError as e:
+        print(f"graphrag-code: {e}", file=sys.stderr)
+        raise SystemExit(2) from e
 
     print(f"Done. Snapshot: {snap_dir}")
     print("Use graph_query / context_pack against the --graph root.")

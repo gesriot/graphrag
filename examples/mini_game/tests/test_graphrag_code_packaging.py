@@ -164,6 +164,8 @@ def test_wheel_and_sdist_contents(tmp_path: Path):
         names = zf.namelist()
         assert "graphrag_code/cli.py" in names
         assert "graphrag_code/persisted_graph_doctor.py" in names
+        assert "graphrag_code/index_reuse.py" in names
+        assert "graphrag_code/python_inputs.py" in names
         assert "graphrag_code/doc_claims.json" in names
         assert not any(
             "scripts/" in name
@@ -406,6 +408,44 @@ def test_installed_cli_from_outside_checkout(tmp_path: Path):
         env=env,
     )
     assert python_index.returncode == 0, python_index.stderr
+    python_graph = outside / "python_graph"
+    python_current = (python_graph / "current").read_bytes()
+    python_snaps = sorted(path.name for path in (python_graph / "snapshots").iterdir())
+    python_reuse = subprocess.run(
+        [
+            "graphrag-code",
+            "index-python",
+            "--package",
+            python_source.name,
+            "--graph",
+            "python_graph",
+            "--keep-snapshots",
+            "1",
+            "--reuse-unchanged",
+        ],
+        cwd=outside,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert python_reuse.returncode == 0, python_reuse.stderr
+    assert python_reuse.stdout.strip().startswith("Unchanged. Reusing snapshot:")
+    assert (python_graph / "current").read_bytes() == python_current
+    assert sorted(path.name for path in (python_graph / "snapshots").iterdir()) == python_snaps
+    loc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import graphrag_code.index_reuse as r; print(r.__file__)",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(outside),
+    )
+    assert loc.returncode == 0, loc.stderr
+    assert str(tmp_path / "site") in loc.stdout
+    assert str(ROOT / "src") not in loc.stdout
     python_doctor = subprocess.run(
         [
             "graphrag-code",
@@ -444,6 +484,30 @@ def test_installed_cli_from_outside_checkout(tmp_path: Path):
         env=env,
     )
     assert c_index.returncode == 0, c_index.stderr
+    c_graph = outside / "c_graph"
+    c_current = (c_graph / "current").read_bytes()
+    c_snaps = sorted(path.name for path in (c_graph / "snapshots").iterdir())
+    c_reuse = subprocess.run(
+        [
+            "graphrag-code",
+            "index-c",
+            "--package",
+            c_source.name,
+            "--graph",
+            "c_graph",
+            "--keep-snapshots",
+            "1",
+            "--reuse-unchanged",
+        ],
+        cwd=outside,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert c_reuse.returncode == 0, c_reuse.stderr
+    assert c_reuse.stdout.strip().startswith("Unchanged. Reusing snapshot:")
+    assert (c_graph / "current").read_bytes() == c_current
+    assert sorted(path.name for path in (c_graph / "snapshots").iterdir()) == c_snaps
     c_doctor = subprocess.run(
         [
             "graphrag-code",
