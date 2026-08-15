@@ -163,6 +163,39 @@ MCP remains strict: a managed graph without a regular `.publish.lock`
 is still rejected at startup. Immutable published `byog_*` evidence
 keeps the explicitly unleased compatibility path.
 
+### Snapshot history and structural diff
+
+`graphrag-code snapshot-history` lists published `snapshots/<id>/`
+directories newest-first by canonical id. `.staging-*` entries are
+bounded informational notices, never published history. Unexpected
+symlinks, files, or other unsafe snapshot entries fail closed.
+`--limit` defaults to 20 and has a hard maximum of 200. `total` is the
+exact published-directory count even when the returned sample is
+truncated. Each returned snapshot's persisted envelope is validated.
+Staging notices retain the exact count and return at most 20 sorted
+names with explicit `returned` and `truncated` fields.
+
+`graphrag-code snapshot-diff --from <id|current> --to <id|current>`
+compares `entities`, `relationships`, `text_units`, and optional
+`call_observations` using the nonempty string `id` column. Added,
+removed, and modified samples are truncated independently per table;
+totals remain exact. Modified samples contain only the row id and the
+sorted changed-field names. A missing field differs from explicit null,
+and JSON booleans differ from numbers. Parquet null/NaN values become
+JSON null; other non-finite values are rejected. Manifest comparison is a
+deterministic added/removed/changed key summary, not a payload dump.
+Comparing a snapshot with itself is an all-zero diff. This is
+structural persisted-field comparison, not semantic equivalence.
+
+Both commands hold one shared graph-root reader lease across resolving
+`current` once, listing, loading, and computing the response. They
+never create `.publish.lock`. Without the lock they exit 2 unless
+`--allow-unlocked-legacy` is passed; that CLI-only option still
+fingerprints inputs and reports that there is no retention guarantee.
+MCP `snapshot_history` and `snapshot_diff` are scoped to the startup
+graph and never enable the legacy path. A lock-ignoring actor can still
+mutate files; pre/post fingerprints detect that and fail closed.
+
 ## Entity Types (code domain, start with these)
 - file
 - module / package

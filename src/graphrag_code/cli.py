@@ -13,7 +13,7 @@ Usage:
 What this is not: a demonstrated accuracy multiplier for cold porting. The
 Phase 7 ablations showed no graph-vs-raw capability win on bounded library
 slices; this CLI packages the *rails* (index, query, packs, audit,
-adopt-publication-lock, port_eval).
+adopt-publication-lock, snapshot-history, snapshot-diff, port_eval).
 """
 from __future__ import annotations
 
@@ -38,7 +38,8 @@ app = typer.Typer(
     no_args_is_help=True,
     help=(
         "graphrag-code: deterministic code graph → query → context-pack → "
-        "persisted doctor → adopt-publication-lock → port-eval. Relative "
+        "persisted doctor → adopt-publication-lock → snapshot-history → "
+        "snapshot-diff → port-eval. Relative "
         "paths are resolved from the invoking working directory."
     ),
 )
@@ -50,6 +51,7 @@ _DELEGATE_MODULES = {
     "context_pack.py": "graphrag_code.context_pack",
     "persisted_graph_doctor.py": "graphrag_code.persisted_graph_doctor",
     "adopt_publication_lock.py": "graphrag_code.adopt_publication_lock",
+    "snapshot_compare.py": "graphrag_code.snapshot_compare",
     "audit_call_edges.py": "graphrag_code.audit_call_edges",
     "port_eval.py": "graphrag_code.port_eval",
 }
@@ -591,6 +593,89 @@ def adopt_publication_lock(
     if json_out is True:
         args.append("--json")
     _delegate("adopt_publication_lock.py", args)
+
+
+@app.command("snapshot-history")
+def snapshot_history(
+    graph: Path = typer.Option(..., "--graph", "-g", help="Managed BYOG graph root"),
+    limit: int = typer.Option(
+        20,
+        "--limit",
+        help="maximum published snapshots to return (default 20, hard max 200)",
+    ),
+    json_out: bool = typer.Option(
+        False, "--json", help="same JSON shape as snapshot_compare.py history --json"
+    ),
+    allow_unlocked_legacy: bool = typer.Option(
+        False,
+        "--allow-unlocked-legacy",
+        help=(
+            "Explicit read-only compatibility for immutable pre-lock evidence. "
+            "Never creates .publish.lock and provides no retention guarantee."
+        ),
+    ),
+):
+    """List published snapshots newest-first under a shared reader lease.
+
+    Staging directories are notices, not history. Does not reindex, publish,
+    or create .publish.lock. Missing lock exits 2 unless
+    --allow-unlocked-legacy is set.
+    """
+    args = ["history", "--graph", str(graph), "--limit", str(limit)]
+    if json_out is True:
+        args.append("--json")
+    if allow_unlocked_legacy is True:
+        args.append("--allow-unlocked-legacy")
+    _delegate("snapshot_compare.py", args)
+
+
+@app.command("snapshot-diff")
+def snapshot_diff(
+    graph: Path = typer.Option(..., "--graph", "-g", help="Managed BYOG graph root"),
+    from_snapshot: str = typer.Option(
+        ..., "--from", help="published snapshot id or 'current'"
+    ),
+    to_snapshot: str = typer.Option(
+        ..., "--to", help="published snapshot id or 'current'"
+    ),
+    max_items: int = typer.Option(
+        50,
+        "--max-items",
+        help="sample cap per added/removed/modified category per table (default 50, hard max 500)",
+    ),
+    json_out: bool = typer.Option(
+        False, "--json", help="same JSON shape as snapshot_compare.py diff --json"
+    ),
+    allow_unlocked_legacy: bool = typer.Option(
+        False,
+        "--allow-unlocked-legacy",
+        help=(
+            "Explicit read-only compatibility for immutable pre-lock evidence. "
+            "Never creates .publish.lock and provides no retention guarantee."
+        ),
+    ),
+):
+    """Structurally compare two published snapshots under a shared reader lease.
+
+    Row modification means canonical persisted fields differ. This is not
+    semantic equivalence. Does not reindex, publish, or create .publish.lock.
+    """
+    args = [
+        "diff",
+        "--graph",
+        str(graph),
+        "--from",
+        from_snapshot,
+        "--to",
+        to_snapshot,
+        "--max-items",
+        str(max_items),
+    ]
+    if json_out is True:
+        args.append("--json")
+    if allow_unlocked_legacy is True:
+        args.append("--allow-unlocked-legacy")
+    _delegate("snapshot_compare.py", args)
 
 
 @app.command("audit-graph")

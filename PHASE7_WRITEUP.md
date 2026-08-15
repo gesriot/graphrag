@@ -159,7 +159,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`1447 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`1468 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
@@ -185,6 +185,19 @@ and snapshots stay unchanged unless a separately running actor changes them.
 The JSON result reports that observed pre/post comparison as
 `payload_unchanged`. MCP remains strict. Checked-in `byog_*` roots stay
 unleased until an operator adopts a disposable or operational copy.
+`graphrag-code snapshot-history` and `snapshot-diff` (also
+`python -m graphrag_code.snapshot_compare` and
+`scripts/snapshot_compare.py`) expose bounded local snapshot history and
+structural persisted-row diffs. They hold one shared `.publish.lock`
+lease, resolve `current` once, and never create the lock. MCP adds
+`snapshot_history` and `snapshot_diff` to the fixed 11-tool set and stays
+strict. `--allow-unlocked-legacy` is CLI-only compatibility for
+immutable pre-lock evidence and reports that there is no retention
+guarantee. Row modification means canonical persisted fields differ;
+this is not semantic equivalence. Missing fields differ from explicit
+nulls, and JSON booleans differ from numbers. Staging directories are
+notices, not history; notices keep the exact count and return at most 20
+names. Shared leases protect only cooperating processes.
 
 **Live re-check (2026-07-26):** `538 passed, 2 xfailed`.
 

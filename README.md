@@ -46,6 +46,8 @@ These generic installed commands operate on user-supplied directories:
 - `graphrag-code context-pack`
 - `graphrag-code index-python` / `index-c`
 - `graphrag-code adopt-publication-lock --graph <root> --indexer auto --offline-confirmed`
+- `graphrag-code snapshot-history --graph <root>`
+- `graphrag-code snapshot-diff --graph <root> --from <id|current> --to <id|current>`
 - `graphrag-code mcp --graph <root> --indexer auto`
 
 `graphrag-code mcp` is a local stdio MCP adapter over one existing graph.
@@ -56,9 +58,14 @@ stderr.
 
 The server exposes a fixed read-only tool set: `graph_status`,
 `graph_doctor`, `query_symbol`, `callers`, `callees`, `neighbors`,
-`impact`, `type_closure`, and `context_pack`. Tool arguments cannot
-select another graph. There is no indexing, publishing, retention,
-port-eval, compiler/Clang, SQL, or shell tool.
+`impact`, `type_closure`, `context_pack`, `snapshot_history`, and
+`snapshot_diff`. Tool arguments cannot select another graph. There is no
+indexing, publishing, retention, port-eval, compiler/Clang, SQL, or
+shell tool. Snapshot history is a bounded local listing of retained
+published ids. Snapshot diff is structural persisted-row comparison, not
+semantic equivalence: a modified row means canonical persisted fields
+differ. Staging directories are notices, not history. Neither tool
+accepts graph paths, filesystem paths, output paths, or table names.
 
 Each tool call takes a shared advisory lock on the graph-root
 `.publish.lock`, resolves `current` once while that lease is held, and
@@ -96,6 +103,26 @@ text/type evidence, doctor samples, and the serialized response envelope all
 have hard limits; the MCP context-pack tool deliberately does not expose the
 unbounded CLI `--full-text` mode.
 
+`snapshot-history` and `snapshot-diff` are read-only. They hold one
+shared `.publish.lock` lease while resolving `current` once, listing
+retained snapshots, loading compared snapshots, and building the
+response. Cooperating publishers wait. The commands are strict by
+default: a managed graph without `.publish.lock` exits 2 and is not
+modified; they never create the lock and point at
+`adopt-publication-lock`. `--allow-unlocked-legacy` is an explicit
+CLI-only compatibility path for immutable pre-lock evidence. It still
+fingerprints inputs and reports that there is no retention guarantee.
+MCP never exposes that option. History is newest-first on canonical
+published ids, excludes `.staging-*`, and treats unexpected snapshot
+entries as unsafe. Staging notices retain the exact count and return at
+most 20 UTF-8-byte-sorted names with explicit `returned` / `truncated`
+fields. Diff compares `entities`, `relationships`,
+`text_units`, and optional `call_observations` by the nonempty string
+`id` column. Samples are truncated independently per
+added/removed/modified category; totals stay exact. A missing field
+differs from explicit null, and JSON booleans differ from numbers. This
+is not natural-language search, a UI, an HTTP service, repair, or reindex.
+
 `index-python`, `index-c`, and `index` accept opt-in `--reuse-unchanged`.
 That is content-addressed whole-snapshot reuse, not per-file delta
 indexing and not a watcher. When the supported deterministic inputs, the
@@ -126,6 +153,8 @@ Source-checkout script paths remain supported:
 uv run python scripts/graphrag_code.py --help
 uv run python scripts/persisted_graph_doctor.py --graph <root> --indexer python
 uv run python scripts/adopt_publication_lock.py --graph <root> --indexer python --offline-confirmed
+uv run python scripts/snapshot_compare.py history --graph <root>
+uv run python scripts/snapshot_compare.py diff --graph <root> --from current --to current
 uv run python scripts/index_python.py --package <pkg> --graph <out>
 uv run python scripts/index_c.py --package <pkg> --graph <out>
 uv run python scripts/graph_query.py symbol <title> --graph <root>

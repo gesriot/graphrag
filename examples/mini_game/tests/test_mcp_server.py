@@ -247,8 +247,10 @@ def test_every_required_tool_via_sdk_client(tmp_path: Path):
     async def _body():
         async with Client(server) as client:
             for name in TOOL_NAMES:
-                if name in {"graph_status", "graph_doctor"}:
+                if name in {"graph_status", "graph_doctor", "snapshot_history"}:
                     result = await client.call_tool(name)
+                elif name == "snapshot_diff":
+                    result = await client.call_tool(name, {"from_snapshot": "current"})
                 elif name == "type_closure":
                     result = await client.call_tool(name, {"symbol": symbol, "direction": "dependencies"})
                 elif name == "context_pack":

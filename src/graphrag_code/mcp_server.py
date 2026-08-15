@@ -44,6 +44,15 @@ from graphrag_code.persisted_graph_doctor import (
     audit_to_json,
 )
 from graphrag_code.persisted_graph_integrity import AmbiguousIndexerError
+from graphrag_code.snapshot_compare import (
+    DEFAULT_DIFF_MAX_ITEMS,
+    DEFAULT_HISTORY_LIMIT,
+    HARD_MAX_DIFF_ITEMS,
+    HARD_MAX_HISTORY_LIMIT,
+    SnapshotCompareError,
+    snapshot_diff as compare_snapshots,
+    snapshot_history as list_snapshot_history,
+)
 
 SCHEMA_VERSION = 1
 DEFAULT_MAX_ITEMS = 100
@@ -74,6 +83,8 @@ TOOL_NAMES = (
     "impact",
     "type_closure",
     "context_pack",
+    "snapshot_history",
+    "snapshot_diff",
 )
 
 
@@ -483,6 +494,95 @@ class GraphMcpSession:
         except ByogReaderLockError as exc:
             raise GraphMcpError(str(exc)) from exc
 
+    def snapshot_history(self, limit: Any = DEFAULT_HISTORY_LIMIT) -> Dict[str, Any]:
+        _reject_non_finite("limit", limit)
+        bound = _require_int(
+            "limit", limit, minimum=1, maximum=HARD_MAX_HISTORY_LIMIT
+        )
+        try:
+            result = list_snapshot_history(
+                self.graph_root,
+                limit=bound,
+                allow_unlocked_legacy=False,
+            )
+            return _envelope(
+                tool="snapshot_history",
+                graph=self.graph_root,
+                snapshot=str(result["current"]),
+                data=result,
+                limits={
+                    "limit": bound,
+                    "hard_max_limit": HARD_MAX_HISTORY_LIMIT,
+                },
+                truncated=_pack_was_truncated(result),
+                total=int(result["total"]),
+                returned=int(result["returned"]),
+            )
+        except ByogReaderLockError as exc:
+            raise GraphMcpError(str(exc)) from exc
+        except (
+            SnapshotCompareError,
+            SnapshotGraphAuditError,
+            PersistedGraphDoctorError,
+            OSError,
+            TypeError,
+            ValueError,
+            KeyError,
+        ) as exc:
+            raise GraphMcpError(str(exc)) from exc
+
+    def snapshot_diff(
+        self,
+        from_snapshot: Any,
+        to_snapshot: Any = "current",
+        max_items: Any = DEFAULT_DIFF_MAX_ITEMS,
+    ) -> Dict[str, Any]:
+        from_ref = _require_str("from_snapshot", from_snapshot)
+        to_ref = _require_str("to_snapshot", to_snapshot)
+        _reject_non_finite("max_items", max_items)
+        bound = _require_int(
+            "max_items", max_items, minimum=1, maximum=HARD_MAX_DIFF_ITEMS
+        )
+        try:
+            result = compare_snapshots(
+                self.graph_root,
+                from_ref,
+                to_ref,
+                max_items=bound,
+                allow_unlocked_legacy=False,
+            )
+            return _envelope(
+                tool="snapshot_diff",
+                graph=self.graph_root,
+                snapshot=str(result["to_snapshot"]),
+                data=result,
+                limits={
+                    "max_items": bound,
+                    "hard_max_items": HARD_MAX_DIFF_ITEMS,
+                },
+                truncated=_pack_was_truncated(result),
+                total=int((result.get("totals") or {}).get("added", 0))
+                + int((result.get("totals") or {}).get("removed", 0))
+                + int((result.get("totals") or {}).get("modified", 0)),
+                returned=sum(
+                    int((table.get(kind) or {}).get("returned", 0))
+                    for table in (result.get("tables") or {}).values()
+                    for kind in ("added", "removed", "modified")
+                ),
+            )
+        except ByogReaderLockError as exc:
+            raise GraphMcpError(str(exc)) from exc
+        except (
+            SnapshotCompareError,
+            SnapshotGraphAuditError,
+            PersistedGraphDoctorError,
+            OSError,
+            TypeError,
+            ValueError,
+            KeyError,
+        ) as exc:
+            raise GraphMcpError(str(exc)) from exc
+
 
 def build_mcp_server(session: GraphMcpSession) -> MCPServer:
     mcp = MCPServer(
@@ -590,6 +690,26 @@ def build_mcp_server(session: GraphMcpSession) -> MCPServer:
             max_type_observations,
             type_depth,
         )
+
+    @mcp.tool(
+        name="snapshot_history",
+        description="Bounded newest-first list of published snapshots for this graph.",
+        annotations=READ_ONLY_TOOL,
+    )
+    def snapshot_history(limit: int = DEFAULT_HISTORY_LIMIT) -> Dict[str, Any]:
+        return session.snapshot_history(limit)
+
+    @mcp.tool(
+        name="snapshot_diff",
+        description="Structural persisted-row diff of two published snapshots.",
+        annotations=READ_ONLY_TOOL,
+    )
+    def snapshot_diff(
+        from_snapshot: str,
+        to_snapshot: str = "current",
+        max_items: int = DEFAULT_DIFF_MAX_ITEMS,
+    ) -> Dict[str, Any]:
+        return session.snapshot_diff(from_snapshot, to_snapshot, max_items)
 
     _forbid_unknown_tool_arguments(mcp)
     return mcp

@@ -119,7 +119,7 @@ definitions are all present; 113 re-exports are reported separately rather
 than inflated into duplicate graph entities. The `sqlparse.split` target named
 by the Rust port is therefore an actual graph entity, not merely a module API
 outside the graph. See `examples/sqlparse/PROVENANCE.md` for the census and
-call-oracle effect. The current full-suite expectation is **1447 passed, 2 xfailed**;
+call-oracle effect. The current full-suite expectation is **1468 passed, 2 xfailed**;
 this 2026-08-14 persisted-integrity doctor update supersedes the earlier 721-passed /
 2026-07-26 gate snapshot. The product CLI is the installable ``graphrag-code``
 console command (`python -m graphrag_code`); source-checkout ``scripts/*.py``
@@ -146,7 +146,16 @@ no legacy reader or publisher that ignores the lock is active; the program
 cannot prove quiescence, because those processes never open the file.
 Automatically touching `.publish.lock` would split the locking domain.
 Immutable checked-in `byog_*` evidence remains on the explicitly unleased
-compatibility path.
+compatibility path. ``graphrag-code snapshot-history`` and
+``snapshot-diff`` (and MCP ``snapshot_history`` / ``snapshot_diff``) list
+or structurally compare retained published snapshots under one shared
+reader lease. This is persisted-row comparison, not semantic
+equivalence. Staging is not history. The CLI is strict by default and
+never creates the lock; staging notices keep the exact count and at most
+20 returned names. Missing fields differ from explicit nulls, and JSON
+booleans differ from numbers. ``--allow-unlocked-legacy`` is CLI-only
+and has no retention guarantee. MCP remains strict and does not expose that
+option. No search, UI, HTTP service, repair, or reindex is added.
 
 **Re-export namespace boundary (2026-07-30):** the 113 non-direct initializer
 bindings are now measured separately from direct definitions: 73 have a unique
