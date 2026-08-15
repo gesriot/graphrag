@@ -71,11 +71,17 @@ canonical persisted fields differ. Staging directories are notices, not
 history. Neither history nor diff accepts graph paths, filesystem paths,
 output paths, or table names.
 
-Each tool call takes a shared advisory lock on the graph-root
-`.publish.lock`, resolves `current` once while that lease is held, and
-stays on that published snapshot for the rest of the call. Cooperating
-publishers and keep-last retention wait until the call releases the
-lock. A managed graph without that regular lock file is rejected during
+Query, context-pack, doctor, and status tools accept an optional
+`snapshot` argument (`current` by default, or one explicit published
+id). Historical reads do not require `snapshot-activate` and do not
+change `current`. Each call takes a shared advisory lock on the
+graph-root `.publish.lock`, pins the selected retained snapshot for the
+rest of the call, and reports that canonical id in the response
+envelope. `current` is resolved exactly once when it is selected; an
+explicit id does not read `current`. Cooperating publishers and
+keep-last retention wait until the call releases the lock. The MCP tool
+set remains exactly 11 read-only tools. `snapshot_history` and
+`snapshot_diff` keep their own reference contracts. A managed graph without that regular lock file is rejected during
 MCP startup. MCP never creates the lock, and neither does the doctor or
 `ByogGraph`. To add the protocol to an existing pre-lock managed graph
 without reindexing, run `graphrag-code adopt-publication-lock` after an
@@ -146,6 +152,20 @@ activation among retained published ids are allowed; existing retention
 continues to protect whichever snapshot is current. Advisory locks
 protect only cooperating processes. This command is intentionally
 absent from MCP.
+
+Query and context-pack commands accept optional
+`--snapshot <id|current>`. Omitting it preserves the existing default
+current/legacy-flat read. `--snapshot current` explicitly selects the
+snapshot named by `current`. An explicit published id reads
+`<graph>/snapshots/<id>` without mutating `current`. Historical reads
+are read-only: they do not activate, publish, retain, repair, or
+reindex. One shared `.publish.lock` lease pins the selected snapshot
+against cooperating keep-last retention for the complete response.
+Explicit query/context selectors require that existing regular lock and
+never create it. Only their omitted-selector CLI compatibility read may
+use pre-lock evidence without a lease; that path has no retention guarantee.
+Advisory locks do not protect against non-cooperating actors. This is not
+natural-language search, a UI, an HTTP service, repair, or reindex.
 
 `index-python`, `index-c`, and `index` accept opt-in `--reuse-unchanged`.
 That is content-addressed whole-snapshot reuse, not per-file delta

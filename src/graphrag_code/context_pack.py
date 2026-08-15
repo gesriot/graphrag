@@ -21,16 +21,25 @@ from __future__ import annotations
 
 import json
 import math
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 import pandas as pd
 import sys
 import typer
 
-from graphrag_code.byog_graph import load_byog  # common loader
+from graphrag_code.snapshot_read import SnapshotReadError, retained_snapshot_read
 
 app = typer.Typer(help="Assemble a context pack for a code symbol from a BYOG graph (entities/rels/tus parquets).")
+
+
+class _ContextPackReadError(ValueError):
+    """Public-API-compatible wrapper that preserves CLI exit severity."""
+
+    def __init__(self, message: str, *, exit_code: int) -> None:
+        super().__init__(message)
+        self.exit_code = exit_code
 
 
 def find_entity(
@@ -401,8 +410,39 @@ def assemble_context_pack(
     max_type_edges: int = 20,
     max_type_observations: int = 5,
     type_depth: int = 1,
+    snapshot: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build a context pack without writing files or process streams."""
+    with _retained_context_pack(
+        symbol,
+        graph,
+        purpose=purpose,
+        max_text_chars=max_text_chars,
+        full_text=full_text,
+        neighbor_text=neighbor_text,
+        max_type_edges=max_type_edges,
+        max_type_observations=max_type_observations,
+        type_depth=type_depth,
+        snapshot=snapshot,
+    ) as data:
+        return data
+
+
+@contextmanager
+def _retained_context_pack(
+    symbol: str,
+    graph: Path,
+    *,
+    purpose: str = "port-to-rust",
+    max_text_chars: int = 300,
+    full_text: bool = False,
+    neighbor_text: bool = True,
+    max_type_edges: int = 20,
+    max_type_observations: int = 5,
+    type_depth: int = 1,
+    snapshot: Optional[str] = None,
+) -> Iterator[Dict[str, Any]]:
+    """Yield one pack while its retained-snapshot lease remains held."""
     if full_text:
         max_text_chars = 0
     if max_type_edges < 0:
@@ -415,12 +455,62 @@ def assemble_context_pack(
         )
 
     try:
-        data = load_byog(graph)
-    except FileNotFoundError as exc:
-        raise FileNotFoundError(
-            f"BYOG not found under {graph}. Run an indexer or bridge first."
-        ) from exc
-    ents, rels, tus = data["entities"], data["relationships"], data["text_units"]
+        with retained_snapshot_read(
+            Path(graph),
+            snapshot,
+            allow_unlocked_managed=True,
+        ) as scope:
+            try:
+                loaded = scope.load_graph()
+            except FileNotFoundError as exc:
+                raise FileNotFoundError(
+                    f"BYOG not found under {graph}. Run an indexer or bridge first."
+                ) from exc
+            data = {
+                "entities": loaded.ents,
+                "relationships": loaded.rels,
+                "text_units": loaded.tus,
+            }
+            if len(loaded.call_observations) > 0:
+                data["call_observations"] = loaded.call_observations
+            ents, rels, tus = (
+                data["entities"],
+                data["relationships"],
+                data["text_units"],
+            )
+            yield _assemble_context_pack_from_tables(
+                symbol,
+                ents,
+                rels,
+                tus,
+                data,
+                graph=Path(graph),
+                purpose=purpose,
+                max_text_chars=max_text_chars,
+                neighbor_text=neighbor_text,
+                max_type_edges=max_type_edges,
+                max_type_observations=max_type_observations,
+                type_depth=type_depth,
+            )
+    except SnapshotReadError as exc:
+        raise _ContextPackReadError(str(exc), exit_code=exc.exit_code) from exc
+
+
+def _assemble_context_pack_from_tables(
+    symbol: str,
+    ents: pd.DataFrame,
+    rels: pd.DataFrame,
+    tus: pd.DataFrame,
+    data: Dict[str, Any],
+    *,
+    graph: Path,
+    purpose: str,
+    max_text_chars: int,
+    neighbor_text: bool,
+    max_type_edges: int,
+    max_type_observations: int,
+    type_depth: int,
+) -> Dict[str, Any]:
 
     lookup_errors: List[str] = []
     ent = find_entity(ents, symbol, errors=lookup_errors)
@@ -942,7 +1032,7 @@ def assemble_context_pack(
         "usage_hint": "Use this pack + the original source of the listed files when prompting an LLM to port the symbol to Rust while preserving exact observable behavior on the golden inputs.",
         "truncation": {
             "max_text_chars": max_text_chars if max_text_chars > 0 else None,
-            "full_text": full_text or max_text_chars <= 0,
+            "full_text": max_text_chars <= 0,
         },
     })
 
@@ -1059,10 +1149,18 @@ def pack(
             "depth > 1 adds transitive type_*_closure sections)"
         ),
     ),
+    snapshot: Optional[str] = typer.Option(
+        None,
+        "--snapshot",
+        help=(
+            "published snapshot id or 'current'. Omit for the default current "
+            "snapshot, or the legacy flat-parquet layout. Does not change current."
+        ),
+    ),
 ):
     """Assemble and print (or save) a context pack for the given symbol."""
     try:
-        data = assemble_context_pack(
+        pack_scope = _retained_context_pack(
             symbol,
             Path(graph),
             purpose=purpose,
@@ -1072,20 +1170,25 @@ def pack(
             max_type_edges=max_type_edges,
             max_type_observations=max_type_observations,
             type_depth=type_depth,
+            snapshot=snapshot,
         )
+        with pack_scope as data:
+            result = json.dumps(data, indent=2, ensure_ascii=False)
+            if output:
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_text(result)
+                typer.echo(f"Wrote context pack to {output}")
+            else:
+                typer.echo(result)
     except FileNotFoundError as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from exc
+    except _ContextPackReadError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(exc.exit_code) from exc
     except ValueError as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from exc
-    result = json.dumps(data, indent=2, ensure_ascii=False)
-    if output:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(result)
-        typer.echo(f"Wrote context pack to {output}")
-    else:
-        typer.echo(result)
 
 
 if __name__ == "__main__":

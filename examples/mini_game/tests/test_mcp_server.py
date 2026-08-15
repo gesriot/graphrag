@@ -630,9 +630,9 @@ def test_one_call_stays_on_pinned_snapshot(tmp_path: Path, monkeypatch: pytest.M
         keep_last=5,
     )
     (graph / "current").write_text(first)
-    import graphrag_code.mcp_server as mcp_mod
+    import graphrag_code.snapshot_read as scope_mod
 
-    real = mcp_mod.resolve_snapshot
+    real = scope_mod.resolve_snapshot
     seen = {"n": 0}
 
     def wrapped(graph_root, snapshot=None):
@@ -642,7 +642,7 @@ def test_one_call_stays_on_pinned_snapshot(tmp_path: Path, monkeypatch: pytest.M
             (Path(graph_root) / "current").write_text(second_dir.name)
         return result
 
-    monkeypatch.setattr(mcp_mod, "resolve_snapshot", wrapped)
+    monkeypatch.setattr(scope_mod, "resolve_snapshot", wrapped)
     session = GraphMcpSession(
         graph,
         configured_indexer="python",
@@ -658,21 +658,21 @@ def test_one_call_stays_on_pinned_snapshot(tmp_path: Path, monkeypatch: pytest.M
 def _mcp_paused_query(graph: str, pinned, resume, q) -> None:
     sys.path.insert(0, str(Path(__file__).parents[3] / "src"))
     from contextlib import contextmanager
-    import graphrag_code.mcp_server as mcp_mod
+    import graphrag_code.snapshot_read as scope_mod
     from graphrag_code.mcp_server import GraphMcpSession
 
-    orig = mcp_mod.graph_read_lease
+    orig = scope_mod.graph_read_lease
 
     @contextmanager
-    def wrapped(root):
-        with orig(root):
+    def wrapped(root, *args, **kwargs):
+        with orig(root, *args, **kwargs):
             pinned.set()
             if not resume.wait(timeout=20):
                 q.put("timeout")
                 return
             yield
 
-    mcp_mod.graph_read_lease = wrapped
+    scope_mod.graph_read_lease = wrapped
     session = GraphMcpSession(
         Path(graph),
         configured_indexer="python",

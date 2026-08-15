@@ -356,7 +356,12 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def read_only_fingerprint(graph_root: Path, snap_dir: Path) -> Dict[str, str]:
+def read_only_fingerprint(
+    graph_root: Path,
+    snap_dir: Path,
+    *,
+    include_current: bool = True,
+) -> Dict[str, str]:
     fingerprint: Dict[str, str] = {}
     try:
         entries = list(Path(snap_dir).iterdir())
@@ -383,19 +388,22 @@ def read_only_fingerprint(graph_root: Path, snap_dir: Path) -> Dict[str, str]:
     fingerprint["snapshot/listing"] = hashlib.sha256(
         "\n".join(listing).encode("utf-8")
     ).hexdigest()
-    pointer = Path(graph_root) / "current"
-    if pointer.is_symlink():
-        try:
-            target = str(pointer.readlink())
-        except OSError as e:
-            raise SnapshotGraphAuditError(f"cannot read symlink {pointer}: {e}") from e
-        fingerprint["graph/current"] = "symlink:" + hashlib.sha256(
-            target.encode("utf-8")
-        ).hexdigest()
-    elif pointer.is_file():
-        fingerprint["graph/current"] = _sha256_file(pointer)
-    else:
-        fingerprint["graph/current"] = "absent"
+    if include_current:
+        pointer = Path(graph_root) / "current"
+        if pointer.is_symlink():
+            try:
+                target = str(pointer.readlink())
+            except OSError as e:
+                raise SnapshotGraphAuditError(
+                    f"cannot read symlink {pointer}: {e}"
+                ) from e
+            fingerprint["graph/current"] = "symlink:" + hashlib.sha256(
+                target.encode("utf-8")
+            ).hexdigest()
+        elif pointer.is_file():
+            fingerprint["graph/current"] = _sha256_file(pointer)
+        else:
+            fingerprint["graph/current"] = "absent"
     snapshots_dir = Path(graph_root) / "snapshots"
     if snapshots_dir.is_symlink():
         try:

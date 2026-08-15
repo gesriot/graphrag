@@ -159,7 +159,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`1491 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`1516 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
@@ -206,6 +206,19 @@ mandatory. It holds one exclusive existing-lock lease, never creates
 `.publish.lock`, and is intentionally absent from the fixed 11-tool MCP
 set. It does not delete, retain, publish, repair, or reindex. Advisory
 locks do not protect against non-cooperating programs.
+Query, context-pack, `graph_status`, and `graph_doctor` accept an
+optional retained-snapshot selector (`--snapshot <id|current>` in the
+CLI; MCP `snapshot="current"` on the existing nine selectable tools).
+Historical reads do not require `snapshot-activate` and do not change
+`current`. One shared `.publish.lock` lease pins the selected snapshot
+against cooperating keep-last retention until the complete response is
+built. `current` is resolved exactly once when selected and is not read
+for an explicit published id. The MCP tool set remains exactly 11.
+Explicit query/context CLI selectors require the existing regular
+publication lock and never create it. Their omitted `--snapshot` path
+keeps the existing default current/legacy-flat pre-lock compatibility
+and has no retention guarantee. This is not natural-language search, an
+HTTP service, repair, reindex, or semantic equivalence.
 
 **Live re-check (2026-07-26):** `538 passed, 2 xfailed`.
 

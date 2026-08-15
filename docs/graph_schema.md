@@ -254,6 +254,39 @@ lock-ignoring actor that mutates protected inputs fails closed with exit 1;
 there remains an unavoidable race against actors that deliberately ignore
 the advisory protocol. Advisory locks protect only cooperating processes.
 
+### Reading a retained snapshot without activating it
+
+Query, context-pack, doctor, and status tools accept an optional selector:
+
+- CLI: `--snapshot <published-id|current>` on `query-symbol`, `callers`,
+  `callees`, `types-used-by`, `type-users`, `type-closure`, `neighbors`,
+  `subgraph`, `dependency-order`, `impact`, `observations`, and
+  `context-pack`.
+- MCP: optional last argument `snapshot: str = "current"` on
+  `graph_status`, `graph_doctor`, `query_symbol`, `callers`, `callees`,
+  `neighbors`, `impact`, `type_closure`, and `context_pack`.
+
+Historical reads do not require `snapshot-activate` and never change
+`current`. Omitting CLI `--snapshot` preserves the existing default
+current or legacy-flat read. `--snapshot current` explicitly selects the
+snapshot named by `current`. An explicit published id is resolved
+strictly beneath `<graph>/snapshots/<id>` without reading `current`.
+Staging ids, traversal, separators, empty values, malformed ids, missing
+snapshots, and symlinked snapshot or core paths fail closed. A legacy
+flat-parquet directory may still be read when the selector is omitted,
+but an explicit retained id fails because it has no retained history.
+
+One shared graph-root `.publish.lock` lease is held across validation,
+resolution, parquet load, and the complete response, so cooperating
+keep-last retention cannot delete the selected snapshot during the
+call. Explicit query/context CLI selectors require that existing regular
+lock and never create it. Only their omitted-selector compatibility path
+may read a pre-lock managed graph without a lease; that path has no
+retention guarantee. MCP remains strict and remains exactly 11 read-only tools.
+`snapshot_history` and `snapshot_diff` keep their own reference
+contracts. This is not activation, publication, retention, repair,
+reindex, natural-language search, or semantic equivalence.
+
 ## Entity Types (code domain, start with these)
 - file
 - module / package

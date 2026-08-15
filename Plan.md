@@ -119,7 +119,7 @@ definitions are all present; 113 re-exports are reported separately rather
 than inflated into duplicate graph entities. The `sqlparse.split` target named
 by the Rust port is therefore an actual graph entity, not merely a module API
 outside the graph. See `examples/sqlparse/PROVENANCE.md` for the census and
-call-oracle effect. The current full-suite expectation is **1491 passed, 2 xfailed**;
+call-oracle effect. The current full-suite expectation is **1516 passed, 2 xfailed**;
 this 2026-08-14 persisted-integrity doctor update supersedes the earlier 721-passed /
 2026-07-26 gate snapshot. The product CLI is the installable ``graphrag-code``
 console command (`python -m graphrag_code`); source-checkout ``scripts/*.py``
@@ -160,8 +160,17 @@ explicit mutating CLI that changes only ``current`` to an
 already-published retained snapshot. Confirmation and
 ``--expected-current`` are mandatory. It requires an already-adopted
 publication lock, never creates that file, and is intentionally absent
-from MCP. Advisory locks do not protect against non-cooperating
-programs. No search, UI, HTTP service, repair, or reindex is added.
+from MCP. Query, context-pack, doctor, and status tools accept an
+optional retained-snapshot selector (``--snapshot`` / MCP ``snapshot``,
+default ``current``). Historical reads do not require activation and do
+not change ``current``. One shared reader lease pins the selected
+published snapshot against cooperating keep-last retention. The existing
+regular lock is required for explicit query/context CLI selectors and is
+never created by them. Their omitted-selector path keeps legacy-flat and
+pre-lock compatibility and has no retention guarantee. MCP remains exactly 11
+read-only tools and stays strict. Advisory locks do not protect against
+non-cooperating programs. No search, UI, HTTP service, repair, or reindex
+is added.
 
 **Re-export namespace boundary (2026-07-30):** the 113 non-direct initializer
 bindings are now measured separately from direct definitions: 73 have a unique

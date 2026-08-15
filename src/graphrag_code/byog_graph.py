@@ -1020,16 +1020,45 @@ class ByogGraph:
             self._load_tables()
 
     def _load_tables(self) -> None:
-        self._snap_base = _resolve_graph_base(self.root)
-        self.ents: pd.DataFrame = pd.read_parquet(self._snap_base / "entities.parquet")
-        self.rels: pd.DataFrame = pd.read_parquet(self._snap_base / "relationships.parquet")
+        self._load_tables_from_base(_resolve_graph_base(self.root))
+
+    @classmethod
+    def _from_resolved_base(cls, snap_dir: Path) -> "ByogGraph":
+        """Load parquet from an already-resolved snapshot directory.
+
+        Does not take a lease and does not consult ``current``. Callers must
+        already hold any required graph-root lease and must have resolved
+        ``snap_dir`` strictly beneath that graph.
+        """
+        obj = cls.__new__(cls)
+        obj.root = Path(snap_dir)
+        obj._load_tables_from_base(Path(snap_dir))
+        return obj
+
+    def _load_tables_from_base(self, base: Path) -> None:
+        self._snap_base = Path(base)
+        # These tables are fully materialized before the read lease is
+        # released.  Synchronous decoding also avoids a Python 3.14/PyArrow
+        # interpreter-shutdown deadlock where a short-lived CLI process exits
+        # while Arrow worker callbacks are still trying to reacquire the GIL.
+        parquet_options = {"use_threads": False}
+        self.ents: pd.DataFrame = pd.read_parquet(
+            self._snap_base / "entities.parquet", **parquet_options
+        )
+        self.rels: pd.DataFrame = pd.read_parquet(
+            self._snap_base / "relationships.parquet", **parquet_options
+        )
         tus_path = self._snap_base / "text_units.parquet"
         self.tus: pd.DataFrame = (
-            pd.read_parquet(tus_path) if tus_path.exists() else pd.DataFrame()
+            pd.read_parquet(tus_path, **parquet_options)
+            if tus_path.exists()
+            else pd.DataFrame()
         )
         obs_path = self._snap_base / "call_observations.parquet"
         self.call_observations: pd.DataFrame = (
-            pd.read_parquet(obs_path) if obs_path.exists() else pd.DataFrame()
+            pd.read_parquet(obs_path, **parquet_options)
+            if obs_path.exists()
+            else pd.DataFrame()
         )
 
         # Precompute for fast resolve

@@ -5,10 +5,11 @@ Local agents and editors can query a single graph selected at startup.
 This is not an indexer, publisher, port-eval surface, HTTP service, or
 semantic-search backend. stdout is MCP protocol traffic only.
 
-Each tool call takes a shared ``.publish.lock`` reader lease, resolves
-``current`` once while the lease is held, pins that snapshot for the rest
-of the call, and reports the snapshot id. Cooperating publishers wait.
-Manual deletion or corruption still returns a controlled error.
+Each tool call takes a shared ``.publish.lock`` reader lease and pins one
+retained snapshot (``current`` by default, or an explicit published id)
+for the rest of the call. Historical reads do not activate or change
+``current``. Cooperating publishers wait. Manual deletion or corruption
+still returns a controlled error.
 """
 from __future__ import annotations
 
@@ -29,21 +30,25 @@ from graphrag_code.byog_graph import (
     DEFAULT_TYPE_CLOSURE_MAX_EDGES,
     DEFAULT_TYPE_CLOSURE_MAX_NODES,
     TYPE_CLOSURE_DIRECTIONS,
-    ByogGraph,
     ByogReaderLockError,
-    graph_read_lease,
 )
-from graphrag_code.byog_snapshot_graph_audit import (
-    SnapshotGraphAuditError,
-    resolve_snapshot,
-)
-from graphrag_code.context_pack import assemble_context_pack
+from graphrag_code.byog_snapshot_graph_audit import SnapshotGraphAuditError
+from graphrag_code.context_pack import _assemble_context_pack_from_tables
 from graphrag_code.persisted_graph_doctor import (
     PersistedGraphDoctorError,
+    _audit_graph_root_unlocked,
     audit_graph_root,
     audit_to_json,
 )
-from graphrag_code.persisted_graph_integrity import AmbiguousIndexerError
+from graphrag_code.snapshot_read import (
+    CURRENT_REF,
+    SnapshotReadError,
+    retained_snapshot_read,
+)
+from graphrag_code.persisted_graph_integrity import (
+    AmbiguousIndexerError,
+    resolve_persisted_indexer,
+)
 from graphrag_code.snapshot_compare import (
     DEFAULT_DIFF_MAX_ITEMS,
     DEFAULT_HISTORY_LIMIT,
@@ -211,48 +216,45 @@ class GraphMcpSession:
         self.resolved_indexer = resolved_indexer
         self.preflight = dict(preflight)
 
-    def pin(self) -> Tuple[Path, str, Dict[str, Any]]:
+    def _scope(self, snapshot: Any):
+        ref = _require_str("snapshot", snapshot)
         try:
-            snap_dir, snap_id, manifest = resolve_snapshot(self.graph_root, None)
-        except SnapshotGraphAuditError as exc:
-            raise GraphMcpError(str(exc)) from exc
-        except OSError as exc:
-            raise GraphMcpError(
-                f"cannot resolve published snapshot under {self.graph_root}: {exc}"
-            ) from exc
-        if snap_id is None or not isinstance(manifest, Mapping):
-            raise GraphMcpError(
-                f"graph has no published current snapshot: {self.graph_root}"
+            return retained_snapshot_read(
+                self.graph_root,
+                ref,
+                allow_unlocked_managed=False,
             )
-        return Path(snap_dir), str(snap_id), dict(manifest)
+        except SnapshotReadError as exc:
+            raise GraphMcpError(str(exc)) from exc
 
-    def _graph(self, snap_dir: Path) -> ByogGraph:
+    def graph_status(self, snapshot: Any = CURRENT_REF) -> Dict[str, Any]:
         try:
-            return ByogGraph(snap_dir)
-        except FileNotFoundError as exc:
-            raise GraphMcpError(
-                f"pinned snapshot is no longer readable: {exc}"
-            ) from exc
-        except OSError as exc:
-            raise GraphMcpError(
-                f"pinned snapshot is no longer readable: {exc}"
-            ) from exc
-
-    def graph_status(self) -> Dict[str, Any]:
-        try:
-            with graph_read_lease(self.graph_root):
-                _snap_dir, snap_id, manifest = self.pin()
+            with self._scope(snapshot) as scope:
+                if scope.snap_id is None or not isinstance(scope.manifest, Mapping):
+                    raise GraphMcpError(
+                        f"graph has no published snapshot for {snapshot!r}"
+                    )
+                manifest = scope.manifest
                 index_input = manifest.get("index_input")
                 reuse_supported = None
                 index_input_present = isinstance(index_input, Mapping)
                 if index_input_present:
                     reuse_supported = bool(index_input.get("reuse_supported"))
+                loaded = scope.load_graph()
+                selected_indexer, selected_resolution = resolve_persisted_indexer(
+                    self.configured_indexer,
+                    loaded.ents,
+                    loaded.rels,
+                    loaded.tus,
+                    loaded.call_observations,
+                    manifest,
+                )
                 data = {
                     "graph": str(self.graph_root),
-                    "snapshot": snap_id,
-                    "indexer": self.resolved_indexer,
+                    "snapshot": scope.snap_id,
+                    "indexer": selected_indexer,
                     "indexer_configured": self.configured_indexer,
-                    "indexer_resolution": dict(self.preflight.get("indexer_resolution") or {}),
+                    "indexer_resolution": selected_resolution,
                     "schema_version": manifest.get("schema_version"),
                     "counts": manifest.get("counts"),
                     "files": manifest.get("files"),
@@ -262,13 +264,21 @@ class GraphMcpSession:
                 return _envelope(
                     tool="graph_status",
                     graph=self.graph_root,
-                    snapshot=snap_id,
+                    snapshot=scope.snap_id,
                     data=data,
                 )
-        except ByogReaderLockError as exc:
+        except (
+            AmbiguousIndexerError,
+            ByogReaderLockError,
+            SnapshotReadError,
+        ) as exc:
             raise GraphMcpError(str(exc)) from exc
 
-    def graph_doctor(self, max_anomaly_samples: Any = DEFAULT_MAX_ANOMALY_SAMPLES) -> Dict[str, Any]:
+    def graph_doctor(
+        self,
+        max_anomaly_samples: Any = DEFAULT_MAX_ANOMALY_SAMPLES,
+        snapshot: Any = CURRENT_REF,
+    ) -> Dict[str, Any]:
         _reject_non_finite("max_anomaly_samples", max_anomaly_samples)
         samples = _require_int(
             "max_anomaly_samples",
@@ -277,24 +287,31 @@ class GraphMcpSession:
             maximum=HARD_MAX_ANOMALY_SAMPLES,
         )
         try:
-            report = audit_graph_root(
-                self.graph_root,
-                indexer=self.resolved_indexer,
-                max_anomaly_samples=samples,
-                allow_unlocked_managed=False,
-            )
-            snap_id = str(report["snapshot"])
-            data = json.loads(audit_to_json(report))
-            return _envelope(
-                tool="graph_doctor",
-                graph=self.graph_root,
-                snapshot=snap_id,
-                data=data,
-                limits={"max_anomaly_samples": samples},
-            )
+            with self._scope(snapshot) as scope:
+                if scope.snap_id is None:
+                    raise GraphMcpError(
+                        f"graph has no published snapshot for {snapshot!r}"
+                    )
+                report = _audit_graph_root_unlocked(
+                    self.graph_root,
+                    indexer=self.configured_indexer,
+                    snapshot=scope.snap_id,
+                    max_anomaly_samples=samples,
+                    include_current=snapshot == CURRENT_REF,
+                )
+                snap_id = str(report["snapshot"])
+                data = json.loads(audit_to_json(report))
+                return _envelope(
+                    tool="graph_doctor",
+                    graph=self.graph_root,
+                    snapshot=snap_id,
+                    data=data,
+                    limits={"max_anomaly_samples": samples},
+                )
         except (
             PersistedGraphDoctorError,
             SnapshotGraphAuditError,
+            SnapshotReadError,
             AmbiguousIndexerError,
             OSError,
             TypeError,
@@ -303,75 +320,112 @@ class GraphMcpSession:
         ) as exc:
             raise GraphMcpError(str(exc)) from exc
 
-    def query_symbol(self, symbol: Any) -> Dict[str, Any]:
+    def query_symbol(self, symbol: Any, snapshot: Any = CURRENT_REF) -> Dict[str, Any]:
         title = _require_str("symbol", symbol)
         try:
-            with graph_read_lease(self.graph_root):
-                _snap_dir, snap_id, _manifest = self.pin()
-                graph = self._graph(_snap_dir)
+            with self._scope(snapshot) as scope:
+                if scope.snap_id is None:
+                    raise GraphMcpError(
+                        f"graph has no published snapshot for {snapshot!r}"
+                    )
+                graph = scope.load_graph()
                 return _envelope(
                     tool="query_symbol",
                     graph=self.graph_root,
-                    snapshot=snap_id,
+                    snapshot=scope.snap_id,
                     data=graph.symbol(title),
                 )
-        except ByogReaderLockError as exc:
+        except (ByogReaderLockError, SnapshotReadError) as exc:
             raise GraphMcpError(str(exc)) from exc
 
-    def callers(self, symbol: Any, max_items: Any = DEFAULT_MAX_ITEMS) -> Dict[str, Any]:
-        return self._symbol_list("callers", symbol, max_items, lambda g, title: g.callers(title))
+    def callers(
+        self,
+        symbol: Any,
+        max_items: Any = DEFAULT_MAX_ITEMS,
+        snapshot: Any = CURRENT_REF,
+    ) -> Dict[str, Any]:
+        return self._symbol_list(
+            "callers", symbol, max_items, lambda g, title: g.callers(title), snapshot
+        )
 
-    def callees(self, symbol: Any, max_items: Any = DEFAULT_MAX_ITEMS) -> Dict[str, Any]:
-        return self._symbol_list("callees", symbol, max_items, lambda g, title: g.callees(title))
+    def callees(
+        self,
+        symbol: Any,
+        max_items: Any = DEFAULT_MAX_ITEMS,
+        snapshot: Any = CURRENT_REF,
+    ) -> Dict[str, Any]:
+        return self._symbol_list(
+            "callees", symbol, max_items, lambda g, title: g.callees(title), snapshot
+        )
 
-    def impact(self, symbol: Any, max_items: Any = DEFAULT_MAX_ITEMS) -> Dict[str, Any]:
-        return self._symbol_list("impact", symbol, max_items, lambda g, title: g.impact(title))
+    def impact(
+        self,
+        symbol: Any,
+        max_items: Any = DEFAULT_MAX_ITEMS,
+        snapshot: Any = CURRENT_REF,
+    ) -> Dict[str, Any]:
+        return self._symbol_list(
+            "impact", symbol, max_items, lambda g, title: g.impact(title), snapshot
+        )
 
-    def _symbol_list(self, tool: str, symbol: Any, max_items: Any, fn) -> Dict[str, Any]:
+    def _symbol_list(
+        self, tool: str, symbol: Any, max_items: Any, fn, snapshot: Any = CURRENT_REF
+    ) -> Dict[str, Any]:
         title = _require_str("symbol", symbol)
         _reject_non_finite("max_items", max_items)
         limit = _require_int("max_items", max_items, minimum=1, maximum=HARD_MAX_ITEMS)
         try:
-            with graph_read_lease(self.graph_root):
-                snap_dir, snap_id, _manifest = self.pin()
+            with self._scope(snapshot) as scope:
+                if scope.snap_id is None:
+                    raise GraphMcpError(
+                        f"graph has no published snapshot for {snapshot!r}"
+                    )
                 items, total, returned, truncated = _truncate_list(
-                    fn(self._graph(snap_dir), title), limit
+                    fn(scope.load_graph(), title), limit
                 )
                 return _envelope(
                     tool=tool,
                     graph=self.graph_root,
-                    snapshot=snap_id,
+                    snapshot=scope.snap_id,
                     data=items,
                     limits={"max_items": limit},
                     truncated=truncated,
                     total=total,
                     returned=returned,
                 )
-        except ByogReaderLockError as exc:
+        except (ByogReaderLockError, SnapshotReadError) as exc:
             raise GraphMcpError(str(exc)) from exc
 
-    def neighbors(self, symbol: Any, max_items: Any = DEFAULT_MAX_ITEMS) -> Dict[str, Any]:
+    def neighbors(
+        self,
+        symbol: Any,
+        max_items: Any = DEFAULT_MAX_ITEMS,
+        snapshot: Any = CURRENT_REF,
+    ) -> Dict[str, Any]:
         title = _require_str("symbol", symbol)
         _reject_non_finite("max_items", max_items)
         limit = _require_int("max_items", max_items, minimum=1, maximum=HARD_MAX_ITEMS)
         try:
-            with graph_read_lease(self.graph_root):
-                snap_dir, snap_id, _manifest = self.pin()
-                raw = self._graph(snap_dir).neighbors(title)
+            with self._scope(snapshot) as scope:
+                if scope.snap_id is None:
+                    raise GraphMcpError(
+                        f"graph has no published snapshot for {snapshot!r}"
+                    )
+                raw = scope.load_graph().neighbors(title)
                 incoming, in_total, in_ret, in_trunc = _truncate_list(raw.get("incoming") or [], limit)
                 outgoing, out_total, out_ret, out_trunc = _truncate_list(raw.get("outgoing") or [], limit)
                 truncated = in_trunc or out_trunc
                 return _envelope(
                     tool="neighbors",
                     graph=self.graph_root,
-                    snapshot=snap_id,
+                    snapshot=scope.snap_id,
                     data={"incoming": incoming, "outgoing": outgoing},
                     limits={"max_items": limit},
                     truncated=truncated,
                     total=in_total + out_total,
                     returned=in_ret + out_ret,
                 )
-        except ByogReaderLockError as exc:
+        except (ByogReaderLockError, SnapshotReadError) as exc:
             raise GraphMcpError(str(exc)) from exc
 
     def type_closure(
@@ -381,6 +435,7 @@ class GraphMcpSession:
         max_depth: Any = DEFAULT_TYPE_CLOSURE_MAX_DEPTH,
         max_nodes: Any = DEFAULT_TYPE_CLOSURE_MAX_NODES,
         max_edges: Any = DEFAULT_TYPE_CLOSURE_MAX_EDGES,
+        snapshot: Any = CURRENT_REF,
     ) -> Dict[str, Any]:
         title = _require_str("symbol", symbol)
         if not isinstance(direction, str) or direction not in TYPE_CLOSURE_DIRECTIONS:
@@ -397,10 +452,13 @@ class GraphMcpSession:
         nodes = _require_int("max_nodes", max_nodes, minimum=0, maximum=HARD_MAX_CLOSURE_NODES)
         edges = _require_int("max_edges", max_edges, minimum=0, maximum=HARD_MAX_CLOSURE_EDGES)
         try:
-            with graph_read_lease(self.graph_root):
-                snap_dir, snap_id, _manifest = self.pin()
+            with self._scope(snapshot) as scope:
+                if scope.snap_id is None:
+                    raise GraphMcpError(
+                        f"graph has no published snapshot for {snapshot!r}"
+                    )
                 try:
-                    result = self._graph(snap_dir).type_closure(
+                    result = scope.load_graph().type_closure(
                         title,
                         direction=direction,
                         max_depth=depth,
@@ -413,7 +471,7 @@ class GraphMcpSession:
                 return _envelope(
                     tool="type_closure",
                     graph=self.graph_root,
-                    snapshot=snap_id,
+                    snapshot=scope.snap_id,
                     data=result,
                     limits={
                         "max_depth": depth,
@@ -422,7 +480,7 @@ class GraphMcpSession:
                     },
                     truncated=truncated,
                 )
-        except ByogReaderLockError as exc:
+        except (ByogReaderLockError, SnapshotReadError) as exc:
             raise GraphMcpError(str(exc)) from exc
 
     def context_pack(
@@ -434,6 +492,7 @@ class GraphMcpSession:
         max_type_edges: Any = 20,
         max_type_observations: Any = 5,
         type_depth: Any = 1,
+        snapshot: Any = CURRENT_REF,
     ) -> Dict[str, Any]:
         title = _require_str("symbol", symbol)
         purpose_s = _require_str("purpose", purpose)
@@ -456,15 +515,29 @@ class GraphMcpSession:
         )
         depth = _require_int("type_depth", type_depth, minimum=1, maximum=HARD_MAX_TYPE_DEPTH)
         try:
-            with graph_read_lease(self.graph_root):
-                snap_dir, snap_id, _manifest = self.pin()
+            with self._scope(snapshot) as scope:
+                if scope.snap_id is None:
+                    raise GraphMcpError(
+                        f"graph has no published snapshot for {snapshot!r}"
+                    )
                 try:
-                    pack = assemble_context_pack(
+                    loaded = scope.load_graph()
+                    tables = {
+                        "entities": loaded.ents,
+                        "relationships": loaded.rels,
+                        "text_units": loaded.tus,
+                    }
+                    if len(loaded.call_observations) > 0:
+                        tables["call_observations"] = loaded.call_observations
+                    pack = _assemble_context_pack_from_tables(
                         title,
-                        snap_dir,
+                        loaded.ents,
+                        loaded.rels,
+                        loaded.tus,
+                        tables,
+                        graph=self.graph_root,
                         purpose=purpose_s,
                         max_text_chars=text_chars,
-                        full_text=False,
                         neighbor_text=neighbor,
                         max_type_edges=type_edges,
                         max_type_observations=type_obs,
@@ -480,7 +553,7 @@ class GraphMcpSession:
                 return _envelope(
                     tool="context_pack",
                     graph=self.graph_root,
-                    snapshot=snap_id,
+                    snapshot=scope.snap_id,
                     data=pack,
                     limits={
                         "max_text_chars": text_chars,
@@ -491,7 +564,7 @@ class GraphMcpSession:
                     },
                     truncated=truncated,
                 )
-        except ByogReaderLockError as exc:
+        except (ByogReaderLockError, SnapshotReadError) as exc:
             raise GraphMcpError(str(exc)) from exc
 
     def snapshot_history(self, limit: Any = DEFAULT_HISTORY_LIMIT) -> Dict[str, Any]:
@@ -600,8 +673,8 @@ def build_mcp_server(session: GraphMcpSession) -> MCPServer:
         description="Read-only snapshot and indexer status.",
         annotations=READ_ONLY_TOOL,
     )
-    def graph_status() -> Dict[str, Any]:
-        return session.graph_status()
+    def graph_status(snapshot: str = CURRENT_REF) -> Dict[str, Any]:
+        return session.graph_status(snapshot)
 
     @mcp.tool(
         name="graph_doctor",
@@ -610,48 +683,65 @@ def build_mcp_server(session: GraphMcpSession) -> MCPServer:
     )
     def graph_doctor(
         max_anomaly_samples: int = DEFAULT_MAX_ANOMALY_SAMPLES,
+        snapshot: str = CURRENT_REF,
     ) -> Dict[str, Any]:
-        return session.graph_doctor(max_anomaly_samples)
+        return session.graph_doctor(max_anomaly_samples, snapshot)
 
     @mcp.tool(
         name="query_symbol",
         description="Look up one graph entity by title or unique partial.",
         annotations=READ_ONLY_TOOL,
     )
-    def query_symbol(symbol: str) -> Dict[str, Any]:
-        return session.query_symbol(symbol)
+    def query_symbol(symbol: str, snapshot: str = CURRENT_REF) -> Dict[str, Any]:
+        return session.query_symbol(symbol, snapshot)
 
     @mcp.tool(
         name="callers",
         description="Direct callers of a symbol.",
         annotations=READ_ONLY_TOOL,
     )
-    def callers(symbol: str, max_items: int = DEFAULT_MAX_ITEMS) -> Dict[str, Any]:
-        return session.callers(symbol, max_items)
+    def callers(
+        symbol: str,
+        max_items: int = DEFAULT_MAX_ITEMS,
+        snapshot: str = CURRENT_REF,
+    ) -> Dict[str, Any]:
+        return session.callers(symbol, max_items, snapshot)
 
     @mcp.tool(
         name="callees",
         description="Direct callees of a symbol.",
         annotations=READ_ONLY_TOOL,
     )
-    def callees(symbol: str, max_items: int = DEFAULT_MAX_ITEMS) -> Dict[str, Any]:
-        return session.callees(symbol, max_items)
+    def callees(
+        symbol: str,
+        max_items: int = DEFAULT_MAX_ITEMS,
+        snapshot: str = CURRENT_REF,
+    ) -> Dict[str, Any]:
+        return session.callees(symbol, max_items, snapshot)
 
     @mcp.tool(
         name="neighbors",
         description="Incoming and outgoing neighbors of a symbol.",
         annotations=READ_ONLY_TOOL,
     )
-    def neighbors(symbol: str, max_items: int = DEFAULT_MAX_ITEMS) -> Dict[str, Any]:
-        return session.neighbors(symbol, max_items)
+    def neighbors(
+        symbol: str,
+        max_items: int = DEFAULT_MAX_ITEMS,
+        snapshot: str = CURRENT_REF,
+    ) -> Dict[str, Any]:
+        return session.neighbors(symbol, max_items, snapshot)
 
     @mcp.tool(
         name="impact",
         description="Cycle-safe transitive callers of a symbol.",
         annotations=READ_ONLY_TOOL,
     )
-    def impact(symbol: str, max_items: int = DEFAULT_MAX_ITEMS) -> Dict[str, Any]:
-        return session.impact(symbol, max_items)
+    def impact(
+        symbol: str,
+        max_items: int = DEFAULT_MAX_ITEMS,
+        snapshot: str = CURRENT_REF,
+    ) -> Dict[str, Any]:
+        return session.impact(symbol, max_items, snapshot)
 
     @mcp.tool(
         name="type_closure",
@@ -664,8 +754,11 @@ def build_mcp_server(session: GraphMcpSession) -> MCPServer:
         max_depth: int = DEFAULT_TYPE_CLOSURE_MAX_DEPTH,
         max_nodes: int = DEFAULT_TYPE_CLOSURE_MAX_NODES,
         max_edges: int = DEFAULT_TYPE_CLOSURE_MAX_EDGES,
+        snapshot: str = CURRENT_REF,
     ) -> Dict[str, Any]:
-        return session.type_closure(symbol, direction, max_depth, max_nodes, max_edges)
+        return session.type_closure(
+            symbol, direction, max_depth, max_nodes, max_edges, snapshot
+        )
 
     @mcp.tool(
         name="context_pack",
@@ -680,6 +773,7 @@ def build_mcp_server(session: GraphMcpSession) -> MCPServer:
         max_type_edges: int = 20,
         max_type_observations: int = 5,
         type_depth: int = 1,
+        snapshot: str = CURRENT_REF,
     ) -> Dict[str, Any]:
         return session.context_pack(
             symbol,
@@ -689,6 +783,7 @@ def build_mcp_server(session: GraphMcpSession) -> MCPServer:
             max_type_edges,
             max_type_observations,
             type_depth,
+            snapshot,
         )
 
     @mcp.tool(

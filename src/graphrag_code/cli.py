@@ -103,6 +103,38 @@ def _graph_opt() -> Any:
     )
 
 
+def _snapshot_opt() -> Any:
+    return typer.Option(
+        None,
+        "--snapshot",
+        help=(
+            "published snapshot id or 'current'. Omit for the default current "
+            "snapshot, or the legacy flat-parquet layout. Explicit ids never "
+            "change current. Unlocked compatibility reads have no retention "
+            "guarantee."
+        ),
+    )
+
+
+def _append_snapshot(args: list[str], snapshot: Optional[str]) -> list[str]:
+    if snapshot is not None:
+        args.extend(["--snapshot", snapshot])
+    return args
+
+
+def _json_query(graph: Path, snapshot: Optional[str], fn) -> None:
+    from graphrag_code.snapshot_read import SnapshotReadError, retained_snapshot_read
+
+    try:
+        with retained_snapshot_read(
+            graph, snapshot, allow_unlocked_managed=True
+        ) as scope:
+            _print_json(fn(scope.load_graph()))
+    except SnapshotReadError as error:
+        sys.stderr.write(f"graphrag-code: {error}\n")
+        raise SystemExit(error.exit_code) from error
+
+
 # ---------------------------------------------------------------------------
 # Index
 # ---------------------------------------------------------------------------
@@ -191,6 +223,7 @@ def index(
 def query_symbol(
     symbol: str = typer.Argument(..., help="Symbol title or partial (e.g. parse_duration)"),
     graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
     json_out: bool = typer.Option(False, "--json", help="Machine-readable JSON (same shape as graph_query symbol)"),
 ):
     """Look up a symbol in the graph (delegates to graph_query.py symbol)."""
@@ -198,7 +231,7 @@ def query_symbol(
     # --json keeps that machine shape; default is a short human view of the same data.
     res = _delegate(
         "graph_query.py",
-        ["symbol", symbol, "--graph", str(graph)],
+        _append_snapshot(["symbol", symbol, "--graph", str(graph)], snapshot),
         capture=True,
     )
     assert isinstance(res, subprocess.CompletedProcess)
@@ -234,40 +267,45 @@ def query_symbol(
 def callers(
     symbol: str = typer.Argument(...),
     graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
     json_out: bool = typer.Option(False, "--json"),
 ):
     """Who calls this symbol (graph_query.py callers)."""
     if not json_out:
-        _delegate("graph_query.py", ["callers", symbol, "--graph", str(graph)])
+        _delegate(
+            "graph_query.py",
+            _append_snapshot(["callers", symbol, "--graph", str(graph)], snapshot),
+        )
         return
-    from graphrag_code.byog_graph import ByogGraph
-
-    _print_json(ByogGraph(graph).callers(symbol))
+    _json_query(graph, snapshot, lambda g: g.callers(symbol))
 
 
 @app.command("callees")
 def callees(
     symbol: str = typer.Argument(...),
     graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
     json_out: bool = typer.Option(False, "--json"),
 ):
     """What this symbol calls (graph_query.py callees)."""
     if not json_out:
-        _delegate("graph_query.py", ["callees", symbol, "--graph", str(graph)])
+        _delegate(
+            "graph_query.py",
+            _append_snapshot(["callees", symbol, "--graph", str(graph)], snapshot),
+        )
         return
-    from graphrag_code.byog_graph import ByogGraph
-
-    _print_json(ByogGraph(graph).callees(symbol))
+    _json_query(graph, snapshot, lambda g: g.callees(symbol))
 
 
 @app.command("types-used-by")
 def types_used_by(
     symbol: str = typer.Argument(...),
     graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
     json_out: bool = typer.Option(False, "--json"),
 ):
     """Outgoing uses_type targets (graph_query.py types-used-by)."""
-    args = ["types-used-by", symbol, "--graph", str(graph)]
+    args = _append_snapshot(["types-used-by", symbol, "--graph", str(graph)], snapshot)
     if json_out:
         args.append("--json")
     _delegate("graph_query.py", args)
@@ -277,10 +315,11 @@ def types_used_by(
 def type_users(
     symbol: str = typer.Argument(...),
     graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
     json_out: bool = typer.Option(False, "--json"),
 ):
     """Incoming uses_type sources (graph_query.py type-users)."""
-    args = ["type-users", symbol, "--graph", str(graph)]
+    args = _append_snapshot(["type-users", symbol, "--graph", str(graph)], snapshot)
     if json_out:
         args.append("--json")
     _delegate("graph_query.py", args)
@@ -290,6 +329,7 @@ def type_users(
 def type_closure(
     symbol: str = typer.Argument(...),
     graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
     direction: str = typer.Option(
         "dependencies",
         "--direction",
@@ -301,20 +341,23 @@ def type_closure(
     json_out: bool = typer.Option(False, "--json"),
 ):
     """Bounded cycle-safe transitive uses_type closure (graph_query.py type-closure)."""
-    args = [
-        "type-closure",
-        symbol,
-        "--graph",
-        str(graph),
-        "--direction",
-        direction,
-        "--max-depth",
-        str(max_depth),
-        "--max-nodes",
-        str(max_nodes),
-        "--max-edges",
-        str(max_edges),
-    ]
+    args = _append_snapshot(
+        [
+            "type-closure",
+            symbol,
+            "--graph",
+            str(graph),
+            "--direction",
+            direction,
+            "--max-depth",
+            str(max_depth),
+            "--max-nodes",
+            str(max_nodes),
+            "--max-edges",
+            str(max_edges),
+        ],
+        snapshot,
+    )
     if json_out:
         args.append("--json")
     _delegate("graph_query.py", args)
@@ -324,21 +367,24 @@ def type_closure(
 def neighbors(
     symbol: str = typer.Argument(...),
     graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
     json_out: bool = typer.Option(False, "--json"),
 ):
     """Incoming/outgoing neighbors of a symbol (graph_query.py neighbors)."""
     if not json_out:
-        _delegate("graph_query.py", ["neighbors", symbol, "--graph", str(graph)])
+        _delegate(
+            "graph_query.py",
+            _append_snapshot(["neighbors", symbol, "--graph", str(graph)], snapshot),
+        )
         return
-    from graphrag_code.byog_graph import ByogGraph
-
-    _print_json(ByogGraph(graph).neighbors(symbol))
+    _json_query(graph, snapshot, lambda g: g.neighbors(symbol))
 
 
 @app.command("subgraph")
 def subgraph(
     symbol: str = typer.Argument(..., help="Symbol or module"),
     graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
     json_out: bool = typer.Option(False, "--json"),
 ):
     """Local subgraph around a symbol — same data as neighbors (no separate pipeline stage).
@@ -348,50 +394,56 @@ def subgraph(
     existing invocation, so this does not invent one.
     """
     if not json_out:
-        _delegate("graph_query.py", ["neighbors", symbol, "--graph", str(graph)])
+        _delegate(
+            "graph_query.py",
+            _append_snapshot(["neighbors", symbol, "--graph", str(graph)], snapshot),
+        )
         return
-    from graphrag_code.byog_graph import ByogGraph
-
-    _print_json(ByogGraph(graph).neighbors(symbol))
+    _json_query(graph, snapshot, lambda g: g.neighbors(symbol))
 
 
 @app.command("dependency-order")
 def dependency_order(
     graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
     json_out: bool = typer.Option(False, "--json"),
 ):
     """Containment-based dependency order (graph_query.py dependency-order)."""
     if not json_out:
-        _delegate("graph_query.py", ["dependency-order", "--graph", str(graph)])
+        _delegate(
+            "graph_query.py",
+            _append_snapshot(["dependency-order", "--graph", str(graph)], snapshot),
+        )
         return
-    from graphrag_code.byog_graph import ByogGraph
-
-    _print_json(ByogGraph(graph).dependency_order())
+    _json_query(graph, snapshot, lambda g: g.dependency_order())
 
 
 @app.command("impact")
 def impact(
     symbol: str = typer.Argument(...),
     graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
     json_out: bool = typer.Option(False, "--json"),
 ):
     """Transitive callers (who would be affected) — graph_query.py impact."""
     if not json_out:
-        _delegate("graph_query.py", ["impact", symbol, "--graph", str(graph)])
+        _delegate(
+            "graph_query.py",
+            _append_snapshot(["impact", symbol, "--graph", str(graph)], snapshot),
+        )
         return
-    from graphrag_code.byog_graph import ByogGraph
-
-    _print_json(ByogGraph(graph).impact(symbol))
+    _json_query(graph, snapshot, lambda g: g.impact(symbol))
 
 
 @app.command("observations")
 def observations(
     query: str = typer.Argument(..., help="Symbol or module"),
     graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
     json_out: bool = typer.Option(False, "--json", help="Same JSON shape as graph_query observations --json"),
 ):
     """Weak/ambiguous call observations (graph_query.py observations)."""
-    args = ["observations", query, "--graph", str(graph)]
+    args = _append_snapshot(["observations", query, "--graph", str(graph)], snapshot)
     if json_out:
         args.append("--json")
     _delegate("graph_query.py", args)
@@ -406,6 +458,7 @@ def observations(
 def context_pack(
     symbol: str = typer.Argument(..., help="Symbol or module title"),
     graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
     purpose: str = typer.Option("port-to-rust", "--purpose", "-p"),
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Write full JSON pack to this path"),
     max_text_chars: int = typer.Option(300, "--max-text-chars"),
@@ -440,21 +493,24 @@ def context_pack(
     Default: short human summary. --json: exact pack JSON from the underlying
     script (field names unchanged).
     """
-    args = [
-        symbol,
-        "--graph",
-        str(graph),
-        "--purpose",
-        purpose,
-        "--max-text-chars",
-        str(max_text_chars),
-        "--max-type-edges",
-        str(max_type_edges),
-        "--max-type-observations",
-        str(max_type_observations),
-        "--type-depth",
-        str(type_depth),
-    ]
+    args = _append_snapshot(
+        [
+            symbol,
+            "--graph",
+            str(graph),
+            "--purpose",
+            purpose,
+            "--max-text-chars",
+            str(max_text_chars),
+            "--max-type-edges",
+            str(max_type_edges),
+            "--max-type-observations",
+            str(max_type_observations),
+            "--type-depth",
+            str(type_depth),
+        ],
+        snapshot,
+    )
     if full_text:
         args.append("--full-text")
     if not neighbor_text:

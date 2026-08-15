@@ -130,8 +130,17 @@ def _lock_fingerprint(graph_root: Path) -> str:
     return "regular:" + digest.hexdigest()
 
 
-def doctor_fingerprint(graph_root: Path, snap_dir: Path) -> Dict[str, str]:
-    fingerprint = read_only_fingerprint(graph_root, snap_dir)
+def doctor_fingerprint(
+    graph_root: Path,
+    snap_dir: Path,
+    *,
+    include_current: bool = True,
+) -> Dict[str, str]:
+    fingerprint = read_only_fingerprint(
+        graph_root,
+        snap_dir,
+        include_current=include_current,
+    )
     fingerprint["graph/publish_lock"] = _lock_fingerprint(graph_root)
     return fingerprint
 
@@ -277,9 +286,25 @@ def _audit_graph_root_unlocked(
     indexer: str,
     snapshot: Optional[str] = None,
     max_anomaly_samples: int = 40,
+    include_current: Optional[bool] = None,
 ) -> Dict[str, Any]:
     snap_dir, snap_id, _ = resolve_snapshot(graph_root, snapshot)
-    before = doctor_fingerprint(graph_root, snap_dir)
+    # An explicit snapshot is independent of the mutable current pointer.
+    # Excluding it from the fingerprint preserves the zero-current-read
+    # contract while still detecting changes to the selected snapshot,
+    # snapshots listing, and publication lock.
+    if include_current is None:
+        include_current = snapshot is None
+    if include_current:
+        # Keep the default call shape compatible with tests and downstream
+        # instrumentation that wrap doctor_fingerprint(graph, snapshot).
+        before = doctor_fingerprint(graph_root, snap_dir)
+    else:
+        before = doctor_fingerprint(
+            graph_root,
+            snap_dir,
+            include_current=False,
+        )
 
     confirmed_dir, confirmed_id, manifest = resolve_snapshot(graph_root, snapshot)
     selection_changed = confirmed_dir != snap_dir or confirmed_id != snap_id
@@ -325,7 +350,14 @@ def _audit_graph_root_unlocked(
         snapshot=snap_id,
     )
     report["publication_notices"] = notices
-    after = doctor_fingerprint(graph_root, snap_dir)
+    if include_current:
+        after = doctor_fingerprint(graph_root, snap_dir)
+    else:
+        after = doctor_fingerprint(
+            graph_root,
+            snap_dir,
+            include_current=False,
+        )
     changed = sorted(name for name in before if before[name] != after.get(name))
     extra_after = sorted(name for name in after if name not in before)
     changed.extend(extra_after)
@@ -334,7 +366,11 @@ def _audit_graph_root_unlocked(
     changed = sorted(set(changed))
     report["read_only_verification"] = {
         "verified": not changed,
-        "method": "sha256 of snapshot files, current, snapshots listing, and publish lock",
+        "method": (
+            "sha256 of snapshot files, current, snapshots listing, and publish lock"
+            if include_current
+            else "sha256 of snapshot files, snapshots listing, and publish lock"
+        ),
         "inputs": sorted(before),
         "changed_inputs": changed,
         "fingerprint": dict(sorted(after.items())),

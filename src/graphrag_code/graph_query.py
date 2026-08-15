@@ -26,8 +26,9 @@ Example:
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Iterator, List, Dict, Any, Optional
 
 import pandas as pd
 import sys
@@ -41,8 +42,41 @@ from graphrag_code.byog_graph import (  # re-export for backward compat
     compute_uses_type_closure,
     load_graph,
 )
+from graphrag_code.snapshot_read import (
+    SnapshotReadError,
+    retained_snapshot_read,
+)
 
 app = typer.Typer(help="Local BYOG graph queries (callers, callees, impact, etc.)")
+
+
+def _graph_opt() -> Any:
+    return typer.Option(Path("byog_mini_game"), "--graph")
+
+
+def _snapshot_opt() -> Any:
+    return typer.Option(
+        None,
+        "--snapshot",
+        help=(
+            "published snapshot id or 'current'. Omit for the default current "
+            "snapshot, or the legacy flat-parquet layout. Explicit ids never "
+            "change current. Unlocked compatibility reads have no retention "
+            "guarantee."
+        ),
+    )
+
+
+@contextmanager
+def _scoped_graph(graph: Path, snapshot: Optional[str]) -> Iterator[ByogGraph]:
+    try:
+        with retained_snapshot_read(
+            graph, snapshot, allow_unlocked_managed=True
+        ) as scope:
+            yield scope.load_graph()
+    except SnapshotReadError as error:
+        typer.secho(str(error), fg=typer.colors.RED, err=True)
+        raise typer.Exit(error.exit_code) from error
 
 
 def _resolve_symbol(ents: pd.DataFrame, query: str) -> str | None:
@@ -250,51 +284,62 @@ def symbol_lookup(ents: pd.DataFrame, query: str) -> Dict[str, Any] | None:
 
 
 @app.command("callers")
-def cli_callers(symbol: str, graph: Path = typer.Option(Path("byog_mini_game"), "--graph")):
-    g = ByogGraph(graph)
-    print("\n".join(g.callers(symbol)))
+def cli_callers(
+    symbol: str,
+    graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
+):
+    with _scoped_graph(graph, snapshot) as g:
+        print("\n".join(g.callers(symbol)))
 
 
 @app.command("callees")
-def cli_callees(symbol: str, graph: Path = typer.Option(Path("byog_mini_game"), "--graph")):
-    g = ByogGraph(graph)
-    print("\n".join(g.callees(symbol)))
+def cli_callees(
+    symbol: str,
+    graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
+):
+    with _scoped_graph(graph, snapshot) as g:
+        print("\n".join(g.callees(symbol)))
 
 
 @app.command("types-used-by")
 def cli_types_used_by(
     symbol: str,
-    graph: Path = typer.Option(Path("byog_mini_game"), "--graph"),
+    graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
     json_output: bool = typer.Option(False, "--json"),
 ):
     """Outgoing uses_type targets for a symbol (configured type-use overlay)."""
-    g = ByogGraph(graph)
-    result = g.types_used_by(symbol)
-    if json_output:
-        print(json.dumps(result, indent=2, ensure_ascii=False))
-    else:
-        print("\n".join(result))
+    with _scoped_graph(graph, snapshot) as g:
+        result = g.types_used_by(symbol)
+        if json_output:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        else:
+            print("\n".join(result))
 
 
 @app.command("type-users")
 def cli_type_users(
     symbol: str,
-    graph: Path = typer.Option(Path("byog_mini_game"), "--graph"),
+    graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
     json_output: bool = typer.Option(False, "--json"),
 ):
     """Incoming uses_type sources for a type/symbol (configured type-use overlay)."""
-    g = ByogGraph(graph)
-    result = g.type_users(symbol)
-    if json_output:
-        print(json.dumps(result, indent=2, ensure_ascii=False))
-    else:
-        print("\n".join(result))
+    with _scoped_graph(graph, snapshot) as g:
+        result = g.type_users(symbol)
+        if json_output:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        else:
+            print("\n".join(result))
 
 
 @app.command("type-closure")
 def cli_type_closure(
     symbol: str,
-    graph: Path = typer.Option(Path("byog_mini_game"), "--graph"),
+    graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
     direction: str = typer.Option(
         "dependencies",
         "--direction",
@@ -319,58 +364,74 @@ def cli_type_closure(
 ):
     """Bounded cycle-safe transitive uses_type closure (consumer-only)."""
     try:
-        g = ByogGraph(graph)
-        result = g.type_closure(
-            symbol,
-            direction=direction,
-            max_depth=max_depth,
-            max_nodes=max_nodes,
-            max_edges=max_edges,
-        )
+        with _scoped_graph(graph, snapshot) as g:
+            result = g.type_closure(
+                symbol,
+                direction=direction,
+                max_depth=max_depth,
+                max_nodes=max_nodes,
+                max_edges=max_edges,
+            )
+            if json_output:
+                print(json.dumps(result, indent=2, ensure_ascii=False))
+            else:
+                print(format_type_closure_human(result))
     except ValueError as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from e
-    if json_output:
-        print(json.dumps(result, indent=2, ensure_ascii=False))
-    else:
-        print(format_type_closure_human(result))
 
 
 @app.command("neighbors")
-def cli_neighbors(symbol: str, graph: Path = typer.Option(Path("byog_mini_game"), "--graph")):
-    g = ByogGraph(graph)
-    n = g.neighbors(symbol)
-    print("incoming:", n["incoming"])
-    print("outgoing:", n["outgoing"])
+def cli_neighbors(
+    symbol: str,
+    graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
+):
+    with _scoped_graph(graph, snapshot) as g:
+        n = g.neighbors(symbol)
+        print("incoming:", n["incoming"])
+        print("outgoing:", n["outgoing"])
 
 
 @app.command("dependency-order")
-def cli_dep_order(graph: Path = typer.Option(Path("byog_mini_game"), "--graph")):
-    g = ByogGraph(graph)
-    for t in g.dependency_order():
-        print(t)
+def cli_dep_order(
+    graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
+):
+    with _scoped_graph(graph, snapshot) as g:
+        for t in g.dependency_order():
+            print(t)
 
 
 @app.command("impact")
-def cli_impact(symbol: str, graph: Path = typer.Option(Path("byog_mini_game"), "--graph")):
-    g = ByogGraph(graph)
-    print("\n".join(g.impact(symbol)))
+def cli_impact(
+    symbol: str,
+    graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
+):
+    with _scoped_graph(graph, snapshot) as g:
+        print("\n".join(g.impact(symbol)))
 
 
 @app.command("symbol")
-def cli_symbol(query: str, graph: Path = typer.Option(Path("byog_mini_game"), "--graph")):
-    g = ByogGraph(graph)
-    res = g.symbol(query)
-    if res:
-        print(json.dumps(res, indent=2, ensure_ascii=False))
-    else:
-        print("Not found")
+def cli_symbol(
+    query: str,
+    graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
+):
+    with _scoped_graph(graph, snapshot) as g:
+        res = g.symbol(query)
+        if res:
+            print(json.dumps(res, indent=2, ensure_ascii=False))
+        else:
+            print("Not found")
 
 
 @app.command("observations")
 def cli_observations(
     query: str,
-    graph: Path = typer.Option(Path("byog_mini_game"), "--graph"),
+    graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
     json_output: bool = typer.Option(False, "--json", help="Output machine-readable JSON (for agent loops / diagnostics)"),
 ):
     """Show weak/ambiguous/container call observations for a symbol or module.
@@ -380,30 +441,30 @@ def cli_observations(
 
     Use --json for programmatic consumption by agents.
     """
-    g = ByogGraph(graph)
-    obs = g.observations(query)
-    if json_output:
-        print(json.dumps(obs, indent=2, ensure_ascii=False))
-        return
-    if not obs:
-        print(f"No observations for {query}")
-        return
-    for o in obs:
-        src = o.get("source", "?")
-        tgt = o.get("display_target", "?")
-        conf = o.get("confidence", "?")
-        reason = o.get("reason", "")
-        prov = ""
-        sf = o.get("source_file")
-        sp = o.get("span")
-        if sf:
-            prov = f"{sf}:{sp}" if sp else sf
-        line = f"{src} -> {tgt}  conf={conf}"
-        if reason:
-            line += f"  [{reason}]"
-        print(line)
-        if prov:
-            print(f"    {prov}")
+    with _scoped_graph(graph, snapshot) as g:
+        obs = g.observations(query)
+        if json_output:
+            print(json.dumps(obs, indent=2, ensure_ascii=False))
+            return
+        if not obs:
+            print(f"No observations for {query}")
+            return
+        for o in obs:
+            src = o.get("source", "?")
+            tgt = o.get("display_target", "?")
+            conf = o.get("confidence", "?")
+            reason = o.get("reason", "")
+            prov = ""
+            sf = o.get("source_file")
+            sp = o.get("span")
+            if sf:
+                prov = f"{sf}:{sp}" if sp else sf
+            line = f"{src} -> {tgt}  conf={conf}"
+            if reason:
+                line += f"  [{reason}]"
+            print(line)
+            if prov:
+                print(f"    {prov}")
 
 
 if __name__ == "__main__":

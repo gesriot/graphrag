@@ -153,6 +153,7 @@ def test_wheel_and_sdist_contents(built_wheel_and_sdist):
         assert "graphrag_code/adopt_publication_lock.py" in names
         assert "graphrag_code/snapshot_compare.py" in names
         assert "graphrag_code/snapshot_activate.py" in names
+        assert "graphrag_code/snapshot_read.py" in names
         assert "graphrag_code/doc_claims.json" in names
         assert not any(
             "scripts/" in name
