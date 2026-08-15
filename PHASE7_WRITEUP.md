@@ -159,7 +159,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`1431 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`1447 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
@@ -170,6 +170,21 @@ Cooperating snapshot readers take a shared advisory lock on the
 graph-root `.publish.lock`. MCP rejects managed roots without that regular
 lock file; legacy immutable evidence remains available only through explicitly
 unleased compatibility reads. This is not a distributed lease service.
+`graphrag-code adopt-publication-lock` (also `python -m
+graphrag_code.adopt_publication_lock` and
+`scripts/adopt_publication_lock.py`) is the explicit offline way to add
+that file to a pre-lock managed graph without reindexing. Creating the
+lock requires `--offline-confirmed` because the program cannot see
+legacy readers or publishers that ignore `.publish.lock`. Automatically
+touching the file from MCP or the doctor would be unsafe: it would
+serialize only against lock-aware peers while any still-running pre-lock
+reader stayed unprotected, or a pre-lock publisher could replace
+`current` without waiting. Adoption creates only `<graph>/.publish.lock`
+after a compatibility-mode persisted-integrity doctor; payload, `current`,
+and snapshots stay unchanged unless a separately running actor changes them.
+The JSON result reports that observed pre/post comparison as
+`payload_unchanged`. MCP remains strict. Checked-in `byog_*` roots stay
+unleased until an operator adopts a disposable or operational copy.
 
 **Live re-check (2026-07-26):** `538 passed, 2 xfailed`.
 

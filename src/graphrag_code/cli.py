@@ -12,7 +12,8 @@ Usage:
 
 What this is not: a demonstrated accuracy multiplier for cold porting. The
 Phase 7 ablations showed no graph-vs-raw capability win on bounded library
-slices; this CLI packages the *rails* (index, query, packs, audit, port_eval).
+slices; this CLI packages the *rails* (index, query, packs, audit,
+adopt-publication-lock, port_eval).
 """
 from __future__ import annotations
 
@@ -37,8 +38,8 @@ app = typer.Typer(
     no_args_is_help=True,
     help=(
         "graphrag-code: deterministic code graph → query → context-pack → "
-        "persisted doctor → port-eval. Relative paths are resolved from the "
-        "invoking working directory."
+        "persisted doctor → adopt-publication-lock → port-eval. Relative "
+        "paths are resolved from the invoking working directory."
     ),
 )
 
@@ -48,6 +49,7 @@ _DELEGATE_MODULES = {
     "graph_query.py": "graphrag_code.graph_query",
     "context_pack.py": "graphrag_code.context_pack",
     "persisted_graph_doctor.py": "graphrag_code.persisted_graph_doctor",
+    "adopt_publication_lock.py": "graphrag_code.adopt_publication_lock",
     "audit_call_edges.py": "graphrag_code.audit_call_edges",
     "port_eval.py": "graphrag_code.port_eval",
 }
@@ -551,6 +553,44 @@ def doctor(
     if json_out:
         args.append("--json")
     _delegate("persisted_graph_doctor.py", args)
+
+
+@app.command("adopt-publication-lock")
+def adopt_publication_lock(
+    graph: Path = typer.Option(..., "--graph", "-g", help="Managed BYOG graph root"),
+    indexer: str = typer.Option(
+        ...,
+        "--indexer",
+        help="python, c, or auto (fail closed if persisted evidence is ambiguous)",
+    ),
+    offline_confirmed: bool = typer.Option(
+        False,
+        "--offline-confirmed",
+        help=(
+            "Required to create .publish.lock. Asserts that no legacy reader "
+            "that ignores .publish.lock is active, no legacy publisher or "
+            "retention process that ignores .publish.lock is active, and "
+            "future publishers will use the current lock-aware protocol. "
+            "This program cannot prove those conditions."
+        ),
+    ),
+    json_out: bool = typer.Option(
+        False, "--json", help="same JSON shape as adopt_publication_lock.py --json"
+    ),
+):
+    """Adopt .publish.lock on a pre-lock managed graph without rewriting payload.
+
+    Explicit offline migration, never an automatic MCP or doctor side effect.
+    Creates only <graph>/.publish.lock. Does not reindex, extract, publish,
+    or alter current/snapshots.
+    """
+    lang = indexer.strip().lower()
+    args = ["--graph", str(graph), "--indexer", lang]
+    if offline_confirmed is True:
+        args.append("--offline-confirmed")
+    if json_out is True:
+        args.append("--json")
+    _delegate("adopt_publication_lock.py", args)
 
 
 @app.command("audit-graph")

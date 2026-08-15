@@ -45,6 +45,7 @@ These generic installed commands operate on user-supplied directories:
 - `graphrag-code query-symbol` / `callers` / `callees`
 - `graphrag-code context-pack`
 - `graphrag-code index-python` / `index-c`
+- `graphrag-code adopt-publication-lock --graph <root> --indexer auto --offline-confirmed`
 - `graphrag-code mcp --graph <root> --indexer auto`
 
 `graphrag-code mcp` is a local stdio MCP adapter over one existing graph.
@@ -64,11 +65,31 @@ Each tool call takes a shared advisory lock on the graph-root
 stays on that published snapshot for the rest of the call. Cooperating
 publishers and keep-last retention wait until the call releases the
 lock. A managed graph without that regular lock file is rejected during
-MCP startup; republish/reindex it before serving. This is not a distributed
-lease service and does not protect against tools that ignore `.publish.lock`.
-Manual deletion or corruption still returns a controlled error. This is
-agent access to a local graph, not a UI, HTTP service, or semantic search
-backend.
+MCP startup. MCP never creates the lock, and neither does the doctor or
+`ByogGraph`. To add the protocol to an existing pre-lock managed graph
+without reindexing, run `graphrag-code adopt-publication-lock` after an
+offline confirmation. This is not a distributed lease service and does
+not protect against tools that ignore `.publish.lock`. Manual deletion
+or corruption still returns a controlled error. This is agent access to
+a local graph, not a UI, HTTP service, or semantic search backend.
+
+`adopt-publication-lock` is an explicit migration, never an automatic
+MCP or doctor side effect. `--offline-confirmed` is required to create
+`.publish.lock`. Passing it asserts that no legacy reader or
+publisher/retention process that ignores `.publish.lock` is active, and
+that future publishers will use the current lock-aware protocol. The
+program cannot prove those conditions: processes that never open the
+lock file are invisible. Creating the file while such a process is live
+would split the locking domain. Without the flag, a managed graph
+missing the lock exits 2 and is not modified. The command may create
+only `<graph>/.publish.lock`. It does not reindex, extract, compile,
+publish, retain, alter `current`, or rewrite manifests, parquet, or
+settings. Immutable checked-in `byog_*` evidence stays on the
+explicitly unleased compatibility path until an operator adopts a
+disposable or operational copy. The JSON `payload_unchanged` field compares
+the doctor's persisted-input fingerprints before and after adoption (excluding
+the lock itself); it can be `false` if another actor changes a valid snapshot
+during the command, even though adoption code writes only the lock.
 
 Tool schemas reject unknown fields. List and traversal sizes, context-pack
 text/type evidence, doctor samples, and the serialized response envelope all
@@ -104,6 +125,7 @@ Source-checkout script paths remain supported:
 ```bash
 uv run python scripts/graphrag_code.py --help
 uv run python scripts/persisted_graph_doctor.py --graph <root> --indexer python
+uv run python scripts/adopt_publication_lock.py --graph <root> --indexer python --offline-confirmed
 uv run python scripts/index_python.py --package <pkg> --graph <out>
 uv run python scripts/index_c.py --package <pkg> --graph <out>
 uv run python scripts/graph_query.py symbol <title> --graph <root>
@@ -392,7 +414,11 @@ modules, plugins, and PCH fail explicitly. See
   doctor, and snapshot audit retain an explicit read-only compatibility path
   for immutable evidence published before the lock existed; that path does
   not claim a retention lease. A legacy flat-parquet directory also has no
-  cooperating retention protocol.
+  cooperating retention protocol. Adding the lock to a pre-lock managed
+  graph is `graphrag-code adopt-publication-lock --offline-confirmed`: an
+  explicit operator migration that creates only `.publish.lock` after a
+  compatibility-mode doctor. Automatically touching the file would be
+  unsafe because existing pre-lock readers cannot be discovered.
 - `scripts/persisted_graph_doctor.py` / `graphrag-code doctor` – **read-only
   persisted-integrity doctor** for any BYOG graph. Selects one snapshot,
   validates the language-independent envelope, then runs every applicable

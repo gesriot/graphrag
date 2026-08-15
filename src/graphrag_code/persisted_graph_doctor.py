@@ -98,8 +98,19 @@ def _lock_fingerprint(graph_root: Path) -> str:
             raise PersistedGraphDoctorError(
                 f"publication lock changed to a non-regular file: {lock}"
             )
-        if getattr(os, "O_NOFOLLOW", 0) == 0 and (
-            opened.st_dev != before.st_dev or opened.st_ino != before.st_ino
+        if opened.st_dev != before.st_dev or opened.st_ino != before.st_ino:
+            raise PersistedGraphDoctorError(
+                f"publication lock changed while opening it: {lock}"
+            )
+        current = lock.lstat()
+        if stat.S_ISLNK(current.st_mode):
+            raise PersistedGraphDoctorError(
+                f"unsafe symlinked publication lock: {lock}"
+            )
+        if (
+            not stat.S_ISREG(current.st_mode)
+            or current.st_dev != opened.st_dev
+            or current.st_ino != opened.st_ino
         ):
             raise PersistedGraphDoctorError(
                 f"publication lock changed while opening it: {lock}"
@@ -241,6 +252,8 @@ def audit_graph_root(
     ``allow_unlocked_managed`` preserves read-only access to immutable
     evidence produced before ``.publish.lock`` existed. Strict consumers such
     as MCP disable it because that compatibility path has no retention lease.
+
+    This never creates or rewrites ``.publish.lock``.
     """
     graph_root = Path(graph_root)
     try:

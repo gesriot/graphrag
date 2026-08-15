@@ -629,6 +629,19 @@ def test_publish_lock_absent_regular_and_symlink(tmp_path: Path, capsys, monkeyp
     assert doctor_main(["--graph", str(graph), "--indexer", "python"]) == 2
     assert "symlinked publication lock" in capsys.readouterr().err
 
+    monkeypatch.setattr(doctor.os, "open", original_open)
+    lock.unlink()
+    lock.write_text("original", encoding="utf-8")
+
+    def swap_regular_before_open(path, flags):
+        lock.unlink()
+        lock.write_text("replacement", encoding="utf-8")
+        return original_open(path, flags)
+
+    monkeypatch.setattr(doctor.os, "open", swap_regular_before_open)
+    assert doctor_main(["--graph", str(graph), "--indexer", "python"]) == 2
+    assert "changed while opening" in capsys.readouterr().err
+
 
 def test_symlinked_current_is_unsafe(tmp_path: Path, capsys):
     graph = _publish(tmp_path, *_py_rows())

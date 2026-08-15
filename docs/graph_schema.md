@@ -118,6 +118,51 @@ retain an explicit compatibility path for immutable pre-lock evidence, with
 no retention guarantee. A legacy flat-parquet directory has no cooperating
 retention protocol.
 
+### Adopting `.publish.lock` on a pre-lock managed graph
+
+`graphrag-code adopt-publication-lock --graph <root> --indexer auto|python|c
+--offline-confirmed` is the only product path that creates `.publish.lock`
+on an existing managed graph. It is an explicit offline migration, never
+an automatic MCP, doctor, or `ByogGraph` side effect.
+
+`--offline-confirmed` is required to create the file. Passing it asserts
+that no legacy reader that ignores `.publish.lock` is active, no legacy
+publisher or retention process that ignores `.publish.lock` is active, and
+future publishers will use the current lock-aware protocol. The program
+cannot prove those conditions. Pre-lock processes never open the lock
+file, so they cannot be discovered. Automatically touching
+`.publish.lock` would split the locking domain: lock-aware publishers
+would wait for lock-aware readers, while any still-running pre-lock
+reader would keep reading without a lease, and a pre-lock publisher
+could replace `current` or retain snapshots underneath that reader.
+
+Without the flag, a managed graph missing the lock exits 2 and is not
+modified. Before mutation the command runs the persisted-integrity
+doctor in compatibility mode. Flat parquet directories, incomplete or
+symlinked managed markers, unsafe lock pathnames, unreadable input, and
+an unsupported lock backend fail closed. An invalid persisted graph
+exits 1 and does not receive a lock.
+
+The only pathname the command may create is `<graph>/.publish.lock`. It
+uses exclusive creation (`O_CREAT | O_EXCL`) with `O_NOFOLLOW` /
+`O_CLOEXEC` where available, validates the opened descriptor with
+`fstat` and path identity with `lstat`, and never follows, replaces,
+truncates, chmods, or rewrites an existing lock. If another lock-aware
+process wins the create race, the command validates that regular file
+and serializes through the exclusive protocol (`already_adopted`). A
+newly created lock is never deleted after its pathname is exposed:
+removing it while another process may be waiting on that inode would
+split the locking domain. After adoption the doctor runs again under
+the established exclusive hold without a nested shared lease. The result's
+`payload_unchanged` value is an observed comparison of the doctor's pre/post
+persisted-input fingerprints with the lock entry excluded. A cooperating or
+legacy actor can make it false; the adoption implementation itself still
+writes only the lock.
+
+MCP remains strict: a managed graph without a regular `.publish.lock`
+is still rejected at startup. Immutable published `byog_*` evidence
+keeps the explicitly unleased compatibility path.
+
 ## Entity Types (code domain, start with these)
 - file
 - module / package

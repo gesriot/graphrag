@@ -119,7 +119,7 @@ definitions are all present; 113 re-exports are reported separately rather
 than inflated into duplicate graph entities. The `sqlparse.split` target named
 by the Rust port is therefore an actual graph entity, not merely a module API
 outside the graph. See `examples/sqlparse/PROVENANCE.md` for the census and
-call-oracle effect. The current full-suite expectation is **1431 passed, 2 xfailed**;
+call-oracle effect. The current full-suite expectation is **1447 passed, 2 xfailed**;
 this 2026-08-14 persisted-integrity doctor update supersedes the earlier 721-passed /
 2026-07-26 gate snapshot. The product CLI is the installable ``graphrag-code``
 console command (`python -m graphrag_code`); source-checkout ``scripts/*.py``
@@ -138,6 +138,15 @@ and pins one published snapshot for the duration of the call. Cooperating
 publishers wait. MCP rejects managed graphs without an existing regular lock
 file instead of silently serving without retention protection; this is not a
 distributed lease and not protection against tools that ignore the lock.
+`graphrag-code adopt-publication-lock --offline-confirmed` is the explicit
+offline migration that creates only `.publish.lock` on a doctor-valid
+managed graph published before the protocol existed. It is never an
+automatic MCP or doctor side effect. The flag is an operator assertion that
+no legacy reader or publisher that ignores the lock is active; the program
+cannot prove quiescence, because those processes never open the file.
+Automatically touching `.publish.lock` would split the locking domain.
+Immutable checked-in `byog_*` evidence remains on the explicitly unleased
+compatibility path.
 
 **Re-export namespace boundary (2026-07-30):** the 113 non-direct initializer
 bindings are now measured separately from direct definitions: 73 have a unique

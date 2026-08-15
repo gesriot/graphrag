@@ -91,6 +91,7 @@ def test_python_module_help():
     assert "query-symbol" in proc.stdout
     assert "index-python" in proc.stdout
     assert "mcp" in proc.stdout
+    assert "adopt-publication-lock" in proc.stdout
 
 
 def test_source_script_and_package_expose_same_commands():
@@ -112,6 +113,7 @@ def test_source_script_and_package_expose_same_commands():
         "index-c",
         "port-eval",
         "mcp",
+        "adopt-publication-lock",
     )
     for name in required:
         assert name in packaged
@@ -142,6 +144,7 @@ def test_wheel_and_sdist_contents(built_wheel_and_sdist):
         assert "graphrag_code/index_reuse.py" in names
         assert "graphrag_code/python_inputs.py" in names
         assert "graphrag_code/mcp_server.py" in names
+        assert "graphrag_code/adopt_publication_lock.py" in names
         assert "graphrag_code/doc_claims.json" in names
         assert not any(
             "scripts/" in name
