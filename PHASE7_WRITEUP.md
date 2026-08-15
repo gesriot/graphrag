@@ -159,7 +159,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`1516 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`1535 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
@@ -217,7 +217,17 @@ for an explicit published id. The MCP tool set remains exactly 11.
 Explicit query/context CLI selectors require the existing regular
 publication lock and never create it. Their omitted `--snapshot` path
 keeps the existing default current/legacy-flat pre-lock compatibility
-and has no retention guarantee. This is not natural-language search, an
+and has no retention guarantee. ``graphrag-code snapshot-pins`` (also
+`python -m graphrag_code.snapshot_pins` and `scripts/snapshot_pins.py`)
+lists operator, claim, and effective pins. ``snapshot-pin`` /
+``snapshot-unpin`` write only ``.snapshot-pins.json`` after confirmation
+and a registry-revision compare-and-swap. This is retention metadata, not
+activation, backup, or replication. Listing never creates the file.
+Unpin does not delete immediately. Cooperating keep-last protects
+``current``, existing doc-claim pins, and operator pins. A malformed
+registry aborts publication before ``current`` or snapshot deletion.
+MCP remains exactly 11 read-only tools. Advisory locks do not protect
+against non-cooperating programs. This is not natural-language search, an
 HTTP service, repair, reindex, or semantic equivalence.
 
 **Live re-check (2026-07-26):** `538 passed, 2 xfailed`.

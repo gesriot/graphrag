@@ -287,6 +287,66 @@ retention guarantee. MCP remains strict and remains exactly 11 read-only tools.
 contracts. This is not activation, publication, retention, repair,
 reindex, natural-language search, or semantic equivalence.
 
+### Operator-managed snapshot retention pins
+
+`graphrag-code snapshot-pins --graph <root>` lists the operator pin
+registry. `graphrag-code snapshot-pin <published-id> --graph <root>
+--expected-registry-revision <token> --pin-confirmed` and
+`snapshot-unpin` write only `<graph>/.snapshot-pins.json`. This is
+retention metadata, not activation, publication, reindexing, backup,
+replication, or a distributed lease. It is intentionally absent from
+MCP. The fixed MCP tool set remains 11 read-only tools.
+
+Canonical registry schema:
+
+```json
+{
+  "schema_version": 1,
+  "pins": [
+    "<canonical-published-id>"
+  ]
+}
+```
+
+Pins are unique, UTF-8-byte-sorted published snapshot ids. The file is
+capped at 64 KiB and 1000 entries. `current`, staging names, traversal,
+separators, empty strings, unknown fields, and duplicate keys are
+rejected. An absent file is an empty operator pin set with revision
+`absent`. Listing and publishing never create the file. Pin and unpin
+may create it only after confirmation. Unpinning the last entry writes
+the canonical empty registry and does not unlink it. Symlinked or
+non-regular registry paths fail closed. Malformed registry state is
+never silently replaced.
+
+The list result includes `schema_version`, `graph`, `current`,
+`registry_revision`, `operator_pins`, `claim_pins`, and
+`effective_pins`. `claim_pins` are existing doc-claim/frozen-evidence
+pins. `effective_pins` is the sorted union. Registry revision is
+`absent` or `sha256:<lowercase hex of the exact file bytes>`.
+
+Pin and unpin require `--expected-registry-revision`. Under one exclusive
+existing-lock lease the command recomputes that revision and refuses a
+stale caller before writing. Pinning an already-pinned id or unpinning an
+absent id succeeds with `changed=false`. Otherwise the canonical JSON is
+written atomically and `changed=true`. Unpin reports that it performs no
+immediate deletion and only makes the snapshot eligible for a later
+cooperating keep-last operation.
+
+Listing holds one shared existing-lock lease. Pin and unpin hold one
+exclusive existing-lock lease across validation, CAS, atomic replacement,
+verification, and the complete response. They never create, rewrite,
+chmod, truncate, or replace `.publish.lock`. A missing lock points at
+`adopt-publication-lock`. Advisory locks protect only cooperating
+processes. Mutation commands may change only `.snapshot-pins.json`.
+
+Cooperating keep-last cleanup protects `current` UNION existing doc-claim
+pins UNION operator pins. Publication validates the registry under the
+publication lock before promoting a snapshot or replacing `current`. A
+malformed registry aborts before those mutations. An absent registry
+remains a no-op and is not created. Manual or lock-ignoring deletion can
+still remove a pinned snapshot. The registry does not activate a
+snapshot or claim semantic equivalence.
+
 ## Entity Types (code domain, start with these)
 - file
 - module / package

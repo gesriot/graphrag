@@ -830,6 +830,12 @@ def publish_byog_snapshot(
 
     A crash may leave a private staging directory. Retention does not reap
     staging dirs by guessed age.
+
+    Cooperating keep-last cleanup protects ``current``, doc-claim pins, and
+    operator pins from ``.snapshot-pins.json``. The registry is validated
+    under the publication lock before staging promotion or the ``current``
+    write. A malformed registry aborts publication before those mutations.
+    An absent registry is a no-op and is not created.
     """
     out_root = Path(out_root)
     snapshots_dir = out_root / "snapshots"
@@ -861,6 +867,9 @@ def publish_byog_snapshot(
             out_root=out_root,
         )
         with _publication_lock(out_root):
+            # Validate operator pins before promotion or current mutation.
+            # An absent registry is an empty pin set and is not created.
+            operator_pins = _operator_pins_for_retention(out_root)
             try:
                 os.rename(stage_dir, final_dir)
             except OSError:
@@ -879,11 +888,42 @@ def publish_byog_snapshot(
                     if current_id != snap_id:
                         shutil.rmtree(final_dir)
                 raise
-            _cleanup_old_snapshots_locked(out_root, keep_last=keep_last)
+            try:
+                operator_after = _operator_pins_for_retention(out_root)
+            except ValueError:
+                # Lock-ignoring registry mutation made pin state ambiguous.
+                # Skip deletion rather than retain or delete from a bad parse.
+                return final_dir
+            if operator_after != operator_pins:
+                return final_dir
+            _cleanup_old_snapshots_locked(
+                out_root, keep_last=keep_last, operator_pins=operator_pins
+            )
         return final_dir
     except Exception:
         _remove_staging_dir(stage_dir)
         raise
+
+
+def _operator_pins_for_retention(out_root: Path) -> set[str]:
+    """Validated operator pins. Caller must already hold the publication lock.
+
+    An absent ``.snapshot-pins.json`` is an empty set and is not created.
+    Malformed or unsafe registry state fails closed so publication and
+    cleanup do not change ``current`` or delete snapshots from a bad parse.
+    """
+    from graphrag_code.snapshot_pins import (
+        SnapshotPinsError,
+        load_operator_pins_unlocked,
+    )
+
+    try:
+        _revision, pins = load_operator_pins_unlocked(out_root)
+    except SnapshotPinsError as error:
+        raise ValueError(
+            f"operator pin registry is unsafe or malformed: {error}"
+        ) from error
+    return set(pins)
 
 
 def pinned_snapshot_ids(out_root: Path) -> set[str]:
@@ -892,7 +932,8 @@ def pinned_snapshot_ids(out_root: Path) -> set[str]:
     `scripts/doc_claims.json` records `frozen_snapshot` claims against specific
     snapshot ids. Those are evidence, not cache: once retention deletes one the
     number it backed can never be re-derived, because the code that produced it
-    has moved on.
+    has moved on. Operator pins live in ``.snapshot-pins.json`` and are loaded
+    separately so a malformed registry cannot be confused with this set.
     """
     manifest = Path(__file__).resolve().parent / "doc_claims.json"
     if not manifest.is_file():
@@ -921,6 +962,9 @@ def cleanup_old_snapshots(out_root: Path, keep_last: int = 5) -> int:
       retention destroyed the sqlparse phase-5 baseline once: two reindexes
       published two new snapshots, the sixth-oldest fell off, and the claim that
       verified it degraded to an "absent source" skip that read as a pass.
+    - Also protects operator pins from ``.snapshot-pins.json``. A malformed
+      registry fails closed before any deletion. An absent registry is empty
+      and is not created. Unpin does not run this cleanup.
     - `keep_last` is clamped to at least 1 because current must be retained.
     - Keeps current plus the newest remaining snapshots up to the total limit.
     - Snapshot dirs are sorted by name (timestamped names sort chronologically).
@@ -940,10 +984,18 @@ def cleanup_old_snapshots(out_root: Path, keep_last: int = 5) -> int:
     if not snapshots_dir.exists():
         return 0
     with _publication_lock(out_root):
-        return _cleanup_old_snapshots_locked(out_root, keep_last=keep_last)
+        operator_pins = _operator_pins_for_retention(out_root)
+        return _cleanup_old_snapshots_locked(
+            out_root, keep_last=keep_last, operator_pins=operator_pins
+        )
 
 
-def _cleanup_old_snapshots_locked(out_root: Path, keep_last: int = 5) -> int:
+def _cleanup_old_snapshots_locked(
+    out_root: Path,
+    keep_last: int = 5,
+    *,
+    operator_pins: Optional[set[str]] = None,
+) -> int:
     """Retention body. Caller must already hold ``_publication_lock``."""
     out_root = Path(out_root)
     keep_last = max(1, keep_last)
@@ -955,7 +1007,9 @@ def _cleanup_old_snapshots_locked(out_root: Path, keep_last: int = 5) -> int:
     if not snapshots_dir.exists():
         return 0
 
-    pinned = pinned_snapshot_ids(out_root)
+    if operator_pins is None:
+        operator_pins = _operator_pins_for_retention(out_root)
+    pinned = set(pinned_snapshot_ids(out_root)) | set(operator_pins)
 
     current_file = out_root / "current"
     current_id: Optional[str] = None

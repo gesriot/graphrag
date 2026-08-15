@@ -119,7 +119,7 @@ definitions are all present; 113 re-exports are reported separately rather
 than inflated into duplicate graph entities. The `sqlparse.split` target named
 by the Rust port is therefore an actual graph entity, not merely a module API
 outside the graph. See `examples/sqlparse/PROVENANCE.md` for the census and
-call-oracle effect. The current full-suite expectation is **1516 passed, 2 xfailed**;
+call-oracle effect. The current full-suite expectation is **1535 passed, 2 xfailed**;
 this 2026-08-14 persisted-integrity doctor update supersedes the earlier 721-passed /
 2026-07-26 gate snapshot. The product CLI is the installable ``graphrag-code``
 console command (`python -m graphrag_code`); source-checkout ``scripts/*.py``
@@ -167,7 +167,14 @@ not change ``current``. One shared reader lease pins the selected
 published snapshot against cooperating keep-last retention. The existing
 regular lock is required for explicit query/context CLI selectors and is
 never created by them. Their omitted-selector path keeps legacy-flat and
-pre-lock compatibility and has no retention guarantee. MCP remains exactly 11
+pre-lock compatibility and has no retention guarantee. ``graphrag-code
+snapshot-pins`` / ``snapshot-pin`` / ``snapshot-unpin`` manage operator
+retention pins in ``.snapshot-pins.json``. That registry is not
+activation, backup, or replication. Listing never creates it; pin/unpin
+require confirmation and a registry-revision CAS; unpin does not delete
+immediately. Cooperating keep-last protects ``current``, doc-claim pins,
+and operator pins. A malformed registry aborts publication before
+``current`` changes. MCP remains exactly 11
 read-only tools and stays strict. Advisory locks do not protect against
 non-cooperating programs. No search, UI, HTTP service, repair, or reindex
 is added.

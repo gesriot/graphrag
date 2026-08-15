@@ -49,6 +49,9 @@ These generic installed commands operate on user-supplied directories:
 - `graphrag-code snapshot-history --graph <root>`
 - `graphrag-code snapshot-diff --graph <root> --from <id|current> --to <id|current>`
 - `graphrag-code snapshot-activate --graph <root> --snapshot <id> --expected-current <id> --activate-confirmed`
+- `graphrag-code snapshot-pins --graph <root>`
+- `graphrag-code snapshot-pin <id> --graph <root> --expected-registry-revision <token> --pin-confirmed`
+- `graphrag-code snapshot-unpin <id> --graph <root> --expected-registry-revision <token> --unpin-confirmed`
 - `graphrag-code mcp --graph <root> --indexer auto`
 
 `graphrag-code mcp` is a local stdio MCP adapter over one existing graph.
@@ -60,8 +63,9 @@ stderr.
 The server exposes a fixed read-only tool set: `graph_status`,
 `graph_doctor`, `query_symbol`, `callers`, `callees`, `neighbors`,
 `impact`, `type_closure`, `context_pack`, `snapshot_history`, and
-`snapshot_diff`. There is no `snapshot_activate` tool: activating a
-retained snapshot is an explicit mutating CLI operation and is
+`snapshot_diff`. There is no `snapshot_activate`, `snapshot_pin`, or
+`snapshot_unpin` tool: activating a retained snapshot or writing operator
+retention pins is an explicit mutating CLI operation and is
 intentionally absent from MCP. Tool arguments cannot select another
 graph. There is no indexing, publishing, retention, port-eval,
 compiler/Clang, SQL, or shell tool. Snapshot history is a bounded local
@@ -153,6 +157,28 @@ continues to protect whichever snapshot is current. Advisory locks
 protect only cooperating processes. This command is intentionally
 absent from MCP.
 
+`snapshot-pins`, `snapshot-pin`, and `snapshot-unpin` are operator-managed
+retention metadata. They read or write only `<graph>/.snapshot-pins.json`.
+They do not activate a snapshot, change `current`, publish, reindex, back
+up, or replicate the graph. Listing is read-only and never creates the
+registry; an absent file is an empty operator pin set with revision
+`absent`. Pin and unpin require `--pin-confirmed` / `--unpin-confirmed`
+and `--expected-registry-revision` (`absent` or `sha256:<hex>` of the
+exact file bytes). A stale revision exits 1 and changes nothing.
+Pinning an already-pinned id or unpinning an absent id is a successful
+idempotent no-op. Unpinning the last pin writes the canonical empty
+registry and does not unlink it. Unpin performs no immediate deletion;
+the snapshot only becomes eligible for a later cooperating keep-last
+operation. Cooperating keep-last cleanup protects `current`, existing
+doc-claim/frozen-evidence pins, and these operator pins. A malformed
+registry aborts publication and cleanup before `current` changes or
+snapshots are deleted. All three commands require an already-adopted
+regular `.publish.lock` and never create that file. Listing holds one
+shared lease; pin and unpin hold one exclusive lease. Advisory locks
+protect only cooperating processes. Manual or lock-ignoring deletion can
+still remove a pinned snapshot. These commands are intentionally absent
+from MCP. The MCP tool set remains exactly 11 read-only tools.
+
 Query and context-pack commands accept optional
 `--snapshot <id|current>`. Omitting it preserves the existing default
 current/legacy-flat read. `--snapshot current` explicitly selects the
@@ -200,6 +226,8 @@ uv run python scripts/adopt_publication_lock.py --graph <root> --indexer python 
 uv run python scripts/snapshot_compare.py history --graph <root>
 uv run python scripts/snapshot_compare.py diff --graph <root> --from current --to current
 uv run python scripts/snapshot_activate.py --graph <root> --snapshot <id> --expected-current <id> --activate-confirmed
+uv run python scripts/snapshot_pins.py --graph <root>
+uv run python scripts/snapshot_pins.py pin <id> --graph <root> --expected-registry-revision absent --pin-confirmed
 uv run python scripts/index_python.py --package <pkg> --graph <out>
 uv run python scripts/index_c.py --package <pkg> --graph <out>
 uv run python scripts/graph_query.py symbol <title> --graph <root>
@@ -500,6 +528,15 @@ modules, plugins, and PCH fail explicitly. See
   that file), validates the language-independent snapshot envelope, and
   atomically replaces the pointer. It is not deletion, retention,
   publication, repair, or reindex, and it is not an MCP tool.
+  `graphrag-code snapshot-pins` / `snapshot-pin` / `snapshot-unpin` manage
+  `<graph>/.snapshot-pins.json`. Operator pins are durable retention
+  metadata for cooperating keep-last cleanup only. They are not backups,
+  replication, activation, or a distributed lease. Listing never creates
+  the file. Pin and unpin may create it only after confirmation, use
+  compare-and-swap on the registry revision, and never create
+  `.publish.lock`. Unpin does not delete immediately. A malformed
+  registry fails closed before publication or cleanup mutates `current`
+  or deletes snapshots.
 - `scripts/persisted_graph_doctor.py` / `graphrag-code doctor` – **read-only
   persisted-integrity doctor** for any BYOG graph. Selects one snapshot,
   validates the language-independent envelope, then runs every applicable

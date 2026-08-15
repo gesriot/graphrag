@@ -14,7 +14,7 @@ What this is not: a demonstrated accuracy multiplier for cold porting. The
 Phase 7 ablations showed no graph-vs-raw capability win on bounded library
 slices; this CLI packages the *rails* (index, query, packs, audit,
 adopt-publication-lock, snapshot-history, snapshot-diff, snapshot-activate,
-port_eval).
+snapshot-pins, port_eval).
 """
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ app = typer.Typer(
     help=(
         "graphrag-code: deterministic code graph → query → context-pack → "
         "persisted doctor → adopt-publication-lock → snapshot-history → "
-        "snapshot-diff → snapshot-activate → port-eval. Relative "
+        "snapshot-diff → snapshot-activate → snapshot-pins → port-eval. Relative "
         "paths are resolved from the invoking working directory."
     ),
 )
@@ -54,6 +54,7 @@ _DELEGATE_MODULES = {
     "adopt_publication_lock.py": "graphrag_code.adopt_publication_lock",
     "snapshot_compare.py": "graphrag_code.snapshot_compare",
     "snapshot_activate.py": "graphrag_code.snapshot_activate",
+    "snapshot_pins.py": "graphrag_code.snapshot_pins",
     "audit_call_edges.py": "graphrag_code.audit_call_edges",
     "port_eval.py": "graphrag_code.port_eval",
 }
@@ -782,6 +783,116 @@ def snapshot_activate(
     if json_out is True:
         args.append("--json")
     _delegate("snapshot_activate.py", args)
+
+
+@app.command("snapshot-pins")
+def snapshot_pins(
+    graph: Path = typer.Option(..., "--graph", "-g", help="Managed BYOG graph root"),
+    json_out: bool = typer.Option(
+        False, "--json", help="same JSON shape as snapshot_pins.py list --json"
+    ),
+):
+    """List operator, claim, and effective snapshot retention pins.
+
+    Read-only. Holds one shared existing-lock lease. Never creates
+    .snapshot-pins.json or .publish.lock. Intentionally absent from MCP.
+    """
+    args = ["list", "--graph", str(graph)]
+    if json_out is True:
+        args.append("--json")
+    _delegate("snapshot_pins.py", args)
+
+
+@app.command("snapshot-pin")
+def snapshot_pin(
+    snapshot: str = typer.Argument(
+        ..., help="canonical published snapshot id to pin (not 'current')"
+    ),
+    graph: Path = typer.Option(..., "--graph", "-g", help="Managed BYOG graph root"),
+    expected_registry_revision: str = typer.Option(
+        ...,
+        "--expected-registry-revision",
+        help="absent, or sha256:<hex> of the exact registry file bytes",
+    ),
+    pin_confirmed: bool = typer.Option(
+        False,
+        "--pin-confirmed",
+        help=(
+            "Required to write .snapshot-pins.json. Explicit operator "
+            "confirmation that this should pin an already-published snapshot "
+            "against cooperating keep-last retention. The command still "
+            "refuses to write if the registry revision no longer matches "
+            "--expected-registry-revision. Never an MCP tool."
+        ),
+    ),
+    json_out: bool = typer.Option(
+        False, "--json", help="same JSON shape as snapshot_pins.py pin --json"
+    ),
+):
+    """Pin a published snapshot against cooperating keep-last retention.
+
+    Writes only <graph>/.snapshot-pins.json. Does not activate, publish,
+    delete, repair, or reindex. Requires an already-adopted .publish.lock
+    and never creates that file. Intentionally absent from MCP.
+    """
+    args = [
+        "pin",
+        snapshot,
+        "--graph",
+        str(graph),
+        "--expected-registry-revision",
+        expected_registry_revision,
+    ]
+    if pin_confirmed is True:
+        args.append("--pin-confirmed")
+    if json_out is True:
+        args.append("--json")
+    _delegate("snapshot_pins.py", args)
+
+
+@app.command("snapshot-unpin")
+def snapshot_unpin(
+    snapshot: str = typer.Argument(
+        ..., help="canonical published snapshot id to unpin (not 'current')"
+    ),
+    graph: Path = typer.Option(..., "--graph", "-g", help="Managed BYOG graph root"),
+    expected_registry_revision: str = typer.Option(
+        ...,
+        "--expected-registry-revision",
+        help="absent, or sha256:<hex> of the exact registry file bytes",
+    ),
+    unpin_confirmed: bool = typer.Option(
+        False,
+        "--unpin-confirmed",
+        help=(
+            "Required to write .snapshot-pins.json. Unpin does not delete the "
+            "snapshot now; it only makes that id eligible for a later "
+            "cooperating keep-last operation. Never an MCP tool."
+        ),
+    ),
+    json_out: bool = typer.Option(
+        False, "--json", help="same JSON shape as snapshot_pins.py unpin --json"
+    ),
+):
+    """Remove an operator pin. Does not delete the snapshot immediately.
+
+    Writes only <graph>/.snapshot-pins.json. Unpinning the last pin writes
+    the canonical empty registry and does not unlink it. Requires an
+    already-adopted .publish.lock and never creates that file.
+    """
+    args = [
+        "unpin",
+        snapshot,
+        "--graph",
+        str(graph),
+        "--expected-registry-revision",
+        expected_registry_revision,
+    ]
+    if unpin_confirmed is True:
+        args.append("--unpin-confirmed")
+    if json_out is True:
+        args.append("--json")
+    _delegate("snapshot_pins.py", args)
 
 
 @app.command("audit-graph")
