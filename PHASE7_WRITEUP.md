@@ -159,13 +159,17 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`1420 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`1431 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
 from the project wheel. Source-checkout `scripts/*.py` commands remain
 compatible. The wheel does not bundle published `byog_*` graphs or
 `examples/`; `port-eval --all-gates` stays a repository evidence gate.
+Cooperating snapshot readers take a shared advisory lock on the
+graph-root `.publish.lock`. MCP rejects managed roots without that regular
+lock file; legacy immutable evidence remains available only through explicitly
+unleased compatibility reads. This is not a distributed lease service.
 
 **Live re-check (2026-07-26):** `538 passed, 2 xfailed`.
 

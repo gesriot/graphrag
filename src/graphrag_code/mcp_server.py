@@ -5,10 +5,10 @@ Local agents and editors can query a single graph selected at startup.
 This is not an indexer, publisher, port-eval surface, HTTP service, or
 semantic-search backend. stdout is MCP protocol traffic only.
 
-Each tool call resolves ``current`` once, pins that published snapshot for
-the rest of the call, and reports the snapshot id. There is no reader lease;
-if retention removes the pinned snapshot mid-call the tool returns a
-controlled error. That lifetime limitation is unchanged.
+Each tool call takes a shared ``.publish.lock`` reader lease, resolves
+``current`` once while the lease is held, pins that snapshot for the rest
+of the call, and reports the snapshot id. Cooperating publishers wait.
+Manual deletion or corruption still returns a controlled error.
 """
 from __future__ import annotations
 
@@ -30,6 +30,8 @@ from graphrag_code.byog_graph import (
     DEFAULT_TYPE_CLOSURE_MAX_NODES,
     TYPE_CLOSURE_DIRECTIONS,
     ByogGraph,
+    ByogReaderLockError,
+    graph_read_lease,
 )
 from graphrag_code.byog_snapshot_graph_audit import (
     SnapshotGraphAuditError,
@@ -218,38 +220,42 @@ class GraphMcpSession:
             return ByogGraph(snap_dir)
         except FileNotFoundError as exc:
             raise GraphMcpError(
-                f"pinned snapshot is no longer readable (no reader lease): {exc}"
+                f"pinned snapshot is no longer readable: {exc}"
             ) from exc
         except OSError as exc:
             raise GraphMcpError(
-                f"pinned snapshot is no longer readable (no reader lease): {exc}"
+                f"pinned snapshot is no longer readable: {exc}"
             ) from exc
 
     def graph_status(self) -> Dict[str, Any]:
-        snap_dir, snap_id, manifest = self.pin()
-        index_input = manifest.get("index_input")
-        reuse_supported = None
-        index_input_present = isinstance(index_input, Mapping)
-        if index_input_present:
-            reuse_supported = bool(index_input.get("reuse_supported"))
-        data = {
-            "graph": str(self.graph_root),
-            "snapshot": snap_id,
-            "indexer": self.resolved_indexer,
-            "indexer_configured": self.configured_indexer,
-            "indexer_resolution": dict(self.preflight.get("indexer_resolution") or {}),
-            "schema_version": manifest.get("schema_version"),
-            "counts": manifest.get("counts"),
-            "files": manifest.get("files"),
-            "index_input_present": index_input_present,
-            "reuse_supported": reuse_supported,
-        }
-        return _envelope(
-            tool="graph_status",
-            graph=self.graph_root,
-            snapshot=snap_id,
-            data=data,
-        )
+        try:
+            with graph_read_lease(self.graph_root):
+                _snap_dir, snap_id, manifest = self.pin()
+                index_input = manifest.get("index_input")
+                reuse_supported = None
+                index_input_present = isinstance(index_input, Mapping)
+                if index_input_present:
+                    reuse_supported = bool(index_input.get("reuse_supported"))
+                data = {
+                    "graph": str(self.graph_root),
+                    "snapshot": snap_id,
+                    "indexer": self.resolved_indexer,
+                    "indexer_configured": self.configured_indexer,
+                    "indexer_resolution": dict(self.preflight.get("indexer_resolution") or {}),
+                    "schema_version": manifest.get("schema_version"),
+                    "counts": manifest.get("counts"),
+                    "files": manifest.get("files"),
+                    "index_input_present": index_input_present,
+                    "reuse_supported": reuse_supported,
+                }
+                return _envelope(
+                    tool="graph_status",
+                    graph=self.graph_root,
+                    snapshot=snap_id,
+                    data=data,
+                )
+        except ByogReaderLockError as exc:
+            raise GraphMcpError(str(exc)) from exc
 
     def graph_doctor(self, max_anomaly_samples: Any = DEFAULT_MAX_ANOMALY_SAMPLES) -> Dict[str, Any]:
         _reject_non_finite("max_anomaly_samples", max_anomaly_samples)
@@ -259,14 +265,21 @@ class GraphMcpSession:
             minimum=0,
             maximum=HARD_MAX_ANOMALY_SAMPLES,
         )
-        snap_dir, snap_id, _manifest = self.pin()
-        del snap_dir
         try:
             report = audit_graph_root(
                 self.graph_root,
                 indexer=self.resolved_indexer,
-                snapshot=snap_id,
                 max_anomaly_samples=samples,
+                allow_unlocked_managed=False,
+            )
+            snap_id = str(report["snapshot"])
+            data = json.loads(audit_to_json(report))
+            return _envelope(
+                tool="graph_doctor",
+                graph=self.graph_root,
+                snapshot=snap_id,
+                data=data,
+                limits={"max_anomaly_samples": samples},
             )
         except (
             PersistedGraphDoctorError,
@@ -278,25 +291,21 @@ class GraphMcpSession:
             KeyError,
         ) as exc:
             raise GraphMcpError(str(exc)) from exc
-        data = json.loads(audit_to_json(report))
-        return _envelope(
-            tool="graph_doctor",
-            graph=self.graph_root,
-            snapshot=snap_id,
-            data=data,
-            limits={"max_anomaly_samples": samples},
-        )
 
     def query_symbol(self, symbol: Any) -> Dict[str, Any]:
         title = _require_str("symbol", symbol)
-        _snap_dir, snap_id, _manifest = self.pin()
-        graph = self._graph(_snap_dir)
-        return _envelope(
-            tool="query_symbol",
-            graph=self.graph_root,
-            snapshot=snap_id,
-            data=graph.symbol(title),
-        )
+        try:
+            with graph_read_lease(self.graph_root):
+                _snap_dir, snap_id, _manifest = self.pin()
+                graph = self._graph(_snap_dir)
+                return _envelope(
+                    tool="query_symbol",
+                    graph=self.graph_root,
+                    snapshot=snap_id,
+                    data=graph.symbol(title),
+                )
+        except ByogReaderLockError as exc:
+            raise GraphMcpError(str(exc)) from exc
 
     def callers(self, symbol: Any, max_items: Any = DEFAULT_MAX_ITEMS) -> Dict[str, Any]:
         return self._symbol_list("callers", symbol, max_items, lambda g, title: g.callers(title))
@@ -311,38 +320,48 @@ class GraphMcpSession:
         title = _require_str("symbol", symbol)
         _reject_non_finite("max_items", max_items)
         limit = _require_int("max_items", max_items, minimum=1, maximum=HARD_MAX_ITEMS)
-        snap_dir, snap_id, _manifest = self.pin()
-        items, total, returned, truncated = _truncate_list(fn(self._graph(snap_dir), title), limit)
-        return _envelope(
-            tool=tool,
-            graph=self.graph_root,
-            snapshot=snap_id,
-            data=items,
-            limits={"max_items": limit},
-            truncated=truncated,
-            total=total,
-            returned=returned,
-        )
+        try:
+            with graph_read_lease(self.graph_root):
+                snap_dir, snap_id, _manifest = self.pin()
+                items, total, returned, truncated = _truncate_list(
+                    fn(self._graph(snap_dir), title), limit
+                )
+                return _envelope(
+                    tool=tool,
+                    graph=self.graph_root,
+                    snapshot=snap_id,
+                    data=items,
+                    limits={"max_items": limit},
+                    truncated=truncated,
+                    total=total,
+                    returned=returned,
+                )
+        except ByogReaderLockError as exc:
+            raise GraphMcpError(str(exc)) from exc
 
     def neighbors(self, symbol: Any, max_items: Any = DEFAULT_MAX_ITEMS) -> Dict[str, Any]:
         title = _require_str("symbol", symbol)
         _reject_non_finite("max_items", max_items)
         limit = _require_int("max_items", max_items, minimum=1, maximum=HARD_MAX_ITEMS)
-        snap_dir, snap_id, _manifest = self.pin()
-        raw = self._graph(snap_dir).neighbors(title)
-        incoming, in_total, in_ret, in_trunc = _truncate_list(raw.get("incoming") or [], limit)
-        outgoing, out_total, out_ret, out_trunc = _truncate_list(raw.get("outgoing") or [], limit)
-        truncated = in_trunc or out_trunc
-        return _envelope(
-            tool="neighbors",
-            graph=self.graph_root,
-            snapshot=snap_id,
-            data={"incoming": incoming, "outgoing": outgoing},
-            limits={"max_items": limit},
-            truncated=truncated,
-            total=in_total + out_total,
-            returned=in_ret + out_ret,
-        )
+        try:
+            with graph_read_lease(self.graph_root):
+                snap_dir, snap_id, _manifest = self.pin()
+                raw = self._graph(snap_dir).neighbors(title)
+                incoming, in_total, in_ret, in_trunc = _truncate_list(raw.get("incoming") or [], limit)
+                outgoing, out_total, out_ret, out_trunc = _truncate_list(raw.get("outgoing") or [], limit)
+                truncated = in_trunc or out_trunc
+                return _envelope(
+                    tool="neighbors",
+                    graph=self.graph_root,
+                    snapshot=snap_id,
+                    data={"incoming": incoming, "outgoing": outgoing},
+                    limits={"max_items": limit},
+                    truncated=truncated,
+                    total=in_total + out_total,
+                    returned=in_ret + out_ret,
+                )
+        except ByogReaderLockError as exc:
+            raise GraphMcpError(str(exc)) from exc
 
     def type_closure(
         self,
@@ -366,30 +385,34 @@ class GraphMcpSession:
         depth = _require_int("max_depth", max_depth, minimum=0, maximum=HARD_MAX_DEPTH)
         nodes = _require_int("max_nodes", max_nodes, minimum=0, maximum=HARD_MAX_CLOSURE_NODES)
         edges = _require_int("max_edges", max_edges, minimum=0, maximum=HARD_MAX_CLOSURE_EDGES)
-        snap_dir, snap_id, _manifest = self.pin()
         try:
-            result = self._graph(snap_dir).type_closure(
-                title,
-                direction=direction,
-                max_depth=depth,
-                max_nodes=nodes,
-                max_edges=edges,
-            )
-        except ValueError as exc:
+            with graph_read_lease(self.graph_root):
+                snap_dir, snap_id, _manifest = self.pin()
+                try:
+                    result = self._graph(snap_dir).type_closure(
+                        title,
+                        direction=direction,
+                        max_depth=depth,
+                        max_nodes=nodes,
+                        max_edges=edges,
+                    )
+                except ValueError as exc:
+                    raise GraphMcpError(str(exc)) from exc
+                truncated = bool(result.get("nodes_truncated") or result.get("edges_truncated"))
+                return _envelope(
+                    tool="type_closure",
+                    graph=self.graph_root,
+                    snapshot=snap_id,
+                    data=result,
+                    limits={
+                        "max_depth": depth,
+                        "max_nodes": nodes,
+                        "max_edges": edges,
+                    },
+                    truncated=truncated,
+                )
+        except ByogReaderLockError as exc:
             raise GraphMcpError(str(exc)) from exc
-        truncated = bool(result.get("nodes_truncated") or result.get("edges_truncated"))
-        return _envelope(
-            tool="type_closure",
-            graph=self.graph_root,
-            snapshot=snap_id,
-            data=result,
-            limits={
-                "max_depth": depth,
-                "max_nodes": nodes,
-                "max_edges": edges,
-            },
-            truncated=truncated,
-        )
 
     def context_pack(
         self,
@@ -421,40 +444,44 @@ class GraphMcpSession:
             maximum=HARD_MAX_TYPE_OBSERVATIONS,
         )
         depth = _require_int("type_depth", type_depth, minimum=1, maximum=HARD_MAX_TYPE_DEPTH)
-        snap_dir, snap_id, _manifest = self.pin()
         try:
-            pack = assemble_context_pack(
-                title,
-                snap_dir,
-                purpose=purpose_s,
-                max_text_chars=text_chars,
-                full_text=False,
-                neighbor_text=neighbor,
-                max_type_edges=type_edges,
-                max_type_observations=type_obs,
-                type_depth=depth,
-            )
-        except FileNotFoundError as exc:
-            raise GraphMcpError(
-                f"pinned snapshot is no longer readable (no reader lease): {exc}"
-            ) from exc
-        except ValueError as exc:
+            with graph_read_lease(self.graph_root):
+                snap_dir, snap_id, _manifest = self.pin()
+                try:
+                    pack = assemble_context_pack(
+                        title,
+                        snap_dir,
+                        purpose=purpose_s,
+                        max_text_chars=text_chars,
+                        full_text=False,
+                        neighbor_text=neighbor,
+                        max_type_edges=type_edges,
+                        max_type_observations=type_obs,
+                        type_depth=depth,
+                    )
+                except FileNotFoundError as exc:
+                    raise GraphMcpError(
+                        f"pinned snapshot is no longer readable: {exc}"
+                    ) from exc
+                except ValueError as exc:
+                    raise GraphMcpError(str(exc)) from exc
+                truncated = _pack_was_truncated(pack)
+                return _envelope(
+                    tool="context_pack",
+                    graph=self.graph_root,
+                    snapshot=snap_id,
+                    data=pack,
+                    limits={
+                        "max_text_chars": text_chars,
+                        "max_type_edges": type_edges,
+                        "max_type_observations": type_obs,
+                        "type_depth": depth,
+                        "neighbor_text": neighbor,
+                    },
+                    truncated=truncated,
+                )
+        except ByogReaderLockError as exc:
             raise GraphMcpError(str(exc)) from exc
-        truncated = _pack_was_truncated(pack)
-        return _envelope(
-            tool="context_pack",
-            graph=self.graph_root,
-            snapshot=snap_id,
-            data=pack,
-            limits={
-                "max_text_chars": text_chars,
-                "max_type_edges": type_edges,
-                "max_type_observations": type_obs,
-                "type_depth": depth,
-                "neighbor_text": neighbor,
-            },
-            truncated=truncated,
-        )
 
 
 def build_mcp_server(session: GraphMcpSession) -> MCPServer:
@@ -598,7 +625,11 @@ def preflight_graph(graph_root: Path, indexer: str) -> Dict[str, Any]:
     if lang not in {"auto", "python", "c"}:
         raise SystemExit(f"graphrag-code mcp: unknown --indexer {indexer!r}; use auto, python, or c")
     try:
-        report = audit_graph_root(graph_root, indexer=lang)
+        report = audit_graph_root(
+            graph_root,
+            indexer=lang,
+            allow_unlocked_managed=False,
+        )
     except AmbiguousIndexerError as exc:
         print(f"graphrag-code mcp: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc

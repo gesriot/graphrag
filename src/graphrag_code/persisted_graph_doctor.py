@@ -3,8 +3,11 @@
 
 Selects one snapshot, validates its envelope, then runs every applicable
 overlay contract against that same loaded snapshot. Does not compare the
-graph with a fresh extractor, invoke a compiler, repair data, or acquire
-the publication lock.
+graph with a fresh extractor, invoke a compiler, or repair data. On a
+managed ``current + snapshots/`` graph with an existing lock it takes a
+shared ``.publish.lock`` reader lease for the audit interval. Immutable
+pre-lock evidence uses an explicitly unleased compatibility read. Neither
+path creates or rewrites the lock.
 
 Exit codes:
   0 – every applicable persisted contract is valid
@@ -32,6 +35,8 @@ from typing import Any, Dict, List, Mapping, Optional
 
 from graphrag_code.byog_graph import (  # type: ignore
     PUBLICATION_LOCK_NAME,
+    ByogReaderLockError,
+    graph_read_lease,
     is_staging_snapshot_name,
 )
 from graphrag_code.byog_snapshot_graph_audit import (  # type: ignore
@@ -229,8 +234,37 @@ def audit_graph_root(
     indexer: str,
     snapshot: Optional[str] = None,
     max_anomaly_samples: int = 40,
+    allow_unlocked_managed: bool = True,
 ) -> Dict[str, Any]:
+    """Audit one graph under a reader lease when the protocol is available.
+
+    ``allow_unlocked_managed`` preserves read-only access to immutable
+    evidence produced before ``.publish.lock`` existed. Strict consumers such
+    as MCP disable it because that compatibility path has no retention lease.
+    """
     graph_root = Path(graph_root)
+    try:
+        with graph_read_lease(
+            graph_root,
+            allow_unlocked_managed=allow_unlocked_managed,
+        ):
+            return _audit_graph_root_unlocked(
+                graph_root,
+                indexer=indexer,
+                snapshot=snapshot,
+                max_anomaly_samples=max_anomaly_samples,
+            )
+    except ByogReaderLockError as exc:
+        raise PersistedGraphDoctorError(str(exc)) from exc
+
+
+def _audit_graph_root_unlocked(
+    graph_root: Path,
+    *,
+    indexer: str,
+    snapshot: Optional[str] = None,
+    max_anomaly_samples: int = 40,
+) -> Dict[str, Any]:
     snap_dir, snap_id, _ = resolve_snapshot(graph_root, snapshot)
     before = doctor_fingerprint(graph_root, snap_dir)
 

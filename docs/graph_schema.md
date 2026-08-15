@@ -72,9 +72,11 @@ aliases such as `violations` are not added again. A stable
 `snapshots/.staging-*` entry is an informational publication notice. A
 change to the snapshots listing, `current`, snapshot files, or
 `.publish.lock` during the audit is a concurrent mutation. The doctor
-never acquires the publication lock and never creates that file. This
-is a persisted-state verifier, not extractor freshness, repair,
-compiler re-audit, or semantic equivalence.
+takes a shared reader lease when that regular lock file exists and never
+creates it. Old immutable evidence without the lock uses an explicit
+fingerprint-only compatibility path with no retention guarantee. This is a
+persisted-state verifier, not extractor freshness, repair, compiler re-audit,
+or semantic equivalence.
 
 ### Snapshot publication transaction
 
@@ -103,11 +105,18 @@ retention call against a missing graph remains a filesystem no-op.
 
 A process crash may leave a private staging directory. Retention does
 not reap staging directories by guessed age. This protocol does not
-claim active-reader leases: a reader that keeps a retired snapshot path
-across later retention can see that directory disappear. The lock and
-staging convention belong to the graph-root publication protocol, not
-to `manifest.files` or `total_size_bytes`. An explicitly selected
-staging path is not a valid published snapshot for the envelope audit.
+claim a distributed lease service. Cooperating readers take a shared
+lock on the same `.publish.lock` before resolving `current` and hold it
+until their snapshot files are materialized, so keep-last retention
+waits. Tools that ignore the lock can still see a retired snapshot
+disappear. The lock and staging convention belong to the graph-root
+publication protocol, not to `manifest.files` or `total_size_bytes`. An
+explicitly selected staging path is not a valid published snapshot for
+the envelope audit. Strict readers, including MCP, reject a managed graph
+without a regular `.publish.lock`; general graph loading and integrity audits
+retain an explicit compatibility path for immutable pre-lock evidence, with
+no retention guarantee. A legacy flat-parquet directory has no cooperating
+retention protocol.
 
 ## Entity Types (code domain, start with these)
 - file

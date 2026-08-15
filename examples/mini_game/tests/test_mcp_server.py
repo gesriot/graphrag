@@ -397,6 +397,33 @@ def test_invalid_and_ambiguous_startup_exit_2(tmp_path: Path):
     assert "graphrag-code mcp:" in proc.stderr
     assert "Traceback" not in proc.stderr
 
+    unlocked = _py_graph(tmp_path / "unlocked")
+    lock = unlocked / ".publish.lock"
+    lock.unlink()
+    before_stats = _payload_stats(unlocked)
+    before_hashes = _payload_hashes(unlocked)
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "graphrag_code.mcp_server",
+            "--graph",
+            str(unlocked),
+            "--indexer",
+            "python",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 2
+    assert proc.stdout == ""
+    assert "publication lock is missing" in proc.stderr
+    assert "Traceback" not in proc.stderr
+    assert not lock.exists()
+    assert _payload_stats(unlocked) == before_stats
+    assert _payload_hashes(unlocked) == before_hashes
+
     graph = _py_graph(tmp_path)
     snap = graph / "snapshots" / _current(graph)
     manifest = json.loads((snap / "manifest.json").read_text())
@@ -623,6 +650,73 @@ def test_one_call_stays_on_pinned_snapshot(tmp_path: Path, monkeypatch: pytest.M
     assert payload["snapshot"] == first
     assert _current(graph) == second_dir.name
     assert seen["n"] == 1
+
+
+def _mcp_paused_query(graph: str, pinned, resume, q) -> None:
+    sys.path.insert(0, str(Path(__file__).parents[3] / "src"))
+    from contextlib import contextmanager
+    import graphrag_code.mcp_server as mcp_mod
+    from graphrag_code.mcp_server import GraphMcpSession
+
+    orig = mcp_mod.graph_read_lease
+
+    @contextmanager
+    def wrapped(root):
+        with orig(root):
+            pinned.set()
+            if not resume.wait(timeout=20):
+                q.put("timeout")
+                return
+            yield
+
+    mcp_mod.graph_read_lease = wrapped
+    session = GraphMcpSession(
+        Path(graph),
+        configured_indexer="python",
+        resolved_indexer="python",
+        preflight={"indexer": "python", "indexer_resolution": {}},
+    )
+    payload = session.query_symbol("add")
+    q.put(payload["snapshot"])
+
+
+def test_mcp_call_blocks_publisher_until_release(tmp_path: Path):
+    import multiprocessing
+
+    graph = _py_graph(tmp_path)
+    first = _current(graph)
+    first_dir = graph / "snapshots" / first
+    ctx = multiprocessing.get_context("spawn")
+    pinned = ctx.Event()
+    resume = ctx.Event()
+    about = ctx.Event()
+    got = ctx.Event()
+    q = ctx.Queue()
+    reader = ctx.Process(
+        target=_mcp_paused_query,
+        args=(str(graph), pinned, resume, q),
+    )
+    from test_reader_lease import _cleanup_processes, _publisher
+
+    pub = ctx.Process(target=_publisher, args=(str(graph), "next", 1, about, got, q))
+    try:
+        reader.start()
+        assert pinned.wait(timeout=20)
+        pub.start()
+        assert about.wait(timeout=20)
+        assert not got.is_set()
+        assert _current(graph) == first
+        assert (first_dir / "entities.parquet").is_file()
+        resume.set()
+        reader.join(timeout=20)
+        pub.join(timeout=20)
+        assert not reader.is_alive() and not pub.is_alive()
+        snaps = {q.get(timeout=5), q.get(timeout=5)}
+        assert first in snaps
+        assert _current(graph) != first
+        assert not first_dir.exists()
+    finally:
+        _cleanup_processes(pub, reader, release=resume)
 
 
 def test_installed_wheel_mcp_from_outside_checkout(

@@ -591,6 +591,12 @@ def test_retention_path_safety_and_missing_root_noop(tmp_path: Path):
         cleanup_old_snapshots(graph, keep_last=1)
     assert external_lock.read_text(encoding="utf-8") == "untouched"
 
+    lock_path.unlink()
+    lock_path.mkdir()
+    with pytest.raises(ByogPublicationLockError, match="not a regular file"):
+        cleanup_old_snapshots(graph, keep_last=1)
+    assert lock_path.is_dir()
+
 
 def test_envelope_audit_still_detects_current_switch(tmp_path: Path, monkeypatch):
     ents, rels, tus, obs = _tiny_tables(n_obs=0)

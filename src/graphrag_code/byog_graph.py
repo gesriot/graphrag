@@ -41,6 +41,10 @@ class ByogPublicationLockError(RuntimeError):
     """Raised when a cross-process publication lock cannot be taken honestly."""
 
 
+class ByogReaderLockError(RuntimeError):
+    """Raised when a shared reader lock on ``.publish.lock`` cannot be taken."""
+
+
 def is_staging_snapshot_name(name: str) -> bool:
     """Return True for a private publisher staging directory name."""
     return bool(name) and name.startswith(STAGING_NAME_PREFIX)
@@ -162,59 +166,295 @@ def _available_lock_backend() -> Optional[str]:
     return "msvcrt"
 
 
-def _acquire_exclusive_lock(fd: int) -> str:
+def _windows_overlapped():
+    import ctypes
+    from ctypes import wintypes
+
+    class Overlapped(ctypes.Structure):
+        _fields_ = [
+            ("Internal", ctypes.c_size_t),
+            ("InternalHigh", ctypes.c_size_t),
+            ("Offset", wintypes.DWORD),
+            ("OffsetHigh", wintypes.DWORD),
+            ("hEvent", wintypes.HANDLE),
+        ]
+
+    return Overlapped()
+
+
+def _lock_file_ex(fd: int, *, exclusive: bool) -> None:
+    """Shared/exclusive LockFileEx so Windows readers and publishers interoperate.
+
+    ``msvcrt.locking`` has no shared mode. Exclusive and shared must use the
+    same kernel API on the same byte range.
+    """
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    lock_ex = kernel32.LockFileEx
+    lock_ex.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+    ]
+    lock_ex.restype = wintypes.BOOL
+    handle = msvcrt.get_osfhandle(fd)
+    flags = 0x00000002 if exclusive else 0  # LOCKFILE_EXCLUSIVE_LOCK
+    overlapped = _windows_overlapped()
+    if not lock_ex(handle, flags, 0, 1, 0, ctypes.byref(overlapped)):
+        err = ctypes.get_last_error()
+        raise OSError(err, f"LockFileEx failed with Windows error {err}")
+
+
+def _unlock_file_ex(fd: int) -> None:
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    unlock_ex = kernel32.UnlockFileEx
+    unlock_ex.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+    ]
+    unlock_ex.restype = wintypes.BOOL
+    handle = msvcrt.get_osfhandle(fd)
+    overlapped = _windows_overlapped()
+    if not unlock_ex(handle, 0, 1, 0, ctypes.byref(overlapped)):
+        err = ctypes.get_last_error()
+        raise OSError(err, f"UnlockFileEx failed with Windows error {err}")
+
+
+def _acquire_lock(fd: int, *, exclusive: bool) -> str:
     backend = _available_lock_backend()
     if backend == "fcntl":
         import fcntl
 
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        fcntl.flock(fd, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
         return backend
     if backend == "msvcrt":
-        import msvcrt
-
-        os.lseek(fd, 0, os.SEEK_SET)
-        if os.fstat(fd).st_size < 1:
-            os.write(fd, b"\0")
-            os.lseek(fd, 0, os.SEEK_SET)
-        msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+        _lock_file_ex(fd, exclusive=exclusive)
         return backend
     raise ByogPublicationLockError(
         f"cross-process publication lock is unsupported on {sys.platform!r}; "
-        "refusing to publish or retain snapshots without an exclusive lock"
+        "refusing to lock snapshots without an advisory lock"
     )
 
 
-def _release_exclusive_lock(fd: int, backend: str) -> None:
+def _acquire_exclusive_lock(fd: int) -> str:
+    return _acquire_lock(fd, exclusive=True)
+
+
+def _release_lock(fd: int, backend: str) -> None:
     if backend == "fcntl":
         import fcntl
 
         fcntl.flock(fd, fcntl.LOCK_UN)
         return
     if backend == "msvcrt":
-        import msvcrt
-
-        os.lseek(fd, 0, os.SEEK_SET)
-        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        _unlock_file_ex(fd)
 
 
-@contextmanager
-def _publication_lock(out_root: Path) -> Iterator[None]:
-    """Exclusive cross-process lock for snapshot promotion, current, and retention."""
-    lock_path = Path(out_root) / PUBLICATION_LOCK_NAME
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    if lock_path.is_symlink():
-        raise ByogPublicationLockError(
-            f"unsafe symlinked publication lock is unsupported: {lock_path}"
+def _release_exclusive_lock(fd: int, backend: str) -> None:
+    _release_lock(fd, backend)
+
+
+def is_managed_snapshot_layout(path: Path) -> bool:
+    """Return True for a graph root with ``current`` and ``snapshots/``."""
+    try:
+        return _validate_managed_snapshot_layout(Path(path))
+    except ByogReaderLockError:
+        return False
+
+
+def _validate_managed_snapshot_layout(root: Path) -> bool:
+    """Return False for a flat layout; reject incomplete or unsafe managed markers."""
+    import stat as stat_mod
+
+    root = Path(root)
+    current = root / "current"
+    snapshots = root / "snapshots"
+
+    def inspect(marker: Path):
+        try:
+            return marker.lstat()
+        except FileNotFoundError:
+            return None
+        except OSError as error:
+            raise ByogReaderLockError(
+                f"cannot inspect managed graph marker {marker}: {error}"
+            ) from error
+
+    current_stat = inspect(current)
+    snapshots_stat = inspect(snapshots)
+    if current_stat is None and snapshots_stat is None:
+        return False
+    if current_stat is not None and stat_mod.S_ISLNK(current_stat.st_mode):
+        raise ByogReaderLockError(
+            f"unsafe symlinked current pointer is unsupported: {current}"
         )
+    if snapshots_stat is not None and stat_mod.S_ISLNK(snapshots_stat.st_mode):
+        raise ByogReaderLockError(
+            f"unsafe symlinked snapshots directory is unsupported: {snapshots}"
+        )
+    if current_stat is None or snapshots_stat is None:
+        raise ByogReaderLockError(
+            f"incomplete managed snapshot layout under {root}: "
+            "both current and snapshots/ are required"
+        )
+    if not stat_mod.S_ISREG(current_stat.st_mode):
+        raise ByogReaderLockError(f"current pointer is not a regular file: {current}")
+    if not stat_mod.S_ISDIR(snapshots_stat.st_mode):
+        raise ByogReaderLockError(
+            f"snapshots path is not a real directory: {snapshots}"
+        )
+    return True
+
+
+def _open_exclusive_lock_fd(lock_path: Path) -> int:
+    import stat as stat_mod
+
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    before = None
+    try:
+        before = lock_path.lstat()
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        raise ByogPublicationLockError(
+            f"cannot inspect publication lock {lock_path}: {error}"
+        ) from error
+    if before is not None:
+        if stat_mod.S_ISLNK(before.st_mode):
+            raise ByogPublicationLockError(
+                f"unsafe symlinked publication lock is unsupported: {lock_path}"
+            )
+        if not stat_mod.S_ISREG(before.st_mode):
+            raise ByogPublicationLockError(
+                f"publication lock is not a regular file: {lock_path}"
+            )
     open_flags = os.O_RDWR | os.O_CREAT
     if hasattr(os, "O_NOFOLLOW"):
         open_flags |= os.O_NOFOLLOW
+    if hasattr(os, "O_CLOEXEC"):
+        open_flags |= os.O_CLOEXEC
     try:
         fd = os.open(str(lock_path), open_flags, 0o644)
     except OSError as error:
         raise ByogPublicationLockError(
             f"cannot open publication lock {lock_path}: {error}"
         ) from error
+    try:
+        opened = os.fstat(fd)
+        if not stat_mod.S_ISREG(opened.st_mode):
+            raise ByogPublicationLockError(
+                f"publication lock is not a regular file: {lock_path}"
+            )
+        if before is not None and (
+            before.st_dev != opened.st_dev or before.st_ino != opened.st_ino
+        ):
+            raise ByogPublicationLockError(
+                f"publication lock changed while opening it: {lock_path}"
+            )
+        current = lock_path.lstat()
+        if stat_mod.S_ISLNK(current.st_mode):
+            raise ByogPublicationLockError(
+                f"unsafe symlinked publication lock is unsupported: {lock_path}"
+            )
+        if (
+            not stat_mod.S_ISREG(current.st_mode)
+            or current.st_dev != opened.st_dev
+            or current.st_ino != opened.st_ino
+        ):
+            raise ByogPublicationLockError(
+                f"publication lock changed while opening it: {lock_path}"
+            )
+    except Exception:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _open_shared_lock_fd(lock_path: Path) -> int:
+    """Open an existing regular lock file for reading. Never create or write."""
+    import errno
+    import stat as stat_mod
+
+    try:
+        before = lock_path.lstat()
+    except FileNotFoundError as error:
+        raise ByogReaderLockError(
+            f"publication lock is missing; refusing to read a managed snapshot graph: {lock_path}"
+        ) from error
+    except OSError as error:
+        raise ByogReaderLockError(
+            f"cannot inspect publication lock {lock_path}: {error}"
+        ) from error
+    if stat_mod.S_ISLNK(before.st_mode):
+        raise ByogReaderLockError(
+            f"unsafe symlinked publication lock is unsupported: {lock_path}"
+        )
+    if not stat_mod.S_ISREG(before.st_mode):
+        raise ByogReaderLockError(
+            f"publication lock is not a regular file: {lock_path}"
+        )
+    open_flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        open_flags |= os.O_NOFOLLOW
+    if hasattr(os, "O_CLOEXEC"):
+        open_flags |= os.O_CLOEXEC
+    try:
+        fd = os.open(str(lock_path), open_flags)
+    except OSError as error:
+        if getattr(error, "errno", None) == getattr(errno, "ELOOP", object()):
+            raise ByogReaderLockError(
+                f"unsafe symlinked publication lock is unsupported: {lock_path}"
+            ) from error
+        raise ByogReaderLockError(
+            f"cannot open publication lock {lock_path}: {error}"
+        ) from error
+    try:
+        opened = os.fstat(fd)
+        if not stat_mod.S_ISREG(opened.st_mode):
+            raise ByogReaderLockError(
+                f"publication lock is not a regular file: {lock_path}"
+            )
+        if opened.st_dev != before.st_dev or opened.st_ino != before.st_ino:
+            raise ByogReaderLockError(
+                f"publication lock changed while opening it: {lock_path}"
+            )
+        current = lock_path.lstat()
+        if stat_mod.S_ISLNK(current.st_mode):
+            raise ByogReaderLockError(
+                f"unsafe symlinked publication lock is unsupported: {lock_path}"
+            )
+        if (
+            not stat_mod.S_ISREG(current.st_mode)
+            or current.st_dev != opened.st_dev
+            or current.st_ino != opened.st_ino
+        ):
+            raise ByogReaderLockError(
+                f"publication lock changed while opening it: {lock_path}"
+            )
+    except Exception:
+        os.close(fd)
+        raise
+    return fd
+
+
+@contextmanager
+def _publication_lock(out_root: Path) -> Iterator[None]:
+    """Exclusive cross-process lock for snapshot promotion, current, and retention."""
+    lock_path = Path(out_root) / PUBLICATION_LOCK_NAME
+    fd = _open_exclusive_lock_fd(lock_path)
     backend: Optional[str] = None
     try:
         backend = _acquire_exclusive_lock(fd)
@@ -226,6 +466,79 @@ def _publication_lock(out_root: Path) -> Iterator[None]:
             except OSError:
                 pass
         os.close(fd)
+
+
+@contextmanager
+def _shared_publication_lock(graph_root: Path) -> Iterator[None]:
+    """Shared reader lock. Never creates or rewrites ``.publish.lock``."""
+    lock_path = Path(graph_root) / PUBLICATION_LOCK_NAME
+    fd = _open_shared_lock_fd(lock_path)
+    backend: Optional[str] = None
+    try:
+        try:
+            backend = _acquire_lock(fd, exclusive=False)
+        except ByogPublicationLockError as error:
+            raise ByogReaderLockError(str(error)) from error
+        except OSError as error:
+            raise ByogReaderLockError(
+                f"cannot acquire shared publication lock {lock_path}: {error}"
+            ) from error
+        yield
+    finally:
+        if backend is not None:
+            try:
+                _release_lock(fd, backend)
+            except OSError:
+                pass
+        os.close(fd)
+
+
+@contextmanager
+def graph_read_lease(
+    graph_root: Path,
+    *,
+    allow_unlocked_managed: bool = False,
+) -> Iterator[None]:
+    """Hold a shared advisory lock for one logical read of a managed graph.
+
+    For a managed ``current + snapshots/`` layout with an existing
+    ``.publish.lock`` this acquires a shared lock before the caller should
+    resolve ``current``. Cooperating publishers and retention take the same
+    lock exclusively, so they wait until this block exits. Concurrent readers
+    may share the lock. Process death releases it.
+
+    A managed layout without ``.publish.lock`` fails closed by default: a
+    future publisher could otherwise create the lock and retain snapshots
+    underneath an unprotected reader. ``allow_unlocked_managed`` exists only
+    for explicit compatibility reads of immutable pre-lock evidence graphs;
+    it never creates the missing file and provides no retention guarantee.
+
+    For a legacy flat-parquet directory this is also a no-op.
+
+    This is not a distributed lease service and does not protect against
+    tools that ignore ``.publish.lock``.
+    """
+    root = Path(graph_root)
+    if not _validate_managed_snapshot_layout(root):
+        yield
+        return
+    lock_path = root / PUBLICATION_LOCK_NAME
+    try:
+        lock_path.lstat()
+    except FileNotFoundError:
+        if allow_unlocked_managed:
+            yield
+            return
+        raise ByogReaderLockError(
+            f"publication lock is missing; refusing an unleased managed graph read: "
+            f"{lock_path}"
+        )
+    except OSError as error:
+        raise ByogReaderLockError(
+            f"cannot inspect publication lock {lock_path}: {error}"
+        ) from error
+    with _shared_publication_lock(root):
+        yield
 
 
 def _remove_staging_dir(stage_dir: Path) -> None:
@@ -324,7 +637,7 @@ def publish_byog_snapshot(
     Layout created:
         out_root/
             current                 # text file with the snapshot id
-            .publish.lock           # exclusive publication/retention lock
+            .publish.lock           # exclusive publication/retention; shared readers
             snapshots/
                 <id>/
                     entities.parquet
@@ -343,8 +656,9 @@ def publish_byog_snapshot(
 
     ``current`` is only updated after the staging directory has been renamed
     into place, so it never names a staging directory or a partial snapshot.
-    A reader that keeps a retired snapshot path across later retention is
-    not leased; that remains a separate limitation.
+    Cooperating readers take a shared lock on ``.publish.lock`` before
+    resolving ``current`` and hold it until their files are materialized.
+    Tools that ignore the lock are not protected.
 
     A crash may leave a private staging directory. Retention does not reap
     staging dirs by guessed age.
@@ -534,6 +848,10 @@ class ByogGraph:
 
     def __init__(self, graph_dir: Path):
         self.root = Path(graph_dir)
+        with graph_read_lease(self.root, allow_unlocked_managed=True):
+            self._load_tables()
+
+    def _load_tables(self) -> None:
         self._snap_base = _resolve_graph_base(self.root)
         self.ents: pd.DataFrame = pd.read_parquet(self._snap_base / "entities.parquet")
         self.rels: pd.DataFrame = pd.read_parquet(self._snap_base / "relationships.parquet")

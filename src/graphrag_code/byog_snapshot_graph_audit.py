@@ -10,6 +10,10 @@ or compile_commands.json; reconstruct overlays; reindex, repair, publish,
 rename, or delete snapshots; update current; or compare source_root,
 git_commit, or created_at with the current host.
 
+Managed graphs with an existing ``.publish.lock`` are audited under a shared
+reader lease. Immutable pre-lock evidence uses an explicitly unleased,
+fingerprinted compatibility read; the audit never creates the lock.
+
 Exit codes:
   0 – valid snapshot envelope
   1 – persisted integrity violations
@@ -33,6 +37,8 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 
 from graphrag_code.byog_graph import (  # type: ignore
+    ByogReaderLockError,
+    graph_read_lease,
     is_published_snapshot_id,
     is_staging_snapshot_name,
 )
@@ -431,6 +437,23 @@ def audit_graph_root(
     max_anomaly_samples: int = 40,
 ) -> Dict[str, Any]:
     graph_root = Path(graph_root)
+    try:
+        with graph_read_lease(graph_root, allow_unlocked_managed=True):
+            return _audit_graph_root_unlocked(
+                graph_root,
+                snapshot=snapshot,
+                max_anomaly_samples=max_anomaly_samples,
+            )
+    except ByogReaderLockError as exc:
+        raise SnapshotGraphAuditError(str(exc)) from exc
+
+
+def _audit_graph_root_unlocked(
+    graph_root: Path,
+    *,
+    snapshot: Optional[str] = None,
+    max_anomaly_samples: int = 40,
+) -> Dict[str, Any]:
     snap_dir, snap_id, _ = resolve_snapshot(graph_root, snapshot)
     before = read_only_fingerprint(graph_root, snap_dir)
 

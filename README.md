@@ -59,11 +59,16 @@ The server exposes a fixed read-only tool set: `graph_status`,
 select another graph. There is no indexing, publishing, retention,
 port-eval, compiler/Clang, SQL, or shell tool.
 
-Each tool call resolves `current` once and stays on that published
-snapshot for the rest of the call. There is still no reader lease: if
-retention removes that snapshot mid-call the tool returns an error.
-This is agent access to a local graph, not a UI, HTTP service, or
-semantic search backend.
+Each tool call takes a shared advisory lock on the graph-root
+`.publish.lock`, resolves `current` once while that lease is held, and
+stays on that published snapshot for the rest of the call. Cooperating
+publishers and keep-last retention wait until the call releases the
+lock. A managed graph without that regular lock file is rejected during
+MCP startup; republish/reindex it before serving. This is not a distributed
+lease service and does not protect against tools that ignore `.publish.lock`.
+Manual deletion or corruption still returns a controlled error. This is
+agent access to a local graph, not a UI, HTTP service, or semantic search
+backend.
 
 Tool schemas reject unknown fields. List and traversal sizes, context-pack
 text/type evidence, doctor samples, and the serialized response envelope all
@@ -379,8 +384,15 @@ modules, plugins, and PCH fail explicitly. See
   not published snapshot ids and are never retention candidates.
   `current` is never updated to a staging directory or a partial
   snapshot. A crash may leave a private staging directory; retention
-  does not reap those by guessed age. Readers that retain a retired
-  snapshot path across later retention are not leased.
+  does not reap those by guessed age. Cooperating readers take a shared
+  lock on the same `.publish.lock` before resolving `current` and hold
+  it until their snapshot files are materialized. Tools that ignore the
+  lock are not protected. Strict readers, including MCP, reject a managed
+  graph without `.publish.lock` and never create that file. `ByogGraph`, the
+  doctor, and snapshot audit retain an explicit read-only compatibility path
+  for immutable evidence published before the lock existed; that path does
+  not claim a retention lease. A legacy flat-parquet directory also has no
+  cooperating retention protocol.
 - `scripts/persisted_graph_doctor.py` / `graphrag-code doctor` – **read-only
   persisted-integrity doctor** for any BYOG graph. Selects one snapshot,
   validates the language-independent envelope, then runs every applicable
@@ -389,8 +401,12 @@ modules, plugins, and PCH fail explicitly. See
   names; `--indexer auto` uses persisted `source_file` extensions and
   extractor provenance and fails closed on empty, mixed, or contradictory
   evidence. Does not invoke an extractor, compiler, or Clang; does not
-  compare the graph with a fresh extraction; does not acquire
-  `.publish.lock`, remove `.staging-*` remnants, or rewrite graphs.
+  compare the graph with a fresh extraction; does not take the exclusive
+  publication lock, remove `.staging-*` remnants, or rewrite graphs. On
+  a managed snapshot graph with an existing lock it holds a shared
+  `.publish.lock` reader lease across snapshot selection and the complete
+  aggregate audit. Old immutable evidence without the lock is audited in
+  explicit fingerprint-only compatibility mode and has no retention lease.
   A stable staging directory is reported as a publication notice, not as
   proven corruption. Exit 0 = every applicable persisted contract is
   valid, 1 = integrity violation or concurrent mutation, 2 = unsafe path /
