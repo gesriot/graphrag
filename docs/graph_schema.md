@@ -108,7 +108,9 @@ not reap staging directories by guessed age. This protocol does not
 claim a distributed lease service. Cooperating readers take a shared
 lock on the same `.publish.lock` before resolving `current` and hold it
 until their snapshot files are materialized, so keep-last retention
-waits. Tools that ignore the lock can still see a retired snapshot
+waits. `snapshot-activate` takes a strict exclusive lease on an
+already-existing regular `.publish.lock` and never creates that file.
+Tools that ignore the lock can still see a retired snapshot
 disappear. The lock and staging convention belong to the graph-root
 publication protocol, not to `manifest.files` or `total_size_bytes`. An
 explicitly selected staging path is not a valid published snapshot for
@@ -195,6 +197,62 @@ fingerprints inputs and reports that there is no retention guarantee.
 MCP `snapshot_history` and `snapshot_diff` are scoped to the startup
 graph and never enable the legacy path. A lock-ignoring actor can still
 mutate files; pre/post fingerprints detect that and fail closed.
+
+### Activating a retained published snapshot
+
+`graphrag-code snapshot-activate --graph <root> --snapshot <published-id>
+--expected-current <published-id> --activate-confirmed` changes only the
+managed graph's `current` pointer. It is an explicit mutating CLI
+operation, not deletion, retention, publication, repair, or reindex, and
+it is intentionally absent from MCP. The fixed MCP tool set remains 11
+read-only tools.
+
+`--activate-confirmed` is required. Without it the command exits 2, prints
+a controlled diagnostic to stderr, writes nothing to stdout, and changes
+nothing. `--expected-current` is a compare-and-swap guard: while one
+exclusive existing-lock lease is held, `current` is resolved exactly once
+and the pointer is written only when that id still matches. A mismatch
+exits 1 and does not write. Both `--snapshot` and `--expected-current`
+must be explicit canonical published ids. `current`, paths, traversal,
+separators, staging ids, empty strings, and aliases are rejected.
+Activating the already-current snapshot is a successful idempotent no-op
+with `changed=false`.
+
+Activation is managed-layout only and requires an already-adopted regular
+`.publish.lock`. A missing lock exits 2 and points at
+`adopt-publication-lock`. The exclusive lease never creates, truncates,
+rewrites, chmods, or replaces the lock. Symlinked, non-regular,
+disappearing, or inode-swapped locks fail closed. The command holds that
+one exclusive lease across resolving current, checking the expected id,
+validating the target envelope, fingerprinting protected inputs,
+atomically replacing `current`, and verifying the result. It does not
+acquire a nested shared lease. The opened lock fd is checked against the
+pathname again after the potentially blocking acquisition, so replacing
+the lock while the process waits cannot silently split the locking domain.
+
+The target is resolved strictly beneath `<graph>/snapshots/<published-id>`
+and must pass the language-independent persisted snapshot envelope
+(manifest identity, required parquet files, counts, files list, sizes,
+optional `call_observations`, unexpected/symlinked entries). Staging
+directories are bounded notices, never valid activation targets.
+Unexpected unsafe `snapshots/` entries fail closed. An invalid target
+exits 1 and leaves `current` unchanged.
+
+The pointer update uses the same-directory temporary-file + atomic
+replace mechanism. A failed write leaves the previous `current` usable
+and cleans temporary files. No manifest, parquet, settings file, snapshot
+directory, staging directory, or lock is altered. Previously current and
+newer snapshots are not deleted. Backward and forward activation among
+retained published ids are allowed; existing retention continues to
+protect whichever snapshot is current.
+
+Pre/post fingerprints cover published snapshot payloads, snapshot
+membership, staging membership, and lock content/identity. The only
+expected change is the exact `current` transition. A second protected-state
+fingerprint and current-pointer check run immediately before the write. A
+lock-ignoring actor that mutates protected inputs fails closed with exit 1;
+there remains an unavoidable race against actors that deliberately ignore
+the advisory protocol. Advisory locks protect only cooperating processes.
 
 ## Entity Types (code domain, start with these)
 - file

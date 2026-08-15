@@ -13,7 +13,8 @@ Usage:
 What this is not: a demonstrated accuracy multiplier for cold porting. The
 Phase 7 ablations showed no graph-vs-raw capability win on bounded library
 slices; this CLI packages the *rails* (index, query, packs, audit,
-adopt-publication-lock, snapshot-history, snapshot-diff, port_eval).
+adopt-publication-lock, snapshot-history, snapshot-diff, snapshot-activate,
+port_eval).
 """
 from __future__ import annotations
 
@@ -39,7 +40,7 @@ app = typer.Typer(
     help=(
         "graphrag-code: deterministic code graph → query → context-pack → "
         "persisted doctor → adopt-publication-lock → snapshot-history → "
-        "snapshot-diff → port-eval. Relative "
+        "snapshot-diff → snapshot-activate → port-eval. Relative "
         "paths are resolved from the invoking working directory."
     ),
 )
@@ -52,6 +53,7 @@ _DELEGATE_MODULES = {
     "persisted_graph_doctor.py": "graphrag_code.persisted_graph_doctor",
     "adopt_publication_lock.py": "graphrag_code.adopt_publication_lock",
     "snapshot_compare.py": "graphrag_code.snapshot_compare",
+    "snapshot_activate.py": "graphrag_code.snapshot_activate",
     "audit_call_edges.py": "graphrag_code.audit_call_edges",
     "port_eval.py": "graphrag_code.port_eval",
 }
@@ -676,6 +678,54 @@ def snapshot_diff(
     if allow_unlocked_legacy is True:
         args.append("--allow-unlocked-legacy")
     _delegate("snapshot_compare.py", args)
+
+
+@app.command("snapshot-activate")
+def snapshot_activate(
+    graph: Path = typer.Option(..., "--graph", "-g", help="Managed BYOG graph root"),
+    snapshot: str = typer.Option(
+        ...,
+        "--snapshot",
+        help="canonical published snapshot id to activate (not 'current')",
+    ),
+    expected_current: str = typer.Option(
+        ...,
+        "--expected-current",
+        help="canonical published id that current must still name",
+    ),
+    activate_confirmed: bool = typer.Option(
+        False,
+        "--activate-confirmed",
+        help=(
+            "Required to change current. Explicit operator confirmation that "
+            "this should activate a retained published snapshot. The command "
+            "still refuses to write if current no longer matches "
+            "--expected-current. Never an MCP tool."
+        ),
+    ),
+    json_out: bool = typer.Option(
+        False, "--json", help="same JSON shape as snapshot_activate.py --json"
+    ),
+):
+    """Activate a retained published snapshot by changing only current.
+
+    Requires --activate-confirmed and --expected-current. Does not delete,
+    retain, publish, repair, or reindex. Requires an already-adopted
+    .publish.lock and never creates that file. Intentionally absent from MCP.
+    """
+    args = [
+        "--graph",
+        str(graph),
+        "--snapshot",
+        snapshot,
+        "--expected-current",
+        expected_current,
+    ]
+    if activate_confirmed is True:
+        args.append("--activate-confirmed")
+    if json_out is True:
+        args.append("--json")
+    _delegate("snapshot_activate.py", args)
 
 
 @app.command("audit-graph")

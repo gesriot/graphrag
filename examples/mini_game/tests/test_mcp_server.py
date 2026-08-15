@@ -226,7 +226,8 @@ def test_tools_list_is_exactly_documented(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert sorted(names) == sorted(TOOL_NAMES)
-            assert len(names) == len(set(names)) == len(TOOL_NAMES)
+            assert len(names) == len(set(names)) == len(TOOL_NAMES) == 11
+            assert "snapshot_activate" not in names
             for tool in tools:
                 assert tool.input_schema["additionalProperties"] is False
                 assert tool.annotations is not None

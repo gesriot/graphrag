@@ -159,7 +159,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`1468 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`1491 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
@@ -198,6 +198,14 @@ this is not semantic equivalence. Missing fields differ from explicit
 nulls, and JSON booleans differ from numbers. Staging directories are
 notices, not history; notices keep the exact count and return at most 20
 names. Shared leases protect only cooperating processes.
+`graphrag-code snapshot-activate` (also `python -m
+graphrag_code.snapshot_activate` and `scripts/snapshot_activate.py`) is
+the explicit mutating CLI that retargets only `current` onto a retained
+published snapshot. `--activate-confirmed` and `--expected-current` are
+mandatory. It holds one exclusive existing-lock lease, never creates
+`.publish.lock`, and is intentionally absent from the fixed 11-tool MCP
+set. It does not delete, retain, publish, repair, or reindex. Advisory
+locks do not protect against non-cooperating programs.
 
 **Live re-check (2026-07-26):** `538 passed, 2 xfailed`.
 

@@ -458,6 +458,7 @@ def _publication_lock(out_root: Path) -> Iterator[None]:
     backend: Optional[str] = None
     try:
         backend = _acquire_exclusive_lock(fd)
+        _validate_existing_exclusive_lock_fd(fd, lock_path)
         yield
     finally:
         if backend is not None:
@@ -483,6 +484,10 @@ def _shared_publication_lock(graph_root: Path) -> Iterator[None]:
             raise ByogReaderLockError(
                 f"cannot acquire shared publication lock {lock_path}: {error}"
             ) from error
+        try:
+            _validate_existing_exclusive_lock_fd(fd, lock_path)
+        except ByogPublicationLockError as error:
+            raise ByogReaderLockError(str(error)) from error
         yield
     finally:
         if backend is not None:
@@ -539,6 +544,169 @@ def graph_read_lease(
         ) from error
     with _shared_publication_lock(root):
         yield
+
+
+def _validate_existing_exclusive_lock_fd(
+    fd: int,
+    lock_path: Path,
+    *,
+    expected: Optional[os.stat_result] = None,
+) -> None:
+    """Prove ``lock_path`` still names the regular file open as ``fd``."""
+    import stat as stat_mod
+
+    try:
+        opened = os.fstat(fd)
+    except OSError as error:
+        raise ByogPublicationLockError(
+            f"cannot inspect opened publication lock {lock_path}: {error}"
+        ) from error
+    if not stat_mod.S_ISREG(opened.st_mode):
+        raise ByogPublicationLockError(
+            f"publication lock is not a regular file: {lock_path}"
+        )
+    if expected is not None and (
+        opened.st_dev != expected.st_dev or opened.st_ino != expected.st_ino
+    ):
+        raise ByogPublicationLockError(
+            f"publication lock changed while opening it: {lock_path}"
+        )
+    try:
+        current = lock_path.lstat()
+    except FileNotFoundError as error:
+        raise ByogPublicationLockError(
+            f"publication lock disappeared while acquiring it: {lock_path}"
+        ) from error
+    except OSError as error:
+        raise ByogPublicationLockError(
+            f"cannot re-inspect publication lock {lock_path}: {error}"
+        ) from error
+    if stat_mod.S_ISLNK(current.st_mode):
+        raise ByogPublicationLockError(
+            f"unsafe symlinked publication lock is unsupported: {lock_path}"
+        )
+    if (
+        not stat_mod.S_ISREG(current.st_mode)
+        or current.st_dev != opened.st_dev
+        or current.st_ino != opened.st_ino
+    ):
+        raise ByogPublicationLockError(
+            f"publication lock changed while acquiring it: {lock_path}"
+        )
+
+
+def _open_existing_exclusive_lock_fd(lock_path: Path) -> int:
+    """Open an existing regular lock for exclusive use. Never create or write.
+
+    Publishers that must create ``.publish.lock`` still use
+    ``_open_exclusive_lock_fd``. Activation and other existing-lock
+    mutations must not create, truncate, chmod, or replace the file.
+    """
+    import errno
+    import stat as stat_mod
+
+    try:
+        before = lock_path.lstat()
+    except FileNotFoundError as error:
+        raise ByogPublicationLockError(
+            f"publication lock is missing; refusing an exclusive mutation of "
+            f"an unleased managed graph: {lock_path}"
+        ) from error
+    except OSError as error:
+        raise ByogPublicationLockError(
+            f"cannot inspect publication lock {lock_path}: {error}"
+        ) from error
+    if stat_mod.S_ISLNK(before.st_mode):
+        raise ByogPublicationLockError(
+            f"unsafe symlinked publication lock is unsupported: {lock_path}"
+        )
+    if not stat_mod.S_ISREG(before.st_mode):
+        raise ByogPublicationLockError(
+            f"publication lock is not a regular file: {lock_path}"
+        )
+    # Advisory locking does not require permission to modify the lock bytes.
+    # Opening read-only makes the "never writes the existing lock" contract
+    # enforceable by the descriptor itself (and still supports flock /
+    # LockFileEx on the supported backends).
+    open_flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        open_flags |= os.O_NOFOLLOW
+    if hasattr(os, "O_CLOEXEC"):
+        open_flags |= os.O_CLOEXEC
+    try:
+        fd = os.open(str(lock_path), open_flags)
+    except OSError as error:
+        if getattr(error, "errno", None) == getattr(errno, "ELOOP", object()):
+            raise ByogPublicationLockError(
+                f"unsafe symlinked publication lock is unsupported: {lock_path}"
+            ) from error
+        if getattr(error, "errno", None) == errno.ENOENT:
+            raise ByogPublicationLockError(
+                f"publication lock is missing; refusing an exclusive mutation of "
+                f"an unleased managed graph: {lock_path}"
+            ) from error
+        raise ByogPublicationLockError(
+            f"cannot open publication lock {lock_path}: {error}"
+        ) from error
+    try:
+        _validate_existing_exclusive_lock_fd(fd, lock_path, expected=before)
+    except Exception:
+        os.close(fd)
+        raise
+    return fd
+
+
+@contextmanager
+def graph_exclusive_lease(graph_root: Path) -> Iterator[None]:
+    """Hold an exclusive advisory lock on an existing regular ``.publish.lock``.
+
+    For a managed ``current + snapshots/`` graph this acquires the same
+    exclusive lock publishers and retention use, but it never creates,
+    truncates, rewrites, chmods, or replaces the lock file. Missing,
+    symlinked, non-regular, disappearing, or inode-swapped locks fail
+    closed. A legacy flat-parquet directory is rejected because there is
+    no managed publication protocol to mutate.
+
+    Callers must not acquire a nested shared lease while this block is
+    held. Process death releases the lock. This is not a distributed
+    lease service and does not protect against tools that ignore
+    ``.publish.lock``.
+    """
+    root = Path(graph_root)
+    try:
+        managed = _validate_managed_snapshot_layout(root)
+    except ByogReaderLockError as error:
+        raise ByogPublicationLockError(str(error)) from error
+    if not managed:
+        raise ByogPublicationLockError(
+            "exclusive existing-lock lease requires a managed "
+            f"current + snapshots/ graph: {root}"
+        )
+    lock_path = root / PUBLICATION_LOCK_NAME
+    fd = _open_existing_exclusive_lock_fd(lock_path)
+    backend: Optional[str] = None
+    try:
+        try:
+            backend = _acquire_exclusive_lock(fd)
+        except ByogPublicationLockError:
+            raise
+        except OSError as error:
+            raise ByogPublicationLockError(
+                f"cannot acquire exclusive publication lock {lock_path}: {error}"
+            ) from error
+        # Opening and validating precedes the potentially blocking lock call.
+        # A lock-ignoring actor could replace the pathname while this process
+        # waits, splitting the locking domain unless the held fd is checked
+        # against the pathname again after acquisition.
+        _validate_existing_exclusive_lock_fd(fd, lock_path)
+        yield
+    finally:
+        if backend is not None:
+            try:
+                _release_exclusive_lock(fd, backend)
+            except OSError:
+                pass
+        os.close(fd)
 
 
 def _remove_staging_dir(stage_dir: Path) -> None:

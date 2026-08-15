@@ -48,6 +48,7 @@ These generic installed commands operate on user-supplied directories:
 - `graphrag-code adopt-publication-lock --graph <root> --indexer auto --offline-confirmed`
 - `graphrag-code snapshot-history --graph <root>`
 - `graphrag-code snapshot-diff --graph <root> --from <id|current> --to <id|current>`
+- `graphrag-code snapshot-activate --graph <root> --snapshot <id> --expected-current <id> --activate-confirmed`
 - `graphrag-code mcp --graph <root> --indexer auto`
 
 `graphrag-code mcp` is a local stdio MCP adapter over one existing graph.
@@ -59,13 +60,16 @@ stderr.
 The server exposes a fixed read-only tool set: `graph_status`,
 `graph_doctor`, `query_symbol`, `callers`, `callees`, `neighbors`,
 `impact`, `type_closure`, `context_pack`, `snapshot_history`, and
-`snapshot_diff`. Tool arguments cannot select another graph. There is no
-indexing, publishing, retention, port-eval, compiler/Clang, SQL, or
-shell tool. Snapshot history is a bounded local listing of retained
-published ids. Snapshot diff is structural persisted-row comparison, not
-semantic equivalence: a modified row means canonical persisted fields
-differ. Staging directories are notices, not history. Neither tool
-accepts graph paths, filesystem paths, output paths, or table names.
+`snapshot_diff`. There is no `snapshot_activate` tool: activating a
+retained snapshot is an explicit mutating CLI operation and is
+intentionally absent from MCP. Tool arguments cannot select another
+graph. There is no indexing, publishing, retention, port-eval,
+compiler/Clang, SQL, or shell tool. Snapshot history is a bounded local
+listing of retained published ids. Snapshot diff is structural
+persisted-row comparison, not semantic equivalence: a modified row means
+canonical persisted fields differ. Staging directories are notices, not
+history. Neither history nor diff accepts graph paths, filesystem paths,
+output paths, or table names.
 
 Each tool call takes a shared advisory lock on the graph-root
 `.publish.lock`, resolves `current` once while that lease is held, and
@@ -123,6 +127,26 @@ added/removed/modified category; totals stay exact. A missing field
 differs from explicit null, and JSON booleans differ from numbers. This
 is not natural-language search, a UI, an HTTP service, repair, or reindex.
 
+`snapshot-activate` is an explicit mutating CLI operation. It changes
+only `<graph>/current` so an operator can activate an already-published
+retained snapshot. `--activate-confirmed` and `--expected-current` are
+mandatory. Without confirmation the command exits 2, prints a controlled
+diagnostic to stderr, writes nothing to stdout, and changes nothing.
+`--expected-current` is a compare-and-swap guard: while one exclusive
+existing-lock lease is held, `current` is resolved exactly once and the
+pointer is written only when that id still matches. `--snapshot` and
+`--expected-current` must be explicit canonical published ids, not
+`current`, paths, traversal, staging ids, or aliases. Activating the
+already-current snapshot is a successful idempotent no-op with
+`changed=false`. The command requires an already-adopted regular
+`.publish.lock`; a missing lock exits 2, points at
+`adopt-publication-lock`, and never creates the lock. It does not
+delete, retain, publish, repair, or reindex. Both backward and forward
+activation among retained published ids are allowed; existing retention
+continues to protect whichever snapshot is current. Advisory locks
+protect only cooperating processes. This command is intentionally
+absent from MCP.
+
 `index-python`, `index-c`, and `index` accept opt-in `--reuse-unchanged`.
 That is content-addressed whole-snapshot reuse, not per-file delta
 indexing and not a watcher. When the supported deterministic inputs, the
@@ -155,6 +179,7 @@ uv run python scripts/persisted_graph_doctor.py --graph <root> --indexer python
 uv run python scripts/adopt_publication_lock.py --graph <root> --indexer python --offline-confirmed
 uv run python scripts/snapshot_compare.py history --graph <root>
 uv run python scripts/snapshot_compare.py diff --graph <root> --from current --to current
+uv run python scripts/snapshot_activate.py --graph <root> --snapshot <id> --expected-current <id> --activate-confirmed
 uv run python scripts/index_python.py --package <pkg> --graph <out>
 uv run python scripts/index_c.py --package <pkg> --graph <out>
 uv run python scripts/graph_query.py symbol <title> --graph <root>
@@ -448,6 +473,13 @@ modules, plugins, and PCH fail explicitly. See
   explicit operator migration that creates only `.publish.lock` after a
   compatibility-mode doctor. Automatically touching the file would be
   unsafe because existing pre-lock readers cannot be discovered.
+  `graphrag-code snapshot-activate --snapshot <id> --expected-current <id>
+  --activate-confirmed` is the explicit mutating CLI that retargets only
+  `current` onto an already-published retained snapshot. It takes a
+  strict existing-lock exclusive lease on `.publish.lock` (never creating
+  that file), validates the language-independent snapshot envelope, and
+  atomically replaces the pointer. It is not deletion, retention,
+  publication, repair, or reindex, and it is not an MCP tool.
 - `scripts/persisted_graph_doctor.py` / `graphrag-code doctor` – **read-only
   persisted-integrity doctor** for any BYOG graph. Selects one snapshot,
   validates the language-independent envelope, then runs every applicable
