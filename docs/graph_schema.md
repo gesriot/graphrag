@@ -87,8 +87,12 @@ directory the publisher creates
 `snapshots/.staging-<id>/.staging-writer.lock` and holds an exclusive
 advisory writer lease for the complete staging-write interval. Staging
 writes remain concurrent across publisher processes: each publisher has
-its own staging directory and writer-lock file. The writer lease is
-still held while the publisher waits for the graph-root exclusive
+its own staging directory and writer-lock file. In an already-managed
+graph, reacquiring existing writer-lock metadata briefly holds the
+graph-root lock shared and is nonblocking while gated; fresh publisher
+lock creation is not gated. That gate ends before payload construction
+and prevents a cleanup release/unlink race with a waiting cooperative
+writer. The writer lease is still held while the publisher waits for the graph-root exclusive
 `.publish.lock`. While that graph-root lock is held, the publisher
 releases and removes the writer-lock metadata, then:
 
@@ -564,15 +568,17 @@ MCP tool set remains 11 read-only tools.
 ### Snapshot staging cleanup plan
 
 `graphrag-code snapshot-staging-cleanup-plan --graph <root>` is a
-read-only schema-1 plan over the schema-2 staging inventory. It does
-not delete, rename, quarantine, repair, claim, or mutate staging
-entries. It reuses the snapshot-staging two-scan scanner under one
-shared existing-lock lease and does not take a nested graph-root
-lease. It requires an already-adopted regular `.publish.lock` and
-never creates, truncates, chmods, rewrites, or replaces that lock. It
-never creates or changes `.snapshot-pins.json`, `current`, published
-snapshots, staging directories, payload files, or writer-lock
-bytes/metadata.
+read-only schema-2 plan over the schema-2 staging inventory. Schema 1
+was read-only/pre-apply (`apply_supported=false`) and is not accepted
+by apply. Schema 2 sets `apply_supported=true` and keeps
+`cleanup_applied=false`. The plan command does not delete, rename,
+quarantine, repair, claim, or mutate staging entries. It reuses the
+snapshot-staging two-scan scanner under one shared existing-lock lease
+and does not take a nested graph-root lease. It requires an
+already-adopted regular `.publish.lock` and never creates, truncates,
+chmods, rewrites, or replaces that lock. It never creates or changes
+`.snapshot-pins.json`, `current`, published snapshots, staging
+directories, payload files, or writer-lock bytes/metadata.
 
 A staging name appears in `deletion_candidates` only when the stable
 observation is a real directory, the suffix is a canonical published
@@ -611,17 +617,26 @@ JSON binding `schema_version`, `current`, `published_snapshots`,
 `deletion_candidates`, `blocked_entries`, `ownership_inference`,
 `cleanup_applied`, and `apply_supported`. Absolute graph path,
 counts, notices, `ok`, and `staging_entries` are excluded. This
-command does not accept or apply that token. `apply_supported` and
-`cleanup_applied` are false.
-
-A future destructive command must acquire the graph-root exclusive
-existing-lock lease, recompute and compare this `plan_revision`,
-nonblockingly acquire every selected existing writer lock, revalidate
-the exact staged directory and writer-lock identities, and hold all
-claimed writer leases through deletion. Observed non-contention in
-this plan is not that future exclusive claim. Actual deletion is not
-implemented. The command is intentionally absent from MCP. The fixed
-MCP tool set remains 11 read-only tools.
+command does not accept or apply that token. `cleanup_applied` stays
+false. `apply_supported` is true because
+`graphrag-code snapshot-staging-cleanup --graph <root>
+--expected-plan-revision sha256:<hex> --cleanup-confirmed` is the
+separate CAS apply. That command acquires one exclusive existing-lock
+graph lease, recomputes this schema-2 `plan_revision`, compares the
+caller token, nonblockingly claims every selected existing writer
+lock, revalidates the exact staged directory, writer-lock identity
+and type, and bounded top-level structural token, and holds those
+claims through deletion. The plan's `not_held_at_scan` observation is
+not that exclusive claim. Schema-1 revisions are rejected. There is
+no dry-run and no caller-supplied deletion list. Confirmation is
+required even when the candidate set is empty. Recursive deletion is
+not transactionally atomic. A partial result reports `partial=true`,
+`filesystem_may_have_changed=true`, and
+`retry_requires_fresh_plan=true`; there is no rollback, trash,
+quarantine, or recovery. A fresh plan is mandatory after any partial
+result. Apply-result schema version is 1. Both commands are
+intentionally absent from MCP. The fixed MCP tool set remains 11
+read-only tools.
 
 ## Entity Types (code domain, start with these)
 - file

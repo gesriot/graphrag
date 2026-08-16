@@ -56,6 +56,7 @@ These generic installed commands operate on user-supplied directories:
 - `graphrag-code snapshot-prune --graph <root> --keep-last <N> --expected-plan-revision sha256:<hex> --prune-confirmed`
 - `graphrag-code snapshot-staging --graph <root>`
 - `graphrag-code snapshot-staging-cleanup-plan --graph <root>`
+- `graphrag-code snapshot-staging-cleanup --graph <root> --expected-plan-revision sha256:<hex> --cleanup-confirmed`
 - `graphrag-code mcp --graph <root> --indexer auto`
 
 `graphrag-code mcp` is a local stdio MCP adapter over one existing graph.
@@ -69,11 +70,12 @@ The server exposes a fixed read-only tool set: `graph_status`,
 `impact`, `type_closure`, `context_pack`, `snapshot_history`, and
 `snapshot_diff`. There is no `snapshot_activate`, `snapshot_pin`,
 `snapshot_unpin`, `snapshot_retention_plan`, `snapshot_prune`,
-`snapshot_staging`, or `snapshot_staging_cleanup_plan` tool:
+`snapshot_staging`, `snapshot_staging_cleanup_plan`, or
+`snapshot_staging_cleanup` tool:
 activating a retained snapshot, writing operator retention pins,
 planning keep-last retention, pruning CAS-verified candidates,
-listing staging directories, or emitting a read-only staging cleanup
-plan is an
+listing staging directories, emitting a read-only staging cleanup
+plan, or applying that plan is an
 explicit CLI operation and is intentionally absent from MCP. Tool arguments cannot select another
 graph. There is no indexing, publishing, retention, port-eval,
 compiler/Clang, SQL, or shell tool. Snapshot history is a bounded local
@@ -240,12 +242,19 @@ direct `snapshots/.staging-*` entries. It requires a managed
 `.publish.lock`, holds one shared existing-lock lease across both
 discovery scans and the complete response, and never creates that lock
 or changes `current`, `.snapshot-pins.json`, published payloads, or
-staging entries. Publishers construct `.staging-*` outside the
-graph-root publication lock and take that lock only for promotion, so
+staging entries. Publishers construct `.staging-*` without holding the
+exclusive graph-root publication lock and acquire it exclusively only
+for promotion, so
 the shared graph lease is not a liveness lease over a staging writer.
 Cooperating publishers also hold a dedicated advisory writer lease on
 `snapshots/.staging-<id>/.staging-writer.lock` for the staging-write
-interval. Inventory observes that private lease with a nonblocking
+interval. In an already-managed graph, reacquiring existing writer-lock
+metadata briefly joins the shared `.publish.lock` domain, then releases
+that graph gate before payload construction; reacquisition is
+nonblocking while gated, and fresh publisher lock creation is not gated.
+This prevents cleanup from removing a lock while
+a cooperative writer is waiting for it without serializing ordinary
+staging writes. Inventory observes that private lease with a nonblocking
 exclusive probe. Contended acquisition means only that a cooperating
 process held the writer lease at that scan. A successful
 acquire-and-release means only that the lease was not held at that
@@ -260,7 +269,7 @@ each staging entry now reports `writer_lease_protocol`,
 `writer_lease_state`, `writer_lock_present`, and `writer_lock_regular`.
 Ownership is always `unknown`. No wall-clock age, mtime heuristic, PID
 probe, host identity, or guessed timeout is used to infer ownership.
-Cleanup is not implemented; `cleanup_eligible` is always false.
+This inventory does not apply cleanup; `cleanup_eligible` is always false.
 `complete_payload_candidate` means only that the expected top-level file
 names are present, not parquet validity, manifest integrity, successful
 publication, or deletion safety. `staging_revision` is an informational
@@ -274,10 +283,13 @@ absent from MCP.
 CLI plan over that same schema-2 inventory. It reuses the inventory
 scanner under one shared existing-lock lease, never creates
 `.publish.lock` or `.snapshot-pins.json`, and never mutates staging,
-payloads, or writer-lock bytes. Cleanup-plan schema version is 1.
-A staging name appears in `deletion_candidates` only when the stable
-observation is a real directory whose suffix is a canonical published
-id, `writer_lease_protocol=cooperative_v1`,
+payloads, or writer-lock bytes. Cleanup-plan schema 1 was
+read-only/pre-apply (`apply_supported=false`). Schema version is now 2
+and `apply_supported` is true because `snapshot-staging-cleanup` is
+the separate CAS apply. `cleanup_applied` stays false. A staging name
+appears in `deletion_candidates` only when the stable observation is a
+real directory whose suffix is a canonical published id,
+`writer_lease_protocol=cooperative_v1`,
 `writer_lease_state=not_held_at_scan`, and the writer-lock file is
 present and regular. Payload completeness is not a selection
 condition. Everything else is a deterministic `blocked_entries` row
@@ -300,18 +312,25 @@ replacement is visible even when public inventory fields match.
 `deletion_candidates`, `blocked_entries`, `ownership_inference`,
 `cleanup_applied`, and `apply_supported`. Graph path, counts, notices,
 `ok`, and `staging_entries` are excluded. This command does not accept
-or apply that token. `apply_supported` and `cleanup_applied` remain
-false. A future exclusive apply command must recompute this revision
-under the graph-root exclusive existing-lock lease, nonblockingly
-acquire every selected existing writer lock, revalidate staged
-directory and writer-lock identities, and hold those claimed writer
-leases through deletion. That apply is not implemented. The command is
-intentionally absent from MCP. Staging entries and their top-level children are each
-capped at 64, and the reported published-snapshot list is capped at
-4096. Enumeration is descriptor-relative with `O_NOFOLLOW`; a platform
-without that safe primitive is rejected instead of falling back to a
-pathname traversal. Advisory locks protect only cooperating processes.
-No backup, recovery, quarantine, or distributed lease is claimed.
+or apply that token. Schema-1 revisions are not accepted by apply.
+`snapshot-staging-cleanup --graph <root> --expected-plan-revision
+sha256:<hex> --cleanup-confirmed` is the explicit mutating CLI. There
+is no dry-run. Confirmation is required even when the candidate set is
+empty. It acquires one exclusive existing-lock graph lease, recomputes
+the schema-2 plan, compares `plan_revision`, nonblockingly claims
+every selected existing writer lock, revalidates staged-directory and
+writer-lock identities plus the bounded top-level structural token,
+and only then deletes. The plan's `not_held_at_scan` observation is
+not that exclusive claim. Recursive deletion is not transactionally
+atomic. A partial result reports `partial=true` and always requires a
+fresh plan; there is no rollback, trash, or recovery. Both commands
+are intentionally absent from MCP. Staging entries and their top-level
+children are each capped at 64, and the reported published-snapshot
+list is capped at 4096. Enumeration is descriptor-relative with
+`O_NOFOLLOW`; a platform without that safe primitive is rejected
+instead of falling back to a pathname traversal. Advisory locks
+protect only cooperating processes. No backup, recovery, quarantine,
+or distributed lease is claimed.
 
 Query and context-pack commands accept optional
 `--snapshot <id|current>`. Omitting it preserves the existing default
@@ -366,6 +385,7 @@ uv run python scripts/snapshot_retention.py --graph <root> --keep-last 2
 uv run python scripts/snapshot_prune.py --graph <root> --keep-last 2 --expected-plan-revision sha256:<hex> --prune-confirmed
 uv run python scripts/snapshot_staging.py --graph <root>
 uv run python scripts/snapshot_staging_cleanup_plan.py --graph <root>
+uv run python scripts/snapshot_staging_cleanup.py --graph <root> --expected-plan-revision sha256:<hex> --cleanup-confirmed
 uv run python scripts/index_python.py --package <pkg> --graph <out>
 uv run python scripts/index_c.py --package <pkg> --graph <out>
 uv run python scripts/graph_query.py symbol <title> --graph <root>
@@ -644,11 +664,17 @@ modules, plugins, and PCH fail explicitly. See
   directory it creates `snapshots/.staging-<id>/.staging-writer.lock`
   and holds an exclusive advisory writer lease for the complete
   staging-write interval, including the wait for the graph-root
-  exclusive `.publish.lock`. The graph-root lock is taken only for
+  exclusive `.publish.lock`. The graph-root lock is held exclusively only for
   removing that writer-lock metadata, the atomic staging-to-final
   rename, the `current` pointer update, and keep-last retention. The
   published snapshot and `manifest.files` never contain the writer-lock
-  file. Staging names are not published snapshot ids and are never
+  file. Reacquiring existing writer-lock metadata in an already-managed
+  graph uses a short shared graph-lock gate which ends before payload
+  construction; reacquisition is nonblocking while gated, and fresh
+  publisher lock creation is not gated. Concurrent
+  staging writes therefore remain concurrent while cleanup cannot race a
+  waiting cooperative writer during lock removal. Staging
+  names are not published snapshot ids and are never
   retention candidates. `current` is never updated to a staging
   directory or a partial snapshot. Process death releases the kernel
   writer lease and may leave the staging directory and lock file; that
@@ -694,11 +720,15 @@ modules, plugins, and PCH fail explicitly. See
   staging-writer lease without inferring ownership. Two-scan agreement
   is bounded change detection, not a liveness lease over a staging
   writer. Inventory `cleanup_eligible` stays false.
-  `graphrag-code snapshot-staging-cleanup-plan` emits a schema-1
-  read-only plan over that inventory. Observed non-contention is not
-  ownership and not a future exclusive claim. Actual staging deletion
-  remains unimplemented. Advisory locks protect only
-  cooperating processes. None of these commands is an MCP tool.
+  `graphrag-code snapshot-staging-cleanup-plan` emits a schema-2
+  read-only plan over that inventory. Schema 1 was read-only/pre-apply.
+  Observed non-contention is not ownership and not the apply command's
+  exclusive writer-lock claim. `graphrag-code snapshot-staging-cleanup
+  --expected-plan-revision sha256:<hex> --cleanup-confirmed` applies
+  exactly that CAS-verified plan. Recursive deletion is not
+  transactionally atomic; a partial result requires a fresh plan.
+  Advisory locks protect only cooperating processes. None of these
+  commands is an MCP tool.
 - `scripts/persisted_graph_doctor.py` / `graphrag-code doctor` – **read-only
   persisted-integrity doctor** for any BYOG graph. Selects one snapshot,
   validates the language-independent envelope, then runs every applicable

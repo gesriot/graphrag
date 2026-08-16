@@ -642,6 +642,118 @@ def _list_snapshot_entries(root: Path) -> Tuple[List[str], List[Path]]:
     return published, staging
 
 
+def _collect_staging_children(
+    path: Path,
+) -> Tuple[
+    os.stat_result,
+    List[Dict[str, Any]],
+    List[Dict[str, Any]],
+    Dict[str, bool],
+    List[Dict[str, Any]],
+]:
+    """List one staging directory's top-level children. Does not probe leases."""
+    opened, children = _safe_directory_entries(
+        path,
+        max_entries=MAX_TOP_LEVEL_ENTRIES,
+        label="staging directory",
+    )
+    children_reported: List[Dict[str, Any]] = []
+    children_token: List[Dict[str, Any]] = []
+    notices: List[Dict[str, Any]] = []
+    present = {name: False for name in EXPECTED_PAYLOAD_FILES}
+    for child_name, child_info in children:
+        child = path / child_name
+        if stat.S_ISLNK(child_info.st_mode):
+            raise SnapshotStagingIntegrityError(
+                f"unsafe symlinked staging child: {child}"
+            )
+        child_kind = _entry_kind(child_info.st_mode)
+        if child_kind == "directory":
+            notices.append(
+                _notice(
+                    "nested_directory",
+                    "nested directory reported without recursion",
+                    name=child.name,
+                )
+            )
+        elif child_kind in {"fifo", "socket", "device", "other"}:
+            notices.append(
+                _notice(
+                    "non_regular_entry",
+                    "non-regular top-level entry is reported and is not opened",
+                    name=child.name,
+                    entry_kind=child_kind,
+                )
+            )
+        elif (
+            child_kind == "file"
+            and child.name not in EXPECTED_PAYLOAD_FILES
+            and child.name not in PROTOCOL_FILES
+        ):
+            notices.append(
+                _notice(
+                    "unexpected_top_level_entry",
+                    "top-level file is outside the expected payload set",
+                    name=child.name,
+                )
+            )
+        if child.name == STAGING_WRITER_LOCK_NAME and child_kind != "file":
+            raise SnapshotStagingIntegrityError(
+                f"unsafe non-regular staging writer lock: {child}"
+            )
+        if child_kind == "file" and child.name in present:
+            present[child.name] = True
+        children_reported.append(
+            {
+                "name": child.name,
+                "entry_kind": child_kind,
+                "size_bytes": child_info.st_size if child_kind == "file" else None,
+            }
+        )
+        children_token.append(
+            {
+                "name": child.name,
+                "entry_kind": child_kind,
+                "dev": child_info.st_dev,
+                "ino": child_info.st_ino,
+                "mode": child_info.st_mode,
+                "mtime_ns": child_info.st_mtime_ns,
+                "size": child_info.st_size,
+            }
+        )
+    return opened, children_reported, children_token, present, notices
+
+
+def staging_structure_token(path: Path) -> Dict[str, Any]:
+    """Directory and child identities without probing the writer lease.
+
+    Apply revalidation uses this after claiming the existing writer lock.
+    A same-process lease probe would not be an honest observation.
+    """
+    try:
+        info = path.lstat()
+    except OSError as error:
+        raise SnapshotStagingIntegrityError(f"cannot inspect {path}: {error}") from error
+    if stat.S_ISLNK(info.st_mode):
+        raise SnapshotStagingIntegrityError(f"unsafe symlinked staging entry: {path}")
+    kind = _entry_kind(info.st_mode)
+    children_token: List[Dict[str, Any]] = []
+    if kind == "directory":
+        info, _reported, children_token, _present, _notices = _collect_staging_children(
+            path
+        )
+    return {
+        "name": path.name,
+        "entry_kind": kind,
+        "dev": info.st_dev,
+        "ino": info.st_ino,
+        "mode": info.st_mode,
+        "mtime_ns": info.st_mtime_ns,
+        "size": info.st_size,
+        "children": children_token,
+    }
+
+
 def _inspect_staging_entry(path: Path) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     try:
         info = path.lstat()
@@ -669,72 +781,14 @@ def _inspect_staging_entry(path: Path) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             )
         )
     else:
-        opened, children = _safe_directory_entries(
-            path,
-            max_entries=MAX_TOP_LEVEL_ENTRIES,
-            label="staging directory",
-        )
-        info = opened
-        for child_name, child_info in children:
-            child = path / child_name
-            if stat.S_ISLNK(child_info.st_mode):
-                raise SnapshotStagingIntegrityError(
-                    f"unsafe symlinked staging child: {child}"
-                )
-            child_kind = _entry_kind(child_info.st_mode)
-            if child_kind == "directory":
-                notices.append(
-                    _notice(
-                        "nested_directory",
-                        "nested directory reported without recursion",
-                        name=child.name,
-                    )
-                )
-            elif child_kind in {"fifo", "socket", "device", "other"}:
-                notices.append(
-                    _notice(
-                        "non_regular_entry",
-                        "non-regular top-level entry is reported and is not opened",
-                        name=child.name,
-                        entry_kind=child_kind,
-                    )
-                )
-            elif (
-                child_kind == "file"
-                and child.name not in EXPECTED_PAYLOAD_FILES
-                and child.name not in PROTOCOL_FILES
-            ):
-                notices.append(
-                    _notice(
-                        "unexpected_top_level_entry",
-                        "top-level file is outside the expected payload set",
-                        name=child.name,
-                    )
-                )
-            if child.name == STAGING_WRITER_LOCK_NAME and child_kind != "file":
-                raise SnapshotStagingIntegrityError(
-                    f"unsafe non-regular staging writer lock: {child}"
-                )
-            if child_kind == "file" and child.name in present:
-                present[child.name] = True
-            children_reported.append(
-                {
-                    "name": child.name,
-                    "entry_kind": child_kind,
-                    "size_bytes": child_info.st_size if child_kind == "file" else None,
-                }
-            )
-            children_token.append(
-                {
-                    "name": child.name,
-                    "entry_kind": child_kind,
-                    "dev": child_info.st_dev,
-                    "ino": child_info.st_ino,
-                    "mode": child_info.st_mode,
-                    "mtime_ns": child_info.st_mtime_ns,
-                    "size": child_info.st_size,
-                }
-            )
+        (
+            info,
+            children_reported,
+            children_token,
+            present,
+            child_notices,
+        ) = _collect_staging_children(path)
+        notices.extend(child_notices)
 
     if not name_valid:
         notices.append(

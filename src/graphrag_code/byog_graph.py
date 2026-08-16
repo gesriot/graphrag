@@ -853,6 +853,11 @@ def _inspect_staging_writer_lock_path(lock_path: Path) -> Optional[os.stat_resul
     return info
 
 
+def _has_o_nofollow() -> bool:
+    """Test hook. Existing-lock opens use O_NOFOLLOW when this is true."""
+    return hasattr(os, "O_NOFOLLOW")
+
+
 def _open_existing_staging_writer_lock_fd(lock_path: Path) -> Tuple[int, os.stat_result]:
     """Open an existing regular writer lock. Never create, write, or follow."""
     import errno
@@ -868,7 +873,7 @@ def _open_existing_staging_writer_lock_fd(lock_path: Path) -> Tuple[int, os.stat
     # post-open fd/path identity check still rejects a raced reparse/symlink
     # before any advisory lock is attempted, and this descriptor is read-only.
     open_flags = os.O_RDONLY
-    if hasattr(os, "O_NOFOLLOW"):
+    if _has_o_nofollow():
         open_flags |= os.O_NOFOLLOW
     if hasattr(os, "O_CLOEXEC"):
         open_flags |= os.O_CLOEXEC
@@ -895,12 +900,14 @@ def _open_existing_staging_writer_lock_fd(lock_path: Path) -> Tuple[int, os.stat
         raise
 
 
-def _open_or_create_staging_writer_lock_fd(lock_path: Path) -> Tuple[int, os.stat_result]:
+def _open_or_create_staging_writer_lock_fd(
+    lock_path: Path, *, must_create: bool = False
+) -> Tuple[int, os.stat_result]:
     """Create a regular writer lock if needed. Never truncate, follow, or chmod."""
     import errno
     import stat as stat_mod
 
-    before = _inspect_staging_writer_lock_path(lock_path)
+    before = None if must_create else _inspect_staging_writer_lock_path(lock_path)
     # Creation needs a writable descriptor, but an already-persistent lock is
     # opened read-only because advisory locking never changes its bytes. This
     # also makes the no-O_NOFOLLOW fallback non-mutating before identity is
@@ -1020,13 +1027,88 @@ def _after_staging_writer_lease(stage_dir: Path) -> None:
 
 
 @contextmanager
+def _staging_writer_acquisition_gate(stage_dir: Path) -> Iterator[bool]:
+    """Briefly join the managed graph lock domain while acquiring a lease.
+
+    Cleanup holds the graph lock exclusively but must release a claimed writer
+    lock before unlinking it on Windows. Without this shared acquisition gate,
+    a cooperating writer already waiting on that lock could acquire it in the
+    release/unlink window. Existing-lock acquisition is nonblocking while the
+    graph gate is held, avoiding a writer-lock/graph-lock deadlock. The gate
+    ends as soon as the private writer lease is held, so payload construction
+    remains concurrent.
+
+    Standalone staging directories and an initializing graph without a
+    complete managed layout keep the historical writer-lock-only behavior.
+    """
+    stage_dir = Path(stage_dir)
+    snapshots_dir = stage_dir.parent
+    if snapshots_dir.name != "snapshots":
+        yield False
+        return
+    graph_root = snapshots_dir.parent
+    # The first publication has created snapshots/ and its private stage but
+    # has not published current yet. That is the expected initializing layout,
+    # not a managed graph whose acquisition needs the shared gate.
+    try:
+        (graph_root / "current").lstat()
+    except FileNotFoundError:
+        yield False
+        return
+    except OSError as error:
+        raise StagingWriterLeaseError(
+            f"cannot inspect graph current marker before acquiring staging "
+            f"writer lease {stage_dir}: {error}"
+        ) from error
+    try:
+        (graph_root / PUBLICATION_LOCK_NAME).lstat()
+    except FileNotFoundError:
+        # Managed graphs published before the lock protocol retain the
+        # historical publisher path which creates .publish.lock at promotion.
+        # Destructive cleanup refuses such a graph, so there is no cleanup
+        # release/unlink window to guard yet.
+        yield False
+        return
+    except OSError as error:
+        raise StagingWriterLeaseError(
+            f"cannot inspect graph publication lock before acquiring staging "
+            f"writer lease {stage_dir}: {error}"
+        ) from error
+    try:
+        managed = _validate_managed_snapshot_layout(graph_root)
+    except ByogReaderLockError as error:
+        raise StagingWriterLeaseError(
+            f"cannot join managed graph lock domain before acquiring staging "
+            f"writer lease {stage_dir}: {error}"
+        ) from error
+    if not managed:
+        yield False
+        return
+    try:
+        with graph_read_lease(graph_root, allow_unlocked_managed=False):
+            yield True
+    except ByogReaderLockError as error:
+        raise StagingWriterLeaseError(
+            f"cannot acquire managed graph gate for staging writer lease "
+            f"{stage_dir}: {error}"
+        ) from error
+
+
+@contextmanager
 def staging_writer_lease(stage_dir: Path) -> Iterator[_HeldStagingWriterLease]:
     """Hold the exclusive private writer lease for one staging directory.
 
     Creates a regular ``.staging-writer.lock`` when absent, then takes a
-    blocking exclusive advisory lease. The persistent file is protocol
-    metadata, not proof of ownership. Process death releases the kernel
-    lease and may leave the file behind. This is not a graph-root lease.
+    blocking exclusive advisory lease. Reacquiring existing writer-lock
+    metadata inside an already-managed graph is gated by a short shared graph
+    lease and is nonblocking while gated. Fresh publisher lock creation is not
+    gated. The shared lease is released before payload construction; it only
+    prevents an exclusive cleanup from releasing and removing the writer-lock
+    pathname while another cooperating writer is waiting to acquire it.
+
+    The persistent file is protocol metadata, not proof of ownership.
+    Process death releases the kernel lease and may leave the file behind.
+    The writer lease itself is not a graph-root lease.
     """
     stage_dir = Path(stage_dir)
     if not is_staging_snapshot_name(stage_dir.name):
@@ -1035,21 +1117,45 @@ def staging_writer_lease(stage_dir: Path) -> Iterator[_HeldStagingWriterLease]:
             f"{stage_dir}"
         )
     lock_path = _staging_writer_lock_path(stage_dir)
-    fd, opened = _open_or_create_staging_writer_lock_fd(lock_path)
+    fd: Optional[int] = None
     backend: Optional[str] = None
     held: Optional[_HeldStagingWriterLease] = None
     try:
-        try:
-            backend = _acquire_lock(fd, exclusive=True)
-        except ByogPublicationLockError as error:
-            raise StagingWriterLeaseError(
-                f"staging-writer lock backend is unsupported: {error}"
-            ) from error
-        except OSError as error:
-            raise StagingWriterLeaseError(
-                f"cannot acquire staging writer lease {lock_path}: {error}"
-            ) from error
-        _validate_staging_writer_lock_fd(fd, lock_path, expected=opened)
+        existing = _inspect_staging_writer_lock_path(lock_path)
+        if existing is None:
+            fd, opened = _open_or_create_staging_writer_lock_fd(
+                lock_path, must_create=True
+            )
+            try:
+                backend = _acquire_lock(fd, exclusive=True)
+            except ByogPublicationLockError as error:
+                raise StagingWriterLeaseError(
+                    f"staging-writer lock backend is unsupported: {error}"
+                ) from error
+            except OSError as error:
+                raise StagingWriterLeaseError(
+                    f"cannot acquire staging writer lease {lock_path}: {error}"
+                ) from error
+            _validate_staging_writer_lock_fd(fd, lock_path, expected=opened)
+        else:
+            with _staging_writer_acquisition_gate(stage_dir) as gated:
+                fd, opened = _open_existing_staging_writer_lock_fd(lock_path)
+                try:
+                    if gated:
+                        backend = _try_acquire_exclusive_lock(fd)
+                    else:
+                        backend = _acquire_lock(fd, exclusive=True)
+                except ByogPublicationLockError as error:
+                    raise StagingWriterLeaseError(
+                        f"staging-writer lock backend is unsupported: {error}"
+                    ) from error
+                except StagingWriterLeaseError:
+                    raise
+                except OSError as error:
+                    raise StagingWriterLeaseError(
+                        f"cannot acquire staging writer lease {lock_path}: {error}"
+                    ) from error
+                _validate_staging_writer_lock_fd(fd, lock_path, expected=opened)
         held = _HeldStagingWriterLease(
             fd, backend, lock_path, (opened.st_dev, opened.st_ino)
         )
@@ -1058,14 +1164,193 @@ def staging_writer_lease(stage_dir: Path) -> Iterator[_HeldStagingWriterLease]:
     finally:
         if held is not None:
             held.close()
-        elif backend is not None:
+        elif fd is not None and backend is not None:
             try:
                 _release_lock(fd, backend)
             except OSError:
                 pass
             os.close(fd)
-        else:
+        elif fd is not None:
             os.close(fd)
+
+
+class HeldExistingStagingWriterClaim:
+    """Exclusive claim on an existing ``.staging-writer.lock``.
+
+    The lock file is never created, truncated, written, chmodded, or
+    replaced. Identity is the observed regular-file (dev, ino, mode,
+    mtime, size) tuple used by inventory revalidation. This is not
+    ownership, writer death, or a graph-root lease.
+    """
+
+    def __init__(
+        self,
+        fd: int,
+        backend: str,
+        lock_path: Path,
+        stage_dir: Path,
+        identity: Tuple[int, int, int, int, int],
+    ) -> None:
+        self._fd = fd
+        self._backend = backend
+        self._lock_path = lock_path
+        self._stage_dir = Path(stage_dir)
+        self._identity = identity
+        self._closed = False
+
+    @property
+    def fd(self) -> int:
+        return self._fd
+
+    @property
+    def lock_path(self) -> Path:
+        return self._lock_path
+
+    @property
+    def stage_dir(self) -> Path:
+        return self._stage_dir
+
+    @property
+    def identity(self) -> Tuple[int, int, int, int, int]:
+        return self._identity
+
+    @property
+    def inode_identity(self) -> Tuple[int, int]:
+        return (self._identity[0], self._identity[1])
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+    def release_and_remove(self) -> None:
+        """Drop the kernel lease and unlink this claimed lock metadata."""
+        self.close()
+        try:
+            current = self._lock_path.lstat()
+        except FileNotFoundError as error:
+            raise StagingWriterLockUnsafe(
+                f"staging writer lock disappeared before removal: "
+                f"{self._lock_path}"
+            ) from error
+        except OSError as error:
+            raise StagingWriterLockUnsafe(
+                f"cannot inspect staging writer lock before removal "
+                f"{self._lock_path}: {error}"
+            ) from error
+        import stat as stat_mod
+
+        if stat_mod.S_ISLNK(current.st_mode):
+            _raise_staging_writer_lock_unsafe(
+                self._lock_path,
+                "unsafe symlinked staging writer lock is unsupported",
+            )
+        if not stat_mod.S_ISREG(current.st_mode) or (
+            current.st_dev,
+            current.st_ino,
+        ) != self.inode_identity:
+            _raise_staging_writer_lock_unsafe(
+                self._lock_path,
+                "staging writer lock changed before removal",
+            )
+        try:
+            self._lock_path.unlink()
+        except FileNotFoundError as error:
+            raise StagingWriterLockUnsafe(
+                f"staging writer lock disappeared before removal: "
+                f"{self._lock_path}"
+            ) from error
+        except OSError as error:
+            raise StagingWriterLeaseError(
+                f"cannot remove staging writer lock {self._lock_path}: {error}"
+            ) from error
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            _release_lock(self._fd, self._backend)
+        except OSError:
+            pass
+        os.close(self._fd)
+
+
+def _after_existing_staging_writer_claim(stage_dir: Path) -> None:
+    """Test hook. Called after an existing writer lock is claimed."""
+    return
+
+
+def acquire_existing_staging_writer_claim(
+    stage_dir: Path,
+) -> HeldExistingStagingWriterClaim:
+    """Nonblocking exclusive claim of an existing staging writer lock.
+
+    Never creates a missing lock. Never truncates, writes, chmods, or
+    replaces the file. Opens read-only, uses ``O_NOFOLLOW`` where
+    available, and otherwise uses the existing read-only identity-checked
+    fallback. Distinguishes contention from malformed/unsafe state.
+    Does not infer PID, process, host, writer death, or ownership.
+    """
+    stage_dir = Path(stage_dir)
+    if not is_staging_snapshot_name(stage_dir.name):
+        raise StagingWriterLeaseError(
+            f"existing writer-lock claim requires a private staging "
+            f"directory: {stage_dir}"
+        )
+    lock_path = _staging_writer_lock_path(stage_dir)
+    fd, opened = _open_existing_staging_writer_lock_fd(lock_path)
+    backend: Optional[str] = None
+    held: Optional[HeldExistingStagingWriterClaim] = None
+    try:
+        try:
+            backend = _try_acquire_exclusive_lock(fd)
+        except StagingWriterLockContention:
+            raise
+        except StagingWriterLeaseError:
+            raise
+        except OSError as error:
+            raise StagingWriterLeaseError(
+                f"cannot claim staging writer lease {lock_path}: {error}"
+            ) from error
+        opened = _validate_staging_writer_lock_fd(fd, lock_path, expected=opened)
+        held = HeldExistingStagingWriterClaim(
+            fd,
+            backend,
+            lock_path,
+            stage_dir,
+            (
+                opened.st_dev,
+                opened.st_ino,
+                opened.st_mode,
+                opened.st_mtime_ns,
+                opened.st_size,
+            ),
+        )
+        _after_existing_staging_writer_claim(stage_dir)
+        return held
+    except Exception:
+        if held is not None:
+            held.close()
+        else:
+            if backend is not None:
+                try:
+                    _release_lock(fd, backend)
+                except OSError:
+                    pass
+            os.close(fd)
+        raise
+
+
+@contextmanager
+def claim_existing_staging_writer_lease(
+    stage_dir: Path,
+) -> Iterator[HeldExistingStagingWriterClaim]:
+    """Context manager over :func:`acquire_existing_staging_writer_claim`."""
+    held = acquire_existing_staging_writer_claim(stage_dir)
+    try:
+        yield held
+    finally:
+        held.close()
 
 
 def probe_staging_writer_lease(stage_dir: Path) -> Dict[str, Any]:

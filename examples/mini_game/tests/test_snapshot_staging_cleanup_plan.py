@@ -365,7 +365,7 @@ def test_empty_plan(tmp_path: Path):
     published = _publish(graph, "only")
     before = _protected_state(graph)
     result = snapshot_staging_cleanup_plan(graph)
-    assert result["schema_version"] == 1
+    assert result["schema_version"] == 2
     assert result["ok"] is True
     assert result["graph"] == str(graph.resolve())
     assert result["current"] == published.name
@@ -378,7 +378,7 @@ def test_empty_plan(tmp_path: Path):
     assert result["blocked_count"] == 0
     assert result["ownership_inference"] is False
     assert result["cleanup_applied"] is False
-    assert result["apply_supported"] is False
+    assert result["apply_supported"] is True
     assert result["observed_staging_revision"] == snapshot_staging(graph)["staging_revision"]
     assert result["staging_state_revision"].startswith("sha256:")
     assert len(result["staging_state_revision"]) == len("sha256:") + 64
@@ -387,7 +387,7 @@ def test_empty_plan(tmp_path: Path):
     assert codes == [
         "plan_not_authorization",
         "observed_non_contention_not_claim",
-        "apply_not_supported",
+        "apply_is_separate_cas_command",
         "inventory_cleanup_eligible_false",
     ]
     assert _protected_state(graph) == before
@@ -747,7 +747,7 @@ def test_deterministic_plan_revision_and_output(tmp_path: Path):
     assert "deletion_candidate_count" not in payload
     assert "blocked_count" not in payload
     assert "staging_entries" not in payload
-    assert payload["schema_version"] == 1
+    assert payload["schema_version"] == 2
     assert payload["current"] == first["current"]
     assert payload["published_snapshots"] == first["published_snapshots"]
     assert payload["deletion_candidates"] == [leftover.name]
@@ -758,7 +758,7 @@ def test_deterministic_plan_revision_and_output(tmp_path: Path):
     assert payload["staging_state_revision"] == first["staging_state_revision"]
     assert payload["ownership_inference"] is False
     assert payload["cleanup_applied"] is False
-    assert payload["apply_supported"] is False
+    assert payload["apply_supported"] is True
     text = format_result(first)
     assert text.startswith("snapshot-staging-cleanup-plan:")
     assert first["plan_revision"] in text

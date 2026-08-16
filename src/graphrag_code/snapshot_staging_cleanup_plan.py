@@ -18,13 +18,14 @@ staging directories, payload files, or writer-lock bytes/metadata.
 It does not take a nested graph-root lease. MCP stays exactly 11
 read-only tools; this command is CLI-only.
 
-A later destructive apply command is not implemented. That future
-command must: (1) acquire the graph-root exclusive existing-lock
-lease; (2) recompute and compare this ``plan_revision``; (3)
-nonblockingly acquire every selected existing writer lock; (4)
-revalidate the exact staged directory and writer-lock identities;
-(5) hold all claimed writer leases through deletion. Observed
-non-contention here is not that future exclusive claim.
+Cleanup-plan schema 1 was read-only/pre-apply
+(``apply_supported=false``). Schema 2 is the CAS input accepted by
+``snapshot-staging-cleanup``. This command still does not apply or
+accept ``--expected-plan-revision``. ``cleanup_applied`` stays false.
+``apply_supported`` is true because a separate exclusive apply command
+exists. Observed non-contention here is not that apply's exclusive
+writer-lock claim. Schema-1 plan revisions must not be accepted by
+apply.
 
 Usage:
     graphrag-code snapshot-staging-cleanup-plan --graph <root> [--json]
@@ -54,7 +55,7 @@ from graphrag_code.snapshot_staging import (
     staging_state_revision_of,
 )
 
-PLAN_SCHEMA_VERSION = 1
+PLAN_SCHEMA_VERSION = 2
 _MISSING_LOCK_HINT = (
     "A managed graph without a regular .publish.lock is rejected. "
     "This command never creates the lock. Adopt the protocol with "
@@ -90,20 +91,24 @@ _COMMAND_NOTICES: Tuple[Dict[str, str], ...] = (
         "message": (
             "A successful nonblocking probe means only that the private "
             "staging-writer lease was not held at that scan. That is "
-            "not a graph-root exclusive claim and not a future apply."
+            "not a graph-root exclusive claim and not the apply "
+            "command's exclusive writer-lock claim. Apply recomputes "
+            "this plan and claims existing writer locks itself."
         ),
     },
     {
-        "code": "apply_not_supported",
+        "code": "apply_is_separate_cas_command",
         "kind": "notice",
         "message": (
-            "Actual staging deletion is not implemented. A future "
-            "destructive command must acquire the graph-root exclusive "
-            "existing-lock lease, recompute and compare this "
-            "plan_revision, nonblockingly acquire every selected "
-            "existing writer lock, revalidate the exact staged "
-            "directory and writer-lock identities, and hold those "
-            "claimed writer leases through deletion."
+            "Cleanup-plan schema 2 sets apply_supported=true. Schema 1 "
+            "was read-only/pre-apply and is not accepted by apply. "
+            "snapshot-staging-cleanup is the separate CAS apply: it "
+            "acquires the graph-root exclusive existing-lock lease, "
+            "recomputes and compares this plan_revision, nonblockingly "
+            "claims every selected existing writer lock, revalidates "
+            "staged directory and writer-lock identities, and holds "
+            "those claims through deletion. This command does not "
+            "accept or apply a revision. cleanup_applied stays false."
         ),
     },
     {
@@ -312,19 +317,32 @@ def _plan_from_stable_inventory(
         "blocked_count": len(blocked),
         "ownership_inference": False,
         "cleanup_applied": False,
-        "apply_supported": False,
+        "apply_supported": True,
         "notices": [dict(notice) for notice in _COMMAND_NOTICES],
     }
     result["plan_revision"] = plan_revision_of(result)
     return result
 
 
-def _build_plan_unlocked(root: Path) -> Dict[str, Any]:
+def build_stable_cleanup_plan_unlocked(
+    root: Path,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Two-scan cleanup plan. Caller must already hold the graph lease.
+
+    Returns ``(consistency, plan)``. ``consistency`` is the internal
+    stable scan token used by ``staging_state_revision`` and by apply
+    revalidation. Do not expose it.
+    """
     try:
         consistency, inventory = build_stable_staging_inventory_unlocked(root)
     except SnapshotStagingError as error:
         raise _wrap_staging_error(error) from error
-    return _plan_from_stable_inventory(inventory, consistency)
+    return consistency, _plan_from_stable_inventory(inventory, consistency)
+
+
+def _build_plan_unlocked(root: Path) -> Dict[str, Any]:
+    _consistency, plan = build_stable_cleanup_plan_unlocked(root)
+    return plan
 
 
 @contextmanager
@@ -353,10 +371,12 @@ def snapshot_staging_cleanup_plan(graph: Path) -> Dict[str, Any]:
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Report a read-only staging cleanup plan from the schema-2 "
-            "inventory. Does not delete, quarantine, apply, or infer "
-            "ownership. Never creates .publish.lock or "
-            ".snapshot-pins.json, and is not an MCP tool. "
+            "Report a read-only schema-2 staging cleanup plan from the "
+            "schema-2 inventory. Does not delete, quarantine, apply, "
+            "or infer ownership. apply_supported is true because "
+            "snapshot-staging-cleanup is the separate CAS apply. "
+            "cleanup_applied stays false. Never creates .publish.lock "
+            "or .snapshot-pins.json, and is not an MCP tool. "
             "deletion_candidates is not permission to delete."
         )
     )

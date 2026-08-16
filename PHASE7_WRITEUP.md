@@ -159,7 +159,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`1637 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`1664 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
@@ -248,27 +248,44 @@ graphrag_code.snapshot_staging`` and
 lease and never creates ``.publish.lock``. Cooperating publishers hold
 a dedicated advisory writer lease on
 ``snapshots/.staging-<id>/.staging-writer.lock`` while constructing
-payload files; the graph-root publication lock is a separate lease used
-only for promotion. Inventory observes writer-lease contention with a
+payload files. In an already-managed graph, reacquiring existing
+writer-lock metadata briefly uses a shared graph-lock gate and releases
+it before payload construction; reacquisition is nonblocking while gated,
+and fresh publisher lock creation is not gated. Cleanup therefore cannot
+remove the lock out from under a waiting cooperative writer while staging
+writes remain concurrent. The exclusive graph-root publication lease is
+otherwise used only for promotion. Inventory observes writer-lease contention with a
 nonblocking probe. That observation is not ownership, writer death, or
 cleanup eligibility. Missing lock metadata is legacy/unverifiable.
 Two-scan agreement is bounded change detection, not a liveness lease
 over a staging writer. A stable listing is not proof that a writer is
-dead. No age heuristic is used. Cleanup is not implemented.
+dead. No age heuristic is used. This inventory does not apply cleanup.
 ``staging_revision`` is informational and is not accepted or applied.
 Inventory ``cleanup_eligible`` stays false.
 ``graphrag-code snapshot-staging-cleanup-plan`` (also ``python -m
 graphrag_code.snapshot_staging_cleanup_plan`` and
-``scripts/snapshot_staging_cleanup_plan.py``) is a read-only schema-1
-plan over that inventory. It reuses the two-scan scanner under one
-shared existing-lock lease and never mutates staging or lock metadata.
-``deletion_candidates`` is not ownership, writer death, or permission
-to delete. Observed non-contention is not a future exclusive claim.
-``staging_state_revision`` hashes the internal consistency token,
-including inodes, so a replacement that leaves public inventory fields
-equivalent still changes the plan. ``plan_revision`` binds the
-decision inputs and is not accepted or applied. Actual deletion is not
-implemented. The command is intentionally absent from MCP.
+``scripts/snapshot_staging_cleanup_plan.py``) is a read-only schema-2
+plan over that inventory. Schema 1 was read-only/pre-apply
+(``apply_supported=false``) and is not accepted by apply. Schema 2
+sets ``apply_supported=true`` and keeps ``cleanup_applied=false``.
+It reuses the two-scan scanner under one shared existing-lock lease
+and never mutates staging or lock metadata. ``deletion_candidates``
+is not ownership, writer death, or permission to delete. Observed
+non-contention is not the apply command's exclusive writer-lock
+claim. ``staging_state_revision`` hashes the internal consistency
+token, including inodes, so a replacement that leaves public
+inventory fields equivalent still changes the plan.
+``plan_revision`` binds the decision inputs. This command does not
+accept or apply that token. ``graphrag-code snapshot-staging-cleanup``
+(also ``python -m graphrag_code.snapshot_staging_cleanup`` and
+``scripts/snapshot_staging_cleanup.py``) is the explicit CAS apply:
+it requires ``--cleanup-confirmed`` and
+``--expected-plan-revision``, holds one exclusive existing-lock
+lease, claims every selected existing writer lock before the first
+deletion, and deletes only the recomputed candidates. Recursive
+deletion is not transactionally atomic. A partial result requires a
+fresh plan; there is no rollback. Both commands are intentionally
+absent from MCP.
 Advisory locks do not protect against non-cooperating programs. This is
 not natural-language search, an HTTP service, repair, reindex, or
 semantic equivalence.

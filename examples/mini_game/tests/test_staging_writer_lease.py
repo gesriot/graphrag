@@ -386,6 +386,28 @@ def test_diagnostic_probe_is_nonblocking(tmp_path: Path):
         _cleanup_processes(proc, release=resume)
 
 
+def test_existing_managed_writer_reacquisition_is_nonblocking(tmp_path: Path):
+    graph = tmp_path / "g"
+    _publish(graph, "base")
+    staging = graph / "snapshots" / f"{STAGING_NAME_PREFIX}20240101-000000-reacquire"
+    staging.mkdir()
+    (staging / STAGING_WRITER_LOCK_NAME).write_bytes(b"")
+    held = CTX.Event()
+    resume = CTX.Event()
+    q = CTX.Queue()
+    proc = CTX.Process(target=_lease_holder, args=(str(staging), held, resume, q))
+    try:
+        proc.start()
+        assert held.wait(timeout=TIMEOUT)
+        started = time.monotonic()
+        with pytest.raises(StagingWriterLockContention):
+            with staging_writer_lease(staging):
+                pytest.fail("contended managed reacquisition must not block")
+        assert time.monotonic() - started < 2
+    finally:
+        _cleanup_processes(proc, release=resume)
+
+
 def test_writer_lock_create_race_and_pre_promotion_disappearance_fail_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
