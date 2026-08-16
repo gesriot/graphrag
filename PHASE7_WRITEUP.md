@@ -159,7 +159,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`1616 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`1637 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
@@ -256,7 +256,19 @@ Two-scan agreement is bounded change detection, not a liveness lease
 over a staging writer. A stable listing is not proof that a writer is
 dead. No age heuristic is used. Cleanup is not implemented.
 ``staging_revision`` is informational and is not accepted or applied.
-The command is intentionally absent from MCP.
+Inventory ``cleanup_eligible`` stays false.
+``graphrag-code snapshot-staging-cleanup-plan`` (also ``python -m
+graphrag_code.snapshot_staging_cleanup_plan`` and
+``scripts/snapshot_staging_cleanup_plan.py``) is a read-only schema-1
+plan over that inventory. It reuses the two-scan scanner under one
+shared existing-lock lease and never mutates staging or lock metadata.
+``deletion_candidates`` is not ownership, writer death, or permission
+to delete. Observed non-contention is not a future exclusive claim.
+``staging_state_revision`` hashes the internal consistency token,
+including inodes, so a replacement that leaves public inventory fields
+equivalent still changes the plan. ``plan_revision`` binds the
+decision inputs and is not accepted or applied. Actual deletion is not
+implemented. The command is intentionally absent from MCP.
 Advisory locks do not protect against non-cooperating programs. This is
 not natural-language search, an HTTP service, repair, reindex, or
 semantic equivalence.

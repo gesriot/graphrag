@@ -20,8 +20,10 @@ means only that a cooperating process held the private lease at that
 scan. A successful probe means only that the lease was not held at
 that instant. Neither proves writer death or cleanup eligibility.
 A stable listing is not proof that a writer is dead. Ownership is
-always unknown. Cleanup is not implemented. No age, mtime, PID,
-process, host, or timeout heuristic is used.
+always unknown. Cleanup is not implemented here; ``cleanup_eligible``
+stays false. A separate read-only ``snapshot-staging-cleanup-plan``
+command may classify leftovers without deleting them. No age, mtime,
+PID, process, host, or timeout heuristic is used.
 
 The command requires an already-adopted regular ``.publish.lock`` and
 never creates, truncates, rewrites, chmods, or replaces that lock. It
@@ -205,6 +207,73 @@ def canonical_staging_revision_text(result: Mapping[str, Any]) -> str:
 def staging_revision_of(result: Mapping[str, Any]) -> str:
     digest = hashlib.sha256(
         canonical_staging_revision_text(result).encode("utf-8")
+    ).hexdigest()
+    return "sha256:" + digest
+
+
+def _json_ready_state(value: Any) -> Any:
+    """Convert the internal consistency token into JSON-ready values."""
+    if isinstance(value, tuple):
+        return [_json_ready_state(item) for item in value]
+    if isinstance(value, list):
+        return [_json_ready_state(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _json_ready_state(item) for key, item in value.items()}
+    return value
+
+
+def canonical_staging_state_revision_payload(
+    consistency: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Internal two-scan state bound by ``staging_state_revision``.
+
+    This is not the public inventory. It includes identities that the
+    public ``staging_entries`` omit so an inode replacement is visible
+    even when public fields stay equivalent.
+    """
+    required = (
+        "current",
+        "current_identity",
+        "lock_identity",
+        "published",
+        "staging",
+    )
+    payload: Dict[str, Any] = {}
+    for key in required:
+        if key not in consistency:
+            raise SnapshotStagingError(
+                f"staging consistency state is missing revision input {key!r}"
+            )
+        payload[key] = _json_ready_state(consistency[key])
+    return payload
+
+
+def canonical_staging_state_revision_text(consistency: Mapping[str, Any]) -> str:
+    """Canonical JSON of the internal consistency token. Documented hash input.
+
+    Compact UTF-8 JSON with sorted keys, no trailing newline:
+    ``json.dumps(..., sort_keys=True, separators=(",", ":"),
+    ensure_ascii=True, allow_nan=False)``.
+    """
+    return json.dumps(
+        canonical_staging_state_revision_payload(consistency),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    )
+
+
+def staging_state_revision_of(consistency: Mapping[str, Any]) -> str:
+    """SHA-256 over the internal two-scan consistency token.
+
+    Binds current identity/content, publication-lock identity, the
+    published snapshot listing, each staging entry's name/type/dev/
+    inode/mode/mtime/size, top-level child identities and metadata, and
+    writer-lock identity, type, presence, and observed lease state.
+    """
+    digest = hashlib.sha256(
+        canonical_staging_state_revision_text(consistency).encode("utf-8")
     ).hexdigest()
     return "sha256:" + digest
 
@@ -911,7 +980,16 @@ def _describe_scan_delta(
     return ", ".join(unique)
 
 
-def _build_inventory_unlocked(root: Path) -> Dict[str, Any]:
+def build_stable_staging_inventory_unlocked(
+    root: Path,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Two-scan inventory. Caller must already hold the shared graph lease.
+
+    Returns ``(consistency, result)``. ``consistency`` is the internal
+    stable scan token; do not expose it. Hash it with
+    ``staging_state_revision_of`` when a later reader needs to detect
+    inode replacement that public inventory fields omit.
+    """
     first_token, _first_result = _scan_inventory_state(root)
     second_token, result = _scan_inventory_state(root)
     if first_token != second_token:
@@ -920,6 +998,11 @@ def _build_inventory_unlocked(root: Path) -> Dict[str, Any]:
             + _describe_scan_delta(first_token, second_token)
         )
     result["staging_revision"] = staging_revision_of(result)
+    return second_token, result
+
+
+def _build_inventory_unlocked(root: Path) -> Dict[str, Any]:
+    _token, result = build_stable_staging_inventory_unlocked(root)
     return result
 
 

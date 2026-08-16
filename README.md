@@ -55,6 +55,7 @@ These generic installed commands operate on user-supplied directories:
 - `graphrag-code snapshot-retention-plan --graph <root> --keep-last <N>`
 - `graphrag-code snapshot-prune --graph <root> --keep-last <N> --expected-plan-revision sha256:<hex> --prune-confirmed`
 - `graphrag-code snapshot-staging --graph <root>`
+- `graphrag-code snapshot-staging-cleanup-plan --graph <root>`
 - `graphrag-code mcp --graph <root> --indexer auto`
 
 `graphrag-code mcp` is a local stdio MCP adapter over one existing graph.
@@ -67,11 +68,12 @@ The server exposes a fixed read-only tool set: `graph_status`,
 `graph_doctor`, `query_symbol`, `callers`, `callees`, `neighbors`,
 `impact`, `type_closure`, `context_pack`, `snapshot_history`, and
 `snapshot_diff`. There is no `snapshot_activate`, `snapshot_pin`,
-`snapshot_unpin`, `snapshot_retention_plan`, `snapshot_prune`, or
-`snapshot_staging` tool:
+`snapshot_unpin`, `snapshot_retention_plan`, `snapshot_prune`,
+`snapshot_staging`, or `snapshot_staging_cleanup_plan` tool:
 activating a retained snapshot, writing operator retention pins,
-planning keep-last retention, pruning CAS-verified candidates, or
-listing staging directories is an
+planning keep-last retention, pruning CAS-verified candidates,
+listing staging directories, or emitting a read-only staging cleanup
+plan is an
 explicit CLI operation and is intentionally absent from MCP. Tool arguments cannot select another
 graph. There is no indexing, publishing, retention, port-eval,
 compiler/Clang, SQL, or shell tool. Snapshot history is a bounded local
@@ -266,7 +268,45 @@ publication, or deletion safety. `staging_revision` is an informational
 snapshot ids, and the complete reported inventory. This command does not
 accept or apply that token. A graph with no staging entries is a valid
 exit-0 report with `staging_count=0`. The command is intentionally
-absent from MCP. Staging entries and their top-level children are each
+absent from MCP.
+
+`snapshot-staging-cleanup-plan --graph <root>` is a separate read-only
+CLI plan over that same schema-2 inventory. It reuses the inventory
+scanner under one shared existing-lock lease, never creates
+`.publish.lock` or `.snapshot-pins.json`, and never mutates staging,
+payloads, or writer-lock bytes. Cleanup-plan schema version is 1.
+A staging name appears in `deletion_candidates` only when the stable
+observation is a real directory whose suffix is a canonical published
+id, `writer_lease_protocol=cooperative_v1`,
+`writer_lease_state=not_held_at_scan`, and the writer-lock file is
+present and regular. Payload completeness is not a selection
+condition. Everything else is a deterministic `blocked_entries` row
+with a machine-readable reason (`held_writer_lease`,
+`legacy_or_missing_writer_lock`, `noncanonical_staging_name`,
+`non_directory_staging_entry`). Unsafe symlinked or non-regular
+metadata and two-scan disagreement still exit 1 with empty stdout
+instead of becoming ordinary blockers. `deletion_candidates` means
+only "candidate in this read-only plan": not writer death, not
+ownership, not permission to delete, not a durable lease, and not
+inventory `cleanup_eligible`. A future writer may acquire the private
+writer lease after the plan is emitted. `staging_state_revision` is
+`sha256:<hex>` over the internal two-scan consistency token, including
+current/lock identities and staging/writer-lock inodes, so an inode
+replacement is visible even when public inventory fields match.
+`observed_staging_revision` repeats the inventory `staging_revision`.
+`plan_revision` is `sha256:<hex>` over compact canonical JSON binding
+`schema_version`, `current`, `published_snapshots`,
+`observed_staging_revision`, `staging_state_revision`,
+`deletion_candidates`, `blocked_entries`, `ownership_inference`,
+`cleanup_applied`, and `apply_supported`. Graph path, counts, notices,
+`ok`, and `staging_entries` are excluded. This command does not accept
+or apply that token. `apply_supported` and `cleanup_applied` remain
+false. A future exclusive apply command must recompute this revision
+under the graph-root exclusive existing-lock lease, nonblockingly
+acquire every selected existing writer lock, revalidate staged
+directory and writer-lock identities, and hold those claimed writer
+leases through deletion. That apply is not implemented. The command is
+intentionally absent from MCP. Staging entries and their top-level children are each
 capped at 64, and the reported published-snapshot list is capped at
 4096. Enumeration is descriptor-relative with `O_NOFOLLOW`; a platform
 without that safe primitive is rejected instead of falling back to a
@@ -325,6 +365,7 @@ uv run python scripts/snapshot_pins.py pin <id> --graph <root> --expected-regist
 uv run python scripts/snapshot_retention.py --graph <root> --keep-last 2
 uv run python scripts/snapshot_prune.py --graph <root> --keep-last 2 --expected-plan-revision sha256:<hex> --prune-confirmed
 uv run python scripts/snapshot_staging.py --graph <root>
+uv run python scripts/snapshot_staging_cleanup_plan.py --graph <root>
 uv run python scripts/index_python.py --package <pkg> --graph <out>
 uv run python scripts/index_c.py --package <pkg> --graph <out>
 uv run python scripts/graph_query.py symbol <title> --graph <root>
@@ -652,7 +693,11 @@ modules, plugins, and PCH fail explicitly. See
   entries as a read-only structural inventory and observes the private
   staging-writer lease without inferring ownership. Two-scan agreement
   is bounded change detection, not a liveness lease over a staging
-  writer. Cleanup is not implemented. Advisory locks protect only
+  writer. Inventory `cleanup_eligible` stays false.
+  `graphrag-code snapshot-staging-cleanup-plan` emits a schema-1
+  read-only plan over that inventory. Observed non-contention is not
+  ownership and not a future exclusive claim. Actual staging deletion
+  remains unimplemented. Advisory locks protect only
   cooperating processes. None of these commands is an MCP tool.
 - `scripts/persisted_graph_doctor.py` / `graphrag-code doctor` – **read-only
   persisted-integrity doctor** for any BYOG graph. Selects one snapshot,

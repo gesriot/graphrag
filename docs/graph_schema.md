@@ -561,6 +561,68 @@ paths resolve from the invoking cwd. A symlinked graph root,
 following it. The command is intentionally absent from MCP. The fixed
 MCP tool set remains 11 read-only tools.
 
+### Snapshot staging cleanup plan
+
+`graphrag-code snapshot-staging-cleanup-plan --graph <root>` is a
+read-only schema-1 plan over the schema-2 staging inventory. It does
+not delete, rename, quarantine, repair, claim, or mutate staging
+entries. It reuses the snapshot-staging two-scan scanner under one
+shared existing-lock lease and does not take a nested graph-root
+lease. It requires an already-adopted regular `.publish.lock` and
+never creates, truncates, chmods, rewrites, or replaces that lock. It
+never creates or changes `.snapshot-pins.json`, `current`, published
+snapshots, staging directories, payload files, or writer-lock
+bytes/metadata.
+
+A staging name appears in `deletion_candidates` only when the stable
+observation is a real directory, the suffix is a canonical published
+snapshot id, `writer_lease_protocol` is `cooperative_v1`,
+`writer_lease_state` is `not_held_at_scan`, and the writer-lock file
+is present and regular. Payload completeness is not a selection
+condition. Every other direct `.staging-*` entry is a
+`blocked_entries` row with one machine-readable reason:
+`held_writer_lease`, `legacy_or_missing_writer_lock`,
+`noncanonical_staging_name`, or `non_directory_staging_entry`.
+Symlinked, non-regular, replaced, or disappearing writer-lock
+metadata, and two-scan disagreement, still fail closed with exit 1
+and empty stdout. They are not ordinary blockers.
+
+`deletion_candidates` means only "candidate in this read-only plan".
+It is not proof that a writer died, not ownership, not permission to
+delete, not a durable lease, and not inventory `cleanup_eligible`.
+Embedded `staging_entries` keep `cleanup_eligible=false`. A future
+writer may acquire the private writer lease after the plan is
+emitted. No age, mtime heuristic, PID, process discovery, host
+identity, boot ID, or timeout is used.
+
+`staging_state_revision` is `sha256:<64 lowercase hex>` over compact
+canonical JSON of the internal two-scan consistency token: current
+identity/content, publication-lock identity, published snapshot
+listing, each staging entry's name/type/dev/inode/mode/mtime/size,
+top-level child identities and metadata, and writer-lock identity,
+type, presence, and observed lease state. The raw token is not
+exposed. The hash detects an inode replacement that happens to leave
+public inventory fields equivalent. `observed_staging_revision` is
+the inventory `staging_revision`.
+
+`plan_revision` is `sha256:<64 lowercase hex>` over compact canonical
+JSON binding `schema_version`, `current`, `published_snapshots`,
+`observed_staging_revision`, `staging_state_revision`,
+`deletion_candidates`, `blocked_entries`, `ownership_inference`,
+`cleanup_applied`, and `apply_supported`. Absolute graph path,
+counts, notices, `ok`, and `staging_entries` are excluded. This
+command does not accept or apply that token. `apply_supported` and
+`cleanup_applied` are false.
+
+A future destructive command must acquire the graph-root exclusive
+existing-lock lease, recompute and compare this `plan_revision`,
+nonblockingly acquire every selected existing writer lock, revalidate
+the exact staged directory and writer-lock identities, and hold all
+claimed writer leases through deletion. Observed non-contention in
+this plan is not that future exclusive claim. Actual deletion is not
+implemented. The command is intentionally absent from MCP. The fixed
+MCP tool set remains 11 read-only tools.
+
 ## Entity Types (code domain, start with these)
 - file
 - module / package
