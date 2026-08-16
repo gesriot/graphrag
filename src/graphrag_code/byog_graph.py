@@ -35,6 +35,7 @@ DEFAULT_TYPE_CLOSURE_MAX_EDGES = 100
 
 PUBLICATION_LOCK_NAME = ".publish.lock"
 STAGING_NAME_PREFIX = ".staging-"
+STAGING_WRITER_LOCK_NAME = ".staging-writer.lock"
 
 
 class ByogPublicationLockError(RuntimeError):
@@ -43,6 +44,18 @@ class ByogPublicationLockError(RuntimeError):
 
 class ByogReaderLockError(RuntimeError):
     """Raised when a shared reader lock on ``.publish.lock`` cannot be taken."""
+
+
+class StagingWriterLeaseError(RuntimeError):
+    """Raised when the private staging-writer lease cannot be used honestly."""
+
+
+class StagingWriterLockContention(StagingWriterLeaseError):
+    """A cooperating process held the exclusive staging-writer lease."""
+
+
+class StagingWriterLockUnsafe(StagingWriterLeaseError):
+    """Writer-lock metadata is missing, replaced, symlinked, or not regular."""
 
 
 def is_staging_snapshot_name(name: str) -> bool:
@@ -182,7 +195,7 @@ def _windows_overlapped():
     return Overlapped()
 
 
-def _lock_file_ex(fd: int, *, exclusive: bool) -> None:
+def _lock_file_ex(fd: int, *, exclusive: bool, nonblocking: bool = False) -> None:
     """Shared/exclusive LockFileEx so Windows readers and publishers interoperate.
 
     ``msvcrt.locking`` has no shared mode. Exclusive and shared must use the
@@ -205,6 +218,8 @@ def _lock_file_ex(fd: int, *, exclusive: bool) -> None:
     lock_ex.restype = wintypes.BOOL
     handle = msvcrt.get_osfhandle(fd)
     flags = 0x00000002 if exclusive else 0  # LOCKFILE_EXCLUSIVE_LOCK
+    if nonblocking:
+        flags |= 0x00000001  # LOCKFILE_FAIL_IMMEDIATELY
     overlapped = _windows_overlapped()
     if not lock_ex(handle, flags, 0, 1, 0, ctypes.byref(overlapped)):
         err = ctypes.get_last_error()
@@ -251,6 +266,47 @@ def _acquire_lock(fd: int, *, exclusive: bool) -> str:
 
 def _acquire_exclusive_lock(fd: int) -> str:
     return _acquire_lock(fd, exclusive=True)
+
+
+def _try_acquire_exclusive_lock(fd: int) -> str:
+    """Nonblocking exclusive acquire. Contention is not malformed lock state."""
+    backend = _available_lock_backend()
+    if backend == "fcntl":
+        import errno
+        import fcntl
+
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise StagingWriterLockContention(
+                "staging writer lease is held by a cooperating process"
+            ) from error
+        except OSError as error:
+            if error.errno in {
+                errno.EAGAIN,
+                errno.EACCES,
+                getattr(errno, "EWOULDBLOCK", errno.EAGAIN),
+            }:
+                raise StagingWriterLockContention(
+                    "staging writer lease is held by a cooperating process"
+                ) from error
+            raise
+        return backend
+    if backend == "msvcrt":
+        try:
+            _lock_file_ex(fd, exclusive=True, nonblocking=True)
+        except OSError as error:
+            # ERROR_LOCK_VIOLATION=33, ERROR_IO_PENDING=997, ERROR_LOCK_FAILED=167
+            if getattr(error, "errno", None) in {33, 167, 997}:
+                raise StagingWriterLockContention(
+                    "staging writer lease is held by a cooperating process"
+                ) from error
+            raise
+        return backend
+    raise StagingWriterLeaseError(
+        f"nonblocking exclusive staging-writer lock is unsupported on "
+        f"{sys.platform!r}; refusing to guess writer-lease state"
+    )
 
 
 def _release_lock(fd: int, backend: str) -> None:
@@ -717,6 +773,371 @@ def _remove_staging_dir(stage_dir: Path) -> None:
     shutil.rmtree(stage_dir)
 
 
+def _staging_writer_lock_path(stage_dir: Path) -> Path:
+    return Path(stage_dir) / STAGING_WRITER_LOCK_NAME
+
+
+def _raise_staging_writer_lock_unsafe(lock_path: Path, reason: str) -> None:
+    raise StagingWriterLockUnsafe(f"{reason}: {lock_path}")
+
+
+def _validate_staging_writer_lock_fd(
+    fd: int,
+    lock_path: Path,
+    *,
+    expected: Optional[os.stat_result] = None,
+) -> os.stat_result:
+    """Prove ``lock_path`` still names the regular file open as ``fd``."""
+    import stat as stat_mod
+
+    try:
+        opened = os.fstat(fd)
+    except OSError as error:
+        raise StagingWriterLockUnsafe(
+            f"cannot inspect opened staging writer lock {lock_path}: {error}"
+        ) from error
+    if not stat_mod.S_ISREG(opened.st_mode):
+        _raise_staging_writer_lock_unsafe(
+            lock_path, "staging writer lock is not a regular file"
+        )
+    if expected is not None and (
+        opened.st_dev != expected.st_dev or opened.st_ino != expected.st_ino
+    ):
+        _raise_staging_writer_lock_unsafe(
+            lock_path, "staging writer lock changed while opening it"
+        )
+    try:
+        current = lock_path.lstat()
+    except FileNotFoundError as error:
+        raise StagingWriterLockUnsafe(
+            f"staging writer lock disappeared while opening it: {lock_path}"
+        ) from error
+    except OSError as error:
+        raise StagingWriterLockUnsafe(
+            f"cannot re-inspect staging writer lock {lock_path}: {error}"
+        ) from error
+    if stat_mod.S_ISLNK(current.st_mode):
+        _raise_staging_writer_lock_unsafe(
+            lock_path, "unsafe symlinked staging writer lock is unsupported"
+        )
+    if (
+        not stat_mod.S_ISREG(current.st_mode)
+        or current.st_dev != opened.st_dev
+        or current.st_ino != opened.st_ino
+    ):
+        _raise_staging_writer_lock_unsafe(
+            lock_path, "staging writer lock changed while opening it"
+        )
+    return opened
+
+
+def _inspect_staging_writer_lock_path(lock_path: Path) -> Optional[os.stat_result]:
+    import stat as stat_mod
+
+    try:
+        info = lock_path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise StagingWriterLockUnsafe(
+            f"cannot inspect staging writer lock {lock_path}: {error}"
+        ) from error
+    if stat_mod.S_ISLNK(info.st_mode):
+        _raise_staging_writer_lock_unsafe(
+            lock_path, "unsafe symlinked staging writer lock is unsupported"
+        )
+    if not stat_mod.S_ISREG(info.st_mode):
+        _raise_staging_writer_lock_unsafe(
+            lock_path, "staging writer lock is not a regular file"
+        )
+    return info
+
+
+def _open_existing_staging_writer_lock_fd(lock_path: Path) -> Tuple[int, os.stat_result]:
+    """Open an existing regular writer lock. Never create, write, or follow."""
+    import errno
+    import stat as stat_mod
+
+    before = _inspect_staging_writer_lock_path(lock_path)
+    if before is None:
+        _raise_staging_writer_lock_unsafe(
+            lock_path, "staging writer lock disappeared while opening it"
+        )
+        raise AssertionError("unreachable")
+    # O_NOFOLLOW is unavailable on Windows. The pre-open lstat plus the
+    # post-open fd/path identity check still rejects a raced reparse/symlink
+    # before any advisory lock is attempted, and this descriptor is read-only.
+    open_flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        open_flags |= os.O_NOFOLLOW
+    if hasattr(os, "O_CLOEXEC"):
+        open_flags |= os.O_CLOEXEC
+    try:
+        fd = os.open(str(lock_path), open_flags)
+    except OSError as error:
+        if error.errno in {errno.ELOOP, errno.ENOENT}:
+            raise StagingWriterLockUnsafe(
+                f"staging writer lock changed or became unsafe while opening "
+                f"it: {lock_path}"
+            ) from error
+        raise StagingWriterLeaseError(
+            f"cannot open staging writer lock {lock_path}: {error}"
+        ) from error
+    try:
+        opened = _validate_staging_writer_lock_fd(fd, lock_path, expected=before)
+        if not stat_mod.S_ISREG(opened.st_mode):
+            _raise_staging_writer_lock_unsafe(
+                lock_path, "staging writer lock is not a regular file"
+            )
+        return fd, opened
+    except Exception:
+        os.close(fd)
+        raise
+
+
+def _open_or_create_staging_writer_lock_fd(lock_path: Path) -> Tuple[int, os.stat_result]:
+    """Create a regular writer lock if needed. Never truncate, follow, or chmod."""
+    import errno
+    import stat as stat_mod
+
+    before = _inspect_staging_writer_lock_path(lock_path)
+    # Creation needs a writable descriptor, but an already-persistent lock is
+    # opened read-only because advisory locking never changes its bytes. This
+    # also makes the no-O_NOFOLLOW fallback non-mutating before identity is
+    # revalidated on platforms such as Windows.
+    open_flags = os.O_RDONLY if before is not None else os.O_RDWR
+    if hasattr(os, "O_NOFOLLOW"):
+        open_flags |= os.O_NOFOLLOW
+    if before is None:
+        # A publisher owns a newly-created private staging directory. Use an
+        # exclusive create so a lock-ignoring actor cannot insert a pathname
+        # between lstat() and open() and have the publisher silently adopt it.
+        open_flags |= os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_CLOEXEC"):
+        open_flags |= os.O_CLOEXEC
+    try:
+        fd = os.open(str(lock_path), open_flags, 0o644)
+    except OSError as error:
+        if error.errno in {errno.ELOOP, errno.EEXIST, errno.ENOENT}:
+            raise StagingWriterLockUnsafe(
+                f"staging writer lock changed or became unsafe while opening "
+                f"it: {lock_path}"
+            ) from error
+        raise StagingWriterLeaseError(
+            f"cannot create staging writer lock {lock_path}: {error}"
+        ) from error
+    try:
+        opened = os.fstat(fd)
+        if not stat_mod.S_ISREG(opened.st_mode):
+            _raise_staging_writer_lock_unsafe(
+                lock_path, "staging writer lock is not a regular file"
+            )
+        if before is not None and (
+            before.st_dev != opened.st_dev or before.st_ino != opened.st_ino
+        ):
+            _raise_staging_writer_lock_unsafe(
+                lock_path, "staging writer lock changed while opening it"
+            )
+        _validate_staging_writer_lock_fd(fd, lock_path, expected=opened)
+        return fd, opened
+    except Exception:
+        os.close(fd)
+        raise
+
+
+class _HeldStagingWriterLease:
+    """Exclusive lease on ``.staging-writer.lock`` for one publisher."""
+
+    def __init__(
+        self,
+        fd: int,
+        backend: str,
+        lock_path: Path,
+        identity: Tuple[int, int],
+    ) -> None:
+        self._fd = fd
+        self._backend = backend
+        self._lock_path = lock_path
+        self._identity = identity
+        self._closed = False
+
+    def release_and_remove(self) -> None:
+        """Drop the kernel lease and unlink this publisher's lock metadata."""
+        self.close()
+        try:
+            current = self._lock_path.lstat()
+        except FileNotFoundError as error:
+            raise StagingWriterLockUnsafe(
+                f"staging writer lock disappeared before promotion: "
+                f"{self._lock_path}"
+            ) from error
+        except OSError as error:
+            raise StagingWriterLockUnsafe(
+                f"cannot inspect staging writer lock before removal "
+                f"{self._lock_path}: {error}"
+            ) from error
+        import stat as stat_mod
+
+        if stat_mod.S_ISLNK(current.st_mode):
+            _raise_staging_writer_lock_unsafe(
+                self._lock_path,
+                "unsafe symlinked staging writer lock is unsupported",
+            )
+        if (
+            not stat_mod.S_ISREG(current.st_mode)
+            or (current.st_dev, current.st_ino) != self._identity
+        ):
+            _raise_staging_writer_lock_unsafe(
+                self._lock_path,
+                "staging writer lock changed before promotion",
+            )
+        try:
+            self._lock_path.unlink()
+        except FileNotFoundError as error:
+            raise StagingWriterLockUnsafe(
+                f"staging writer lock disappeared before removal: "
+                f"{self._lock_path}"
+            ) from error
+        except OSError as error:
+            raise StagingWriterLeaseError(
+                f"cannot remove staging writer lock {self._lock_path}: {error}"
+            ) from error
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            _release_lock(self._fd, self._backend)
+        except OSError:
+            pass
+        os.close(self._fd)
+
+
+def _after_staging_writer_lease(stage_dir: Path) -> None:
+    """Test hook. Called after the exclusive staging-writer lease is held."""
+    return
+
+
+@contextmanager
+def staging_writer_lease(stage_dir: Path) -> Iterator[_HeldStagingWriterLease]:
+    """Hold the exclusive private writer lease for one staging directory.
+
+    Creates a regular ``.staging-writer.lock`` when absent, then takes a
+    blocking exclusive advisory lease. The persistent file is protocol
+    metadata, not proof of ownership. Process death releases the kernel
+    lease and may leave the file behind. This is not a graph-root lease.
+    """
+    stage_dir = Path(stage_dir)
+    if not is_staging_snapshot_name(stage_dir.name):
+        raise StagingWriterLeaseError(
+            f"staging writer lease requires a private staging directory: "
+            f"{stage_dir}"
+        )
+    lock_path = _staging_writer_lock_path(stage_dir)
+    fd, opened = _open_or_create_staging_writer_lock_fd(lock_path)
+    backend: Optional[str] = None
+    held: Optional[_HeldStagingWriterLease] = None
+    try:
+        try:
+            backend = _acquire_lock(fd, exclusive=True)
+        except ByogPublicationLockError as error:
+            raise StagingWriterLeaseError(
+                f"staging-writer lock backend is unsupported: {error}"
+            ) from error
+        except OSError as error:
+            raise StagingWriterLeaseError(
+                f"cannot acquire staging writer lease {lock_path}: {error}"
+            ) from error
+        _validate_staging_writer_lock_fd(fd, lock_path, expected=opened)
+        held = _HeldStagingWriterLease(
+            fd, backend, lock_path, (opened.st_dev, opened.st_ino)
+        )
+        _after_staging_writer_lease(stage_dir)
+        yield held
+    finally:
+        if held is not None:
+            held.close()
+        elif backend is not None:
+            try:
+                _release_lock(fd, backend)
+            except OSError:
+                pass
+            os.close(fd)
+        else:
+            os.close(fd)
+
+
+def probe_staging_writer_lease(stage_dir: Path) -> Dict[str, Any]:
+    """Nonblocking observation of one staging directory's writer lease.
+
+    Never creates, truncates, rewrites, chmods, or replaces the lock
+    file. A contended probe means only that a cooperating process held
+    the lease at that instant. A successful acquire-and-release means
+    only that the lease was not held at that instant. Missing lock
+    metadata is legacy/unverifiable. This is not a graph-root lease and
+    does not infer ownership, writer death, or cleanup eligibility.
+    """
+    stage_dir = Path(stage_dir)
+    lock_path = _staging_writer_lock_path(stage_dir)
+    before = _inspect_staging_writer_lock_path(lock_path)
+    if before is None:
+        return {
+            "writer_lease_protocol": "legacy_absent",
+            "writer_lease_state": "unverifiable",
+            "writer_lock_present": False,
+            "writer_lock_regular": False,
+            "identity": None,
+        }
+    fd, opened = _open_existing_staging_writer_lock_fd(lock_path)
+    backend: Optional[str] = None
+    try:
+        try:
+            backend = _try_acquire_exclusive_lock(fd)
+        except StagingWriterLockContention:
+            _validate_staging_writer_lock_fd(fd, lock_path, expected=opened)
+            return {
+                "writer_lease_protocol": "cooperative_v1",
+                "writer_lease_state": "held_by_cooperating_writer",
+                "writer_lock_present": True,
+                "writer_lock_regular": True,
+                "identity": (
+                    opened.st_dev,
+                    opened.st_ino,
+                    opened.st_mode,
+                    opened.st_mtime_ns,
+                    opened.st_size,
+                ),
+            }
+        except StagingWriterLeaseError:
+            raise
+        except OSError as error:
+            raise StagingWriterLeaseError(
+                f"cannot probe staging writer lease {lock_path}: {error}"
+            ) from error
+        _validate_staging_writer_lock_fd(fd, lock_path, expected=opened)
+        return {
+            "writer_lease_protocol": "cooperative_v1",
+            "writer_lease_state": "not_held_at_scan",
+            "writer_lock_present": True,
+            "writer_lock_regular": True,
+            "identity": (
+                opened.st_dev,
+                opened.st_ino,
+                opened.st_mode,
+                opened.st_mtime_ns,
+                opened.st_size,
+            ),
+        }
+    finally:
+        if backend is not None:
+            try:
+                _release_lock(fd, backend)
+            except OSError:
+                pass
+        os.close(fd)
+
+
 def _write_snapshot_payload(
     snap_dir: Path,
     entities_df: pd.DataFrame,
@@ -816,11 +1237,21 @@ def publish_byog_snapshot(
                     manifest.json
 
     Payload files are written first in a private ``.staging-<id>`` directory
-    under snapshots/. Promotion of that directory, the ``current`` pointer
-    update, and keep-last-N retention share one cross-process exclusive lock.
-    Staging writes are not serialized. Staging names are not published ids
-    and are never retention candidates. CLI indexers take ``.index.lock``
-    first and never hold this publication lock during extraction.
+    under snapshots/. The publisher creates
+    ``.staging-<id>/.staging-writer.lock`` immediately and holds an
+    exclusive advisory writer lease for the complete staging-write
+    interval, including the wait for the graph-root exclusive
+    publication lock. Staging writes are not serialized by the graph
+    lock. Staging names are not published ids and are never retention
+    candidates. CLI indexers take ``.index.lock`` first and never hold
+    this publication lock during extraction.
+
+    Promotion of that directory, the ``current`` pointer update, and
+    keep-last-N retention share one cross-process exclusive lock on
+    ``.publish.lock``. While that graph-root lock is held the publisher
+    releases and removes the staging writer-lock metadata, then
+    atomically renames the staging directory. The published snapshot and
+    ``manifest.files`` never contain the writer-lock file.
 
     ``current`` is only updated after the staging directory has been renamed
     into place, so it never names a staging directory or a partial snapshot.
@@ -828,8 +1259,12 @@ def publish_byog_snapshot(
     resolving ``current`` and hold it until their files are materialized.
     Tools that ignore the lock are not protected.
 
-    A crash may leave a private staging directory. Retention does not reap
-    staging dirs by guessed age.
+    The persistent writer-lock file is protocol metadata, not proof of
+    ownership or writer death. Process death releases the kernel lease
+    and may leave the staging directory and lock file. That leftover is
+    not orphaned, abandoned, expired, or safe to delete. The unavoidable
+    directory-creation-to-lock-acquisition window is unverifiable.
+    Retention does not reap staging dirs by guessed age.
 
     Cooperating keep-last cleanup protects ``current``, doc-claim pins, and
     operator pins from ``.snapshot-pins.json``. Selection uses the shared
@@ -855,81 +1290,93 @@ def publish_byog_snapshot(
     final_dir = snapshots_dir / snap_id
     stage_dir.mkdir(parents=True, exist_ok=False)
     try:
-        _write_snapshot_payload(
-            stage_dir,
-            entities_df,
-            relationships_df,
-            text_units_df,
-            settings_text=settings_text,
-            source_root=source_root,
-            call_observations_df=call_observations_df,
-            extra_manifest=extra_manifest,
-            snap_id=snap_id,
-            out_root=out_root,
-        )
-        with _publication_lock(out_root):
-            # Validate operator pins before promotion or current mutation.
-            # An absent registry is an empty pin set and is not created.
-            operator_pins = _operator_pins_for_retention(out_root)
-            # The shared planner also validates current, claims, and every
-            # snapshots/ entry. Do that before promotion so static invalid
-            # retention state cannot turn a successful current update into a
-            # reported publication failure.
-            retention_before = _plan_snapshot_retention_locked(
-                out_root, keep_last=keep_last, operator_pins=operator_pins
+        with staging_writer_lease(stage_dir) as writer_lease:
+            _write_snapshot_payload(
+                stage_dir,
+                entities_df,
+                relationships_df,
+                text_units_df,
+                settings_text=settings_text,
+                source_root=source_root,
+                call_observations_df=call_observations_df,
+                extra_manifest=extra_manifest,
+                snap_id=snap_id,
+                out_root=out_root,
             )
-            try:
-                os.rename(stage_dir, final_dir)
-            except OSError:
-                raise
-            try:
-                _atomic_write_text(snap_id, out_root / "current")
-            except Exception:
-                if final_dir.exists() and is_published_snapshot_id(final_dir.name):
-                    current_file = out_root / "current"
-                    current_id = ""
-                    if current_file.is_file():
-                        try:
-                            current_id = current_file.read_text(encoding="utf-8").strip()
-                        except OSError:
-                            current_id = ""
-                    if current_id != snap_id:
-                        shutil.rmtree(final_dir)
-                raise
-            try:
-                operator_after = _operator_pins_for_retention(out_root)
-            except ValueError:
-                # Lock-ignoring registry mutation made pin state ambiguous.
-                # Skip deletion rather than retain or delete from a bad parse.
-                return final_dir
-            if operator_after != operator_pins:
-                return final_dir
-            try:
-                retention_after = _plan_snapshot_retention_locked(
+            with _publication_lock(out_root):
+                writer_lease.release_and_remove()
+                leftover_lock = _staging_writer_lock_path(stage_dir)
+                try:
+                    leftover_lock.lstat()
+                except FileNotFoundError:
+                    pass
+                else:
+                    raise StagingWriterLeaseError(
+                        "staging writer lock still present before promotion: "
+                        f"{leftover_lock}"
+                    )
+                # Validate operator pins before promotion or current mutation.
+                # An absent registry is an empty pin set and is not created.
+                operator_pins = _operator_pins_for_retention(out_root)
+                # The shared planner also validates current, claims, and every
+                # snapshots/ entry. Do that before promotion so static invalid
+                # retention state cannot turn a successful current update into a
+                # reported publication failure.
+                retention_before = _plan_snapshot_retention_locked(
+                    out_root, keep_last=keep_last, operator_pins=operator_pins
+                )
+                try:
+                    os.rename(stage_dir, final_dir)
+                except OSError:
+                    raise
+                try:
+                    _atomic_write_text(snap_id, out_root / "current")
+                except Exception:
+                    if final_dir.exists() and is_published_snapshot_id(final_dir.name):
+                        current_file = out_root / "current"
+                        current_id = ""
+                        if current_file.is_file():
+                            try:
+                                current_id = current_file.read_text(encoding="utf-8").strip()
+                            except OSError:
+                                current_id = ""
+                        if current_id != snap_id:
+                            shutil.rmtree(final_dir)
+                    raise
+                try:
+                    operator_after = _operator_pins_for_retention(out_root)
+                except ValueError:
+                    # Lock-ignoring registry mutation made pin state ambiguous.
+                    # Skip deletion rather than retain or delete from a bad parse.
+                    return final_dir
+                if operator_after != operator_pins:
+                    return final_dir
+                try:
+                    retention_after = _plan_snapshot_retention_locked(
+                        out_root,
+                        keep_last=keep_last,
+                        operator_pins=operator_pins,
+                    )
+                except ValueError:
+                    # A lock-ignoring actor changed a planner input after current
+                    # was written. Publication is complete; skip deletion rather
+                    # than report failure or act on ambiguous retention state.
+                    return final_dir
+                expected_published = _byte_sort_snapshot_ids(
+                    [*retention_before["published_snapshots"], snap_id]
+                )
+                if (
+                    retention_after["current"] != snap_id
+                    or retention_after["published_snapshots"] != expected_published
+                    or retention_after["claim_pins"] != retention_before["claim_pins"]
+                ):
+                    return final_dir
+                _cleanup_old_snapshots_locked(
                     out_root,
                     keep_last=keep_last,
                     operator_pins=operator_pins,
+                    retention_plan=retention_after,
                 )
-            except ValueError:
-                # A lock-ignoring actor changed a planner input after current
-                # was written. Publication is complete; skip deletion rather
-                # than report failure or act on ambiguous retention state.
-                return final_dir
-            expected_published = _byte_sort_snapshot_ids(
-                [*retention_before["published_snapshots"], snap_id]
-            )
-            if (
-                retention_after["current"] != snap_id
-                or retention_after["published_snapshots"] != expected_published
-                or retention_after["claim_pins"] != retention_before["claim_pins"]
-            ):
-                return final_dir
-            _cleanup_old_snapshots_locked(
-                out_root,
-                keep_last=keep_last,
-                operator_pins=operator_pins,
-                retention_plan=retention_after,
-            )
         return final_dir
     except Exception:
         _remove_staging_dir(stage_dir)

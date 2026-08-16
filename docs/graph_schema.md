@@ -82,42 +82,54 @@ or semantic equivalence.
 
 `publish_byog_snapshot()` writes parquet, optional `settings.yaml`, and
 `manifest.json` in a private `snapshots/.staging-<id>/` directory on the
-same filesystem as `snapshots/`. Those staging writes are concurrent
-across publisher processes. After the payload is complete, one
-cross-process exclusive lock on the graph-root `.publish.lock` covers:
+same filesystem as `snapshots/`. Immediately after creating that
+directory the publisher creates
+`snapshots/.staging-<id>/.staging-writer.lock` and holds an exclusive
+advisory writer lease for the complete staging-write interval. Staging
+writes remain concurrent across publisher processes: each publisher has
+its own staging directory and writer-lock file. The writer lease is
+still held while the publisher waits for the graph-root exclusive
+`.publish.lock`. While that graph-root lock is held, the publisher
+releases and removes the writer-lock metadata, then:
 
-1. atomic same-filesystem rename of the staging directory to
-   `snapshots/<id>/`;
-2. atomic replace of the `current` pointer;
-3. keep-last-N retention of **published** snapshot ids only.
+1. atomically renames the staging directory to `snapshots/<id>/`;
+2. atomically replaces the `current` pointer;
+3. keep-last-N retains **published** snapshot ids only.
 
-Staging names start with `.staging-` and are not published snapshot
-ids. Standalone `cleanup_old_snapshots()` uses the same lock and never
-deletes an active writer's staging directory. A normal exception before
-publication leaves `current` unchanged and removes only that writer's
-staging directory. If the rename succeeds but publishing `current`
-fails, the unpublished final directory is removed and `current` stays
-on the previous snapshot.
+The published snapshot and `manifest.files` never contain the
+writer-lock file. Staging names start with `.staging-` and are not
+published snapshot ids. Standalone `cleanup_old_snapshots()` uses the
+graph-root lock and never deletes an active writer's staging directory.
+A normal exception before publication releases the writer lease and
+removes only that writer's staging directory. If the rename succeeds
+but publishing `current` fails, the unpublished final directory is
+removed and `current` stays on the previous snapshot.
 
 Publication and retention refuse a symlinked `snapshots/` directory or
 `.publish.lock` instead of following either outside the graph root. A
 retention call against a missing graph remains a filesystem no-op.
 
-A process crash may leave a private staging directory. Retention does
-not reap staging directories by guessed age. This protocol does not
-claim a distributed lease service. Cooperating readers take a shared
-lock on the same `.publish.lock` before resolving `current` and hold it
-until their snapshot files are materialized, so keep-last retention
-waits. `snapshot-activate` takes a strict exclusive lease on an
+Process death releases the kernel writer lease and may leave the
+staging directory and lock file. That leftover is not proof of
+ownership, writer death, or deletion safety. An observed staging
+directory without `.staging-writer.lock` is legacy/unverifiable,
+including the unavoidable directory-creation-to-lock window. Retention
+does not reap staging directories by guessed age. This protocol does
+not claim a distributed lease service, durable ownership, recovery, or
+backup. Cooperating readers take a shared lock on the same
+`.publish.lock` before resolving `current` and hold it until their
+snapshot files are materialized, so keep-last retention waits.
+`snapshot-activate` takes a strict exclusive lease on an
 already-existing regular `.publish.lock` and never creates that file.
 Tools that ignore the lock can still see a retired snapshot
-disappear. The lock and staging convention belong to the graph-root
-publication protocol, not to `manifest.files` or `total_size_bytes`. An
-explicitly selected staging path is not a valid published snapshot for
-the envelope audit. Strict readers, including MCP, reject a managed graph
-without a regular `.publish.lock`; general graph loading and integrity audits
-retain an explicit compatibility path for immutable pre-lock evidence, with
-no retention guarantee. A legacy flat-parquet directory has no cooperating
+disappear. The graph-root lock, the private staging-writer lease, and
+the staging-name convention belong to the publication protocol, not to
+`manifest.files` or `total_size_bytes`. An explicitly selected staging
+path is not a valid published snapshot for the envelope audit. Strict
+readers, including MCP, reject a managed graph without a regular
+`.publish.lock`; general graph loading and integrity audits retain an
+explicit compatibility path for immutable pre-lock evidence, with no
+retention guarantee. A legacy flat-parquet directory has no cooperating
 retention protocol.
 
 ### Adopting `.publish.lock` on a pre-lock managed graph
@@ -482,17 +494,22 @@ prune, or age-classify staging. It requires a managed
 replaces that lock, and never creates or changes `.snapshot-pins.json`,
 `current`, published payloads, or staging entries.
 
-Publishers write `snapshots/.staging-*` outside the publication lock
-and take that lock only for promotion. The shared graph lease therefore
-does not make staging contents immutable. The command inspects the
-snapshots listing and staging metadata, then performs a second
-consistency scan before emitting a result. Added, removed, replaced,
-type-changed, or content-metadata-changed staging entries exit 1 with
-empty stdout. That two-scan agreement is bounded change detection, not
-a liveness lease over a staging writer. A stable listing is not proof
-that a writer is dead. Ownership is always `unknown`. The command does
-not use wall-clock age, mtimes, PID probing, process discovery, host
-identity, or guessed timeouts to infer ownership. Cleanup is not
+Publishers write `snapshots/.staging-*` outside the graph-root
+publication lock and take that lock only for promotion. Cooperating
+publishers hold a dedicated advisory writer lease on
+`.staging-<id>/.staging-writer.lock` during that private write. The
+shared graph lease therefore does not make staging contents immutable
+and is not a liveness lease over a staging writer. The command inspects
+the snapshots listing, staging metadata, and writer-lock identity/lease
+state, then performs a second consistency scan before emitting a
+result. Added, removed, replaced, type-changed, or
+content-metadata-changed staging entries, and held/not-held or
+writer-lock appearance/disappearance/replacement/type changes, exit 1
+with empty stdout. That two-scan agreement is bounded change detection,
+not a liveness lease over a staging writer. A stable listing is not
+proof that a writer is dead. Ownership is always `unknown`. The command
+does not use wall-clock age, mtimes, PID probing, process discovery,
+host identity, or guessed timeouts to infer ownership. Cleanup is not
 implemented; `cleanup_eligible` is always false. No backup, recovery,
 quarantine, or distributed lease is claimed.
 
@@ -502,11 +519,20 @@ bounded structural summary: name, `candidate_snapshot_id` or null,
 presence of `manifest.json` / `entities.parquet` /
 `relationships.parquet` / `text_units.parquet` and optional
 `call_observations.parquet` / `settings.yaml`,
-`complete_payload_candidate`, `ownership_status=unknown`,
-`cleanup_eligible=false`, and structural notices.
-`complete_payload_candidate` means only that the expected top-level
-file names are present. It does not claim parquet validity, manifest
-integrity, successful publication, writer death, or deletion safety.
+`complete_payload_candidate`, `writer_lease_protocol`
+(`cooperative_v1` | `legacy_absent` | `unsafe`), `writer_lease_state`
+(`held_by_cooperating_writer` | `not_held_at_scan` | `unverifiable`),
+`writer_lock_present`, `writer_lock_regular`,
+`ownership_status=unknown`, `cleanup_eligible=false`, and structural
+notices. Schema version is 2. A contended nonblocking probe means only
+that a cooperating process held the writer lease at that observation. A
+successful acquire-and-release means only that the lease was not held
+at that instant. Missing writer-lock metadata is legacy/unverifiable.
+Symlinked or non-regular writer-lock metadata fails closed without
+following the target. `complete_payload_candidate` means only that the
+expected top-level file names are present. It does not claim parquet
+validity, manifest integrity, successful publication, writer death, or
+deletion safety.
 Symlinked staging entries and symlinked top-level children fail closed
 without following the target. Nested directories are reported without
 recursion. Non-regular children are reported and are not opened.

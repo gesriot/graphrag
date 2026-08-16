@@ -27,6 +27,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from byog_graph import (  # type: ignore
     PUBLICATION_LOCK_NAME,
     STAGING_NAME_PREFIX,
+    STAGING_WRITER_LOCK_NAME,
+    probe_staging_writer_lease,
     publish_byog_snapshot,
 )
 from graphrag_code.mcp_server import TOOL_NAMES, build_mcp_server, build_session  # type: ignore
@@ -226,7 +228,7 @@ def test_empty_staging_inventory(tmp_path: Path):
     published = _publish(graph, "only")
     before = _protected_state(graph)
     result = snapshot_staging(graph)
-    assert result["schema_version"] == 1
+    assert result["schema_version"] == 2
     assert result["ok"] is True
     assert result["graph"] == str(graph.resolve())
     assert result["current"] == published.name
@@ -243,6 +245,7 @@ def test_empty_staging_inventory(tmp_path: Path):
         "ownership_unknown",
         "cleanup_not_supported",
         "staging_not_leased",
+        "writer_lease_not_ownership",
     ]
     assert _protected_state(graph) == before
 
@@ -277,8 +280,13 @@ def test_structurally_complete_staging_candidate(tmp_path: Path):
     assert entry["has_call_observations_parquet"] is True
     assert entry["has_settings_yaml"] is True
     assert entry["complete_payload_candidate"] is True
+    assert entry["writer_lease_protocol"] == "legacy_absent"
+    assert entry["writer_lease_state"] == "unverifiable"
+    assert entry["writer_lock_present"] is False
+    assert entry["writer_lock_regular"] is False
     assert entry["ownership_status"] == "unknown"
     assert entry["cleanup_eligible"] is False
+    assert any(notice["code"] == "writer_lock_legacy_absent" for notice in entry["notices"])
     assert staging.is_dir()
     assert live.is_dir()
 
@@ -298,10 +306,13 @@ def test_incomplete_staging_candidates(tmp_path: Path):
     assert entry["has_entities_parquet"] is True
     assert entry["has_relationships_parquet"] is False
     assert entry["has_text_units_parquet"] is False
+    assert entry["writer_lease_protocol"] == "legacy_absent"
+    assert entry["writer_lease_state"] == "unverifiable"
     assert entry["ownership_status"] == "unknown"
     assert entry["cleanup_eligible"] is False
     codes = [notice["code"] for notice in entry["notices"]]
     assert "incomplete_payload_shape" in codes
+    assert "writer_lock_legacy_absent" in codes
     assert live.is_dir() and missing.is_dir()
 
 
@@ -576,6 +587,166 @@ def test_two_scan_detects_staging_mutations(
         snapshot_staging(graph)
 
 
+def test_writer_lock_symlink_and_nonregular_fail_closed(tmp_path: Path):
+    graph = tmp_path / "g"
+    _publish(graph, "live")
+    staging = _staging_dir(graph, "20240101-000000-locklink")
+    target = tmp_path / "outside-writer.lock"
+    target.write_bytes(b"secret")
+    (staging / STAGING_WRITER_LOCK_NAME).symlink_to(target)
+    before = target.stat()
+    proc = _run("--graph", str(graph), "--json")
+    assert proc.returncode == 1
+    assert proc.stdout == ""
+    assert "symlink" in proc.stderr.lower()
+    assert target.read_bytes() == b"secret"
+    assert target.stat().st_mtime_ns == before.st_mtime_ns
+    assert (staging / STAGING_WRITER_LOCK_NAME).is_symlink()
+
+    other = tmp_path / "g2"
+    _publish(other, "live")
+    fifo_dir = _staging_dir(other, "20240101-000000-lockfifo")
+    os.mkfifo(fifo_dir / STAGING_WRITER_LOCK_NAME)
+    fifo = _run("--graph", str(other), "--json")
+    assert fifo.returncode == 1
+    assert fifo.stdout == ""
+    assert "writer lock" in fifo.stderr.lower() or "non-regular" in fifo.stderr.lower()
+
+
+def test_writer_lock_probe_does_not_mutate_metadata(tmp_path: Path):
+    graph = tmp_path / "g"
+    _publish(graph, "live")
+    staging = _staging_dir(graph, "20240101-000000-probe")
+    _write_complete_payload(staging)
+    lock = staging / STAGING_WRITER_LOCK_NAME
+    lock.write_bytes(b"")
+    before = lock.lstat()
+    before_bytes = lock.read_bytes()
+    result = snapshot_staging(graph)
+    entry = _entry(result, staging.name)
+    assert entry["writer_lease_protocol"] == "cooperative_v1"
+    assert entry["writer_lease_state"] == "not_held_at_scan"
+    assert entry["writer_lock_present"] is True
+    assert entry["writer_lock_regular"] is True
+    assert entry["ownership_status"] == "unknown"
+    assert entry["cleanup_eligible"] is False
+    after = lock.lstat()
+    assert lock.read_bytes() == before_bytes
+    assert after.st_ino == before.st_ino
+    assert after.st_dev == before.st_dev
+    assert stat.S_IMODE(after.st_mode) == stat.S_IMODE(before.st_mode)
+    assert after.st_size == before.st_size
+    assert after.st_mtime_ns == before.st_mtime_ns
+
+
+def test_two_scan_detects_writer_lease_state_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import graphrag_code.snapshot_staging as staging_mod
+
+    graph = tmp_path / "g"
+    _publish(graph, "live")
+    staging = _staging_dir(graph, "aaaaaaaa-000000-ffffffff")
+    (staging / STAGING_WRITER_LOCK_NAME).write_bytes(b"")
+    original = staging_mod._scan_inventory_state
+    q = CTX.Queue()
+    held = CTX.Event()
+    resume = CTX.Event()
+    holder = CTX.Process(
+        target=_writer_lease_hold, args=(str(staging), held, resume, q)
+    )
+    try:
+        monkeypatch.setattr(
+            staging_mod,
+            "_scan_inventory_state",
+            _mutate_after_first(
+                original,
+                lambda _root: (
+                    holder.start(),
+                    held.wait(timeout=TIMEOUT),
+                ),
+            ),
+        )
+        with pytest.raises(SnapshotStagingIntegrityError, match="writer_lease_state"):
+            snapshot_staging(graph)
+    finally:
+        _cleanup_processes(holder, release=resume)
+
+
+def test_writer_lock_identity_and_open_races(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import graphrag_code.byog_graph as byog
+
+    graph = tmp_path / "g"
+    _publish(graph, "live")
+    staging = _staging_dir(graph, "20240101-000000-lockrace")
+    lock = staging / STAGING_WRITER_LOCK_NAME
+    lock.write_bytes(b"")
+    parked = tmp_path / "parked-writer.lock"
+    outside = tmp_path / "outside-writer.lock"
+    outside.write_bytes(b"must-not-follow")
+    original_open = os.open
+    swapped = {"done": False}
+
+    def swap_lock_before_open(path, flags, *args, **kwargs):
+        if Path(path) == lock and not swapped["done"]:
+            swapped["done"] = True
+            lock.rename(parked)
+            lock.symlink_to(outside)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(byog.os, "open", swap_lock_before_open)
+    with pytest.raises(SnapshotStagingIntegrityError, match="unsafe|changed|symlink"):
+        snapshot_staging(graph)
+    assert swapped["done"] is True
+    assert lock.is_symlink()
+    assert outside.read_bytes() == b"must-not-follow"
+    assert parked.read_bytes() == b""
+
+    graph2 = tmp_path / "g2"
+    _publish(graph2, "live")
+    staging2 = _staging_dir(graph2, "20240101-000000-missingopen")
+    lock2 = staging2 / STAGING_WRITER_LOCK_NAME
+    lock2.write_bytes(b"")
+    original_open2 = os.open
+    unlinked = {"done": False}
+
+    def unlink_before_open(path, flags, *args, **kwargs):
+        if Path(path) == lock2 and not unlinked["done"]:
+            unlinked["done"] = True
+            lock2.unlink()
+        return original_open2(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(byog.os, "open", unlink_before_open)
+    with pytest.raises(
+        SnapshotStagingIntegrityError, match="disappeared|changed|unsafe"
+    ):
+        snapshot_staging(graph2)
+    assert unlinked["done"] is True
+    assert not lock2.exists()
+
+    graph3 = tmp_path / "g3"
+    _publish(graph3, "live")
+    staging3 = _staging_dir(graph3, "20240101-000000-inodeswap")
+    lock3 = staging3 / STAGING_WRITER_LOCK_NAME
+    lock3.write_bytes(b"")
+    original_open3 = os.open
+    swapped_inode = {"done": False}
+
+    def replace_inode_before_open(path, flags, *args, **kwargs):
+        if Path(path) == lock3 and not swapped_inode["done"]:
+            swapped_inode["done"] = True
+            lock3.unlink()
+            lock3.write_bytes(b"replacement")
+        return original_open3(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(byog.os, "open", replace_inode_before_open)
+    with pytest.raises(SnapshotStagingIntegrityError, match="changed|unsafe"):
+        snapshot_staging(graph3)
+    assert swapped_inode["done"] is True
+
+
 def test_publisher_promotion_waits_for_response_lease(tmp_path: Path):
     graph = tmp_path / "g"
     first = _publish(graph, "old")
@@ -595,6 +766,16 @@ def test_publisher_promotion_waits_for_response_lease(tmp_path: Path):
         assert about.wait(timeout=TIMEOUT)
         assert not got.is_set()
         assert _current(graph) == first.name
+        staging = [
+            path
+            for path in (graph / "snapshots").iterdir()
+            if path.name.startswith(STAGING_NAME_PREFIX)
+        ]
+        assert len(staging) == 1
+        assert (
+            probe_staging_writer_lease(staging[0])["writer_lease_state"]
+            == "held_by_cooperating_writer"
+        )
         resume.set()
         pub.join(timeout=TIMEOUT)
         inventory.join(timeout=TIMEOUT)
@@ -839,7 +1020,7 @@ def test_deterministic_json_and_plain_text(tmp_path: Path):
     assert "graph" not in payload
     assert "notices" not in payload
     assert "ownership_inference" not in payload
-    assert payload["schema_version"] == 1
+    assert payload["schema_version"] == 2
     assert payload["current"] == first["current"]
     assert payload["published_snapshots"] == first["published_snapshots"]
     assert payload["staging_entries"] == first["staging_entries"]
@@ -977,6 +1158,23 @@ def test_implementation_does_not_invoke_producers_or_mutations():
     lowered = source.lower()
     for word in FORBIDDEN_WORDS:
         assert word not in lowered
+
+
+def _writer_lease_hold(stage_dir: str, held, resume, q) -> None:
+    sys.path.insert(0, str(ROOT / "src"))
+    from pathlib import Path as ChildPath
+
+    from graphrag_code.byog_graph import staging_writer_lease
+
+    try:
+        with staging_writer_lease(ChildPath(stage_dir)):
+            held.set()
+            if not resume.wait(timeout=TIMEOUT):
+                q.put("timeout")
+                return
+            q.put("held")
+    except Exception as exc:
+        q.put(f"error:{type(exc).__name__}:{exc}")
 
 
 def _exclusive_hold(graph: str, held, resume, q) -> None:

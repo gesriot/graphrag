@@ -7,13 +7,21 @@ rename, repair, quarantine, publish, activate, pin, prune, or
 age-classify anything.
 
 Publishers construct ``snapshots/.staging-*`` outside the publication
-lock and take the exclusive lock only for promotion. The shared graph
-lease therefore does not make staging contents immutable. This command
-inspects the snapshots listing twice under one shared existing-lock
-lease and exits 1 when the scans disagree. Two-scan agreement is
-bounded change detection, not a liveness lease over a staging writer.
+lock and take the exclusive lock only for promotion. Cooperating
+publishers also hold a dedicated advisory writer lease on
+``snapshots/.staging-<id>/.staging-writer.lock`` for the staging-write
+interval. The shared graph lease does not cover that private
+construction window and does not make staging contents immutable.
+This command inspects the snapshots listing and writer-lock metadata
+twice under one shared existing-lock lease and exits 1 when the scans
+disagree. Two-scan agreement is bounded change detection, not a
+liveness lease over a staging writer. Observed writer-lease contention
+means only that a cooperating process held the private lease at that
+scan. A successful probe means only that the lease was not held at
+that instant. Neither proves writer death or cleanup eligibility.
 A stable listing is not proof that a writer is dead. Ownership is
-always unknown. Cleanup is not implemented.
+always unknown. Cleanup is not implemented. No age, mtime, PID,
+process, host, or timeout heuristic is used.
 
 The command requires an already-adopted regular ``.publish.lock`` and
 never creates, truncates, rewrites, chmods, or replaces that lock. It
@@ -43,15 +51,19 @@ from typing import Any, Dict, Iterator, List, Mapping, Optional, Tuple
 from graphrag_code.byog_graph import (
     PUBLICATION_LOCK_NAME,
     STAGING_NAME_PREFIX,
+    STAGING_WRITER_LOCK_NAME,
     ByogPublicationLockError,
     ByogReaderLockError,
+    StagingWriterLeaseError,
+    StagingWriterLockUnsafe,
     _validate_managed_snapshot_layout,
     graph_read_lease,
     is_published_snapshot_id,
     is_staging_snapshot_name,
+    probe_staging_writer_lease,
 )
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 MAX_STAGING_ENTRIES = 64
 MAX_TOP_LEVEL_ENTRIES = 64
 MAX_PUBLISHED_SNAPSHOTS = 4096
@@ -67,6 +79,7 @@ OPTIONAL_PAYLOAD_FILES = (
     "settings.yaml",
 )
 EXPECTED_PAYLOAD_FILES = frozenset(REQUIRED_PAYLOAD_FILES + OPTIONAL_PAYLOAD_FILES)
+PROTOCOL_FILES = frozenset({STAGING_WRITER_LOCK_NAME})
 _MISSING_LOCK_HINT = (
     "A managed graph without a regular .publish.lock is rejected. "
     "This command never creates the lock. Adopt the protocol with "
@@ -103,10 +116,25 @@ _COMMAND_NOTICES: Tuple[Dict[str, str], ...] = (
         "kind": "notice",
         "message": (
             "Publishers construct snapshots/.staging-* outside the "
-            "publication lock and take that lock only for promotion. "
-            "The shared graph lease is not a liveness lease over a "
-            "staging writer. Two-scan agreement is bounded change "
-            "detection, not proof that staging is idle."
+            "graph-root publication lock and take that lock only for "
+            "promotion. The shared graph lease is not a liveness lease "
+            "over a staging writer. The private staging-writer lease is "
+            "a separate advisory file. Two-scan agreement is bounded "
+            "change detection, not proof that staging is idle."
+        ),
+    },
+    {
+        "code": "writer_lease_not_ownership",
+        "kind": "notice",
+        "message": (
+            "Observed writer-lease contention means only that a "
+            "cooperating process held snapshots/.staging-<id>/"
+            ".staging-writer.lock at that scan. A successful "
+            "acquire-and-release probe means only that the lease was "
+            "not held at that instant. The persistent lock file is "
+            "protocol metadata, not proof of ownership or writer death. "
+            "Missing lock metadata is legacy/unverifiable. Cleanup is "
+            "not implemented."
         ),
     },
 )
@@ -198,6 +226,11 @@ def format_result(result: Mapping[str, Any]) -> str:
     names = [entry.get("name") for entry in (result.get("staging_entries") or [])]
     rendered = ",".join(str(name) for name in names if name)
     suffix = f" names={rendered}" if rendered else ""
+    states = [
+        str(entry.get("writer_lease_state") or "unverifiable")
+        for entry in (result.get("staging_entries") or [])
+    ]
+    lease = f" writer_lease={','.join(states)}" if states else ""
     return (
         "snapshot-staging: "
         f"graph={result.get('graph')} "
@@ -205,6 +238,7 @@ def format_result(result: Mapping[str, Any]) -> str:
         f"published={result.get('published_count')} "
         f"staging={result.get('staging_count')} "
         f"staging_revision={result.get('staging_revision')}"
+        f"{lease}"
         f"{suffix}"
     )
 
@@ -596,13 +630,21 @@ def _inspect_staging_entry(path: Path) -> Tuple[Dict[str, Any], Dict[str, Any]]:
                         entry_kind=child_kind,
                     )
                 )
-            elif child_kind == "file" and child.name not in EXPECTED_PAYLOAD_FILES:
+            elif (
+                child_kind == "file"
+                and child.name not in EXPECTED_PAYLOAD_FILES
+                and child.name not in PROTOCOL_FILES
+            ):
                 notices.append(
                     _notice(
                         "unexpected_top_level_entry",
                         "top-level file is outside the expected payload set",
                         name=child.name,
                     )
+                )
+            if child.name == STAGING_WRITER_LOCK_NAME and child_kind != "file":
+                raise SnapshotStagingIntegrityError(
+                    f"unsafe non-regular staging writer lock: {child}"
                 )
             if child_kind == "file" and child.name in present:
                 present[child.name] = True
@@ -650,6 +692,17 @@ def _inspect_staging_entry(path: Path) -> Tuple[Dict[str, Any], Dict[str, Any]]:
                 name=path.name,
             )
         )
+    lease = _classify_writer_lease(path, kind, children_token)
+    if lease["writer_lease_protocol"] == "legacy_absent":
+        notices.append(
+            _notice(
+                "writer_lock_legacy_absent",
+                "staging directory has no .staging-writer.lock; this is "
+                "legacy or the directory-creation-to-lock window. The "
+                "writer is unverifiable, not inactive or cleanup-eligible",
+                name=path.name,
+            )
+        )
     reported = {
         "name": path.name,
         "candidate_snapshot_id": candidate,
@@ -664,6 +717,10 @@ def _inspect_staging_entry(path: Path) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         "has_call_observations_parquet": present["call_observations.parquet"],
         "has_settings_yaml": present["settings.yaml"],
         "complete_payload_candidate": complete,
+        "writer_lease_protocol": lease["writer_lease_protocol"],
+        "writer_lease_state": lease["writer_lease_state"],
+        "writer_lock_present": lease["writer_lock_present"],
+        "writer_lock_regular": lease["writer_lock_regular"],
         "ownership_status": "unknown",
         "cleanup_eligible": False,
         "notices": notices,
@@ -677,8 +734,76 @@ def _inspect_staging_entry(path: Path) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         "mtime_ns": info.st_mtime_ns,
         "size": info.st_size,
         "children": children_token,
+        "writer_lease": {
+            "protocol": lease["writer_lease_protocol"],
+            "state": lease["writer_lease_state"],
+            "present": lease["writer_lock_present"],
+            "regular": lease["writer_lock_regular"],
+            "identity": lease["identity"],
+        },
     }
     return reported, token
+
+
+def _classify_writer_lease(
+    path: Path, kind: str, children: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """Observe writer-lock protocol metadata without inferring ownership."""
+    if kind != "directory":
+        return {
+            "writer_lease_protocol": "unsafe",
+            "writer_lease_state": "unverifiable",
+            "writer_lock_present": False,
+            "writer_lock_regular": False,
+            "identity": None,
+        }
+    listed = next(
+        (child for child in children if child.get("name") == STAGING_WRITER_LOCK_NAME),
+        None,
+    )
+    if listed is None:
+        try:
+            observation = probe_staging_writer_lease(path)
+        except StagingWriterLockUnsafe as error:
+            raise SnapshotStagingIntegrityError(str(error)) from error
+        except StagingWriterLeaseError as error:
+            raise SnapshotStagingError(str(error)) from error
+        if observation["writer_lock_present"]:
+            raise SnapshotStagingIntegrityError(
+                f"staging writer lock appeared while the directory was listed: "
+                f"{path / STAGING_WRITER_LOCK_NAME}"
+            )
+        return {
+            "writer_lease_protocol": "legacy_absent",
+            "writer_lease_state": "unverifiable",
+            "writer_lock_present": False,
+            "writer_lock_regular": False,
+            "identity": None,
+        }
+    try:
+        observation = probe_staging_writer_lease(path)
+    except StagingWriterLockUnsafe as error:
+        raise SnapshotStagingIntegrityError(str(error)) from error
+    except StagingWriterLeaseError as error:
+        raise SnapshotStagingError(str(error)) from error
+    if not observation["writer_lock_present"]:
+        raise SnapshotStagingIntegrityError(
+            f"staging writer lock disappeared while it was inspected: "
+            f"{path / STAGING_WRITER_LOCK_NAME}"
+        )
+    identity = observation.get("identity")
+    if identity is None or identity[0] != listed.get("dev") or identity[1] != listed.get("ino"):
+        raise SnapshotStagingIntegrityError(
+            f"staging writer lock changed while it was inspected: "
+            f"{path / STAGING_WRITER_LOCK_NAME}"
+        )
+    return {
+        "writer_lease_protocol": observation["writer_lease_protocol"],
+        "writer_lease_state": observation["writer_lease_state"],
+        "writer_lock_present": observation["writer_lock_present"],
+        "writer_lock_regular": observation["writer_lock_regular"],
+        "identity": identity,
+    }
 
 
 def _scan_inventory_state(root: Path) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -755,6 +880,24 @@ def _describe_scan_delta(
                 item.get("ino"),
             ):
                 changed.append("staging_identity")
+            elif (prior.get("writer_lease") or {}).get("state") != (
+                item.get("writer_lease") or {}
+            ).get("state"):
+                changed.append("writer_lease_state")
+            elif (prior.get("writer_lease") or {}).get("present") != (
+                item.get("writer_lease") or {}
+            ).get("present") or (prior.get("writer_lease") or {}).get(
+                "protocol"
+            ) != (item.get("writer_lease") or {}).get("protocol"):
+                changed.append("writer_lock_present")
+            elif (prior.get("writer_lease") or {}).get("regular") != (
+                item.get("writer_lease") or {}
+            ).get("regular"):
+                changed.append("writer_lock_type")
+            elif (prior.get("writer_lease") or {}).get("identity") != (
+                item.get("writer_lease") or {}
+            ).get("identity"):
+                changed.append("writer_lock_identity")
             elif prior.get("children") != item.get("children") or prior.get(
                 "mtime_ns"
             ) != item.get("mtime_ns") or prior.get("size") != item.get("size"):
@@ -803,10 +946,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Report a read-only structural inventory of snapshots/.staging-* "
-            "entries. Does not delete, quarantine, or infer ownership. "
-            "Never creates .publish.lock or .snapshot-pins.json, and is "
-            "not an MCP tool. Two-scan agreement is bounded change "
-            "detection, not a liveness lease over a staging writer."
+            "entries, including cooperative writer-lease observations. "
+            "Does not delete, quarantine, or infer ownership. Never creates "
+            ".publish.lock or .snapshot-pins.json, and is not an MCP tool. "
+            "Two-scan agreement is bounded change detection, not a liveness "
+            "lease over a staging writer."
         )
     )
     parser.add_argument(

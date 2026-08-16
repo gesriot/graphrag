@@ -239,17 +239,29 @@ direct `snapshots/.staging-*` entries. It requires a managed
 discovery scans and the complete response, and never creates that lock
 or changes `current`, `.snapshot-pins.json`, published payloads, or
 staging entries. Publishers construct `.staging-*` outside the
-publication lock and take that lock only for promotion, so the shared
-lease is not a liveness lease over a staging writer. Two-scan agreement
-is bounded change detection: added, removed, replaced, type-changed, or
-content-metadata-changed staging entries exit 1 with empty stdout. A
-stable listing is not proof that a writer is dead. Ownership is always
-`unknown`. No wall-clock age, mtime heuristic, PID probe, host identity,
-or guessed timeout is used to infer ownership. Cleanup is not
-implemented; `cleanup_eligible` is always false. `complete_payload_candidate`
-means only that the expected top-level file names are present, not
-parquet validity, manifest integrity, successful publication, or
-deletion safety. `staging_revision` is an informational
+graph-root publication lock and take that lock only for promotion, so
+the shared graph lease is not a liveness lease over a staging writer.
+Cooperating publishers also hold a dedicated advisory writer lease on
+`snapshots/.staging-<id>/.staging-writer.lock` for the staging-write
+interval. Inventory observes that private lease with a nonblocking
+exclusive probe. Contended acquisition means only that a cooperating
+process held the writer lease at that scan. A successful
+acquire-and-release means only that the lease was not held at that
+instant. Neither proves writer death, ownership, or cleanup eligibility.
+Missing writer-lock metadata is `legacy_absent` / `unverifiable`,
+including the small directory-creation-to-lock window. The persistent
+lock file is protocol metadata, not proof of ownership. Two-scan
+agreement binds writer-lock identity and lease state; a
+held/not-held transition or lock appearance, disappearance, replacement,
+or type change exits 1 with empty stdout. Schema version is 2 because
+each staging entry now reports `writer_lease_protocol`,
+`writer_lease_state`, `writer_lock_present`, and `writer_lock_regular`.
+Ownership is always `unknown`. No wall-clock age, mtime heuristic, PID
+probe, host identity, or guessed timeout is used to infer ownership.
+Cleanup is not implemented; `cleanup_eligible` is always false.
+`complete_payload_candidate` means only that the expected top-level file
+names are present, not parquet validity, manifest integrity, successful
+publication, or deletion safety. `staging_revision` is an informational
 `sha256:<hex>` over the schema version, current published id, published
 snapshot ids, and the complete reported inventory. This command does not
 accept or apply that token. A graph with no staging entries is a valid
@@ -587,13 +599,20 @@ modules, plugins, and PCH fail explicitly. See
   graph and short-circuits a broken envelope before fresh extraction or
   language-specific overlay checks.
   `publish_byog_snapshot()` builds payload files in a private
-  `snapshots/.staging-<id>/` directory, then takes a graph-root
-  `.publish.lock` only for the atomic staging-to-final rename, the
-  `current` pointer update, and keep-last retention. Staging names are
-  not published snapshot ids and are never retention candidates.
-  `current` is never updated to a staging directory or a partial
-  snapshot. A crash may leave a private staging directory; retention
-  does not reap those by guessed age. Cooperating readers take a shared
+  `snapshots/.staging-<id>/` directory. Immediately after creating that
+  directory it creates `snapshots/.staging-<id>/.staging-writer.lock`
+  and holds an exclusive advisory writer lease for the complete
+  staging-write interval, including the wait for the graph-root
+  exclusive `.publish.lock`. The graph-root lock is taken only for
+  removing that writer-lock metadata, the atomic staging-to-final
+  rename, the `current` pointer update, and keep-last retention. The
+  published snapshot and `manifest.files` never contain the writer-lock
+  file. Staging names are not published snapshot ids and are never
+  retention candidates. `current` is never updated to a staging
+  directory or a partial snapshot. Process death releases the kernel
+  writer lease and may leave the staging directory and lock file; that
+  leftover is not proof of ownership or deletion safety. Retention does
+  not reap staging by guessed age. Cooperating readers take a shared
   lock on the same `.publish.lock` before resolving `current` and hold
   it until their snapshot files are materialized. Tools that ignore the
   lock are not protected. Strict readers, including MCP, reject a managed
@@ -630,11 +649,11 @@ modules, plugins, and PCH fail explicitly. See
   exclusive existing-lock lease. Recursive deletion is not
   transactionally atomic; a partial prune requires a fresh plan before
   retry. `graphrag-code snapshot-staging` lists `snapshots/.staging-*`
-  entries as a read-only structural inventory. It does not infer
-  ownership or implement cleanup. Two-scan agreement is bounded change
-  detection, not a liveness lease over a staging writer. Advisory locks
-  protect only cooperating processes. None of these commands is an MCP
-  tool.
+  entries as a read-only structural inventory and observes the private
+  staging-writer lease without inferring ownership. Two-scan agreement
+  is bounded change detection, not a liveness lease over a staging
+  writer. Cleanup is not implemented. Advisory locks protect only
+  cooperating processes. None of these commands is an MCP tool.
 - `scripts/persisted_graph_doctor.py` / `graphrag-code doctor` – **read-only
   persisted-integrity doctor** for any BYOG graph. Selects one snapshot,
   validates the language-independent envelope, then runs every applicable

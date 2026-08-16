@@ -159,7 +159,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`1603 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`1616 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
@@ -245,12 +245,18 @@ rollback. The command is intentionally absent from MCP.
 graphrag_code.snapshot_staging`` and
 ``scripts/snapshot_staging.py``) is a read-only structural inventory of
 ``snapshots/.staging-*`` entries. It holds one shared existing-lock
-lease and never creates ``.publish.lock``. Two-scan agreement is
-bounded change detection, not a liveness lease over a staging writer.
-A stable listing is not proof that a writer is dead. No age heuristic
-is used. Cleanup is not implemented. ``staging_revision`` is
-informational and is not accepted or applied. The command is
-intentionally absent from MCP.
+lease and never creates ``.publish.lock``. Cooperating publishers hold
+a dedicated advisory writer lease on
+``snapshots/.staging-<id>/.staging-writer.lock`` while constructing
+payload files; the graph-root publication lock is a separate lease used
+only for promotion. Inventory observes writer-lease contention with a
+nonblocking probe. That observation is not ownership, writer death, or
+cleanup eligibility. Missing lock metadata is legacy/unverifiable.
+Two-scan agreement is bounded change detection, not a liveness lease
+over a staging writer. A stable listing is not proof that a writer is
+dead. No age heuristic is used. Cleanup is not implemented.
+``staging_revision`` is informational and is not accepted or applied.
+The command is intentionally absent from MCP.
 Advisory locks do not protect against non-cooperating programs. This is
 not natural-language search, an HTTP service, repair, reindex, or
 semantic equivalence.

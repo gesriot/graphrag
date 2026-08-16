@@ -24,6 +24,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from byog_graph import (  # type: ignore
     ByogPublicationLockError,
     STAGING_NAME_PREFIX,
+    StagingWriterLeaseError,
     _atomic_write_parquet,
     _atomic_write_text,
     cleanup_old_snapshots,
@@ -531,7 +532,9 @@ def test_unsupported_lock_is_explicit_and_not_a_noop(tmp_path: Path, monkeypatch
 
     ents, rels, tus, obs = _tiny_tables()
     monkeypatch.setattr(byog_graph, "_available_lock_backend", lambda: None)
-    with pytest.raises(ByogPublicationLockError, match="unsupported"):
+    with pytest.raises(
+        (ByogPublicationLockError, StagingWriterLeaseError), match="unsupported"
+    ):
         publish_byog_snapshot(ents, rels, tus, tmp_path / "nolock", call_observations_df=obs)
     assert not _published_dirs(tmp_path / "nolock")
     assert not _staging_dirs(tmp_path / "nolock")

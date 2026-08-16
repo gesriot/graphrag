@@ -986,10 +986,12 @@ def snapshot_staging(
 ):
     """Report a read-only structural inventory of snapshots/.staging-* entries.
 
-    Holds one shared existing-lock lease. Two-scan agreement is bounded
-    change detection, not a liveness lease over a staging writer.
-    Does not delete, quarantine, or infer ownership. Never creates
-    .snapshot-pins.json or .publish.lock. Intentionally absent from MCP.
+    Holds one shared existing-lock lease. Observes the private
+    staging-writer lease without inferring ownership. Two-scan
+    agreement is bounded change detection, not a liveness lease over a
+    staging writer. Does not delete, quarantine, or implement cleanup.
+    Never creates .snapshot-pins.json or .publish.lock. Intentionally
+    absent from MCP.
     """
     args = ["--graph", str(graph)]
     if json_out is True:
