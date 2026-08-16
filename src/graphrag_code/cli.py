@@ -16,7 +16,8 @@ slices; this CLI packages the *rails* (index, query, packs, audit,
 adopt-publication-lock, snapshot-history, snapshot-diff, snapshot-activate,
 snapshot-pins, snapshot-retention-plan, snapshot-prune, snapshot-staging,
 snapshot-staging-cleanup-plan, snapshot-staging-cleanup,
-snapshot-maintenance-plan, snapshot-maintenance-apply, port_eval).
+snapshot-maintenance-plan, snapshot-maintenance-apply,
+snapshot-maintenance-reconcile, port_eval).
 """
 from __future__ import annotations
 
@@ -46,6 +47,7 @@ app = typer.Typer(
         "snapshot-retention-plan → snapshot-prune → snapshot-staging → "
         "snapshot-staging-cleanup-plan → snapshot-staging-cleanup → "
         "snapshot-maintenance-plan → snapshot-maintenance-apply → "
+        "snapshot-maintenance-reconcile → "
         "port-eval. Relative "
         "paths are resolved from the invoking working directory."
     ),
@@ -68,6 +70,7 @@ _DELEGATE_MODULES = {
     "snapshot_staging_cleanup.py": "graphrag_code.snapshot_staging_cleanup",
     "snapshot_maintenance_plan.py": "graphrag_code.snapshot_maintenance_plan",
     "snapshot_maintenance_apply.py": "graphrag_code.snapshot_maintenance_apply",
+    "snapshot_maintenance_reconcile.py": "graphrag_code.snapshot_maintenance_reconcile",
     "audit_call_edges.py": "graphrag_code.audit_call_edges",
     "port_eval.py": "graphrag_code.port_eval",
 }
@@ -1156,6 +1159,42 @@ def snapshot_maintenance_apply(
     if json_out is True:
         args.append("--json")
     _delegate("snapshot_maintenance_apply.py", args)
+
+
+@app.command("snapshot-maintenance-reconcile")
+def snapshot_maintenance_reconcile(
+    graph: Path = typer.Option(..., "--graph", "-g", help="Managed BYOG graph root"),
+    plan_file: Path = typer.Option(
+        ...,
+        "--plan-file",
+        help="Saved schema-1 snapshot-maintenance-plan JSON, relative to cwd.",
+    ),
+    apply_result_file: Optional[Path] = typer.Option(
+        None,
+        "--apply-result-file",
+        help="Optional saved schema-1 snapshot-maintenance-apply JSON, relative to cwd.",
+    ),
+    json_out: bool = typer.Option(
+        False,
+        "--json",
+        help="same JSON shape as snapshot_maintenance_reconcile.py --json",
+    ),
+):
+    """Observe the aftermath of a saved snapshot-maintenance-plan.
+
+    Compares the saved plan, and optionally a saved apply result, with
+    the live graph under one shared existing-lock lease. Observation-only:
+    no recovery, rollback, or deletion-cause claim. Input files are
+    regular files bounded at 1 MiB and are opened without following
+    symlinks. Never creates .snapshot-pins.json or .publish.lock.
+    Intentionally absent from MCP.
+    """
+    args = ["--graph", str(graph), "--plan-file", str(plan_file)]
+    if apply_result_file is not None:
+        args.extend(["--apply-result-file", str(apply_result_file)])
+    if json_out is True:
+        args.append("--json")
+    _delegate("snapshot_maintenance_reconcile.py", args)
 
 
 @app.command("audit-graph")

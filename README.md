@@ -59,6 +59,7 @@ These generic installed commands operate on user-supplied directories:
 - `graphrag-code snapshot-staging-cleanup --graph <root> --expected-plan-revision sha256:<hex> --cleanup-confirmed`
 - `graphrag-code snapshot-maintenance-plan --graph <root> --keep-last <N>`
 - `graphrag-code snapshot-maintenance-apply --graph <root> --keep-last <N> --expected-maintenance-revision sha256:<hex> --maintenance-confirmed`
+- `graphrag-code snapshot-maintenance-reconcile --graph <root> --plan-file <plan.json> [--apply-result-file <result.json>]`
 - `graphrag-code mcp --graph <root> --indexer auto`
 
 `graphrag-code mcp` is a local stdio MCP adapter over one existing graph.
@@ -73,13 +74,15 @@ The server exposes a fixed read-only tool set: `graph_status`,
 `snapshot_diff`. There is no `snapshot_activate`, `snapshot_pin`,
 `snapshot_unpin`, `snapshot_retention_plan`, `snapshot_prune`,
 `snapshot_staging`, `snapshot_staging_cleanup_plan`,
-`snapshot_staging_cleanup`, `snapshot_maintenance_plan`, or
-`snapshot_maintenance_apply` tool:
+`snapshot_staging_cleanup`, `snapshot_maintenance_plan`,
+`snapshot_maintenance_apply`, or
+`snapshot_maintenance_reconcile` tool:
 activating a retained snapshot, writing operator retention pins,
 planning keep-last retention, pruning CAS-verified candidates,
 listing staging directories, emitting a read-only staging cleanup
-plan, applying that plan, composing both maintenance plans, or
-applying the composite plan is an
+plan, applying that plan, composing both maintenance plans,
+applying the composite plan, or reconciling a saved plan against
+the live graph is an
 explicit CLI operation and is intentionally absent from MCP. Tool arguments cannot select another
 graph. There is no indexing, publishing, retention, port-eval,
 compiler/Clang, SQL, or shell tool. Snapshot history is a bounded local
@@ -374,7 +377,23 @@ transactionally atomic. A partial result reports
 also sets `fresh_plan_required_after_any_apply=true`,
 including complete and empty success. Standalone
 `snapshot-prune` and `snapshot-staging-cleanup` remain available.
-Both composite commands are intentionally absent from MCP. The MCP
+`snapshot-maintenance-reconcile --graph <root> --plan-file
+<saved-plan.json> [--apply-result-file <saved-result.json>]` is the
+read-only aftermath inspection for that composite. It accepts only
+bounded regular files (1 MiB) opened read-only without following
+symlinks. Input loading, structural validation, embedded retention and
+staging-cleanup self-hash validation, direct candidate-name validation,
+and optional result/plan cross-validation all finish before graph
+inspection. Apply-result component and candidate outcomes must form the
+exact schema-1 ordered partition, and its current, published, and
+remaining sets must match the saved plan. The command then holds one
+shared existing-lock lease and reports whether planned published and
+staging pathnames are still present. `ok`
+means the read completed, not that maintenance succeeded. An absent
+pathname does not prove deletion cause. There is no recovery,
+rollback, or recommended retry. A new plan is still required before
+any later mutation. The composite plan, apply, and reconcile
+commands are intentionally absent from MCP. The MCP
 tool set remains exactly 11 read-only tools.
 
 Query and context-pack commands accept optional
@@ -779,7 +798,10 @@ modules, plugins, and PCH fail explicitly. See
   --maintenance-confirmed` applies that composite under one exclusive
   existing-lock lease: staging cleanup first, then prune. Applying
   either component, standalone or composite, requires a fresh plan
-  before the next apply. Advisory locks protect only cooperating
+  before the next apply. `graphrag-code snapshot-maintenance-reconcile
+  --plan-file <saved-plan.json>` observes the aftermath of a complete,
+  partial, interrupted, or externally modified run. It does not
+  recover or prove deletion cause. Advisory locks protect only cooperating
   processes. None of these commands is an MCP tool.
 - `scripts/persisted_graph_doctor.py` / `graphrag-code doctor` – **read-only
   persisted-integrity doctor** for any BYOG graph. Selects one snapshot,

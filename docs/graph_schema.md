@@ -739,8 +739,75 @@ true only when at least one complete candidate deletion succeeded.
 complete and empty success; `retry_requires_fresh_plan` additionally
 identifies partial execution.
 The result binds expected and observed `maintenance_revision` plus
-the two observed embedded `plan_revision` tokens. Both composite
-commands are intentionally absent from MCP. The fixed MCP tool set
+the two observed embedded `plan_revision` tokens.
+
+`graphrag-code snapshot-maintenance-reconcile --graph <root>
+--plan-file <saved-plan.json> [--apply-result-file
+<saved-result.json>]` is the read-only aftermath inspection.
+Reconcile-result schema version is 1. `--plan-file` is required saved
+schema-1 `snapshot-maintenance-plan` JSON. `--apply-result-file` is
+optional saved schema-1 `snapshot-maintenance-apply` JSON. Both paths
+are relative to the invoking cwd unless absolute. Only regular files
+opened read-only without following symlinks are accepted, and each is
+bounded at 1,048,576 bytes. Input loading, structural validation, and
+plan/result cross-validation all finish before graph inspection. Plan
+validation recomputes the composite and both embedded component
+self-hashes, requires direct canonical published candidates and direct
+staging candidates, and checks their relationship to current and
+published history. Apply-result validation requires the exact schema-1
+component order and candidate partition and cross-checks current,
+published, planned, and remaining sets against the saved plan.
+Malformed, oversized, symlinked, replaced, or structurally invalid
+inputs fail with exit 2 and empty stdout. A structurally valid apply
+result that refers to another plan is an integrity failure: exit 1 and
+empty stdout.
+
+The command requires a managed `current + snapshots/` graph and an
+already-adopted regular `.publish.lock`. It never creates, truncates,
+chmods, rewrites, or replaces that lock. It holds exactly one shared
+existing-lock lease from graph inspection through result
+construction, serialization, stdout write, and stdout flush. It does
+not take a nested graph lease and does not call publishers,
+extractors, repair/reindex, `snapshot-prune`,
+`snapshot-staging-cleanup`, or `snapshot-maintenance-apply`.
+
+Under that lease it performs a stable two-scan observation of
+`current`, published snapshot names, publication-lock identity, and
+every planned published and staging deletion-candidate pathname.
+Direct entry kind and identity are read without following symlinks.
+Lock-ignoring changes to `current`, the non-candidate published
+listing, or the publication lock between scans are integrity
+failures with exit 1 and empty stdout. Candidate pathnames that
+change between scans are reported as `changed_during_reconcile`.
+Writer-lock observation reuses the read-only staging inventory probe
+and does not claim or create writer locks.
+
+JSON includes `schema_version`, `ok`, `graph`, `input_plan_revision`,
+`input_plan_valid`, `apply_result_supplied`, `apply_result_valid`,
+`observed_current`, `observed_published_snapshots`,
+`current_matches_saved_plan`, `reconciliation_is_observation_only`,
+`deletion_cause_proven`, `recovery_performed`,
+`published_candidate_observations`,
+`staging_candidate_observations`,
+`all_planned_candidates_absent_at_reconcile`,
+`result_consistent_with_observation`, `discrepancies`, and
+`notices`. `ok` means the read completed, not that maintenance
+succeeded. Remaining candidates or discrepancies still exit 0.
+Candidate states are `absent_at_reconcile`,
+`present_directory_at_reconcile`,
+`present_non_directory_at_reconcile`,
+`unsafe_symlink_at_reconcile`, and `changed_during_reconcile`. An
+absent pathname does not prove deletion cause:
+`deletion_cause_proven` is always false and
+`recovery_performed` is always false. When an apply result is
+supplied, a declared-deleted candidate that is present, a failed or
+not-attempted candidate that is not a present directory, and an
+observed current different from the saved plan are discrepancies that
+make `result_consistent_with_observation=false`.
+Replacements cannot be proven identical from the saved public plan
+or result. A new maintenance plan is still required before any later
+mutation. The composite plan, apply, and reconcile commands are
+intentionally absent from MCP. The fixed MCP tool set
 remains 11 read-only tools.
 
 The plan command does not delete, rename, quarantine, pin,

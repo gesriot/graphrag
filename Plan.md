@@ -119,7 +119,7 @@ definitions are all present; 113 re-exports are reported separately rather
 than inflated into duplicate graph entities. The `sqlparse.split` target named
 by the Rust port is therefore an actual graph entity, not merely a module API
 outside the graph. See `examples/sqlparse/PROVENANCE.md` for the census and
-call-oracle effect. The current full-suite expectation is **1697 passed, 2 xfailed**;
+call-oracle effect. The current full-suite expectation is **1712 passed, 2 xfailed**;
 this 2026-08-14 persisted-integrity doctor update supersedes the earlier 721-passed /
 2026-07-26 gate snapshot. The product CLI is the installable ``graphrag-code``
 console command (`python -m graphrag_code`); source-checkout ``scripts/*.py``
@@ -236,9 +236,17 @@ scopes. After writer-lock claims it revalidates from captured
 consistency tokens instead of recomputing the cleanup plan. Internal
 order is staging cleanup then prune. Recursive deletion is not
 transactionally atomic; a partial result requires a fresh plan.
+``graphrag-code snapshot-maintenance-reconcile --plan-file
+<saved-plan.json>`` is the read-only aftermath inspection. It holds
+one shared existing-lock lease and accepts only bounded regular input
+files. Before graph inspection it validates the composite and both
+embedded self-hashes, direct candidate names, and the exact ordered
+schema-1 apply-result outcome when supplied. It does not recover, roll
+back, or prove deletion cause.
 Standalone prune and staging cleanup remain available. Neither
 prune, staging inventory, the staging cleanup plan, staging cleanup
-apply, the composite maintenance plan, nor the composite apply is an
+apply, the composite maintenance plan, the composite apply, nor
+reconcile is an
 MCP tool. MCP remains exactly 11
 read-only tools and stays strict. Advisory locks do not protect
 against non-cooperating programs. No search, UI, HTTP service,

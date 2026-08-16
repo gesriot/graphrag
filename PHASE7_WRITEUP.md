@@ -159,7 +159,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`1697 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`1712 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
@@ -298,7 +298,15 @@ composite: it requires ``--maintenance-confirmed`` and
 lease, claims every selected existing writer lock before the first
 deletion, and applies staging cleanup then prune. Recursive deletion
 is not transactionally atomic. A partial result requires a fresh
-plan; there is no rollback. Both composite commands are
+plan; there is no rollback. ``graphrag-code snapshot-maintenance-reconcile``
+(also ``python -m graphrag_code.snapshot_maintenance_reconcile`` and
+``scripts/snapshot_maintenance_reconcile.py``) is the read-only
+aftermath inspection for a saved composite plan and optional apply
+result. Before graph inspection it validates the composite and both
+embedded self-hashes, direct candidate names, and exact schema-1 apply
+outcomes. It then holds one shared existing-lock lease, never mutates,
+and does not claim recovery or deletion cause. The composite plan, apply,
+and reconcile commands are
 intentionally absent from MCP.
 Advisory locks do not protect against non-cooperating programs. This is
 not natural-language search, an HTTP service, repair, reindex, or
