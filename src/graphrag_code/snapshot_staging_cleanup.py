@@ -728,12 +728,10 @@ def _result(
     }
 
 
-def _cleanup_unlocked(root: Path, expected: str) -> Dict[str, Any]:
-    """Apply one CAS-verified plan. Caller must hold ``graph_exclusive_lease``."""
-    _require_managed_graph(root)
-    consistency, plan = _plan_or_raise(root)
-    _after_cleanup_plan_recompute(root, plan, consistency)
-    _require_matching_revision(plan, expected)
+def _validate_staging_deletion_set(
+    root: Path, plan: Mapping[str, Any]
+) -> List[str]:
+    """Validate the complete staging deletion set. No mutation."""
     snapshots_dir = root / "snapshots"
     _assert_real_snapshots_dir(snapshots_dir)
     candidates = list(plan["deletion_candidates"])
@@ -767,6 +765,17 @@ def _cleanup_unlocked(root: Path, expected: str) -> Dict[str, Any]:
                 f"deletion candidate suffix is not a published id: {name!r}"
             )
         _assert_direct_staging_directory(snapshots_dir, name)
+    return candidates
+
+
+def _cleanup_unlocked(root: Path, expected: str) -> Dict[str, Any]:
+    """Apply one CAS-verified plan. Caller must hold ``graph_exclusive_lease``."""
+    _require_managed_graph(root)
+    consistency, plan = _plan_or_raise(root)
+    _after_cleanup_plan_recompute(root, plan, consistency)
+    _require_matching_revision(plan, expected)
+    candidates = _validate_staging_deletion_set(root, plan)
+    snapshots_dir = root / "snapshots"
     if not candidates:
         return _result(
             plan,

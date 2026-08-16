@@ -644,8 +644,9 @@ read-only tools.
 <N>` is a read-only composite of the current
 `snapshot-retention-plan` and the current schema-2
 `snapshot-staging-cleanup-plan`. It is not another mutation path.
-`snapshot-prune` and `snapshot-staging-cleanup` remain the only apply
-commands. The command is intentionally absent from MCP. The fixed MCP
+Standalone `snapshot-prune` and `snapshot-staging-cleanup` remain
+available, and `snapshot-maintenance-apply` is the composite CAS
+apply. The command is intentionally absent from MCP. The fixed MCP
 tool set remains 11 read-only tools.
 
 The command requires a managed `current + snapshots/` graph and an
@@ -694,13 +695,55 @@ canonical JSON (`sort_keys=True`, `separators=(",", ":")`,
 ```
 
 Graph path, counts, notices, `ok`, and presentation-only embedded
-fields are excluded. `maintenance_revision` is informational only.
-No apply command accepts it. Use the embedded component
-`plan_revision` tokens with `snapshot-prune` or
-`snapshot-staging-cleanup`.
+fields are excluded. The plan command does not accept
+`--expected-*-revision` or a confirmation flag. Use the composite
+`maintenance_revision` with `snapshot-maintenance-apply`, or the
+embedded component `plan_revision` tokens with standalone
+`snapshot-prune` or `snapshot-staging-cleanup`.
 
-The command does not accept `--expected-*-revision` or a
-confirmation flag. It does not delete, rename, quarantine, pin,
+`graphrag-code snapshot-maintenance-apply --graph <root> --keep-last
+<N> --expected-maintenance-revision sha256:<hex>
+--maintenance-confirmed` is the mutating counterpart. Apply-result
+schema version is 1. The command requires a managed
+`current + snapshots/` graph and an already-adopted regular
+`.publish.lock`. It never creates, truncates, chmods, rewrites, or
+replaces that lock. It holds exactly one exclusive existing-lock
+lease from plan recomputation through CAS, preflight, mutation,
+result construction, serialization, stdout write, and stdout flush.
+It does not take a nested graph lease and does not call the public
+or scope entry points of `snapshot-prune` or
+`snapshot-staging-cleanup`. Confirmation is required even when both
+deletion sets are empty.
+
+Under that exclusive lease it recomputes the exact composite plan
+with the unlocked builders and compares `maintenance_revision`
+before any mutation. A mismatch is exit 1, empty stdout, and no
+filesystem change. Before the first unlink it validates both
+deletion sets, nonblockingly claims every selected existing writer
+lock, revalidates every staging directory, structure token, and
+writer-lock identity from the captured consistency tokens, and
+revalidates retention inputs, `current`, the published listing,
+pins, and publication-lock identity. It does not recompute the
+ordinary cleanup plan after taking those claims. Internal execution
+order is `snapshot-staging-cleanup` then `snapshot-prune`. That is
+the apply command's conservative execution order, not a
+recommendation on the read-only plan. Recursive deletion is not
+transactionally atomic. A partial result reports
+`partial=true`, `filesystem_may_have_changed=true`, and
+`retry_requires_fresh_plan=true`, names completed and remaining
+components, and is emitted on stdout with exit 1. There is no
+rollback, trash, quarantine, backup, repair, or recovery. Complete
+success, including an empty plan, returns `ok=true`. `changed` is
+true only when at least one complete candidate deletion succeeded.
+`fresh_plan_required_after_any_apply` is always true, including on
+complete and empty success; `retry_requires_fresh_plan` additionally
+identifies partial execution.
+The result binds expected and observed `maintenance_revision` plus
+the two observed embedded `plan_revision` tokens. Both composite
+commands are intentionally absent from MCP. The fixed MCP tool set
+remains 11 read-only tools.
+
+The plan command does not delete, rename, quarantine, pin,
 activate, publish, repair, reindex, or create a lock. It does not
 change `current`, published snapshots, `.snapshot-pins.json`,
 staging directories, payload files, writer-lock bytes/metadata, or

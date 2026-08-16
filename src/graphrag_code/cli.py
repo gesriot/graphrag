@@ -16,7 +16,7 @@ slices; this CLI packages the *rails* (index, query, packs, audit,
 adopt-publication-lock, snapshot-history, snapshot-diff, snapshot-activate,
 snapshot-pins, snapshot-retention-plan, snapshot-prune, snapshot-staging,
 snapshot-staging-cleanup-plan, snapshot-staging-cleanup,
-snapshot-maintenance-plan, port_eval).
+snapshot-maintenance-plan, snapshot-maintenance-apply, port_eval).
 """
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ app = typer.Typer(
         "snapshot-diff → snapshot-activate → snapshot-pins → "
         "snapshot-retention-plan → snapshot-prune → snapshot-staging → "
         "snapshot-staging-cleanup-plan → snapshot-staging-cleanup → "
-        "snapshot-maintenance-plan → "
+        "snapshot-maintenance-plan → snapshot-maintenance-apply → "
         "port-eval. Relative "
         "paths are resolved from the invoking working directory."
     ),
@@ -67,6 +67,7 @@ _DELEGATE_MODULES = {
     "snapshot_staging_cleanup_plan.py": "graphrag_code.snapshot_staging_cleanup_plan",
     "snapshot_staging_cleanup.py": "graphrag_code.snapshot_staging_cleanup",
     "snapshot_maintenance_plan.py": "graphrag_code.snapshot_maintenance_plan",
+    "snapshot_maintenance_apply.py": "graphrag_code.snapshot_maintenance_apply",
     "audit_call_edges.py": "graphrag_code.audit_call_edges",
     "port_eval.py": "graphrag_code.port_eval",
 }
@@ -1102,6 +1103,59 @@ def snapshot_maintenance_plan(
     if json_out is True:
         args.append("--json")
     _delegate("snapshot_maintenance_plan.py", args)
+
+
+@app.command("snapshot-maintenance-apply")
+def snapshot_maintenance_apply(
+    graph: Path = typer.Option(..., "--graph", "-g", help="Managed BYOG graph root"),
+    keep_last: int = typer.Option(
+        ...,
+        "--keep-last",
+        help="Requested keep-last floor (positive integer).",
+    ),
+    expected_maintenance_revision: str = typer.Option(
+        ...,
+        "--expected-maintenance-revision",
+        help="sha256:<64 lowercase hex> from snapshot-maintenance-plan",
+    ),
+    maintenance_confirmed: bool = typer.Option(
+        False,
+        "--maintenance-confirmed",
+        help=(
+            "Required to delete CAS-verified composite deletion-candidate "
+            "directories. snapshot-maintenance-plan is the preview; this "
+            "command has no dry-run. The command still refuses to delete "
+            "if the recomputed maintenance_revision no longer matches. "
+            "Never an MCP tool."
+        ),
+    ),
+    json_out: bool = typer.Option(
+        False,
+        "--json",
+        help="same JSON shape as snapshot_maintenance_apply.py --json",
+    ),
+):
+    """Delete the CAS-verified snapshot-maintenance-plan candidates.
+
+    Applies exactly the recomputed composite whose maintenance_revision
+    matches --expected-maintenance-revision. Holds one exclusive
+    existing-lock lease. Applies staging cleanup then prune. Never
+    creates .snapshot-pins.json or .publish.lock. Recursive deletion
+    is not transactionally atomic. Intentionally absent from MCP.
+    """
+    args = [
+        "--graph",
+        str(graph),
+        "--keep-last",
+        str(keep_last),
+        "--expected-maintenance-revision",
+        expected_maintenance_revision,
+    ]
+    if maintenance_confirmed is True:
+        args.append("--maintenance-confirmed")
+    if json_out is True:
+        args.append("--json")
+    _delegate("snapshot_maintenance_apply.py", args)
 
 
 @app.command("audit-graph")

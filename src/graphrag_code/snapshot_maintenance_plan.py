@@ -304,14 +304,21 @@ def _after_retention_plan(_root: Path) -> None:
     return None
 
 
-def _build_plan_unlocked(root: Path, keep_last: int) -> Dict[str, Any]:
+def build_stable_maintenance_plan_unlocked(
+    root: Path, keep_last: int
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """One composite plan. Caller must already hold the graph lease.
+
+    Returns ``(consistency, plan)``. ``consistency`` is the internal
+    staging two-scan token used by apply revalidation. Do not expose it.
+    """
     try:
         retention = build_stable_retention_plan_unlocked(root, keep_last)
     except SnapshotRetentionError as error:
         raise _wrap_component_error(error) from error
     _after_retention_plan(root)
     try:
-        _consistency, cleanup = build_stable_cleanup_plan_unlocked(root)
+        consistency, cleanup = build_stable_cleanup_plan_unlocked(root)
     except SnapshotStagingCleanupPlanError as error:
         raise _wrap_component_error(error) from error
     if retention.get("current") != cleanup.get("current"):
@@ -339,6 +346,11 @@ def _build_plan_unlocked(root: Path, keep_last: int) -> Dict[str, Any]:
         "notices": [dict(notice) for notice in _COMMAND_NOTICES],
     }
     result["maintenance_revision"] = maintenance_revision_of(result)
+    return consistency, result
+
+
+def _build_plan_unlocked(root: Path, keep_last: int) -> Dict[str, Any]:
+    _consistency, result = build_stable_maintenance_plan_unlocked(root, keep_last)
     return result
 
 

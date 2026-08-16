@@ -373,6 +373,59 @@ def _verify_decision_inputs_unchanged(
         )
 
 
+def verify_retention_plan_inputs_unlocked(
+    root: Path,
+    plan: Mapping[str, Any],
+    *,
+    lock_identity: tuple[int, int, int, int],
+    check_staging_notices: bool = True,
+) -> None:
+    """Revalidate one public retention plan while the caller holds a lease.
+
+    The public plan stores ``published_snapshots`` in canonical byte order,
+    whereas the planner's internal two-scan verifier compares the raw directory
+    discovery order.  Apply paths must compare against the public CAS plan,
+    not adopt a fresh raw-order scan as their baseline.
+
+    Composite maintenance apply may disable only the staging-notice comparison
+    after it has intentionally deleted the CAS-verified staging candidates.
+    Those notices are presentation-only retention fields; current, published
+    snapshots, both pin sources, the registry revision, and publication-lock
+    identity are always checked.
+    """
+    try:
+        checked_current = _read_current_id_for_retention(root)
+        checked_published, checked_notices = _published_and_notices(root)
+        checked_claims = _claim_pins(root)
+        checked_registry_revision = _registry_revision_now(root)
+        checked_lock = _lock_identity(root)
+    except SnapshotRetentionIntegrityError:
+        raise
+    except Exception as error:
+        raise SnapshotRetentionIntegrityError(
+            f"retention decision inputs changed during apply: {error}"
+        ) from error
+    changed: List[str] = []
+    if checked_current != plan.get("current"):
+        changed.append("current")
+    if _byte_sort(checked_published) != list(plan.get("published_snapshots") or []):
+        changed.append("published_snapshots")
+    if check_staging_notices and checked_notices != list(
+        plan.get("staging_notices") or []
+    ):
+        changed.append("staging_notices")
+    if checked_claims != list(plan.get("claim_pins") or []):
+        changed.append("claim_pins")
+    if checked_registry_revision != plan.get("registry_revision"):
+        changed.append("registry_revision")
+    if checked_lock != lock_identity:
+        changed.append("publication_lock")
+    if changed:
+        raise SnapshotRetentionIntegrityError(
+            "retention decision inputs changed during apply: " + ", ".join(changed)
+        )
+
+
 def build_stable_retention_plan_unlocked(
     root: Path, keep_last: int
 ) -> Dict[str, Any]:

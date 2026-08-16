@@ -119,7 +119,7 @@ definitions are all present; 113 re-exports are reported separately rather
 than inflated into duplicate graph entities. The `sqlparse.split` target named
 by the Rust port is therefore an actual graph entity, not merely a module API
 outside the graph. See `examples/sqlparse/PROVENANCE.md` for the census and
-call-oracle effect. The current full-suite expectation is **1681 passed, 2 xfailed**;
+call-oracle effect. The current full-suite expectation is **1697 passed, 2 xfailed**;
 this 2026-08-14 persisted-integrity doctor update supersedes the earlier 721-passed /
 2026-07-26 gate snapshot. The product CLI is the installable ``graphrag-code``
 console command (`python -m graphrag_code`); source-checkout ``scripts/*.py``
@@ -227,9 +227,18 @@ lease, does not take a nested lease, and is not another mutation
 path. ``actionable_components`` names only the apply commands whose
 embedded deletion sets are currently non-empty. Applying either
 component requires a fresh plan before another mutation.
-``maintenance_revision`` is informational and is not accepted by any
-apply command. Neither prune, staging inventory, the staging cleanup
-plan, staging cleanup apply, nor the composite maintenance plan is an
+``graphrag-code snapshot-maintenance-apply --keep-last <N>
+--expected-maintenance-revision sha256:<hex> --maintenance-confirmed``
+is the CAS apply for that composite. It holds one exclusive
+existing-lock lease, never creates ``.publish.lock``, does not take a
+nested lease, and does not call the public prune or staging-cleanup
+scopes. After writer-lock claims it revalidates from captured
+consistency tokens instead of recomputing the cleanup plan. Internal
+order is staging cleanup then prune. Recursive deletion is not
+transactionally atomic; a partial result requires a fresh plan.
+Standalone prune and staging cleanup remain available. Neither
+prune, staging inventory, the staging cleanup plan, staging cleanup
+apply, the composite maintenance plan, nor the composite apply is an
 MCP tool. MCP remains exactly 11
 read-only tools and stays strict. Advisory locks do not protect
 against non-cooperating programs. No search, UI, HTTP service,
