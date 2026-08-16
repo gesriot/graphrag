@@ -103,6 +103,7 @@ def test_python_module_help():
     assert "snapshot-staging" in proc.stdout
     assert "snapshot-staging-cleanup-plan" in proc.stdout
     assert "snapshot-staging-cleanup" in proc.stdout
+    assert "snapshot-maintenance-plan" in proc.stdout
 
 
 def test_source_script_and_package_expose_same_commands():
@@ -136,6 +137,7 @@ def test_source_script_and_package_expose_same_commands():
         "snapshot-staging",
         "snapshot-staging-cleanup-plan",
         "snapshot-staging-cleanup",
+        "snapshot-maintenance-plan",
     )
     for name in required:
         assert name in packaged
@@ -176,6 +178,7 @@ def test_wheel_and_sdist_contents(built_wheel_and_sdist):
         assert "graphrag_code/snapshot_staging.py" in names
         assert "graphrag_code/snapshot_staging_cleanup_plan.py" in names
         assert "graphrag_code/snapshot_staging_cleanup.py" in names
+        assert "graphrag_code/snapshot_maintenance_plan.py" in names
         assert "graphrag_code/doc_claims.json" in names
         assert not any(
             "scripts/" in name

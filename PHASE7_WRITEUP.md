@@ -159,7 +159,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`1664 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`1681 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
@@ -286,6 +286,14 @@ deletion, and deletes only the recomputed candidates. Recursive
 deletion is not transactionally atomic. A partial result requires a
 fresh plan; there is no rollback. Both commands are intentionally
 absent from MCP.
+``graphrag-code snapshot-maintenance-plan`` (also ``python -m
+graphrag_code.snapshot_maintenance_plan`` and
+``scripts/snapshot_maintenance_plan.py``) embeds those two current
+plans under one shared existing-lock lease. It does not prune, clean
+staging, or apply. Applying either component requires a fresh plan
+before the next mutation. ``maintenance_revision`` is informational
+and is not accepted by any apply command. The command is
+intentionally absent from MCP.
 Advisory locks do not protect against non-cooperating programs. This is
 not natural-language search, an HTTP service, repair, reindex, or
 semantic equivalence.

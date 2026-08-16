@@ -373,7 +373,10 @@ def _verify_decision_inputs_unchanged(
         )
 
 
-def _build_plan_unlocked(root: Path, keep_last: int) -> Dict[str, Any]:
+def build_stable_retention_plan_unlocked(
+    root: Path, keep_last: int
+) -> Dict[str, Any]:
+    """One retention plan. Caller must already hold the graph lease."""
     _require_managed_graph(root)
     lock_identity = _lock_identity(root)
 
@@ -434,6 +437,10 @@ def _build_plan_unlocked(root: Path, keep_last: int) -> Dict[str, Any]:
     }
     result["plan_revision"] = plan_revision_of(result)
     return result
+
+
+def _build_plan_unlocked(root: Path, keep_last: int) -> Dict[str, Any]:
+    return build_stable_retention_plan_unlocked(root, keep_last)
 
 
 @contextmanager

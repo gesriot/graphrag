@@ -119,7 +119,7 @@ definitions are all present; 113 re-exports are reported separately rather
 than inflated into duplicate graph entities. The `sqlparse.split` target named
 by the Rust port is therefore an actual graph entity, not merely a module API
 outside the graph. See `examples/sqlparse/PROVENANCE.md` for the census and
-call-oracle effect. The current full-suite expectation is **1664 passed, 2 xfailed**;
+call-oracle effect. The current full-suite expectation is **1681 passed, 2 xfailed**;
 this 2026-08-14 persisted-integrity doctor update supersedes the earlier 721-passed /
 2026-07-26 gate snapshot. The product CLI is the installable ``graphrag-code``
 console command (`python -m graphrag_code`); source-checkout ``scripts/*.py``
@@ -220,8 +220,17 @@ lock, revalidates identities, and deletes only the CAS-verified
 candidates. There is no dry-run. Recursive deletion is not
 transactionally atomic; a partial result reports ``partial=true`` and
 requires a fresh plan. The command is intentionally absent from MCP.
-Neither prune, staging inventory, the staging cleanup plan, nor
-staging cleanup apply is an MCP tool. MCP remains exactly 11
+``graphrag-code snapshot-maintenance-plan --keep-last <N>`` is a
+read-only composite of the current retention plan and the current
+schema-2 staging cleanup plan. It holds one shared existing-lock
+lease, does not take a nested lease, and is not another mutation
+path. ``actionable_components`` names only the apply commands whose
+embedded deletion sets are currently non-empty. Applying either
+component requires a fresh plan before another mutation.
+``maintenance_revision`` is informational and is not accepted by any
+apply command. Neither prune, staging inventory, the staging cleanup
+plan, staging cleanup apply, nor the composite maintenance plan is an
+MCP tool. MCP remains exactly 11
 read-only tools and stays strict. Advisory locks do not protect
 against non-cooperating programs. No search, UI, HTTP service,
 repair, or reindex is added.

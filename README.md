@@ -57,6 +57,7 @@ These generic installed commands operate on user-supplied directories:
 - `graphrag-code snapshot-staging --graph <root>`
 - `graphrag-code snapshot-staging-cleanup-plan --graph <root>`
 - `graphrag-code snapshot-staging-cleanup --graph <root> --expected-plan-revision sha256:<hex> --cleanup-confirmed`
+- `graphrag-code snapshot-maintenance-plan --graph <root> --keep-last <N>`
 - `graphrag-code mcp --graph <root> --indexer auto`
 
 `graphrag-code mcp` is a local stdio MCP adapter over one existing graph.
@@ -70,12 +71,12 @@ The server exposes a fixed read-only tool set: `graph_status`,
 `impact`, `type_closure`, `context_pack`, `snapshot_history`, and
 `snapshot_diff`. There is no `snapshot_activate`, `snapshot_pin`,
 `snapshot_unpin`, `snapshot_retention_plan`, `snapshot_prune`,
-`snapshot_staging`, `snapshot_staging_cleanup_plan`, or
-`snapshot_staging_cleanup` tool:
+`snapshot_staging`, `snapshot_staging_cleanup_plan`,
+`snapshot_staging_cleanup`, or `snapshot_maintenance_plan` tool:
 activating a retained snapshot, writing operator retention pins,
 planning keep-last retention, pruning CAS-verified candidates,
 listing staging directories, emitting a read-only staging cleanup
-plan, or applying that plan is an
+plan, applying that plan, or composing both maintenance plans is an
 explicit CLI operation and is intentionally absent from MCP. Tool arguments cannot select another
 graph. There is no indexing, publishing, retention, port-eval,
 compiler/Clang, SQL, or shell tool. Snapshot history is a bounded local
@@ -331,6 +332,31 @@ list is capped at 4096. Enumeration is descriptor-relative with
 instead of falling back to a pathname traversal. Advisory locks
 protect only cooperating processes. No backup, recovery, quarantine,
 or distributed lease is claimed.
+
+`snapshot-maintenance-plan --graph <root> --keep-last <N>` is a
+read-only composite of those two existing plans. It holds exactly one
+shared existing-lock lease, computes the current
+`snapshot-retention-plan` and schema-2 `snapshot-staging-cleanup-plan`
+inside that lease, and never takes a nested graph lease. The embedded
+objects are the exact standalone public plan objects for the same
+graph and `keep_last`. Top-level `current` and `published_snapshots`
+must agree with both embedded plans. `actionable_components` lists
+`snapshot-prune` and/or `snapshot-staging-cleanup` only when the
+matching embedded deletion set is non-empty, in fixed UTF-8-byte
+order. It does not recommend an apply order: applying either
+component can invalidate the other revision. A fresh composite or
+standalone plan is required after every apply.
+`maintenance_revision` is `sha256:<hex>` over compact canonical JSON
+binding `schema_version`, `keep_last`, `current`,
+`published_snapshots`, the two embedded `plan_revision` tokens,
+`actionable_components`, and `fresh_plan_required_after_any_apply`.
+Graph path, counts, notices, `ok`, and presentation-only embedded
+fields are excluded. No apply command accepts
+`maintenance_revision`. Schema version is 1. The command never
+creates `.publish.lock` or `.snapshot-pins.json` and does not change
+`current`, published snapshots, pins, staging, or writer-lock
+metadata. It is intentionally absent from MCP. The MCP tool set
+remains exactly 11 read-only tools.
 
 Query and context-pack commands accept optional
 `--snapshot <id|current>`. Omitting it preserves the existing default
@@ -727,8 +753,11 @@ modules, plugins, and PCH fail explicitly. See
   --expected-plan-revision sha256:<hex> --cleanup-confirmed` applies
   exactly that CAS-verified plan. Recursive deletion is not
   transactionally atomic; a partial result requires a fresh plan.
-  Advisory locks protect only cooperating processes. None of these
-  commands is an MCP tool.
+  `graphrag-code snapshot-maintenance-plan --keep-last <N>` embeds
+  both current plans under one shared existing-lock lease. It is not
+  another mutation path. Applying either component requires a fresh
+  plan before the next apply. Advisory locks protect only cooperating
+  processes. None of these commands is an MCP tool.
 - `scripts/persisted_graph_doctor.py` / `graphrag-code doctor` – **read-only
   persisted-integrity doctor** for any BYOG graph. Selects one snapshot,
   validates the language-independent envelope, then runs every applicable

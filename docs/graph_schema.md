@@ -638,6 +638,77 @@ result. Apply-result schema version is 1. Both commands are
 intentionally absent from MCP. The fixed MCP tool set remains 11
 read-only tools.
 
+### Snapshot maintenance plan
+
+`graphrag-code snapshot-maintenance-plan --graph <root> --keep-last
+<N>` is a read-only composite of the current
+`snapshot-retention-plan` and the current schema-2
+`snapshot-staging-cleanup-plan`. It is not another mutation path.
+`snapshot-prune` and `snapshot-staging-cleanup` remain the only apply
+commands. The command is intentionally absent from MCP. The fixed MCP
+tool set remains 11 read-only tools.
+
+The command requires a managed `current + snapshots/` graph and an
+already-adopted regular `.publish.lock`. It never creates, truncates,
+chmods, rewrites, or replaces that lock. It holds exactly one shared
+existing-lock lease from plan construction through JSON/plain
+serialization, stdout write, and stdout flush. It does not take a
+nested graph lease. Both embedded plans are computed inside that
+same lease by the unlocked retention and staging-cleanup builders.
+Standalone public output of those planners is unchanged.
+
+JSON includes `schema_version`, `ok`, `graph`, `keep_last`,
+`current`, `published_snapshots`, `retention_plan`,
+`staging_cleanup_plan`, `maintenance_revision`,
+`actionable_components`, `fresh_plan_required_after_any_apply`, and
+`notices`. Schema version is 1. `retention_plan` is the exact public
+retention-plan object for the same graph and `keep_last`.
+`staging_cleanup_plan` is the exact public schema-2 cleanup-plan
+object. Top-level `current` and `published_snapshots` must agree with
+both embedded plans; disagreement is an integrity failure.
+
+`actionable_components` is deterministic and contains only
+`snapshot-prune` and `snapshot-staging-cleanup`. Each appears only
+when its embedded plan currently has a non-empty deletion set. The
+list uses fixed UTF-8-byte order. It does not recommend an apply
+order. Applying either component can invalidate the other revision.
+`fresh_plan_required_after_any_apply` is always true. The operator
+must capture a fresh composite or standalone plan after every apply
+before running another mutation.
+
+`maintenance_revision` is `sha256:<lowercase hex>` of compact
+canonical JSON (`sort_keys=True`, `separators=(",", ":")`,
+`ensure_ascii=True`, no trailing newline) over:
+
+```json
+{
+  "actionable_components": ["snapshot-prune"],
+  "current": "<published-id>",
+  "fresh_plan_required_after_any_apply": true,
+  "keep_last": 1,
+  "published_snapshots": ["<id>"],
+  "retention_plan": {"plan_revision": "sha256:<hex>"},
+  "schema_version": 1,
+  "staging_cleanup_plan": {"plan_revision": "sha256:<hex>"}
+}
+```
+
+Graph path, counts, notices, `ok`, and presentation-only embedded
+fields are excluded. `maintenance_revision` is informational only.
+No apply command accepts it. Use the embedded component
+`plan_revision` tokens with `snapshot-prune` or
+`snapshot-staging-cleanup`.
+
+The command does not accept `--expected-*-revision` or a
+confirmation flag. It does not delete, rename, quarantine, pin,
+activate, publish, repair, reindex, or create a lock. It does not
+change `current`, published snapshots, `.snapshot-pins.json`,
+staging directories, payload files, writer-lock bytes/metadata, or
+publication-lock metadata. Advisory locks protect only cooperating
+processes. Fresh publisher writer-lock creation remains concurrent.
+Reacquiring existing writer-lock metadata stays nonblocking while
+gated.
+
 ## Entity Types (code domain, start with these)
 - file
 - module / package

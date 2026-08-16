@@ -15,7 +15,8 @@ Phase 7 ablations showed no graph-vs-raw capability win on bounded library
 slices; this CLI packages the *rails* (index, query, packs, audit,
 adopt-publication-lock, snapshot-history, snapshot-diff, snapshot-activate,
 snapshot-pins, snapshot-retention-plan, snapshot-prune, snapshot-staging,
-snapshot-staging-cleanup-plan, snapshot-staging-cleanup, port_eval).
+snapshot-staging-cleanup-plan, snapshot-staging-cleanup,
+snapshot-maintenance-plan, port_eval).
 """
 from __future__ import annotations
 
@@ -44,6 +45,7 @@ app = typer.Typer(
         "snapshot-diff → snapshot-activate → snapshot-pins → "
         "snapshot-retention-plan → snapshot-prune → snapshot-staging → "
         "snapshot-staging-cleanup-plan → snapshot-staging-cleanup → "
+        "snapshot-maintenance-plan → "
         "port-eval. Relative "
         "paths are resolved from the invoking working directory."
     ),
@@ -64,6 +66,7 @@ _DELEGATE_MODULES = {
     "snapshot_staging.py": "graphrag_code.snapshot_staging",
     "snapshot_staging_cleanup_plan.py": "graphrag_code.snapshot_staging_cleanup_plan",
     "snapshot_staging_cleanup.py": "graphrag_code.snapshot_staging_cleanup",
+    "snapshot_maintenance_plan.py": "graphrag_code.snapshot_maintenance_plan",
     "audit_call_edges.py": "graphrag_code.audit_call_edges",
     "port_eval.py": "graphrag_code.port_eval",
 }
@@ -1071,6 +1074,34 @@ def snapshot_staging_cleanup(
     if json_out is True:
         args.append("--json")
     _delegate("snapshot_staging_cleanup.py", args)
+
+
+@app.command("snapshot-maintenance-plan")
+def snapshot_maintenance_plan(
+    graph: Path = typer.Option(..., "--graph", "-g", help="Managed BYOG graph root"),
+    keep_last: int = typer.Option(
+        ...,
+        "--keep-last",
+        help="Requested keep-last floor (positive integer).",
+    ),
+    json_out: bool = typer.Option(
+        False,
+        "--json",
+        help="same JSON shape as snapshot_maintenance_plan.py --json",
+    ),
+):
+    """Report a read-only composite of retention and staging-cleanup plans.
+
+    Embeds the current snapshot-retention-plan and schema-2
+    snapshot-staging-cleanup-plan under one shared existing-lock lease.
+    Does not prune, clean staging, apply, or write files. Never creates
+    .snapshot-pins.json or .publish.lock. A fresh plan is required
+    after any apply. Intentionally absent from MCP.
+    """
+    args = ["--graph", str(graph), "--keep-last", str(keep_last)]
+    if json_out is True:
+        args.append("--json")
+    _delegate("snapshot_maintenance_plan.py", args)
 
 
 @app.command("audit-graph")
