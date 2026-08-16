@@ -53,6 +53,7 @@ These generic installed commands operate on user-supplied directories:
 - `graphrag-code snapshot-pin <id> --graph <root> --expected-registry-revision <token> --pin-confirmed`
 - `graphrag-code snapshot-unpin <id> --graph <root> --expected-registry-revision <token> --unpin-confirmed`
 - `graphrag-code snapshot-retention-plan --graph <root> --keep-last <N>`
+- `graphrag-code snapshot-prune --graph <root> --keep-last <N> --expected-plan-revision sha256:<hex> --prune-confirmed`
 - `graphrag-code mcp --graph <root> --indexer auto`
 
 `graphrag-code mcp` is a local stdio MCP adapter over one existing graph.
@@ -65,10 +66,10 @@ The server exposes a fixed read-only tool set: `graph_status`,
 `graph_doctor`, `query_symbol`, `callers`, `callees`, `neighbors`,
 `impact`, `type_closure`, `context_pack`, `snapshot_history`, and
 `snapshot_diff`. There is no `snapshot_activate`, `snapshot_pin`,
-`snapshot_unpin`, or `snapshot_retention_plan` tool: activating a retained
-snapshot, writing operator retention pins, or planning keep-last
-retention is an explicit CLI operation and is intentionally absent from
-MCP. Tool arguments cannot select another
+`snapshot_unpin`, `snapshot_retention_plan`, or `snapshot_prune` tool:
+activating a retained snapshot, writing operator retention pins,
+planning keep-last retention, or pruning CAS-verified candidates is an
+explicit CLI operation and is intentionally absent from MCP. Tool arguments cannot select another
 graph. There is no indexing, publishing, retention, port-eval,
 compiler/Clang, SQL, or shell tool. Snapshot history is a bounded local
 listing of retained published ids. Snapshot diff is structural
@@ -194,8 +195,8 @@ already-adopted regular `.publish.lock`, holds one shared lease for the
 complete response, and never creates that lock. It does not prune,
 apply, delete, activate, publish, or change any graph file.
 `plan_revision` is `sha256:<hex>` over the canonical decision inputs,
-schema version, and exact retained/deletion result. It is reserved for a
-later prune compare-and-swap; this command does not mutate. Advisory
+schema version, and exact retained/deletion result. `snapshot-prune`
+consumes that token as a compare-and-swap guard. Advisory
 locks protect only cooperating processes. This command is intentionally
 absent from MCP. The planner rechecks `current`, the
 published/staging listing, claim pins, exact registry revision, and lock
@@ -204,6 +205,29 @@ Cleanup fails before deletion when `current` is missing/dangling or a
 `snapshots/` entry is unsafe. Publication performs that validation before
 promotion and skips deletion if an input becomes ambiguous only after the
 new `current` has been written.
+
+`snapshot-prune --graph <root> --keep-last <N> --expected-plan-revision
+sha256:<hex> --prune-confirmed` is the explicit mutating CLI that applies
+exactly one recomputed retention plan. `--prune-confirmed` and
+`--expected-plan-revision` are mandatory. There is no dry-run: the plan
+command is the preview. Without confirmation the command exits 2 and
+changes nothing. Whitespace, uppercase hex, or any token other than
+`sha256:<64 lowercase hex>` is rejected before the lease. One exclusive
+existing-lock lease recomputes the shared planner, requires the observed
+`plan_revision` to match, then deletes only those
+`deletion_candidates`. A stale revision, keep-last mismatch, or changed
+current/pin/published set exits 1 and changes nothing. Current, existing
+operator/claim pins, staging directories, and dangling pins are never
+deleted. Recursive deletion is not transactionally atomic: a later-
+candidate failure or process crash can leave a partial prune, reported
+with `ok=false`, `partial=true`, `deleted_snapshots`, `failed_snapshot`,
+`not_attempted_snapshots`, `filesystem_may_have_changed=true`, and
+`retry_requires_fresh_plan=true`. `changed` counts only snapshot
+directories whose complete removal succeeded; a failing recursive
+removal can still change files before it raises. There is no rollback,
+trash, or recovery protocol. The command never creates
+`.publish.lock` or `.snapshot-pins.json` and is intentionally absent
+from MCP. Advisory locks protect only cooperating processes.
 
 Query and context-pack commands accept optional
 `--snapshot <id|current>`. Omitting it preserves the existing default
@@ -565,8 +589,13 @@ modules, plugins, and PCH fail explicitly. See
   or deletes snapshots.
   `graphrag-code snapshot-retention-plan --keep-last <N>` reports the
   shared keep-last decision without deleting anything. It is not prune,
-  backup, replication, or an MCP tool. A later prune command is not
-  implemented.
+  backup, replication, or an MCP tool.
+  `graphrag-code snapshot-prune --keep-last <N> --expected-plan-revision
+  sha256:<hex> --prune-confirmed` applies exactly that plan under an
+  exclusive existing-lock lease. Recursive deletion is not
+  transactionally atomic; a partial prune requires a fresh plan before
+  retry. Advisory locks protect only cooperating processes. Neither
+  command is an MCP tool.
 - `scripts/persisted_graph_doctor.py` / `graphrag-code doctor` – **read-only
   persisted-integrity doctor** for any BYOG graph. Selects one snapshot,
   validates the language-independent envelope, then runs every applicable

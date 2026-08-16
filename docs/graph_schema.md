@@ -337,7 +337,7 @@ exclusive existing-lock lease across validation, CAS, atomic replacement,
 verification, and the complete response. They never create, rewrite,
 chmod, truncate, or replace `.publish.lock`. A missing lock points at
 `adopt-publication-lock`. Advisory locks protect only cooperating
-processes. Mutation commands may change only `.snapshot-pins.json`.
+processes. Pin and unpin may change only `.snapshot-pins.json`.
 
 Cooperating keep-last cleanup protects `current` UNION existing doc-claim
 pins UNION operator pins. Publication validates the registry under the
@@ -352,9 +352,8 @@ snapshot or claim semantic equivalence.
 `graphrag-code snapshot-retention-plan --graph <root> --keep-last <N>`
 is a read-only report of what cooperating keep-last cleanup would
 retain and delete. It shares `plan_snapshot_retention` with
-`_cleanup_old_snapshots_locked`. There is no prune, apply, or delete
-command. The command is intentionally absent from MCP. The fixed MCP
-tool set remains 11 read-only tools.
+`_cleanup_old_snapshots_locked`. The command is intentionally absent
+from MCP. The fixed MCP tool set remains 11 read-only tools.
 
 The effective protected set is `current` UNION existing doc-claim pins
 UNION existing operator pins. `keep_last` has an effective minimum of
@@ -405,20 +404,72 @@ trailing newline) over the decision inputs:
 The schema version and exact retained/deletion decision are bound along
 with their inputs so a later implementation cannot accept a token for a
 different selection algorithm. Presentation fields and `plan_revision`
-itself are excluded. The token is reserved for a later prune
-compare-and-swap. This command does not mutate `current`, snapshot
+itself are excluded. `snapshot-prune` consumes that token as a
+compare-and-swap guard. This command does not mutate `current`, snapshot
 payloads, `.publish.lock`, or `.snapshot-pins.json`.
 
-Before returning, the command rechecks `current`, the complete published
-and staging listing, claim pins, the exact registry revision, and the
-publication-lock identity. A detected lock-ignoring change exits 1. The
-registry is parsed only once; its second check safely hashes exact bytes
-through an existing regular-file descriptor. Cooperating cleanup rejects
-a missing or dangling `current` and any unexpected, symlinked, or
+Before returning, the plan command rechecks `current`, the complete
+published and staging listing, claim pins, the exact registry revision,
+and the publication-lock identity. A detected lock-ignoring change exits
+1. The registry is parsed only once; its second check safely hashes exact
+bytes through an existing regular-file descriptor. Cooperating cleanup
+rejects a missing or dangling `current` and any unexpected, symlinked, or
 non-directory snapshot entry before deleting anything. Publication runs
 the same cleanup-plan validation before promotion; if a non-cooperating
 actor changes an input only after the new `current` is written, deletion
 is skipped instead of acting on an ambiguous plan.
+
+### Snapshot prune
+
+`graphrag-code snapshot-prune --graph <root> --keep-last <N>
+--expected-plan-revision sha256:<64 lowercase hex> --prune-confirmed`
+applies exactly one recomputed retention plan. It shares
+`plan_snapshot_retention` with planning and cleanup. There is no
+dry-run; `snapshot-retention-plan` is the preview. Without
+`--prune-confirmed` the command exits 2 and changes nothing. The token
+must be `sha256:` plus 64 lowercase hex digits; whitespace, uppercase
+hex, `absent`, and any other shape exit 2 before the lease.
+
+The command requires a managed `current + snapshots/` graph and an
+already-adopted regular `.publish.lock`. It never creates, truncates,
+chmods, rewrites, or replaces the lock, and never creates
+`.snapshot-pins.json`. One exclusive existing-lock lease covers
+validation, plan recomputation, CAS, deletion, result construction,
+serialization, stdout write, and stdout flush. It does not take a
+nested shared lease and does not call `cleanup_old_snapshots`. A
+missing lock exits 2 and points at `adopt-publication-lock`. Malformed,
+oversized, symlinked, or non-regular registry state exits 2. A stale
+`plan_revision` (including a keep-last mismatch or a changed
+current/pin/published set) exits 1 and changes nothing. Advisory locks
+protect only cooperating processes.
+
+Deletion targets are exactly the CAS-verified `deletion_candidates`, in
+canonical UTF-8-byte order. Current, retained snapshots, existing
+operator pins, existing claim pins, staging directories, dangling pins,
+paths outside `<graph>/snapshots/`, and any path reached through a
+symlink are never deleted. Before the first deletion every candidate is
+proven to be a canonical published id naming a real non-symlink
+directory directly under `snapshots/`, the candidate set matches the
+CAS-verified plan, and retained/current/pinned ids are disjoint from
+candidates.
+
+Recursive deletion of several directories is not transactionally
+atomic. A later-candidate failure or process crash can leave a
+partially applied prune. There is no rollback, trash, or recovery
+protocol. Partial mutation writes a structured result then exits 1 with
+`ok=false`, `partial=true`, `deleted_snapshots`, `failed_snapshot`, a
+bounded `error`, `not_attempted_snapshots`,
+`filesystem_may_have_changed=true`, and
+`retry_requires_fresh_plan=true`. `changed` counts only candidates whose
+complete directory removal succeeded. Because a recursive remover can
+delete children before raising, every partial result conservatively says
+the filesystem may have changed even when `changed=false`. A valid plan
+with no candidates is an idempotent exit-0 result with `changed=false`
+and `filesystem_may_have_changed=false`. Pre-deletion failures leave
+stdout empty.
+
+The command is intentionally absent from MCP. The fixed MCP tool set
+remains 11 read-only tools.
 
 ## Entity Types (code domain, start with these)
 - file

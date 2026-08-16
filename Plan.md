@@ -119,7 +119,7 @@ definitions are all present; 113 re-exports are reported separately rather
 than inflated into duplicate graph entities. The `sqlparse.split` target named
 by the Rust port is therefore an actual graph entity, not merely a module API
 outside the graph. See `examples/sqlparse/PROVENANCE.md` for the census and
-call-oracle effect. The current full-suite expectation is **1554 passed, 2 xfailed**;
+call-oracle effect. The current full-suite expectation is **1582 passed, 2 xfailed**;
 this 2026-08-14 persisted-integrity doctor update supersedes the earlier 721-passed /
 2026-07-26 gate snapshot. The product CLI is the installable ``graphrag-code``
 console command (`python -m graphrag_code`); source-checkout ``scripts/*.py``
@@ -183,8 +183,13 @@ not a candidate. Dangling pins are reported, not invented. The command
 holds one shared existing-lock lease, never creates
 ``.snapshot-pins.json`` or ``.publish.lock``, and is intentionally
 absent from MCP. ``plan_revision`` binds the decision inputs, schema,
-and exact retained/deletion result for a later prune CAS that this
-milestone does not implement. MCP remains
+and exact retained/deletion result. ``graphrag-code snapshot-prune
+--keep-last <N> --expected-plan-revision sha256:<hex> --prune-confirmed``
+recomputes that plan under one exclusive existing-lock lease and deletes
+only the CAS-verified candidates. There is no dry-run. A stale revision
+changes nothing. Recursive deletion is not transactionally atomic; a
+partial prune reports ``partial=true`` and requires a fresh plan.
+Neither command is an MCP tool. MCP remains
 exactly 11 read-only tools and stays strict. Advisory locks do not
 protect against non-cooperating programs. No search, UI, HTTP service,
 repair, or reindex is added.

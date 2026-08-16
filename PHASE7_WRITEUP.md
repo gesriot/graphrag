@@ -159,7 +159,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`1554 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`1582 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
@@ -233,6 +233,14 @@ graphrag_code.snapshot_retention`` and
 keep-last selection helper used by cleanup. It does not prune, apply,
 or delete. An absent pin registry stays absent. Malformed registry
 state fails closed. The command is intentionally absent from MCP.
+``graphrag-code snapshot-prune`` (also ``python -m
+graphrag_code.snapshot_prune`` and ``scripts/snapshot_prune.py``)
+applies exactly one CAS-verified plan under an exclusive existing-lock
+lease. ``--prune-confirmed`` and ``--expected-plan-revision`` are
+mandatory; there is no dry-run. A stale revision changes nothing.
+Recursive deletion is not transactionally atomic. A partial prune
+reports ``partial=true`` and requires a fresh plan; there is no
+rollback. The command is intentionally absent from MCP.
 Advisory locks do not protect against non-cooperating programs. This is
 not natural-language search, an HTTP service, repair, reindex, or
 semantic equivalence.
