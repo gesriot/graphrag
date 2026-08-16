@@ -471,6 +471,70 @@ stdout empty.
 The command is intentionally absent from MCP. The fixed MCP tool set
 remains 11 read-only tools.
 
+### Snapshot staging inventory
+
+`graphrag-code snapshot-staging --graph <root>` is a read-only
+structural inventory of every direct `snapshots/.staging-*` entry. It
+does not delete, rename, repair, quarantine, publish, activate, pin,
+prune, or age-classify staging. It requires a managed
+`current + snapshots/` graph and an already-adopted regular
+`.publish.lock`. It never creates, truncates, chmods, rewrites, or
+replaces that lock, and never creates or changes `.snapshot-pins.json`,
+`current`, published payloads, or staging entries.
+
+Publishers write `snapshots/.staging-*` outside the publication lock
+and take that lock only for promotion. The shared graph lease therefore
+does not make staging contents immutable. The command inspects the
+snapshots listing and staging metadata, then performs a second
+consistency scan before emitting a result. Added, removed, replaced,
+type-changed, or content-metadata-changed staging entries exit 1 with
+empty stdout. That two-scan agreement is bounded change detection, not
+a liveness lease over a staging writer. A stable listing is not proof
+that a writer is dead. Ownership is always `unknown`. The command does
+not use wall-clock age, mtimes, PID probing, process discovery, host
+identity, or guessed timeouts to infer ownership. Cleanup is not
+implemented; `cleanup_eligible` is always false. No backup, recovery,
+quarantine, or distributed lease is claimed.
+
+Entries are listed in canonical UTF-8-byte order. Each entry reports a
+bounded structural summary: name, `candidate_snapshot_id` or null,
+`name_valid`, `entry_kind`, top-level entry count and summaries,
+presence of `manifest.json` / `entities.parquet` /
+`relationships.parquet` / `text_units.parquet` and optional
+`call_observations.parquet` / `settings.yaml`,
+`complete_payload_candidate`, `ownership_status=unknown`,
+`cleanup_eligible=false`, and structural notices.
+`complete_payload_candidate` means only that the expected top-level
+file names are present. It does not claim parquet validity, manifest
+integrity, successful publication, writer death, or deletion safety.
+Symlinked staging entries and symlinked top-level children fail closed
+without following the target. Nested directories are reported without
+recursion. Non-regular children are reported and are not opened.
+Staging-entry count is capped at 64 and per-entry top-level count at
+64. The reported published-snapshot list is capped at 4096, so every
+array that contributes to the response has a hard bound. Counts are
+enforced while descriptor-relative directory iterators are consumed,
+not after an unbounded `list(...)`. Directory descriptors use
+`O_NOFOLLOW` and are matched back to the pathname before and after the
+scan. A platform without safe fd-relative scanning exits 2 instead of
+falling back to a pathname traversal. Exceeding any bound exits 2.
+
+`staging_revision` is `sha256:<64 lowercase hex>` over compact
+canonical JSON binding `schema_version`, `current`,
+`published_snapshots`, and the complete reported `staging_entries`.
+Graph path and presentation-only fields are excluded. The token is
+informational and reserved for a possible later protocol; this command
+does not accept or apply it. A graph with no staging entries is a valid
+exit-0 report with `staging_count=0`.
+
+The command holds one shared existing-lock lease across discovery,
+consistency checks, result construction, serialization, stdout write,
+and stdout flush. It does not take a nested lease. Relative `--graph`
+paths resolve from the invoking cwd. A symlinked graph root,
+`snapshots/`, `current`, or publication lock is rejected without
+following it. The command is intentionally absent from MCP. The fixed
+MCP tool set remains 11 read-only tools.
+
 ## Entity Types (code domain, start with these)
 - file
 - module / package

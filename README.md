@@ -54,6 +54,7 @@ These generic installed commands operate on user-supplied directories:
 - `graphrag-code snapshot-unpin <id> --graph <root> --expected-registry-revision <token> --unpin-confirmed`
 - `graphrag-code snapshot-retention-plan --graph <root> --keep-last <N>`
 - `graphrag-code snapshot-prune --graph <root> --keep-last <N> --expected-plan-revision sha256:<hex> --prune-confirmed`
+- `graphrag-code snapshot-staging --graph <root>`
 - `graphrag-code mcp --graph <root> --indexer auto`
 
 `graphrag-code mcp` is a local stdio MCP adapter over one existing graph.
@@ -66,9 +67,11 @@ The server exposes a fixed read-only tool set: `graph_status`,
 `graph_doctor`, `query_symbol`, `callers`, `callees`, `neighbors`,
 `impact`, `type_closure`, `context_pack`, `snapshot_history`, and
 `snapshot_diff`. There is no `snapshot_activate`, `snapshot_pin`,
-`snapshot_unpin`, `snapshot_retention_plan`, or `snapshot_prune` tool:
+`snapshot_unpin`, `snapshot_retention_plan`, `snapshot_prune`, or
+`snapshot_staging` tool:
 activating a retained snapshot, writing operator retention pins,
-planning keep-last retention, or pruning CAS-verified candidates is an
+planning keep-last retention, pruning CAS-verified candidates, or
+listing staging directories is an
 explicit CLI operation and is intentionally absent from MCP. Tool arguments cannot select another
 graph. There is no indexing, publishing, retention, port-eval,
 compiler/Clang, SQL, or shell tool. Snapshot history is a bounded local
@@ -229,6 +232,35 @@ trash, or recovery protocol. The command never creates
 `.publish.lock` or `.snapshot-pins.json` and is intentionally absent
 from MCP. Advisory locks protect only cooperating processes.
 
+`snapshot-staging --graph <root>` is a read-only structural inventory of
+direct `snapshots/.staging-*` entries. It requires a managed
+`current + snapshots/` graph and an already-adopted regular
+`.publish.lock`, holds one shared existing-lock lease across both
+discovery scans and the complete response, and never creates that lock
+or changes `current`, `.snapshot-pins.json`, published payloads, or
+staging entries. Publishers construct `.staging-*` outside the
+publication lock and take that lock only for promotion, so the shared
+lease is not a liveness lease over a staging writer. Two-scan agreement
+is bounded change detection: added, removed, replaced, type-changed, or
+content-metadata-changed staging entries exit 1 with empty stdout. A
+stable listing is not proof that a writer is dead. Ownership is always
+`unknown`. No wall-clock age, mtime heuristic, PID probe, host identity,
+or guessed timeout is used to infer ownership. Cleanup is not
+implemented; `cleanup_eligible` is always false. `complete_payload_candidate`
+means only that the expected top-level file names are present, not
+parquet validity, manifest integrity, successful publication, or
+deletion safety. `staging_revision` is an informational
+`sha256:<hex>` over the schema version, current published id, published
+snapshot ids, and the complete reported inventory. This command does not
+accept or apply that token. A graph with no staging entries is a valid
+exit-0 report with `staging_count=0`. The command is intentionally
+absent from MCP. Staging entries and their top-level children are each
+capped at 64, and the reported published-snapshot list is capped at
+4096. Enumeration is descriptor-relative with `O_NOFOLLOW`; a platform
+without that safe primitive is rejected instead of falling back to a
+pathname traversal. Advisory locks protect only cooperating processes.
+No backup, recovery, quarantine, or distributed lease is claimed.
+
 Query and context-pack commands accept optional
 `--snapshot <id|current>`. Omitting it preserves the existing default
 current/legacy-flat read. `--snapshot current` explicitly selects the
@@ -278,6 +310,9 @@ uv run python scripts/snapshot_compare.py diff --graph <root> --from current --t
 uv run python scripts/snapshot_activate.py --graph <root> --snapshot <id> --expected-current <id> --activate-confirmed
 uv run python scripts/snapshot_pins.py --graph <root>
 uv run python scripts/snapshot_pins.py pin <id> --graph <root> --expected-registry-revision absent --pin-confirmed
+uv run python scripts/snapshot_retention.py --graph <root> --keep-last 2
+uv run python scripts/snapshot_prune.py --graph <root> --keep-last 2 --expected-plan-revision sha256:<hex> --prune-confirmed
+uv run python scripts/snapshot_staging.py --graph <root>
 uv run python scripts/index_python.py --package <pkg> --graph <out>
 uv run python scripts/index_c.py --package <pkg> --graph <out>
 uv run python scripts/graph_query.py symbol <title> --graph <root>
@@ -594,8 +629,12 @@ modules, plugins, and PCH fail explicitly. See
   sha256:<hex> --prune-confirmed` applies exactly that plan under an
   exclusive existing-lock lease. Recursive deletion is not
   transactionally atomic; a partial prune requires a fresh plan before
-  retry. Advisory locks protect only cooperating processes. Neither
-  command is an MCP tool.
+  retry. `graphrag-code snapshot-staging` lists `snapshots/.staging-*`
+  entries as a read-only structural inventory. It does not infer
+  ownership or implement cleanup. Two-scan agreement is bounded change
+  detection, not a liveness lease over a staging writer. Advisory locks
+  protect only cooperating processes. None of these commands is an MCP
+  tool.
 - `scripts/persisted_graph_doctor.py` / `graphrag-code doctor` – **read-only
   persisted-integrity doctor** for any BYOG graph. Selects one snapshot,
   validates the language-independent envelope, then runs every applicable

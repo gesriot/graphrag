@@ -100,6 +100,7 @@ def test_python_module_help():
     assert "snapshot-unpin" in proc.stdout
     assert "snapshot-retention-plan" in proc.stdout
     assert "snapshot-prune" in proc.stdout
+    assert "snapshot-staging" in proc.stdout
 
 
 def test_source_script_and_package_expose_same_commands():
@@ -130,6 +131,7 @@ def test_source_script_and_package_expose_same_commands():
         "snapshot-unpin",
         "snapshot-retention-plan",
         "snapshot-prune",
+        "snapshot-staging",
     )
     for name in required:
         assert name in packaged
@@ -167,6 +169,7 @@ def test_wheel_and_sdist_contents(built_wheel_and_sdist):
         assert "graphrag_code/snapshot_pins.py" in names
         assert "graphrag_code/snapshot_retention.py" in names
         assert "graphrag_code/snapshot_prune.py" in names
+        assert "graphrag_code/snapshot_staging.py" in names
         assert "graphrag_code/doc_claims.json" in names
         assert not any(
             "scripts/" in name

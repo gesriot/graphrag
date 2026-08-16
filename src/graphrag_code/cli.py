@@ -14,7 +14,8 @@ What this is not: a demonstrated accuracy multiplier for cold porting. The
 Phase 7 ablations showed no graph-vs-raw capability win on bounded library
 slices; this CLI packages the *rails* (index, query, packs, audit,
 adopt-publication-lock, snapshot-history, snapshot-diff, snapshot-activate,
-snapshot-pins, snapshot-retention-plan, snapshot-prune, port_eval).
+snapshot-pins, snapshot-retention-plan, snapshot-prune, snapshot-staging,
+port_eval).
 """
 from __future__ import annotations
 
@@ -41,7 +42,8 @@ app = typer.Typer(
         "graphrag-code: deterministic code graph → query → context-pack → "
         "persisted doctor → adopt-publication-lock → snapshot-history → "
         "snapshot-diff → snapshot-activate → snapshot-pins → "
-        "snapshot-retention-plan → snapshot-prune → port-eval. Relative "
+        "snapshot-retention-plan → snapshot-prune → snapshot-staging → "
+        "port-eval. Relative "
         "paths are resolved from the invoking working directory."
     ),
 )
@@ -58,6 +60,7 @@ _DELEGATE_MODULES = {
     "snapshot_pins.py": "graphrag_code.snapshot_pins",
     "snapshot_retention.py": "graphrag_code.snapshot_retention",
     "snapshot_prune.py": "graphrag_code.snapshot_prune",
+    "snapshot_staging.py": "graphrag_code.snapshot_staging",
     "audit_call_edges.py": "graphrag_code.audit_call_edges",
     "port_eval.py": "graphrag_code.port_eval",
 }
@@ -972,6 +975,26 @@ def snapshot_prune(
     if json_out is True:
         args.append("--json")
     _delegate("snapshot_prune.py", args)
+
+
+@app.command("snapshot-staging")
+def snapshot_staging(
+    graph: Path = typer.Option(..., "--graph", "-g", help="Managed BYOG graph root"),
+    json_out: bool = typer.Option(
+        False, "--json", help="same JSON shape as snapshot_staging.py --json"
+    ),
+):
+    """Report a read-only structural inventory of snapshots/.staging-* entries.
+
+    Holds one shared existing-lock lease. Two-scan agreement is bounded
+    change detection, not a liveness lease over a staging writer.
+    Does not delete, quarantine, or infer ownership. Never creates
+    .snapshot-pins.json or .publish.lock. Intentionally absent from MCP.
+    """
+    args = ["--graph", str(graph)]
+    if json_out is True:
+        args.append("--json")
+    _delegate("snapshot_staging.py", args)
 
 
 @app.command("audit-graph")

@@ -119,7 +119,7 @@ definitions are all present; 113 re-exports are reported separately rather
 than inflated into duplicate graph entities. The `sqlparse.split` target named
 by the Rust port is therefore an actual graph entity, not merely a module API
 outside the graph. See `examples/sqlparse/PROVENANCE.md` for the census and
-call-oracle effect. The current full-suite expectation is **1582 passed, 2 xfailed**;
+call-oracle effect. The current full-suite expectation is **1603 passed, 2 xfailed**;
 this 2026-08-14 persisted-integrity doctor update supersedes the earlier 721-passed /
 2026-07-26 gate snapshot. The product CLI is the installable ``graphrag-code``
 console command (`python -m graphrag_code`); source-checkout ``scripts/*.py``
@@ -189,7 +189,16 @@ recomputes that plan under one exclusive existing-lock lease and deletes
 only the CAS-verified candidates. There is no dry-run. A stale revision
 changes nothing. Recursive deletion is not transactionally atomic; a
 partial prune reports ``partial=true`` and requires a fresh plan.
-Neither command is an MCP tool. MCP remains
+``graphrag-code snapshot-staging`` is a read-only structural inventory
+of direct ``snapshots/.staging-*`` entries. It holds one shared
+existing-lock lease, never creates ``.publish.lock``, and does not
+delete, quarantine, or infer ownership. Publishers construct staging
+outside the publication lock, so the shared lease is not a liveness
+lease over a staging writer. Two-scan agreement is bounded change
+detection, not proof that a writer is dead. No age heuristic is used.
+Cleanup is not implemented. ``staging_revision`` is informational and
+is not accepted or applied. The command is intentionally absent from
+MCP. Neither prune nor staging is an MCP tool. MCP remains
 exactly 11 read-only tools and stays strict. Advisory locks do not
 protect against non-cooperating programs. No search, UI, HTTP service,
 repair, or reindex is added.
