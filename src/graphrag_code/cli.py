@@ -14,7 +14,7 @@ What this is not: a demonstrated accuracy multiplier for cold porting. The
 Phase 7 ablations showed no graph-vs-raw capability win on bounded library
 slices; this CLI packages the *rails* (index, query, packs, audit,
 adopt-publication-lock, snapshot-history, snapshot-diff, snapshot-activate,
-snapshot-pins, port_eval).
+snapshot-pins, snapshot-retention-plan, port_eval).
 """
 from __future__ import annotations
 
@@ -40,7 +40,8 @@ app = typer.Typer(
     help=(
         "graphrag-code: deterministic code graph → query → context-pack → "
         "persisted doctor → adopt-publication-lock → snapshot-history → "
-        "snapshot-diff → snapshot-activate → snapshot-pins → port-eval. Relative "
+        "snapshot-diff → snapshot-activate → snapshot-pins → "
+        "snapshot-retention-plan → port-eval. Relative "
         "paths are resolved from the invoking working directory."
     ),
 )
@@ -55,6 +56,7 @@ _DELEGATE_MODULES = {
     "snapshot_compare.py": "graphrag_code.snapshot_compare",
     "snapshot_activate.py": "graphrag_code.snapshot_activate",
     "snapshot_pins.py": "graphrag_code.snapshot_pins",
+    "snapshot_retention.py": "graphrag_code.snapshot_retention",
     "audit_call_edges.py": "graphrag_code.audit_call_edges",
     "port_eval.py": "graphrag_code.port_eval",
 }
@@ -893,6 +895,31 @@ def snapshot_unpin(
     if json_out is True:
         args.append("--json")
     _delegate("snapshot_pins.py", args)
+
+
+@app.command("snapshot-retention-plan")
+def snapshot_retention_plan(
+    graph: Path = typer.Option(..., "--graph", "-g", help="Managed BYOG graph root"),
+    keep_last: int = typer.Option(
+        ...,
+        "--keep-last",
+        help="Requested keep-last floor (effective minimum is 1).",
+    ),
+    json_out: bool = typer.Option(
+        False, "--json", help="same JSON shape as snapshot_retention.py --json"
+    ),
+):
+    """Report what cooperating keep-last cleanup would retain and delete.
+
+    Read-only. Shares the cleanup selection helper. Holds one shared
+    existing-lock lease. Never creates .snapshot-pins.json or
+    .publish.lock. Does not prune, activate, publish, or delete.
+    Intentionally absent from MCP.
+    """
+    args = ["--graph", str(graph), "--keep-last", str(keep_last)]
+    if json_out is True:
+        args.append("--json")
+    _delegate("snapshot_retention.py", args)
 
 
 @app.command("audit-graph")

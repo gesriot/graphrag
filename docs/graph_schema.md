@@ -347,6 +347,79 @@ remains a no-op and is not created. Manual or lock-ignoring deletion can
 still remove a pinned snapshot. The registry does not activate a
 snapshot or claim semantic equivalence.
 
+### Snapshot retention plan
+
+`graphrag-code snapshot-retention-plan --graph <root> --keep-last <N>`
+is a read-only report of what cooperating keep-last cleanup would
+retain and delete. It shares `plan_snapshot_retention` with
+`_cleanup_old_snapshots_locked`. There is no prune, apply, or delete
+command. The command is intentionally absent from MCP. The fixed MCP
+tool set remains 11 read-only tools.
+
+The effective protected set is `current` UNION existing doc-claim pins
+UNION existing operator pins. `keep_last` has an effective minimum of
+1. Current is always retained when it names a published directory.
+Every existing claim or operator pin is retained even when that set
+exceeds `keep_last`. Newest remaining published snapshots fill the
+floor. Published order is UTF-8-byte ascending (chronological for
+timestamped ids). Staging directories are never published ids and never
+deletion candidates. Dangling pins (ids left by manual or lock-ignoring
+deletion) are reported and are not invented as retained snapshots.
+
+The planner loads and validates `.snapshot-pins.json` once under one
+shared existing-lock lease. An absent registry is an empty operator pin
+set and is not created. Malformed, oversized, symlinked, or
+non-regular registry state exits 2 and changes nothing. A missing
+`.publish.lock` exits 2 and points at `adopt-publication-lock`. The
+command never creates, truncates, chmods, rewrites, or replaces the
+lock. Advisory locks protect only cooperating processes.
+
+JSON includes `schema_version`, `graph`, `keep_last_requested`,
+`keep_last_effective`, `current`, `registry_revision`,
+`published_count`, `published_snapshots`, `operator_pins`,
+`claim_pins`, `effective_pins`, `existing_operator_pins`,
+`existing_claim_pins`, `dangling_operator_pins`,
+`dangling_claim_pins`, `retained_snapshots`, `deletion_candidates`,
+`staging_notices`, and `plan_revision`. ID arrays are unique and
+UTF-8-byte sorted; `published_snapshots`, `retained_snapshots`, and
+`deletion_candidates` use that same canonical retention order.
+
+`plan_revision` is `sha256:<lowercase hex>` of compact canonical JSON
+(`sort_keys=True`, `separators=(",", ":")`, `ensure_ascii=True`, no
+trailing newline) over the decision inputs:
+
+```json
+{
+  "claim_pins": ["<id>"],
+  "current": "<published-id>",
+  "deletion_candidates": ["<id>"],
+  "keep_last_effective": 1,
+  "operator_pins": ["<id>"],
+  "published_snapshots": ["<id>"],
+  "registry_revision": "absent",
+  "retained_snapshots": ["<id>"],
+  "schema_version": 1
+}
+```
+
+The schema version and exact retained/deletion decision are bound along
+with their inputs so a later implementation cannot accept a token for a
+different selection algorithm. Presentation fields and `plan_revision`
+itself are excluded. The token is reserved for a later prune
+compare-and-swap. This command does not mutate `current`, snapshot
+payloads, `.publish.lock`, or `.snapshot-pins.json`.
+
+Before returning, the command rechecks `current`, the complete published
+and staging listing, claim pins, the exact registry revision, and the
+publication-lock identity. A detected lock-ignoring change exits 1. The
+registry is parsed only once; its second check safely hashes exact bytes
+through an existing regular-file descriptor. Cooperating cleanup rejects
+a missing or dangling `current` and any unexpected, symlinked, or
+non-directory snapshot entry before deleting anything. Publication runs
+the same cleanup-plan validation before promotion; if a non-cooperating
+actor changes an input only after the new `current` is written, deletion
+is skipped instead of acting on an ambiguous plan.
+
 ## Entity Types (code domain, start with these)
 - file
 - module / package

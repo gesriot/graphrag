@@ -159,7 +159,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`1535 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`1554 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
@@ -226,9 +226,16 @@ activation, backup, or replication. Listing never creates the file.
 Unpin does not delete immediately. Cooperating keep-last protects
 ``current``, existing doc-claim pins, and operator pins. A malformed
 registry aborts publication before ``current`` or snapshot deletion.
-MCP remains exactly 11 read-only tools. Advisory locks do not protect
-against non-cooperating programs. This is not natural-language search, an
-HTTP service, repair, reindex, or semantic equivalence.
+MCP remains exactly 11 read-only tools. ``graphrag-code
+snapshot-retention-plan`` (also ``python -m
+graphrag_code.snapshot_retention`` and
+``scripts/snapshot_retention.py``) is a read-only report of the shared
+keep-last selection helper used by cleanup. It does not prune, apply,
+or delete. An absent pin registry stays absent. Malformed registry
+state fails closed. The command is intentionally absent from MCP.
+Advisory locks do not protect against non-cooperating programs. This is
+not natural-language search, an HTTP service, repair, reindex, or
+semantic equivalence.
 
 **Live re-check (2026-07-26):** `538 passed, 2 xfailed`.
 

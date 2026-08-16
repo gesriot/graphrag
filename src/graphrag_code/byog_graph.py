@@ -21,7 +21,7 @@ from collections import defaultdict, deque
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
 import pandas as pd
 import pyarrow as pa
@@ -832,10 +832,11 @@ def publish_byog_snapshot(
     staging dirs by guessed age.
 
     Cooperating keep-last cleanup protects ``current``, doc-claim pins, and
-    operator pins from ``.snapshot-pins.json``. The registry is validated
-    under the publication lock before staging promotion or the ``current``
-    write. A malformed registry aborts publication before those mutations.
-    An absent registry is a no-op and is not created.
+    operator pins from ``.snapshot-pins.json``. Selection uses the shared
+    ``plan_snapshot_retention`` helper. The registry is validated under the
+    publication lock before staging promotion or the ``current`` write. A
+    malformed registry aborts publication before those mutations. An absent
+    registry is a no-op and is not created.
     """
     out_root = Path(out_root)
     snapshots_dir = out_root / "snapshots"
@@ -870,6 +871,13 @@ def publish_byog_snapshot(
             # Validate operator pins before promotion or current mutation.
             # An absent registry is an empty pin set and is not created.
             operator_pins = _operator_pins_for_retention(out_root)
+            # The shared planner also validates current, claims, and every
+            # snapshots/ entry. Do that before promotion so static invalid
+            # retention state cannot turn a successful current update into a
+            # reported publication failure.
+            retention_before = _plan_snapshot_retention_locked(
+                out_root, keep_last=keep_last, operator_pins=operator_pins
+            )
             try:
                 os.rename(stage_dir, final_dir)
             except OSError:
@@ -896,8 +904,31 @@ def publish_byog_snapshot(
                 return final_dir
             if operator_after != operator_pins:
                 return final_dir
+            try:
+                retention_after = _plan_snapshot_retention_locked(
+                    out_root,
+                    keep_last=keep_last,
+                    operator_pins=operator_pins,
+                )
+            except ValueError:
+                # A lock-ignoring actor changed a planner input after current
+                # was written. Publication is complete; skip deletion rather
+                # than report failure or act on ambiguous retention state.
+                return final_dir
+            expected_published = _byte_sort_snapshot_ids(
+                [*retention_before["published_snapshots"], snap_id]
+            )
+            if (
+                retention_after["current"] != snap_id
+                or retention_after["published_snapshots"] != expected_published
+                or retention_after["claim_pins"] != retention_before["claim_pins"]
+            ):
+                return final_dir
             _cleanup_old_snapshots_locked(
-                out_root, keep_last=keep_last, operator_pins=operator_pins
+                out_root,
+                keep_last=keep_last,
+                operator_pins=operator_pins,
+                retention_plan=retention_after,
             )
         return final_dir
     except Exception:
@@ -954,6 +985,177 @@ def pinned_snapshot_ids(out_root: Path) -> set[str]:
     return pinned
 
 
+def _byte_sort_snapshot_ids(values: Sequence[str]) -> List[str]:
+    return sorted(dict.fromkeys(values), key=lambda item: item.encode("utf-8"))
+
+
+def plan_snapshot_retention(
+    *,
+    keep_last: int,
+    current_id: Optional[str],
+    published_ids: Sequence[str],
+    operator_pins: Sequence[str] = (),
+    claim_pins: Sequence[str] = (),
+) -> Dict[str, Any]:
+    """Pure keep-last selection used by planning and cooperating cleanup.
+
+    No I/O. Protected set is ``current`` UNION existing claim pins UNION
+    existing operator pins. ``keep_last`` has an effective minimum of 1.
+    Current is retained when it names a published directory. Every existing
+    claim or operator pin is retained even when that set exceeds
+    ``keep_last``. Newest remaining published ids fill the floor. Staging
+    names are not published ids. Dangling pins are reported and never
+    invented as retained snapshots. Published order is UTF-8-byte
+    ascending, which is chronological for timestamped snapshot ids.
+    """
+    if isinstance(keep_last, bool) or not isinstance(keep_last, int):
+        raise ValueError("keep_last must be an integer")
+    keep_last_effective = max(1, keep_last)
+
+    published: List[str] = []
+    seen_published: set[str] = set()
+    for item in published_ids:
+        if not isinstance(item, str) or not is_published_snapshot_id(item):
+            raise ValueError(
+                f"published snapshot id is not a published id: {item!r}"
+            )
+        if item not in seen_published:
+            published.append(item)
+            seen_published.add(item)
+    published.sort(key=lambda item: item.encode("utf-8"))
+    published_set = set(published)
+
+    def classify_pins(values: Sequence[str]) -> Tuple[List[str], List[str], List[str]]:
+        all_pins: List[str] = []
+        existing: List[str] = []
+        dangling: List[str] = []
+        seen: set[str] = set()
+        for item in values:
+            if not isinstance(item, str) or not is_published_snapshot_id(item):
+                raise ValueError(f"pin id is not a published id: {item!r}")
+            if item in seen:
+                continue
+            seen.add(item)
+            all_pins.append(item)
+            if is_published_snapshot_id(item) and item in published_set:
+                existing.append(item)
+            else:
+                dangling.append(item)
+        all_pins.sort(key=lambda item: item.encode("utf-8"))
+        existing.sort(key=lambda item: item.encode("utf-8"))
+        dangling.sort(key=lambda item: item.encode("utf-8"))
+        return all_pins, existing, dangling
+
+    operator, existing_operator, dangling_operator = classify_pins(operator_pins)
+    claim, existing_claim, dangling_claim = classify_pins(claim_pins)
+    effective = _byte_sort_snapshot_ids([*operator, *claim])
+
+    current: Optional[str] = None
+    keep: set[str] = set()
+    if current_id is None or current_id == "":
+        if published:
+            raise ValueError("current snapshot id is required when snapshots are published")
+    else:
+        if not isinstance(current_id, str) or not is_published_snapshot_id(current_id):
+            raise ValueError(
+                f"current snapshot id is not a published id: {current_id!r}"
+            )
+        current = current_id
+        if current not in published_set:
+            raise ValueError(
+                f"current snapshot is not a published snapshots/ directory: {current!r}"
+            )
+        keep.add(current)
+    keep.update(existing_operator)
+    keep.update(existing_claim)
+
+    slots_left = max(0, keep_last_effective - len(keep))
+    if slots_left > 0:
+        newest_remaining = [sid for sid in published if sid not in keep]
+        keep.update(newest_remaining[-slots_left:])
+
+    retained = [sid for sid in published if sid in keep]
+    deletion = [sid for sid in published if sid not in keep]
+    return {
+        "keep_last_effective": keep_last_effective,
+        "current": current,
+        "published_snapshots": published,
+        "operator_pins": operator,
+        "claim_pins": claim,
+        "effective_pins": effective,
+        "existing_operator_pins": existing_operator,
+        "existing_claim_pins": existing_claim,
+        "dangling_operator_pins": dangling_operator,
+        "dangling_claim_pins": dangling_claim,
+        "retained_snapshots": retained,
+        "deletion_candidates": deletion,
+    }
+
+
+def _published_snapshot_ids_for_retention(snapshots_dir: Path) -> List[str]:
+    """Published snapshot ids in canonical retention order. No I/O beyond listing."""
+    import stat as stat_mod
+
+    snapshots_dir = Path(snapshots_dir)
+    if snapshots_dir.is_symlink():
+        raise ValueError(
+            f"unsafe symlinked snapshots directory is unsupported: {snapshots_dir}"
+        )
+    if not snapshots_dir.exists():
+        return []
+    if not snapshots_dir.is_dir():
+        raise ValueError(f"snapshots path is not a real directory: {snapshots_dir}")
+    try:
+        entries = list(snapshots_dir.iterdir())
+    except OSError as error:
+        raise ValueError(f"cannot list {snapshots_dir}: {error}") from error
+    published: List[str] = []
+    for entry in entries:
+        try:
+            info = entry.lstat()
+        except OSError as error:
+            raise ValueError(f"cannot inspect {entry}: {error}") from error
+        name = entry.name
+        if stat_mod.S_ISLNK(info.st_mode):
+            raise ValueError(f"unsafe symlinked snapshot entry: {entry}")
+        if is_staging_snapshot_name(name):
+            if not stat_mod.S_ISDIR(info.st_mode):
+                raise ValueError(f"staging path is not a directory: {entry}")
+            continue
+        if is_published_snapshot_id(name) and stat_mod.S_ISDIR(info.st_mode):
+            published.append(name)
+            continue
+        raise ValueError(
+            f"unexpected unsafe snapshots entry is not published history: {entry}"
+        )
+    published.sort(key=lambda item: item.encode("utf-8"))
+    return published
+
+
+def _read_current_id_for_retention(out_root: Path) -> str:
+    """Return the published current id. Fail closed on an unsafe pointer."""
+    import stat as stat_mod
+
+    current_file = Path(out_root) / "current"
+    try:
+        info = current_file.lstat()
+    except FileNotFoundError as error:
+        raise ValueError(f"unsafe or missing current pointer: {current_file}") from error
+    except OSError as error:
+        raise ValueError(f"cannot inspect current pointer {current_file}: {error}") from error
+    if stat_mod.S_ISLNK(info.st_mode) or not stat_mod.S_ISREG(info.st_mode):
+        raise ValueError(f"unsafe or missing current pointer: {current_file}")
+    try:
+        current_id = current_file.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError) as error:
+        raise ValueError(f"cannot read current pointer {current_file}: {error}") from error
+    if not is_published_snapshot_id(current_id):
+        raise ValueError(
+            f"current snapshot id is not a published id: {current_id!r}"
+        )
+    return current_id
+
+
 def cleanup_old_snapshots(out_root: Path, keep_last: int = 5) -> int:
     """Delete old snapshot directories, keeping at most the most recent `keep_last`.
 
@@ -965,6 +1167,9 @@ def cleanup_old_snapshots(out_root: Path, keep_last: int = 5) -> int:
     - Also protects operator pins from ``.snapshot-pins.json``. A malformed
       registry fails closed before any deletion. An absent registry is empty
       and is not created. Unpin does not run this cleanup.
+    - Selection is ``plan_snapshot_retention``: the same helper used by
+      ``snapshot-retention-plan``. Fail closed if that helper cannot produce
+      a valid decision.
     - `keep_last` is clamped to at least 1 because current must be retained.
     - Keeps current plus the newest remaining snapshots up to the total limit.
     - Snapshot dirs are sorted by name (timestamped names sort chronologically).
@@ -995,74 +1200,94 @@ def _cleanup_old_snapshots_locked(
     keep_last: int = 5,
     *,
     operator_pins: Optional[set[str]] = None,
+    retention_plan: Optional[Dict[str, Any]] = None,
 ) -> int:
     """Retention body. Caller must already hold ``_publication_lock``."""
+    plan = retention_plan
+    if plan is None:
+        plan = _plan_snapshot_retention_locked(
+            out_root,
+            keep_last=keep_last,
+            operator_pins=operator_pins,
+        )
+    else:
+        try:
+            validated_plan = plan_snapshot_retention(
+                keep_last=keep_last,
+                current_id=plan["current"],
+                published_ids=plan["published_snapshots"],
+                operator_pins=plan["operator_pins"],
+                claim_pins=plan["claim_pins"],
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError(f"invalid precomputed retention plan: {error}") from error
+        if validated_plan != plan:
+            raise ValueError("precomputed retention plan does not match its inputs")
+        if operator_pins is not None and set(plan["operator_pins"]) != set(
+            operator_pins
+        ):
+            raise ValueError("precomputed retention plan has different operator pins")
     out_root = Path(out_root)
-    keep_last = max(1, keep_last)
+    snapshots_dir = out_root / "snapshots"
+    deleted = 0
+    for snap_id in plan["deletion_candidates"]:
+        target = snapshots_dir / snap_id
+        try:
+            shutil.rmtree(target)
+            deleted += 1
+        except Exception:
+            # Best effort; do not fail the whole operation
+            pass
+    return deleted
+
+
+def _plan_snapshot_retention_locked(
+    out_root: Path,
+    keep_last: int = 5,
+    *,
+    operator_pins: Optional[set[str]] = None,
+) -> Dict[str, Any]:
+    """Build the exact cooperating-cleanup plan without deleting anything.
+
+    Caller must already hold ``_publication_lock``. This is used as a
+    preflight before publication mutation and by cleanup immediately before
+    deletion.
+    """
+    out_root = Path(out_root)
     snapshots_dir = out_root / "snapshots"
     if snapshots_dir.is_symlink():
         raise ValueError(
             f"unsafe symlinked snapshots directory is unsupported: {snapshots_dir}"
         )
     if not snapshots_dir.exists():
-        return 0
-
+        return plan_snapshot_retention(
+            keep_last=keep_last,
+            current_id=None,
+            published_ids=[],
+            operator_pins=sorted(operator_pins or set()),
+            claim_pins=sorted(pinned_snapshot_ids(out_root)),
+        )
     if operator_pins is None:
         operator_pins = _operator_pins_for_retention(out_root)
-    pinned = set(pinned_snapshot_ids(out_root)) | set(operator_pins)
-
-    current_file = out_root / "current"
-    current_id: Optional[str] = None
-    if current_file.exists():
-        try:
-            current_id = current_file.read_text().strip()
-        except Exception:
-            current_id = None
-    if current_id and not is_published_snapshot_id(current_id):
-        current_id = None
-
-    snap_dirs = [
-        d
-        for d in snapshots_dir.iterdir()
-        if not d.is_symlink() and d.is_dir() and is_published_snapshot_id(d.name)
-    ]
-    if not snap_dirs:
-        return 0
-
-    # Sort by name (YYYYMMDD-... format sorts correctly)
-    snap_dirs.sort(key=lambda p: p.name)
-
-    # Determine which to keep: current first, then newest remaining snapshots
-    # until the total keep_last limit is reached.
-    keep: set[Path] = set()
-    if current_id:
-        current_dir = snapshots_dir / current_id
-        if current_dir.exists() and is_published_snapshot_id(current_dir.name):
-            keep.add(current_dir)
-
-    for snapshot_id in pinned:
-        if not is_published_snapshot_id(snapshot_id):
-            continue
-        pinned_dir = snapshots_dir / snapshot_id
-        if not pinned_dir.is_symlink() and pinned_dir.is_dir():
-            keep.add(pinned_dir)
-
-    slots_left = max(0, keep_last - len(keep))
-    if slots_left > 0:
-        candidates = [d for d in snap_dirs if d not in keep]
-        keep.update(candidates[-slots_left:])
-
-    deleted = 0
-    for d in snap_dirs:
-        if d not in keep:
-            try:
-                shutil.rmtree(d)
-                deleted += 1
-            except Exception:
-                # Best effort; do not fail the whole operation
-                pass
-
-    return deleted
+    published_ids = _published_snapshot_ids_for_retention(snapshots_dir)
+    current_path = out_root / "current"
+    try:
+        current_path.lstat()
+        current_marker_exists = True
+    except FileNotFoundError:
+        current_marker_exists = False
+    except OSError as error:
+        raise ValueError(f"cannot inspect current pointer {current_path}: {error}") from error
+    current_id = (
+        _read_current_id_for_retention(out_root) if current_marker_exists else None
+    )
+    return plan_snapshot_retention(
+        keep_last=keep_last,
+        current_id=current_id,
+        published_ids=published_ids,
+        operator_pins=sorted(operator_pins),
+        claim_pins=sorted(pinned_snapshot_ids(out_root)),
+    )
 
 
 class ByogGraph:

@@ -119,7 +119,7 @@ definitions are all present; 113 re-exports are reported separately rather
 than inflated into duplicate graph entities. The `sqlparse.split` target named
 by the Rust port is therefore an actual graph entity, not merely a module API
 outside the graph. See `examples/sqlparse/PROVENANCE.md` for the census and
-call-oracle effect. The current full-suite expectation is **1535 passed, 2 xfailed**;
+call-oracle effect. The current full-suite expectation is **1554 passed, 2 xfailed**;
 this 2026-08-14 persisted-integrity doctor update supersedes the earlier 721-passed /
 2026-07-26 gate snapshot. The product CLI is the installable ``graphrag-code``
 console command (`python -m graphrag_code`); source-checkout ``scripts/*.py``
@@ -174,10 +174,20 @@ activation, backup, or replication. Listing never creates it; pin/unpin
 require confirmation and a registry-revision CAS; unpin does not delete
 immediately. Cooperating keep-last protects ``current``, doc-claim pins,
 and operator pins. A malformed registry aborts publication before
-``current`` changes. MCP remains exactly 11
-read-only tools and stays strict. Advisory locks do not protect against
-non-cooperating programs. No search, UI, HTTP service, repair, or reindex
-is added.
+``current`` changes. ``graphrag-code snapshot-retention-plan
+--keep-last <N>`` is the read-only report of that same shared selection
+helper: current UNION existing claim pins UNION operator pins, then
+newest remaining published snapshots up to the effective keep-last
+floor of at least 1. It does not prune or delete. Staging is a notice,
+not a candidate. Dangling pins are reported, not invented. The command
+holds one shared existing-lock lease, never creates
+``.snapshot-pins.json`` or ``.publish.lock``, and is intentionally
+absent from MCP. ``plan_revision`` binds the decision inputs, schema,
+and exact retained/deletion result for a later prune CAS that this
+milestone does not implement. MCP remains
+exactly 11 read-only tools and stays strict. Advisory locks do not
+protect against non-cooperating programs. No search, UI, HTTP service,
+repair, or reindex is added.
 
 **Re-export namespace boundary (2026-07-30):** the 113 non-direct initializer
 bindings are now measured separately from direct definitions: 73 have a unique

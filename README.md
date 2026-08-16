@@ -52,6 +52,7 @@ These generic installed commands operate on user-supplied directories:
 - `graphrag-code snapshot-pins --graph <root>`
 - `graphrag-code snapshot-pin <id> --graph <root> --expected-registry-revision <token> --pin-confirmed`
 - `graphrag-code snapshot-unpin <id> --graph <root> --expected-registry-revision <token> --unpin-confirmed`
+- `graphrag-code snapshot-retention-plan --graph <root> --keep-last <N>`
 - `graphrag-code mcp --graph <root> --indexer auto`
 
 `graphrag-code mcp` is a local stdio MCP adapter over one existing graph.
@@ -63,10 +64,11 @@ stderr.
 The server exposes a fixed read-only tool set: `graph_status`,
 `graph_doctor`, `query_symbol`, `callers`, `callees`, `neighbors`,
 `impact`, `type_closure`, `context_pack`, `snapshot_history`, and
-`snapshot_diff`. There is no `snapshot_activate`, `snapshot_pin`, or
-`snapshot_unpin` tool: activating a retained snapshot or writing operator
-retention pins is an explicit mutating CLI operation and is
-intentionally absent from MCP. Tool arguments cannot select another
+`snapshot_diff`. There is no `snapshot_activate`, `snapshot_pin`,
+`snapshot_unpin`, or `snapshot_retention_plan` tool: activating a retained
+snapshot, writing operator retention pins, or planning keep-last
+retention is an explicit CLI operation and is intentionally absent from
+MCP. Tool arguments cannot select another
 graph. There is no indexing, publishing, retention, port-eval,
 compiler/Clang, SQL, or shell tool. Snapshot history is a bounded local
 listing of retained published ids. Snapshot diff is structural
@@ -178,6 +180,30 @@ shared lease; pin and unpin hold one exclusive lease. Advisory locks
 protect only cooperating processes. Manual or lock-ignoring deletion can
 still remove a pinned snapshot. These commands are intentionally absent
 from MCP. The MCP tool set remains exactly 11 read-only tools.
+
+`snapshot-retention-plan --graph <root> --keep-last <N>` is a read-only
+report of what cooperating keep-last cleanup would retain and delete. It
+shares the same selection helper as cleanup. `keep_last` has an
+effective minimum of 1. Current and every existing claim or operator pin
+are retained even when that protected set exceeds `keep_last`; newest
+remaining published snapshots fill the floor. Staging directories are
+notices, not candidates. Dangling pins are reported and are not invented
+as retained snapshots. An absent `.snapshot-pins.json` is an empty
+operator pin set and is not created. The command requires an
+already-adopted regular `.publish.lock`, holds one shared lease for the
+complete response, and never creates that lock. It does not prune,
+apply, delete, activate, publish, or change any graph file.
+`plan_revision` is `sha256:<hex>` over the canonical decision inputs,
+schema version, and exact retained/deletion result. It is reserved for a
+later prune compare-and-swap; this command does not mutate. Advisory
+locks protect only cooperating processes. This command is intentionally
+absent from MCP. The planner rechecks `current`, the
+published/staging listing, claim pins, exact registry revision, and lock
+identity before returning; detected lock-ignoring mutation exits 1.
+Cleanup fails before deletion when `current` is missing/dangling or a
+`snapshots/` entry is unsafe. Publication performs that validation before
+promotion and skips deletion if an input becomes ambiguous only after the
+new `current` has been written.
 
 Query and context-pack commands accept optional
 `--snapshot <id|current>`. Omitting it preserves the existing default
@@ -537,6 +563,10 @@ modules, plugins, and PCH fail explicitly. See
   `.publish.lock`. Unpin does not delete immediately. A malformed
   registry fails closed before publication or cleanup mutates `current`
   or deletes snapshots.
+  `graphrag-code snapshot-retention-plan --keep-last <N>` reports the
+  shared keep-last decision without deleting anything. It is not prune,
+  backup, replication, or an MCP tool. A later prune command is not
+  implemented.
 - `scripts/persisted_graph_doctor.py` / `graphrag-code doctor` – **read-only
   persisted-integrity doctor** for any BYOG graph. Selects one snapshot,
   validates the language-independent envelope, then runs every applicable
