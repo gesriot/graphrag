@@ -18,7 +18,8 @@ snapshot-pins, snapshot-retention-plan, snapshot-prune, snapshot-staging,
 snapshot-staging-cleanup-plan, snapshot-staging-cleanup,
 snapshot-maintenance-plan, snapshot-maintenance-apply,
 snapshot-maintenance-reconcile, snapshot-export-plan,
-snapshot-export-apply, snapshot-export-verify, port_eval).
+snapshot-export-apply, snapshot-export-verify,
+snapshot-export-reconcile, port_eval).
 """
 from __future__ import annotations
 
@@ -52,6 +53,7 @@ app = typer.Typer(
         "snapshot-export-plan → "
         "snapshot-export-apply → "
         "snapshot-export-verify → "
+        "snapshot-export-reconcile → "
         "port-eval. Relative "
         "paths are resolved from the invoking working directory."
     ),
@@ -78,6 +80,7 @@ _DELEGATE_MODULES = {
     "snapshot_export_plan.py": "graphrag_code.snapshot_export_plan",
     "snapshot_export_apply.py": "graphrag_code.snapshot_export_apply",
     "snapshot_export_verify.py": "graphrag_code.snapshot_export_verify",
+    "snapshot_export_reconcile.py": "graphrag_code.snapshot_export_reconcile",
     "audit_call_edges.py": "graphrag_code.audit_call_edges",
     "port_eval.py": "graphrag_code.port_eval",
 }
@@ -1320,6 +1323,49 @@ def snapshot_export_verify(
     if json_out is True:
         args.append("--json")
     _delegate("snapshot_export_verify.py", args)
+
+
+@app.command("snapshot-export-reconcile")
+def snapshot_export_reconcile(
+    plan_file: Path = typer.Option(
+        ...,
+        "--plan-file",
+        help="Saved schema-1 snapshot-export-plan JSON, relative to cwd.",
+    ),
+    destination: Path = typer.Option(
+        ...,
+        "--destination",
+        help="Standalone destination to observe, relative to cwd.",
+    ),
+    apply_result_file: Optional[Path] = typer.Option(
+        None,
+        "--apply-result-file",
+        help="Optional saved schema-1 snapshot-export-apply JSON.",
+    ),
+    json_out: bool = typer.Option(
+        False,
+        "--json",
+        help="same JSON shape as snapshot_export_reconcile.py --json",
+    ),
+):
+    """Reconcile a saved export plan against one standalone destination.
+
+    Observation only. Does not inspect a managed graph, acquire a graph
+    lease, or mutate the destination. Absence does not prove apply failed;
+    presence does not prove apply created the path. Not a backup and not
+    authorization to delete anything. Intentionally absent from MCP.
+    """
+    args = [
+        "--plan-file",
+        str(plan_file),
+        "--destination",
+        str(destination),
+    ]
+    if apply_result_file is not None:
+        args.extend(["--apply-result-file", str(apply_result_file)])
+    if json_out is True:
+        args.append("--json")
+    _delegate("snapshot_export_reconcile.py", args)
 
 
 @app.command("audit-graph")

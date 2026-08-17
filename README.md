@@ -63,6 +63,7 @@ These generic installed commands operate on user-supplied directories:
 - `graphrag-code snapshot-export-plan --graph <root> --snapshot <id|current>`
 - `graphrag-code snapshot-export-apply --graph <root> --snapshot <id|current> --destination <new-dir> --expected-export-revision sha256:<hex> --export-confirmed`
 - `graphrag-code snapshot-export-verify --export-dir <directory> --expected-export-revision sha256:<hex>`
+- `graphrag-code snapshot-export-reconcile --plan-file <saved-plan.json> --destination <path> [--apply-result-file <saved-apply-result.json>]`
 - `graphrag-code mcp --graph <root> --indexer auto`
 
 `graphrag-code mcp` is a local stdio MCP adapter over one existing graph.
@@ -81,15 +82,17 @@ The server exposes a fixed read-only tool set: `graph_status`,
 `snapshot_maintenance_apply`,
 `snapshot_maintenance_reconcile`,
 `snapshot_export_plan`,
-`snapshot_export_apply`, or
-`snapshot_export_verify` tool:
+`snapshot_export_apply`,
+`snapshot_export_verify`, or
+`snapshot_export_reconcile` tool:
 activating a retained snapshot, writing operator retention pins,
 planning keep-last retention, pruning CAS-verified candidates,
 listing staging directories, emitting a read-only staging cleanup
 plan, applying that plan, composing both maintenance plans,
 applying the composite plan, reconciling a saved plan against
 the live graph, planning a snapshot export, applying that
-export, or verifying a standalone export directory is an
+export, verifying a standalone export directory, or reconciling a
+saved export plan against a destination is an
 explicit CLI operation and is intentionally absent from MCP. Tool arguments cannot select another
 graph. There is no indexing, publishing, retention, port-eval,
 compiler/Clang, SQL, or shell tool. Snapshot history is a bounded local
@@ -418,8 +421,16 @@ to delete anything. `snapshot-export-verify --export-dir <directory>
 standalone export directory still contains exactly that envelope. It
 does not inspect a managed graph, acquire a graph lease, or mutate
 the export. Bytes and structure only: it is not a backup,
-authenticity, or recoverability claim. The composite plan, apply,
-reconcile, export-plan, export-apply, and export-verify
+authenticity, or recoverability claim. `snapshot-export-reconcile
+--plan-file <saved-plan.json> --destination <path>` observes one
+standalone destination after a complete, partial, interrupted, or
+externally modified export attempt. It does not inspect a managed
+graph, acquire a graph lease, or mutate the destination. Absence does
+not prove apply failed; presence does not prove apply created the
+path; revision equality is only the saved plan's payload contract
+during the observation window. It performs no recovery and authorizes
+no deletion. The composite plan, apply, reconcile, export-plan,
+export-apply, export-verify, and export-reconcile
 commands are intentionally absent from MCP. The MCP
 tool set remains exactly 11 read-only tools.
 
@@ -845,7 +856,12 @@ modules, plugins, and PCH fail explicitly. See
   rechecks one standalone export directory against that same
   canonical revision. It does not inspect a graph or mutate the
   export. A stable revision mismatch emits the report and exits 1;
-  unsafe structure exits 1 with empty stdout. Advisory locks protect
+  unsafe structure exits 1 with empty stdout.
+  `graphrag-code snapshot-export-reconcile --plan-file
+  <saved-plan.json> --destination <path>` observes that destination
+  against a saved export plan and optional saved apply result. It
+  does not recover, retry, or prove that apply created or deleted
+  the path. Advisory locks protect
   only cooperating processes. None of these commands is an MCP tool.
 - `scripts/persisted_graph_doctor.py` / `graphrag-code doctor` – **read-only
   persisted-integrity doctor** for any BYOG graph. Selects one snapshot,

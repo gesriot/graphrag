@@ -807,7 +807,7 @@ make `result_consistent_with_observation=false`.
 Replacements cannot be proven identical from the saved public plan
 or result. A new maintenance plan is still required before any later
 mutation. The composite plan, apply, reconcile, export-plan,
-export-apply, and export-verify commands are
+export-apply, export-verify, and export-reconcile commands are
 intentionally absent from MCP. The fixed MCP tool set
 remains 11 read-only tools.
 
@@ -1034,6 +1034,74 @@ backup, authentic, recoverable, complete source evidence, or
 authorization to delete anything. The command is intentionally
 absent from MCP. The fixed MCP tool set remains 11 read-only
 tools.
+
+`graphrag-code snapshot-export-reconcile --plan-file
+<saved-plan.json> --destination <path>
+[--apply-result-file <saved-apply-result.json>]` is the read-only
+aftermath inspection for a saved schema-1 snapshot-export-plan and
+an optional saved schema-1 snapshot-export-apply result. Export-reconcile
+schema version is 1. `--plan-file` and `--destination` are
+required. Relative paths resolve from the invoking cwd. Saved JSON
+inputs must be bounded regular files (1 MiB), opened read-only
+without following symlinks. Input loading and complete plan/result
+validation finish before the destination is inspected. The command
+does not inspect a managed graph, read `current`, `snapshots/`,
+pins, staging, or `.publish.lock`, or acquire a graph lease. It
+does not recover, retry, copy, repair, rename, quarantine, delete,
+import, restore, or mutate anything.
+
+Plan validation covers the complete producer contract: schema
+version, booleans, canonical snapshot id, canonical direct file
+names, unique UTF-8-byte-ordered files, exact `file_count` and
+`total_size_bytes`, exact `sha256:<64 lowercase hex>` content
+revisions, the required/optional snapshot-envelope file set,
+`export_performed=false`, and an exact recomputed `export_revision`
+from the snapshot-export-plan canonical helper. Presentation fields
+and notices never replace that validation. A structurally valid
+apply result must match the saved plan's revision, resolved
+snapshot, ordered files, counts, and sizes, and its destination
+must equal the canonical anchored `--destination`. Its
+confirmation/export/destination/source/parent-fsync/error flags
+must form either an exact complete-success outcome or an exact
+emitted post-publication partial outcome.
+
+The destination parent is anchored with a no-follow directory
+descriptor. Destination listing, stat, open, and read operations
+are descriptor-relative. A platform missing those primitives is
+rejected. Destination observation reuses the snapshot-export
+verification hashing/listing contract without invoking a public CLI
+or creating a nested observation window. Symlinks, non-direct
+structure violations, invalid envelopes, and concurrent
+replacement/change fail closed and never redirect reads outside the
+anchored destination. The relevant parent/export descriptor stays
+held through result construction, serialization, stdout write, and
+stdout flush.
+
+JSON includes `schema_version`, `ok`, `input_plan_revision`,
+`input_plan_valid`, `apply_result_supplied`, `apply_result_valid`,
+`declared_apply_outcome` (`not_supplied`, `complete`, or
+`partial`), `destination`, `destination_state` (`absent`,
+`matches_plan`, or `revision_mismatch`), `destination_present`,
+`destination_matches_plan`, `resolved_snapshot`, `files`,
+`file_count`, `total_size_bytes`, `observed_export_revision`,
+`export_mutated=false`, `graph_inspected=false`,
+`recovery_performed=false`, `creation_cause_proven=false`, and
+`notices`. `ok=true` means the observation completed, not that
+apply succeeded or that the destination matches. Stable absence and
+stable revision mismatch therefore emit a complete report and exit
+0. Unsafe structure, invalid envelope content, input/result
+cross-integrity failure, or concurrent destination change is exit
+1, empty stdout. Ordinary argument, input-format, or
+unsupported-platform errors are exit 2, empty stdout.
+
+Absence does not prove snapshot-export-apply failed or that another
+actor deleted the destination. Presence does not prove
+snapshot-export-apply created it. Revision equality proves only
+equality with the saved plan's canonical payload contract during
+the observation window. A fresh export plan is still required
+before any later apply. Reconciliation performs no recovery and
+authorizes no deletion. The command is intentionally absent from
+MCP. The fixed MCP tool set remains 11 read-only tools.
 
 The plan command does not delete, rename, quarantine, pin,
 activate, publish, repair, reindex, or create a lock. It does not
