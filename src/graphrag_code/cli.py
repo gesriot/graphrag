@@ -17,7 +17,7 @@ adopt-publication-lock, snapshot-history, snapshot-diff, snapshot-activate,
 snapshot-pins, snapshot-retention-plan, snapshot-prune, snapshot-staging,
 snapshot-staging-cleanup-plan, snapshot-staging-cleanup,
 snapshot-maintenance-plan, snapshot-maintenance-apply,
-snapshot-maintenance-reconcile, port_eval).
+snapshot-maintenance-reconcile, snapshot-export-plan, port_eval).
 """
 from __future__ import annotations
 
@@ -48,6 +48,7 @@ app = typer.Typer(
         "snapshot-staging-cleanup-plan → snapshot-staging-cleanup → "
         "snapshot-maintenance-plan → snapshot-maintenance-apply → "
         "snapshot-maintenance-reconcile → "
+        "snapshot-export-plan → "
         "port-eval. Relative "
         "paths are resolved from the invoking working directory."
     ),
@@ -71,6 +72,7 @@ _DELEGATE_MODULES = {
     "snapshot_maintenance_plan.py": "graphrag_code.snapshot_maintenance_plan",
     "snapshot_maintenance_apply.py": "graphrag_code.snapshot_maintenance_apply",
     "snapshot_maintenance_reconcile.py": "graphrag_code.snapshot_maintenance_reconcile",
+    "snapshot_export_plan.py": "graphrag_code.snapshot_export_plan",
     "audit_call_edges.py": "graphrag_code.audit_call_edges",
     "port_eval.py": "graphrag_code.port_eval",
 }
@@ -1195,6 +1197,34 @@ def snapshot_maintenance_reconcile(
     if json_out is True:
         args.append("--json")
     _delegate("snapshot_maintenance_reconcile.py", args)
+
+
+@app.command("snapshot-export-plan")
+def snapshot_export_plan(
+    graph: Path = typer.Option(..., "--graph", "-g", help="Managed BYOG graph root"),
+    snapshot: str = typer.Option(
+        ...,
+        "--snapshot",
+        help="current or a canonical retained published snapshot id.",
+    ),
+    json_out: bool = typer.Option(
+        False,
+        "--json",
+        help="same JSON shape as snapshot_export_plan.py --json",
+    ),
+):
+    """Report a read-only export plan for one retained published snapshot.
+
+    Lists the selected snapshot's direct envelope payload files with
+    sizes and content hashes. Does not create an archive, copy files,
+    or mutate the graph. This plan is not a backup and is not
+    authorization to delete anything. Never creates .publish.lock.
+    Intentionally absent from MCP.
+    """
+    args = ["--graph", str(graph), "--snapshot", snapshot]
+    if json_out is True:
+        args.append("--json")
+    _delegate("snapshot_export_plan.py", args)
 
 
 @app.command("audit-graph")

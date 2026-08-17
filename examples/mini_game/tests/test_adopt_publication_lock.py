@@ -221,6 +221,16 @@ def _child_env() -> dict[str, str]:
     parts = [part for part in current.split(os.pathsep) if part]
     if src not in parts:
         env["PYTHONPATH"] = src + ((os.pathsep + current) if current else "")
+    # Help text must stay a plain-string assertion. Typer/Rich, when
+    # FORCE_COLOR=1 and TERM is color-capable (e.g. xterm-256color),
+    # styles ``--offline-confirmed`` as separate hyphen tokens with
+    # ANSI inserted between them. Pin a dumb no-color child so the
+    # literal flag remains searchable without weakening the check.
+    env.pop("FORCE_COLOR", None)
+    env.pop("CLICOLOR_FORCE", None)
+    env["NO_COLOR"] = "1"
+    env["CLICOLOR"] = "0"
+    env["TERM"] = "dumb"
     return env
 
 

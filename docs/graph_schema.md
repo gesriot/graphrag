@@ -810,6 +810,74 @@ mutation. The composite plan, apply, and reconcile commands are
 intentionally absent from MCP. The fixed MCP tool set
 remains 11 read-only tools.
 
+`graphrag-code snapshot-export-plan --graph <root> --snapshot
+<id|current>` is a read-only inspection of one retained published
+snapshot. Export-plan schema version is 1. `--snapshot` is required
+and accepts exactly `current` or a canonical retained published
+snapshot id. `current` is resolved once under the protected
+interval. Managed `current + snapshots/` graphs with an
+already-adopted regular `.publish.lock` only. The command never
+creates, truncates, chmods, rewrites, or replaces that lock. Legacy
+flat and unlocked compatibility are out of scope.
+
+It holds exactly one shared existing-lock lease from snapshot
+selection through validation, hashing, result construction,
+serialization, stdout write, and stdout flush. It does not call a
+public scope that takes a nested graph lease. Payload files are
+opened relative to one anchored no-follow selected-directory
+descriptor and hashed in two complete bounded-memory streaming passes.
+A platform missing those descriptor-relative primitives is rejected.
+The accepted payload
+set is the published snapshot envelope: required
+`manifest.json`, `entities.parquet`, `relationships.parquet`, and
+`text_units.parquet`; `call_observations.parquet` only when that
+file is present; optional `settings.yaml` when present. Unexpected
+or non-regular snapshot entries fail closed. Candidate names and
+manifest-declared filenames must be canonical direct names. Symlinks
+are never followed.
+
+JSON includes `schema_version`, `ok`, `graph`,
+`requested_snapshot`, `resolved_snapshot`, `snapshot_path`,
+`files`, `file_count`, `total_size_bytes`, `export_revision`,
+`export_performed=false`, `fresh_plan_required_before_export=true`,
+and `notices`. `files` is UTF-8-byte relative-path order. Each
+record has `path`, exact `size_bytes`, and
+`sha256:<64 lowercase hex>` `content_revision`.
+`export_revision` is `sha256:<hex>` of compact canonical JSON
+(`sort_keys=True`, `separators=(",", ":")`, `ensure_ascii=True`, no
+trailing newline) over:
+
+```json
+{
+  "files": [
+    {
+      "content_revision": "sha256:<hex>",
+      "path": "entities.parquet",
+      "size_bytes": 0
+    }
+  ],
+  "resolved_snapshot": "<published-id>",
+  "schema_version": 1
+}
+```
+
+Graph and snapshot absolute paths, `requested_snapshot`,
+`file_count`, `total_size_bytes`, `ok`, notices, and the boolean
+flags are presentation-only. `export_revision` is a
+self-consistency token for this exact observed payload. It does not
+prove provenance, authenticity, recoverability, or that a future
+export apply may proceed without a fresh plan. The plan is not a
+backup and is not authorization to delete anything.
+`export_performed` is always false. Differences visible across the two
+payload hash observations and the publication-lock, requested-current,
+snapshot-listing, selected-directory, and manifest rechecks are
+integrity failures: exit 1, empty stdout. Advisory locking is not
+continuous protection against lock-ignoring changes after the final
+observation.
+Ordinary invalid selectors or unsupported layout are exit 2, empty
+stdout. The command is intentionally absent from MCP. The fixed MCP
+tool set remains 11 read-only tools.
+
 The plan command does not delete, rename, quarantine, pin,
 activate, publish, repair, reindex, or create a lock. It does not
 change `current`, published snapshots, `.snapshot-pins.json`,
