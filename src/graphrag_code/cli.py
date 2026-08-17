@@ -18,7 +18,7 @@ snapshot-pins, snapshot-retention-plan, snapshot-prune, snapshot-staging,
 snapshot-staging-cleanup-plan, snapshot-staging-cleanup,
 snapshot-maintenance-plan, snapshot-maintenance-apply,
 snapshot-maintenance-reconcile, snapshot-export-plan,
-snapshot-export-apply, port_eval).
+snapshot-export-apply, snapshot-export-verify, port_eval).
 """
 from __future__ import annotations
 
@@ -51,6 +51,7 @@ app = typer.Typer(
         "snapshot-maintenance-reconcile → "
         "snapshot-export-plan → "
         "snapshot-export-apply → "
+        "snapshot-export-verify → "
         "port-eval. Relative "
         "paths are resolved from the invoking working directory."
     ),
@@ -76,6 +77,7 @@ _DELEGATE_MODULES = {
     "snapshot_maintenance_reconcile.py": "graphrag_code.snapshot_maintenance_reconcile",
     "snapshot_export_plan.py": "graphrag_code.snapshot_export_plan",
     "snapshot_export_apply.py": "graphrag_code.snapshot_export_apply",
+    "snapshot_export_verify.py": "graphrag_code.snapshot_export_verify",
     "audit_call_edges.py": "graphrag_code.audit_call_edges",
     "port_eval.py": "graphrag_code.port_eval",
 }
@@ -1282,6 +1284,42 @@ def snapshot_export_apply(
     if json_out is True:
         args.append("--json")
     _delegate("snapshot_export_apply.py", args)
+
+
+@app.command("snapshot-export-verify")
+def snapshot_export_verify(
+    export_dir: Path = typer.Option(
+        ...,
+        "--export-dir",
+        help="Standalone export directory, relative to cwd.",
+    ),
+    expected_export_revision: str = typer.Option(
+        ...,
+        "--expected-export-revision",
+        help="sha256:<64 lowercase hex> from snapshot-export-plan",
+    ),
+    json_out: bool = typer.Option(
+        False,
+        "--json",
+        help="same JSON shape as snapshot_export_verify.py --json",
+    ),
+):
+    """Verify one standalone export directory against an export_revision.
+
+    Checks bytes and structure only. Does not inspect a managed graph,
+    acquire a graph lease, or mutate the export. The verification is
+    not a backup and is not authorization to delete anything.
+    Intentionally absent from MCP.
+    """
+    args = [
+        "--export-dir",
+        str(export_dir),
+        "--expected-export-revision",
+        expected_export_revision,
+    ]
+    if json_out is True:
+        args.append("--json")
+    _delegate("snapshot_export_verify.py", args)
 
 
 @app.command("audit-graph")

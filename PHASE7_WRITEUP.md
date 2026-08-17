@@ -159,7 +159,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`1745 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`1762 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
@@ -317,8 +317,14 @@ graphrag_code.snapshot_export_apply`` and
 payload set into a newly created destination. It does not mutate the
 graph, overwrite an existing destination, or claim backup or
 recoverability. A failure after atomic publication reports
-``partial=true`` and never deletes the destination. The composite plan, apply,
-reconcile, export-plan, and export-apply commands are
+``partial=true`` and never deletes the destination.
+``graphrag-code snapshot-export-verify`` (also ``python -m
+graphrag_code.snapshot_export_verify`` and
+``scripts/snapshot_export_verify.py``) rechecks one standalone
+export directory against the same canonical export_revision. It
+does not inspect a graph or mutate the export, and it does not
+claim backup or recoverability. The composite plan, apply,
+reconcile, export-plan, export-apply, and export-verify commands are
 intentionally absent from MCP.
 Advisory locks do not protect against non-cooperating programs. This is
 not natural-language search, an HTTP service, repair, reindex, or

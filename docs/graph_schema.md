@@ -806,8 +806,8 @@ observed current different from the saved plan are discrepancies that
 make `result_consistent_with_observation=false`.
 Replacements cannot be proven identical from the saved public plan
 or result. A new maintenance plan is still required before any later
-mutation. The composite plan, apply, reconcile, export-plan, and
-export-apply commands are
+mutation. The composite plan, apply, reconcile, export-plan,
+export-apply, and export-verify commands are
 intentionally absent from MCP. The fixed MCP tool set
 remains 11 read-only tools.
 
@@ -976,6 +976,64 @@ empty stdout.
 A fully emitted successful result exits 0. The command is
 intentionally absent from MCP. The fixed MCP tool set remains
 11 read-only tools.
+
+`graphrag-code snapshot-export-verify --export-dir <directory>
+--expected-export-revision sha256:<64 lowercase hex>` is the
+read-only check that one already-created standalone export
+directory still contains exactly the snapshot envelope bound by
+that revision. Export-verify schema version is 1.
+`--export-dir` and `--expected-export-revision` are required. The
+expected revision must be exactly `sha256:<64 lowercase hex>`
+with no whitespace normalization. Relative `--export-dir` is
+resolved from the invoking cwd and reported as its canonical
+anchored path. The final export path must be an existing real
+directory, not a symlink. The command does not inspect a managed
+graph, read `current`, `snapshots/`, pins, staging, or
+`.publish.lock`, or acquire a graph lease. It does not mutate the
+export directory or any graph.
+
+It anchors the export directory with a no-follow directory
+descriptor. All listing, stat, open, and read operations are
+descriptor-relative. A platform missing those primitives is
+rejected. The accepted payload set is the published snapshot
+envelope: required `manifest.json`, `entities.parquet`,
+`relationships.parquet`, and `text_units.parquet`;
+`call_observations.parquet` only when present; optional
+`settings.yaml` when present. Unexpected entries, symlinks,
+non-regular payloads, and noncanonical or nested names fail
+closed. `resolved_snapshot` is derived from `manifest.id`. File
+records use the snapshot-export-plan fields `path`, `size_bytes`,
+and `content_revision`. `observed_export_revision` is computed
+through the existing canonical export-revision helpers and is
+byte-for-byte compatible with snapshot-export-plan and
+snapshot-export-apply. Payloads are hashed in two complete
+bounded-memory streaming observations of directory identity,
+exact direct listing, manifest identity/content, and every
+payload identity, size, and SHA-256. The second payload pass is
+bracketed by directory/listing observations. Same-size content
+replacement with restored mtime is detected. Directory
+replacement must not redirect reads outside the original
+anchored directory. The descriptor is held through result
+construction, serialization, stdout write, and stdout flush.
+
+JSON includes `schema_version`, `ok`, `export_directory`,
+`resolved_snapshot`, `files`, `file_count`, `total_size_bytes`,
+`expected_export_revision`, `observed_export_revision`,
+`revision_matches`, `payload_verified`, `export_mutated=false`,
+`graph_inspected=false`, and `notices`. When the observed
+revision matches, `ok=true`, `revision_matches=true`,
+`payload_verified=true`, and the command exits 0. When the
+directory is structurally valid and stable but the expected
+revision does not match, the complete report is emitted with
+`ok=false`, `revision_matches=false`, `payload_verified=true`,
+and exit 1. Malformed arguments or unsupported
+invocation/platform conditions are exit 2, empty stdout. Unsafe
+structure, symlinks, invalid envelope content, or concurrent
+changes are exit 1, empty stdout. The verification is not a
+backup, authentic, recoverable, complete source evidence, or
+authorization to delete anything. The command is intentionally
+absent from MCP. The fixed MCP tool set remains 11 read-only
+tools.
 
 The plan command does not delete, rename, quarantine, pin,
 activate, publish, repair, reindex, or create a lock. It does not
