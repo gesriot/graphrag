@@ -820,7 +820,22 @@ def _capture_tokens(
     }
 
 
-def _build_plan_unlocked(root: Path, requested: str) -> Dict[str, Any]:
+@contextmanager
+def _held_snapshot_export_plan_unlocked(
+    root: Path, requested: str
+) -> Iterator[
+    Tuple[Dict[str, Any], int, Tuple[int, int, int, int], Dict[str, Any]]
+]:
+    """Build one export plan and keep the selected-directory descriptor.
+
+    The descriptor stays open until the context exits so a later export
+    apply can copy from the same anchored inode. The yielded token set
+    is the plan's final lock/current/listing/selected-directory
+    observation, captured after the second payload-hash pass. Closing
+    still happens here; callers must not close the fd. Public
+    ``_build_plan_unlocked`` and ``snapshot_export_plan`` keep their
+    previous close-before-return behavior.
+    """
     _require_managed_graph(root)
     _dir_identity(root / "snapshots", label="snapshots directory")
     first = _capture_tokens(root, requested=requested, resolved=None)
@@ -958,9 +973,41 @@ def _build_plan_unlocked(root: Path, requested: str) -> Dict[str, Any]:
             "notices": [dict(notice) for notice in _COMMAND_NOTICES],
         }
         result["export_revision"] = export_revision_of(result)
-        return result
+        final = _capture_tokens(root, requested=requested, resolved=resolved)
+        if (
+            first["lock_identity"] != second["lock_identity"]
+            or first["current_value"] != second["current_value"]
+            or first["current_identity"] != second["current_identity"]
+            or first["listing"] != second["listing"]
+            or first["selected_identity"] != second["selected_identity"]
+            or first["lock_identity"] != final["lock_identity"]
+            or first["current_value"] != final["current_value"]
+            or first["current_identity"] != final["current_identity"]
+            or first["listing"] != final["listing"]
+            or first["selected_identity"] != final["selected_identity"]
+            or final["selected_identity"] != opened_directory_identity
+        ):
+            raise SnapshotExportPlanIntegrityError(
+                "publication lock, current, snapshots listing, or selected "
+                "snapshot changed during export plan"
+            )
+        if requested == CURRENT_REF and final["current_value"] != resolved:
+            raise SnapshotExportPlanIntegrityError(
+                "current no longer names the selected snapshot"
+            )
+        yield result, directory_fd, opened_directory_identity, final
     finally:
         os.close(directory_fd)
+
+
+def _build_plan_unlocked(root: Path, requested: str) -> Dict[str, Any]:
+    with _held_snapshot_export_plan_unlocked(root, requested) as (
+        result,
+        _fd,
+        _identity,
+        _tokens,
+    ):
+        return result
 
 
 @contextmanager

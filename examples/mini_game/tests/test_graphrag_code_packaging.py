@@ -107,6 +107,7 @@ def test_python_module_help():
     assert "snapshot-maintenance-apply" in proc.stdout
     assert "snapshot-maintenance-reconcile" in proc.stdout
     assert "snapshot-export-plan" in proc.stdout
+    assert "snapshot-export-apply" in proc.stdout
 
 
 def test_source_script_and_package_expose_same_commands():
@@ -144,6 +145,7 @@ def test_source_script_and_package_expose_same_commands():
         "snapshot-maintenance-apply",
         "snapshot-maintenance-reconcile",
         "snapshot-export-plan",
+        "snapshot-export-apply",
     )
     for name in required:
         assert name in packaged
@@ -188,6 +190,8 @@ def test_wheel_and_sdist_contents(built_wheel_and_sdist):
         assert "graphrag_code/snapshot_maintenance_apply.py" in names
         assert "graphrag_code/snapshot_maintenance_reconcile.py" in names
         assert "graphrag_code/snapshot_export_plan.py" in names
+        assert "graphrag_code/snapshot_export_apply.py" in names
+        assert "graphrag_code/_rename_noreplace.py" in names
         assert "graphrag_code/doc_claims.json" in names
         assert not any(
             "scripts/" in name

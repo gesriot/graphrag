@@ -806,7 +806,8 @@ observed current different from the saved plan are discrepancies that
 make `result_consistent_with_observation=false`.
 Replacements cannot be proven identical from the saved public plan
 or result. A new maintenance plan is still required before any later
-mutation. The composite plan, apply, and reconcile commands are
+mutation. The composite plan, apply, reconcile, export-plan, and
+export-apply commands are
 intentionally absent from MCP. The fixed MCP tool set
 remains 11 read-only tools.
 
@@ -877,6 +878,104 @@ observation.
 Ordinary invalid selectors or unsupported layout are exit 2, empty
 stdout. The command is intentionally absent from MCP. The fixed MCP
 tool set remains 11 read-only tools.
+
+`graphrag-code snapshot-export-apply --graph <root> --snapshot
+<id|current> --destination <new-dir> --expected-export-revision
+sha256:<64 lowercase hex> --export-confirmed` is the CAS-guarded
+copy of that same accepted payload set into a newly created
+standalone destination directory. Export-apply schema version is 1.
+`--snapshot`, `--destination`, `--expected-export-revision`, and
+`--export-confirmed` are required. The expected revision must be
+exactly `sha256:<64 lowercase hex>` with no whitespace
+normalization. A saved plan file is not accepted. `current` is
+resolved once under the protected interval. Managed
+`current + snapshots/` graphs with an already-adopted regular
+`.publish.lock` only. The command never creates, truncates, chmods,
+rewrites, or replaces that lock, and it never mutates `current`,
+published snapshots, pins, staging, manifests, or payloads. Legacy
+flat and unlocked compatibility are out of scope.
+
+The destination parent must already exist and be a real directory.
+The final destination pathname must be absent; existing regular
+files, directories, symlinks, and other entry types fail closed
+without modification. A relative destination is resolved from the
+invoking cwd and reported as its canonical anchored location.
+
+It holds exactly one shared existing-lock lease from snapshot
+selection through fresh export-plan recomputation, expected-revision
+comparison, source reopening, copying, destination verification,
+atomic publication, result construction, serialization, stdout
+write, and stdout flush. It does not call a public scope that takes
+a nested graph lease. The selected snapshot stays anchored by a
+no-follow directory descriptor. Payload files are opened
+descriptor-relative and streamed in bounded memory. The copy
+independently verifies each source file's byte count and SHA-256
+against the fresh plan. The complete source payload is reobserved
+after copying and before publication. Directory replacement must
+not redirect reads outside the selected snapshot. Apply uses the
+fresh plan's final lock/current/listing/selected-directory token
+set; it does not establish a later unbound baseline. A stable lock
+replacement, current retarget, or snapshots-listing change after
+that plan observation is an integrity failure. When
+`requested_snapshot` is `current`, the observed current value must
+remain the resolved snapshot id.
+
+Publication uses a private unpredictable sibling staging directory
+created descriptor-relative under an anchored destination-parent
+FD, restrictive creation modes, exclusive payload-file creation,
+fsync of completed files and the staging directory,
+descriptor-relative staged verification, and an atomic no-replace
+directory rename. Immediately before that rename the staging
+pathname's no-follow identity must still be the held staging
+descriptor and the originally captured staging inode. After rename
+returns, the destination pathname is inspected descriptor-relative
+and must be that same inode; a final descriptor-relative file-set,
+size, and SHA-256 verification uses the held/published directory
+descriptor. `destination_verified=true` only after those checks
+pass. A check-then-rename that can replace a
+concurrently created empty directory is not acceptable. A platform
+missing those descriptor-relative or exclusive-publication
+primitives is rejected. Before-publication failures leave the final
+destination absent. Best-effort cleanup may remove only the exact
+private staging directory and direct children created by this
+invocation, after the pathname, held descriptor, and captured
+creation identity still agree. It never recursively deletes
+an unresolved or replaced pathname, and it never rmdirs a staging
+pathname whose identity is unknown or mismatched. A crash may leave
+the private staging directory; this command does not add a staging
+cleanup tool. After atomic publication succeeds, a later reporting
+or parent-fsync failure never deletes the destination.
+
+JSON includes `schema_version`, `ok`, `graph`,
+`requested_snapshot`, `resolved_snapshot`, `destination`, `files`,
+`file_count`, `total_size_bytes`, `expected_export_revision`,
+`observed_export_revision`, `export_confirmed`,
+`export_performed`, `destination_created`, `destination_verified`,
+`source_unchanged`, `partial`, `parent_fsync_confirmed`, `error`,
+and `notices`. `files` preserves the
+export-plan UTF-8-byte order. Each record has `path`,
+`size_bytes`, and `sha256:<64 lowercase hex>`
+`content_revision`. On complete success `ok=true`,
+`partial=false`,
+`export_performed=true`, `destination_created=true`,
+`destination_verified=true`, `source_unchanged=true`,
+`parent_fsync_confirmed=true`, and
+`expected_export_revision == observed_export_revision`. A failure
+after successful atomic publication emits `ok=false`,
+`partial=true`, `export_performed=true`,
+`destination_created=true`, the actual verification flags, a
+bounded `error`, and exit 1; the destination is never deleted.
+The copy
+is not a backup, authentic, recoverable, or authorization to
+delete anything. It does not preserve ownership, timestamps,
+xattrs, ACLs, hardlinks, or provenance.
+Ordinary usage, confirmation, layout, destination,
+unsupported-platform, or CAS refusals are exit 2, empty stdout.
+Integrity or concurrency failures before publication are exit 1,
+empty stdout.
+A fully emitted successful result exits 0. The command is
+intentionally absent from MCP. The fixed MCP tool set remains
+11 read-only tools.
 
 The plan command does not delete, rename, quarantine, pin,
 activate, publish, repair, reindex, or create a lock. It does not

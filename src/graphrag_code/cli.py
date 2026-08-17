@@ -17,7 +17,8 @@ adopt-publication-lock, snapshot-history, snapshot-diff, snapshot-activate,
 snapshot-pins, snapshot-retention-plan, snapshot-prune, snapshot-staging,
 snapshot-staging-cleanup-plan, snapshot-staging-cleanup,
 snapshot-maintenance-plan, snapshot-maintenance-apply,
-snapshot-maintenance-reconcile, snapshot-export-plan, port_eval).
+snapshot-maintenance-reconcile, snapshot-export-plan,
+snapshot-export-apply, port_eval).
 """
 from __future__ import annotations
 
@@ -49,6 +50,7 @@ app = typer.Typer(
         "snapshot-maintenance-plan → snapshot-maintenance-apply → "
         "snapshot-maintenance-reconcile → "
         "snapshot-export-plan → "
+        "snapshot-export-apply → "
         "port-eval. Relative "
         "paths are resolved from the invoking working directory."
     ),
@@ -73,6 +75,7 @@ _DELEGATE_MODULES = {
     "snapshot_maintenance_apply.py": "graphrag_code.snapshot_maintenance_apply",
     "snapshot_maintenance_reconcile.py": "graphrag_code.snapshot_maintenance_reconcile",
     "snapshot_export_plan.py": "graphrag_code.snapshot_export_plan",
+    "snapshot_export_apply.py": "graphrag_code.snapshot_export_apply",
     "audit_call_edges.py": "graphrag_code.audit_call_edges",
     "port_eval.py": "graphrag_code.port_eval",
 }
@@ -1225,6 +1228,60 @@ def snapshot_export_plan(
     if json_out is True:
         args.append("--json")
     _delegate("snapshot_export_plan.py", args)
+
+
+@app.command("snapshot-export-apply")
+def snapshot_export_apply(
+    graph: Path = typer.Option(..., "--graph", "-g", help="Managed BYOG graph root"),
+    snapshot: str = typer.Option(
+        ...,
+        "--snapshot",
+        help="current or a canonical retained published snapshot id.",
+    ),
+    destination: Path = typer.Option(
+        ...,
+        "--destination",
+        help="Absent directory that will receive the copied payload files.",
+    ),
+    expected_export_revision: str = typer.Option(
+        ...,
+        "--expected-export-revision",
+        help="sha256:<64 lowercase hex> from a fresh snapshot-export-plan",
+    ),
+    export_confirmed: bool = typer.Option(
+        False,
+        "--export-confirmed",
+        help="Required to create the destination directory.",
+    ),
+    json_out: bool = typer.Option(
+        False,
+        "--json",
+        help="same JSON shape as snapshot_export_apply.py --json",
+    ),
+):
+    """Copy one CAS-verified snapshot envelope into a new destination.
+
+    Recomputes a fresh snapshot-export-plan under one shared existing-lock
+    lease and copies only when --expected-export-revision still matches.
+    Does not mutate the graph or overwrite a pre-existing destination.
+    The copy is not a backup and is not authorization to delete
+    anything. Never creates .publish.lock. Intentionally absent from MCP.
+    """
+    args = [
+        "--graph",
+        str(graph),
+        "--snapshot",
+        snapshot,
+        "--destination",
+        str(destination),
+        "--expected-export-revision",
+        expected_export_revision,
+    ]
+    if export_confirmed is True:
+        args.append("--export-confirmed")
+    if json_out is True:
+        args.append("--json")
+    _delegate("snapshot_export_apply.py", args)
 
 
 @app.command("audit-graph")
