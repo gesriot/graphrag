@@ -807,7 +807,8 @@ make `result_consistent_with_observation=false`.
 Replacements cannot be proven identical from the saved public plan
 or result. A new maintenance plan is still required before any later
 mutation. The composite plan, apply, reconcile, export-plan,
-export-apply, export-verify, and export-reconcile commands are
+export-apply, export-verify, export-reconcile, and export-staging
+commands are
 intentionally absent from MCP. The fixed MCP tool set
 remains 11 read-only tools.
 
@@ -1102,6 +1103,68 @@ the observation window. A fresh export plan is still required
 before any later apply. Reconciliation performs no recovery and
 authorizes no deletion. The command is intentionally absent from
 MCP. The fixed MCP tool set remains 11 read-only tools.
+
+`graphrag-code snapshot-export-staging --parent <directory>` is the
+read-only structural inventory of private snapshot-export-apply
+staging names under one selected parent. Export-staging schema
+version is 1. `--parent` is required and is resolved from the
+invoking cwd. The parent must be an existing real directory, not a
+symlink. The command anchors that parent with a no-follow
+directory descriptor before canonicalization and confirms the
+canonical path still names the held descriptor. All listing and
+child stat operations are descriptor-relative with
+`follow_symlinks=False`. The parent descriptor stays held through
+result construction, serialization, stdout write, and stdout flush.
+The complete parent identity token includes metadata capable of
+exposing rename-away-and-back activity and is not reduced to only
+`dev/ino`. A platform missing those primitives is rejected.
+
+Two complete bounded scans of the direct parent listing must
+agree. The command does not recurse and does not open or read
+child contents. It does not inspect a managed graph, read
+`current`, `snapshots/`, pins, or `.publish.lock`, or acquire a
+graph lease. It does not probe, create, or acquire a writer lock.
+Current-protocol names match `^\.graphrag-export-[0-9a-f]{32}$`
+exactly. Direct entries that start with `.graphrag-export-` but do
+not match that syntax are reported as unrecognized prefixed
+entries and are never silently treated as staging created by this
+project. Unrelated child names are counted only.
+
+JSON includes `schema_version`, `ok`, `parent`, `staging_entries`,
+`staging_count`, `unsafe_staging_count`,
+`unrecognized_prefixed_entries`, `unrecognized_prefixed_count`,
+`other_entry_count`, `inventory_revision`, `ownership_known=false`,
+`writer_activity_known=false`, `cleanup_supported=false`,
+`cleanup_performed=false`, `parent_mutated=false`,
+`graph_inspected=false`, and `notices`. Each recognized or
+unrecognized prefixed record includes `name`, `path`, `kind`,
+`name_matches_current_protocol`, `ownership=unknown`,
+`writer_activity=unknown`, `cleanup_eligible=false`,
+`contents_inspected=false`, and no-follow identity/metadata
+(`dev`, `ino`, `mode`, `size`, `mtime_ns`, `ctime_ns`).
+`inventory_revision` is a self-consistency hash of the canonical
+observed recognized/unrecognized records and counts. It is not a
+cleanup CAS token, ownership proof, writer lease, or authorization
+to mutate anything.
+
+`ok=true` means the inventory observation completed. Stable
+inventories, including stable symlink or non-directory prefixed
+entries, emit the complete report and exit 0. Those unsafe kinds
+are observations, not paths to follow. Malformed arguments, a
+missing/non-directory/symlinked parent, exceeded bounds, or an
+unsupported platform are exit 2, empty stdout. Concurrent listing,
+entry-identity, entry-metadata, parent-identity, or pathname
+changes are exit 1, empty stdout.
+
+A matching name does not prove snapshot-export-apply created the
+entry. A stable observation does not prove a writer is absent or
+dead. Absence does not prove cleanup occurred. Inventory performs
+no cleanup and does not recommend deletion. Contents are not
+inspected, so this is not export verification. This is not a
+backup, recovery, authenticity, provenance, or recoverability
+claim. Changes after the final observation are outside the
+observation window. The command is intentionally absent from MCP.
+The fixed MCP tool set remains 11 read-only tools.
 
 The plan command does not delete, rename, quarantine, pin,
 activate, publish, repair, reindex, or create a lock. It does not

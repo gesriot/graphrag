@@ -19,7 +19,7 @@ snapshot-staging-cleanup-plan, snapshot-staging-cleanup,
 snapshot-maintenance-plan, snapshot-maintenance-apply,
 snapshot-maintenance-reconcile, snapshot-export-plan,
 snapshot-export-apply, snapshot-export-verify,
-snapshot-export-reconcile, port_eval).
+snapshot-export-reconcile, snapshot-export-staging, port_eval).
 """
 from __future__ import annotations
 
@@ -54,6 +54,7 @@ app = typer.Typer(
         "snapshot-export-apply → "
         "snapshot-export-verify → "
         "snapshot-export-reconcile → "
+        "snapshot-export-staging → "
         "port-eval. Relative "
         "paths are resolved from the invoking working directory."
     ),
@@ -81,6 +82,7 @@ _DELEGATE_MODULES = {
     "snapshot_export_apply.py": "graphrag_code.snapshot_export_apply",
     "snapshot_export_verify.py": "graphrag_code.snapshot_export_verify",
     "snapshot_export_reconcile.py": "graphrag_code.snapshot_export_reconcile",
+    "snapshot_export_staging.py": "graphrag_code.snapshot_export_staging",
     "audit_call_edges.py": "graphrag_code.audit_call_edges",
     "port_eval.py": "graphrag_code.port_eval",
 }
@@ -1366,6 +1368,33 @@ def snapshot_export_reconcile(
     if json_out is True:
         args.append("--json")
     _delegate("snapshot_export_reconcile.py", args)
+
+
+@app.command("snapshot-export-staging")
+def snapshot_export_staging(
+    parent: Path = typer.Option(
+        ...,
+        "--parent",
+        help="Parent directory to inventory, relative to cwd.",
+    ),
+    json_out: bool = typer.Option(
+        False,
+        "--json",
+        help="same JSON shape as snapshot_export_staging.py --json",
+    ),
+):
+    """Inventory direct .graphrag-export-* children under one parent.
+
+    Observation only. Does not inspect a managed graph, acquire a
+    graph lease, infer ownership or writer activity, or mutate the
+    parent. A matching name is not proof of creation. Not a backup
+    and not authorization to delete anything. Intentionally absent
+    from MCP.
+    """
+    args = ["--parent", str(parent)]
+    if json_out is True:
+        args.append("--json")
+    _delegate("snapshot_export_staging.py", args)
 
 
 @app.command("audit-graph")

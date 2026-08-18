@@ -119,7 +119,7 @@ definitions are all present; 113 re-exports are reported separately rather
 than inflated into duplicate graph entities. The `sqlparse.split` target named
 by the Rust port is therefore an actual graph entity, not merely a module API
 outside the graph. See `examples/sqlparse/PROVENANCE.md` for the census and
-call-oracle effect. The current full-suite expectation is **1781 passed, 2 xfailed**;
+call-oracle effect. The current full-suite expectation is **1797 passed, 2 xfailed**;
 this 2026-08-14 persisted-integrity doctor update supersedes the earlier 721-passed /
 2026-07-26 gate snapshot. The product CLI is the installable ``graphrag-code``
 console command (`python -m graphrag_code`); source-checkout ``scripts/*.py``
@@ -273,11 +273,17 @@ It does not inspect a managed graph, acquire a graph lease, or
 mutate the destination. Stable absence and stable revision mismatch
 emit a complete report and exit 0. It does not recover or prove
 that apply created or deleted the path.
+``graphrag-code snapshot-export-staging --parent <directory>`` is
+the read-only structural inventory of direct
+``.graphrag-export-*`` children under one selected parent. It does
+not inspect a managed graph, acquire a graph lease, infer
+ownership or writer activity, plan cleanup, or delete anything. A
+matching name is not proof that apply created the entry.
 Standalone prune and staging cleanup remain available. Neither
 prune, staging inventory, the staging cleanup plan, staging cleanup
 apply, the composite maintenance plan, the composite apply,
 reconcile, the export plan, the export apply, the export
-verify, nor the export reconcile is an
+verify, the export reconcile, nor the export staging inventory is an
 MCP tool. MCP remains exactly 11
 read-only tools and stays strict. Advisory locks do not protect
 against non-cooperating programs. No search, UI, HTTP service,
