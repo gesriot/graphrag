@@ -22,12 +22,18 @@ publication, result construction, stdout write, and flush. The command
 does not call a public scope that takes a nested graph lease.
 
 Publication uses a private sibling staging directory created
-descriptor-relative under the destination parent, exclusive payload
-creation, fsync, descriptor-relative staged verification, and an atomic
-no-replace rename. A crash may leave that private staging directory.
-This command does not add a staging cleanup tool. After atomic
-publication succeeds, a later reporting failure never deletes the
-destination.
+descriptor-relative under the destination parent. Immediately after
+that directory is anchored, apply creates ``.export-writer.lock``
+and holds an exclusive advisory writer lease for the complete
+mutable staging-write interval. That owned lock pathname is removed
+while the lease is still held, then the lease is released before
+atomic publication. The
+published destination never contains ``.export-writer.lock``. A
+crash may leave the private staging directory and, if the lock was
+created, the regular lock file. Process death releases the kernel
+lease but does not remove the file. This command does not add a
+staging cleanup tool. After atomic publication succeeds, a later
+reporting failure never deletes the destination.
 
 Usage:
     graphrag-code snapshot-export-apply --graph <root> --snapshot <id|current> \\
@@ -85,6 +91,16 @@ from graphrag_code.snapshot_export_plan import (
     _stream_regular_file,
     _wrap_staging_error,
 )
+from graphrag_code.snapshot_export_writer_lease import (
+    EXPORT_STAGING_WRITER_LOCK_NAME,
+    ExportWriterLeaseError,
+    ExportWriterLeaseIntegrityError,
+    HeldExportWriterLease,
+    acquire_export_writer_lease,
+    cleanup_owned_export_writer_lock,
+    prove_export_writer_lock_absent,
+    require_export_writer_lock_primitives,
+)
 from graphrag_code.snapshot_read import CURRENT_REF
 from graphrag_code.snapshot_staging import SnapshotStagingError
 
@@ -114,8 +130,9 @@ timestamps, xattrs, ACLs, hardlinks, or provenance.
 --expected-export-revision is a compare-and-swap guard: the shared
 existing-lock lease recomputes a fresh export plan and copies only
 when that token still matches. A mismatched revision creates nothing.
-A crash may leave the private sibling staging directory. This command
-does not add a staging cleanup tool.
+A crash may leave the private sibling staging directory and its
+.export-writer.lock protocol file. This command does not add a
+staging cleanup tool.
 """.strip()
 _COMMAND_NOTICES: Tuple[Dict[str, str], ...] = (
     {
@@ -150,9 +167,26 @@ _COMMAND_NOTICES: Tuple[Dict[str, str], ...] = (
         "kind": "notice",
         "message": (
             "A crash before atomic publication may leave the private "
-            "sibling staging directory. This command does not add a "
-            "staging cleanup tool. After publication succeeds the "
-            "destination is never automatically deleted."
+            "sibling staging directory and, if created, the regular "
+            ".export-writer.lock protocol file. Process death releases "
+            "the kernel lease but does not remove that file. This "
+            "command does not add a staging cleanup tool. After "
+            "publication succeeds the destination is never automatically "
+            "deleted."
+        ),
+    },
+    {
+        "code": "export_writer_lease_not_ownership",
+        "kind": "notice",
+        "message": (
+            "The private .export-writer.lock file is protocol metadata, "
+            "not proof of ownership, writer identity, writer death, "
+            "crash, or cleanup eligibility. The pathname is removed "
+            "while the advisory lease is still held, then the lease is "
+            "released before atomic publication; it is not externally "
+            "observable after that "
+            "removal. The published destination never contains "
+            ".export-writer.lock."
         ),
     },
     {
@@ -298,6 +332,16 @@ def _require_export_apply_primitives() -> None:
             "atomic no-replace directory publication is unsupported on "
             f"this platform: {sys.platform!r}"
         )
+    try:
+        require_export_writer_lock_primitives()
+    except ExportWriterLeaseError as error:
+        raise SnapshotExportApplyError(str(error)) from error
+
+
+def _wrap_writer_lease_error(error: ExportWriterLeaseError) -> SnapshotExportApplyError:
+    if isinstance(error, ExportWriterLeaseIntegrityError):
+        return SnapshotExportApplyIntegrityError(str(error))
+    return SnapshotExportApplyError(str(error))
 
 
 def _read_chunk(fd: int, size: int) -> bytes:
@@ -352,6 +396,27 @@ def _after_export_apply_staging_created(
     _parent_fd: int, _staging_name: str, _staging_fd: int
 ) -> None:
     """Test hook after private staging exists and before payload copies."""
+    return None
+
+
+def _after_export_apply_writer_lease(
+    _parent_fd: int, _staging_name: str, _staging_fd: int, _lock_fd: int
+) -> None:
+    """Test hook after the exclusive export-writer lease is held."""
+    return None
+
+
+def _before_export_apply_writer_lease_release(
+    _parent_fd: int, _staging_name: str, _staging_fd: int
+) -> None:
+    """Test hook immediately before the owned writer-lock is released."""
+    return None
+
+
+def _after_export_apply_writer_lease_removed(
+    _parent_fd: int, _staging_name: str, _staging_fd: int
+) -> None:
+    """Test hook after writer-lock removal and before envelope re-verify."""
     return None
 
 
@@ -685,12 +750,20 @@ def _create_private_staging(parent_fd: int) -> Tuple[str, int, Tuple[int, int]]:
     ) from last_error
 
 
-def _list_staging_names(staging_fd: int) -> List[str]:
+def _list_staging_names(
+    staging_fd: int, *, include_writer_lock: bool = False
+) -> Tuple[List[str], bool]:
     names: List[str] = []
+    saw_lock = False
     try:
         with os.scandir(staging_fd) as iterator:
             for entry in iterator:
                 name = entry.name
+                if name == EXPORT_STAGING_WRITER_LOCK_NAME:
+                    saw_lock = True
+                    if include_writer_lock:
+                        names.append(name)
+                    continue
                 if not _is_canonical_direct_name(name):
                     raise SnapshotExportApplyError(
                         f"staging contains a non-canonical direct name: {name!r}"
@@ -702,7 +775,7 @@ def _list_staging_names(staging_fd: int) -> List[str]:
         raise SnapshotExportApplyIntegrityError(
             f"cannot list private export staging directory: {error}"
         ) from error
-    return names
+    return names, saw_lock
 
 
 def _copy_one_payload(
@@ -802,12 +875,29 @@ def _verify_staged_payloads(
     staging_fd: int,
     records: Sequence[Mapping[str, Any]],
     staging_path: Path,
+    *,
+    expect_writer_lock: bool = False,
+    writer_lease: Optional[HeldExportWriterLease] = None,
 ) -> None:
-    present = set(_list_staging_names(staging_fd))
+    present, saw_lock = _list_staging_names(staging_fd)
     planned = [str(item["path"]) for item in records]
-    if present != set(planned):
+    if set(present) != set(planned):
         raise SnapshotExportApplyIntegrityError(
             "private export staging listing is not the planned payload set"
+        )
+    if expect_writer_lock:
+        if not saw_lock:
+            raise SnapshotExportApplyIntegrityError(
+                "export writer lock disappeared during the staging-write interval"
+            )
+        if writer_lease is None:
+            raise SnapshotExportApplyError(
+                "staged verification expected a held export writer lease"
+            )
+        writer_lease.revalidate()
+    elif saw_lock:
+        raise SnapshotExportApplyIntegrityError(
+            "export writer lock is still present after release"
         )
     for record in records:
         name = str(record["path"])
@@ -908,13 +998,16 @@ def _cleanup_owned_staging(
     staging_name: str,
     staging_identity: Tuple[int, int],
     owned_files: Mapping[str, Tuple[int, int]],
+    owned_lock: Optional[Tuple[int, int]] = None,
 ) -> None:
     """Remove only this invocation's staging directory and owned children.
 
     Never follows a replaced pathname and never recursively deletes an
-    unresolved tree. Unexpected children are left in place. The final
-    rmdir runs only when the pathname, held descriptor, and captured
-    creation identity still agree and the directory is empty.
+    unresolved tree. Unexpected children are left in place. Writer-lock
+    metadata is removed only when the staging directory, lock pathname,
+    and creation identity still match. The final rmdir runs only when
+    the pathname, held descriptor, and captured creation identity still
+    agree and the directory is empty.
     """
     if not _is_canonical_direct_name(staging_name):
         return
@@ -930,11 +1023,17 @@ def _cleanup_owned_staging(
         opened = os.fstat(staging_fd)
         if _directory_inode(opened) != staging_identity:
             return
+        if owned_lock is not None:
+            cleanup_owned_export_writer_lock(staging_fd, owned_lock)
         try:
-            names = _list_staging_names(staging_fd)
+            names, _saw_lock = _list_staging_names(
+                staging_fd, include_writer_lock=True
+            )
         except (SnapshotExportApplyError, OSError):
             return
         for name in names:
+            if name == EXPORT_STAGING_WRITER_LOCK_NAME:
+                continue
             if name not in owned_files or not _is_canonical_direct_name(name):
                 continue
             try:
@@ -965,10 +1064,12 @@ def _cleanup_owned_staging(
         ):
             return
         try:
-            remaining = _list_staging_names(staging_fd)
+            remaining, saw_lock = _list_staging_names(
+                staging_fd, include_writer_lock=True
+            )
         except (SnapshotExportApplyError, OSError):
             return
-        if remaining:
+        if remaining or saw_lock:
             return
     finally:
         os.close(staging_fd)
@@ -1100,6 +1201,8 @@ def _apply_unlocked(
     staging_name: Optional[str] = None
     staging_identity: Optional[Tuple[int, int]] = None
     owned_files: Dict[str, Tuple[int, int]] = {}
+    writer_lease: Optional[HeldExportWriterLease] = None
+    owned_lock: Optional[Tuple[int, int]] = None
     try:
         with _held_snapshot_export_plan_unlocked(root, requested) as (
             plan,
@@ -1133,6 +1236,20 @@ def _apply_unlocked(
             staging_name, staging_fd, staging_identity = _create_private_staging(
                 parent_fd
             )
+            try:
+                writer_lease = acquire_export_writer_lease(
+                    parent_fd=parent_fd,
+                    staging_name=staging_name,
+                    staging_fd=staging_fd,
+                    staging_identity=staging_identity,
+                    staging_path=parent_resolved / staging_name,
+                )
+            except ExportWriterLeaseError as error:
+                raise _wrap_writer_lease_error(error) from error
+            owned_lock = writer_lease.inode_identity
+            _after_export_apply_writer_lease(
+                parent_fd, staging_name, staging_fd, writer_lease.fd
+            )
             _after_export_apply_staging_created(parent_fd, staging_name, staging_fd)
             for record in records:
                 _copy_one_payload(
@@ -1141,7 +1258,11 @@ def _apply_unlocked(
             _fsync_directory(staging_fd)
             _after_export_apply_copied(root, records)
             _verify_staged_payloads(
-                staging_fd, records, parent_resolved / staging_name
+                staging_fd,
+                records,
+                parent_resolved / staging_name,
+                expect_writer_lock=True,
+                writer_lease=writer_lease,
             )
             _after_export_apply_staged_verified(root, records)
             _reobserve_source(
@@ -1157,7 +1278,42 @@ def _apply_unlocked(
             source_unchanged = True
             _after_export_apply_source_reobserved(root, records)
             _verify_staged_payloads(
-                staging_fd, records, parent_resolved / staging_name
+                staging_fd,
+                records,
+                parent_resolved / staging_name,
+                expect_writer_lock=True,
+                writer_lease=writer_lease,
+            )
+            _before_export_apply_writer_lease_release(
+                parent_fd, staging_name, staging_fd
+            )
+            _require_destination_parent_is_held(
+                parent_resolved, parent_fd, parent_identity
+            )
+            _require_staging_name_is_held(
+                parent_fd, staging_name, staging_fd, staging_identity
+            )
+            try:
+                writer_lease.revalidate()
+                writer_lease.release_and_remove()
+            except ExportWriterLeaseError as error:
+                raise _wrap_writer_lease_error(error) from error
+            writer_lease = None
+            _fsync_directory(staging_fd)
+            try:
+                prove_export_writer_lock_absent(
+                    staging_fd, parent_resolved / staging_name
+                )
+            except ExportWriterLeaseError as error:
+                raise _wrap_writer_lease_error(error) from error
+            _after_export_apply_writer_lease_removed(
+                parent_fd, staging_name, staging_fd
+            )
+            _verify_staged_payloads(
+                staging_fd,
+                records,
+                parent_resolved / staging_name,
+                expect_writer_lock=False,
             )
             _before_export_apply_publication(parent_fd, dest_name, staging_name)
             _require_destination_parent_is_held(
@@ -1287,7 +1443,11 @@ def _apply_unlocked(
         raise _wrap_plan_error(error) from error
     except SnapshotStagingError as error:
         raise _wrap_staging_error_as_apply(error) from error
+    except ExportWriterLeaseError as error:
+        raise _wrap_writer_lease_error(error) from error
     finally:
+        if writer_lease is not None:
+            writer_lease.close()
         if (
             not published
             and parent_fd is not None
@@ -1295,7 +1455,11 @@ def _apply_unlocked(
             and staging_identity is not None
         ):
             _cleanup_owned_staging(
-                parent_fd, staging_name, staging_identity, owned_files
+                parent_fd,
+                staging_name,
+                staging_identity,
+                owned_files,
+                owned_lock=owned_lock,
             )
         if staging_fd is not None:
             try:
@@ -1348,6 +1512,8 @@ def _snapshot_export_apply_scope(
         raise _wrap_plan_error(error) from error
     except SnapshotStagingError as error:
         raise _wrap_staging_error_as_apply(error) from error
+    except ExportWriterLeaseError as error:
+        raise _wrap_writer_lease_error(error) from error
     except ByogPublicationLockError as error:
         raise _apply_lock_error(error) from error
     except ByogReaderLockError as error:
@@ -1384,7 +1550,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             "destination, create an archive, or claim backup or "
             "recoverability. Never creates .publish.lock, and is not an "
             "MCP tool. A crash may leave the private sibling staging "
-            "directory."
+            "directory and its .export-writer.lock protocol file."
         )
     )
     parser.add_argument(

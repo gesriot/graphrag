@@ -330,6 +330,7 @@ def _assert_apply_shape(
         "export_revision_is_cas_only",
         "metadata_not_preserved",
         "crash_may_leave_private_staging",
+        "export_writer_lease_not_ownership",
         "advisory_locks_cooperating_only",
         "cli_only_not_mcp",
     ]

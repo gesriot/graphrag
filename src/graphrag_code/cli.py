@@ -1271,8 +1271,10 @@ def snapshot_export_apply(
     Recomputes a fresh snapshot-export-plan under one shared existing-lock
     lease and copies only when --expected-export-revision still matches.
     Does not mutate the graph or overwrite a pre-existing destination.
-    The copy is not a backup and is not authorization to delete
-    anything. Never creates .publish.lock. Intentionally absent from MCP.
+    Holds a private .export-writer.lock lease during staging writes and
+    removes it before publication. The copy is not a backup and is not
+    authorization to delete anything. Never creates .publish.lock.
+    Intentionally absent from MCP.
     """
     args = [
         "--graph",
@@ -1387,9 +1389,10 @@ def snapshot_export_staging(
 
     Observation only. Does not inspect a managed graph, acquire a
     graph lease, infer ownership or writer activity, or mutate the
-    parent. A matching name is not proof of creation. Not a backup
-    and not authorization to delete anything. Intentionally absent
-    from MCP.
+    parent. Recognized real directories may report a cooperative
+    .export-writer.lock probe. A matching name is not proof of
+    creation. Not a backup and not authorization to delete anything.
+    Intentionally absent from MCP.
     """
     args = ["--parent", str(parent)]
     if json_out is True:

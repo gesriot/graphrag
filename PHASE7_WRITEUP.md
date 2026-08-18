@@ -159,7 +159,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`1797 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`1808 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
@@ -330,10 +330,19 @@ graphrag_code.snapshot_export_reconcile`` and
 destination against a saved export plan and optional saved apply
 result. It does not inspect a graph, mutate the destination,
 recover, or prove that apply created or deleted the path.
+``graphrag-code snapshot-export-apply`` creates
+``.export-writer.lock`` immediately after anchoring private staging
+and holds an exclusive advisory writer lease through payload
+construction and staged verification. The pathname is removed while
+the lease is still held, then the lease is released before atomic
+publication. The published destination never contains that lock file.
 ``graphrag-code snapshot-export-staging`` (also ``python -m
 graphrag_code.snapshot_export_staging`` and
 ``scripts/snapshot_export_staging.py``) inventories direct
-``.graphrag-export-*`` children under one selected parent. It does
+``.graphrag-export-*`` children under one selected parent. For
+recognized real directories it may observe
+``.export-writer.lock`` as ``metadata_absent``,
+``metadata_unsafe``, ``held_at_scan``, or ``not_held_at_scan``. It does
 not inspect a graph, infer ownership or writer activity, plan
 cleanup, or delete anything. The
 composite plan, apply, reconcile, export-plan, export-apply,

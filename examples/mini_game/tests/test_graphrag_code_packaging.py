@@ -200,6 +200,7 @@ def test_wheel_and_sdist_contents(built_wheel_and_sdist):
         assert "graphrag_code/snapshot_export_verify.py" in names
         assert "graphrag_code/snapshot_export_reconcile.py" in names
         assert "graphrag_code/snapshot_export_staging.py" in names
+        assert "graphrag_code/snapshot_export_writer_lease.py" in names
         assert "graphrag_code/_rename_noreplace.py" in names
         assert "graphrag_code/doc_claims.json" in names
         assert not any(

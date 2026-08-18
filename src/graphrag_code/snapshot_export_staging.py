@@ -17,9 +17,14 @@ inspected. This is not export verification and not a backup,
 authenticity, provenance, or recoverability claim.
 
 The command does not inspect a managed graph, read ``current``,
-``snapshots/``, pins, staging, or ``.publish.lock``, or acquire a
-graph lease. It does not probe, create, or acquire a writer lock.
-MCP stays exactly 11 read-only tools; this command is CLI-only.
+``snapshots/``, pins, graph staging, or ``.publish.lock``, or acquire a
+graph lease. For recognized real staging directories only, it may
+open the directory descriptor-relative and inspect or nonblocking-probe
+the fixed ``.export-writer.lock`` protocol entry. It does not create,
+write, truncate, chmod, replace, unlink, or rename that file, and it
+does not open or read export payload contents. Observed lease
+contention does not change ``writer_activity``. MCP stays exactly 11
+read-only tools; this command is CLI-only.
 
 Usage:
     graphrag-code snapshot-export-staging --parent <directory> [--json]
@@ -39,6 +44,14 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Tuple
+
+from graphrag_code.snapshot_export_writer_lease import (
+    ExportWriterLeaseError,
+    ExportWriterLeaseIntegrityError,
+    close_held_probe_fds,
+    probe_export_writer_lease,
+    require_export_writer_lock_probe_primitives,
+)
 
 STAGING_SCHEMA_VERSION = 1
 STAGING_NAME_PREFIX = ".graphrag-export-"
@@ -96,8 +109,27 @@ _COMMAND_NOTICES: Tuple[Dict[str, str], ...] = (
         "kind": "notice",
         "message": (
             "contents_inspected is always false. This inventory does "
-            "not open or read child contents and is not export "
-            "verification."
+            "not open or read export payload contents and is not export "
+            "verification. On recognized real directories it may inspect "
+            "only the fixed .export-writer.lock protocol entry."
+        ),
+    },
+    {
+        "code": "writer_lease_is_not_activity",
+        "kind": "notice",
+        "message": (
+            "writer_lease_state is a cooperative-lease observation only. "
+            "held_at_scan does not change writer_activity. A persistent "
+            ".export-writer.lock file does not prove a writer exists or "
+            "existed. A successful nonblocking probe proves only that "
+            "the cooperative lease was not held at that instant. "
+            "Contention proves only that a cooperating process held the "
+            "lease at that instant. Missing lock metadata is "
+            "metadata_absent and unverifiable, not cleanup-eligible. "
+            "For metadata_absent, writer_lease_dev, writer_lease_ino, "
+            "writer_lease_mode, writer_lease_size, writer_lease_mtime_ns, "
+            "and writer_lease_ctime_ns are null. writer_lease_path is "
+            "the expected protocol pathname even when the file is absent."
         ),
     },
     {
@@ -152,6 +184,14 @@ def _after_first_scan(path: Path, scan: Mapping[str, Any]) -> None:
 
 
 def _after_result_ready(path: Path, parent_fd: int, result: Mapping[str, Any]) -> None:
+    return None
+
+
+def _after_probe_descriptors_ready(
+    path: Path,
+    parent_fd: int,
+    held: Mapping[str, Tuple[Optional[int], Optional[int]]],
+) -> None:
     return None
 
 
@@ -278,6 +318,16 @@ def _require_descriptor_reads() -> None:
             "safe descriptor-relative no-follow parent inventory is unsupported on "
             f"this platform: {sys.platform!r}"
         )
+    try:
+        require_export_writer_lock_probe_primitives()
+    except ExportWriterLeaseError as error:
+        raise SnapshotExportStagingError(str(error)) from error
+
+
+def _wrap_writer_lease_error(error: ExportWriterLeaseError) -> SnapshotExportStagingError:
+    if isinstance(error, ExportWriterLeaseIntegrityError):
+        return SnapshotExportStagingIntegrityError(str(error))
+    return SnapshotExportStagingError(str(error))
 
 
 def _parent_path(parent: object) -> Path:
@@ -456,33 +506,59 @@ def _scan_parent(
     parent_resolved: Path,
     parent_fd: int,
     expected_identity: Tuple[int, int, int, int, int, int],
-) -> Dict[str, Any]:
+    *,
+    keep_descriptors: bool = False,
+) -> Tuple[Dict[str, Any], Dict[str, Tuple[Optional[int], Optional[int]]]]:
     _require_parent_held(parent_resolved, parent_fd, expected_identity)
     children = _list_parent_children(parent_fd, parent_resolved)
     _require_parent_held(parent_resolved, parent_fd, expected_identity)
     staging: List[Dict[str, Any]] = []
     unrecognized: List[Dict[str, Any]] = []
     other_count = 0
-    for name, info in children:
-        if is_current_export_staging_name(name):
-            staging.append(_child_record(parent_resolved, name, info, matches=True))
-        elif is_export_staging_prefix_name(name):
-            unrecognized.append(
-                _child_record(parent_resolved, name, info, matches=False)
-            )
-        else:
-            other_count += 1
-        if len(staging) + len(unrecognized) > MAX_PREFIXED_ENTRIES:
-            raise SnapshotExportStagingError(
-                f"prefixed export-staging entry count exceeds bound "
-                f"{MAX_PREFIXED_ENTRIES}: {parent_resolved}"
-            )
-    return {
-        "parent_identity": expected_identity,
-        "staging_entries": staging,
-        "unrecognized_prefixed_entries": unrecognized,
-        "other_entry_count": other_count,
-    }
+    held: Dict[str, Tuple[Optional[int], Optional[int]]] = {}
+    try:
+        for name, info in children:
+            if is_current_export_staging_name(name):
+                record = _child_record(parent_resolved, name, info, matches=True)
+                if record["kind"] == "directory":
+                    try:
+                        observation, staging_fd, lock_fd = probe_export_writer_lease(
+                            parent_fd=parent_fd,
+                            staging_name=name,
+                            staging_info=info,
+                            staging_path=parent_resolved / name,
+                            keep_descriptors=keep_descriptors,
+                        )
+                    except ExportWriterLeaseError as error:
+                        raise _wrap_writer_lease_error(error) from error
+                    record.update(observation)
+                    if keep_descriptors:
+                        held[name] = (staging_fd, lock_fd)
+                staging.append(record)
+            elif is_export_staging_prefix_name(name):
+                unrecognized.append(
+                    _child_record(parent_resolved, name, info, matches=False)
+                )
+            else:
+                other_count += 1
+            if len(staging) + len(unrecognized) > MAX_PREFIXED_ENTRIES:
+                raise SnapshotExportStagingError(
+                    f"prefixed export-staging entry count exceeds bound "
+                    f"{MAX_PREFIXED_ENTRIES}: {parent_resolved}"
+                )
+        _require_parent_held(parent_resolved, parent_fd, expected_identity)
+        return (
+            {
+                "parent_identity": expected_identity,
+                "staging_entries": staging,
+                "unrecognized_prefixed_entries": unrecognized,
+                "other_entry_count": other_count,
+            },
+            held,
+        )
+    except Exception:
+        close_held_probe_fds(held)
+        raise
 
 
 def _describe_scan_delta(first: Mapping[str, Any], second: Mapping[str, Any]) -> str:
@@ -523,6 +599,23 @@ def _describe_scan_delta(first: Mapping[str, Any], second: Mapping[str, Any]) ->
             or prior.get("ctime_ns") != item.get("ctime_ns")
         ):
             return "entry metadata"
+        if prior.get("writer_lease_state") != item.get("writer_lease_state"):
+            return "writer-lease state"
+        if any(
+            prior.get(key) != item.get(key)
+            for key in (
+                "writer_lease_metadata_present",
+                "writer_lease_contended",
+                "writer_lease_path",
+                "writer_lease_dev",
+                "writer_lease_ino",
+                "writer_lease_mode",
+                "writer_lease_size",
+                "writer_lease_mtime_ns",
+                "writer_lease_ctime_ns",
+            )
+        ):
+            return "writer-lease identity"
         if prior != item:
             return "entry metadata"
     return "inventory"
@@ -562,12 +655,18 @@ def _snapshot_export_staging_scope(parent: object) -> Iterator[Dict[str, Any]]:
     _require_descriptor_reads()
     path = _parent_path(parent)
     parent_fd, parent_identity = _open_parent(path)
+    held: Dict[str, Tuple[Optional[int], Optional[int]]] = {}
     try:
         parent_resolved = _canonical_parent(path, parent_fd, parent_identity)
         _after_parent_opened(parent_resolved, parent_fd)
-        first = _scan_parent(parent_resolved, parent_fd, parent_identity)
+        first, first_held = _scan_parent(
+            parent_resolved, parent_fd, parent_identity, keep_descriptors=False
+        )
+        close_held_probe_fds(first_held)
         _after_first_scan(parent_resolved, first)
-        second = _scan_parent(parent_resolved, parent_fd, parent_identity)
+        second, held = _scan_parent(
+            parent_resolved, parent_fd, parent_identity, keep_descriptors=True
+        )
         if first != second:
             raise SnapshotExportStagingIntegrityError(
                 "export staging inventory changed during the read: "
@@ -576,8 +675,12 @@ def _snapshot_export_staging_scope(parent: object) -> Iterator[Dict[str, Any]]:
         _require_parent_held(parent_resolved, parent_fd, parent_identity)
         result = _build_result(parent_resolved, second)
         _after_result_ready(parent_resolved, parent_fd, result)
+        _after_probe_descriptors_ready(parent_resolved, parent_fd, held)
         yield result
+    except ExportWriterLeaseError as error:
+        raise _wrap_writer_lease_error(error) from error
     finally:
+        close_held_probe_fds(held)
         os.close(parent_fd)
 
 
@@ -592,8 +695,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         description=(
             "Report a read-only structural inventory of direct "
             ".graphrag-export-* children under one parent directory. "
-            "Does not delete, infer ownership, or inspect contents. "
-            "Not an MCP tool."
+            "Does not delete, infer ownership, or inspect export payload "
+            "contents. May observe .export-writer.lock on recognized "
+            "real directories only. Not an MCP tool."
         )
     )
     parser.add_argument(

@@ -923,10 +923,29 @@ remain the resolved snapshot id.
 
 Publication uses a private unpredictable sibling staging directory
 created descriptor-relative under an anchored destination-parent
-FD, restrictive creation modes, exclusive payload-file creation,
-fsync of completed files and the staging directory,
-descriptor-relative staged verification, and an atomic no-replace
-directory rename. Immediately before that rename the staging
+FD. Immediately after that directory is anchored, apply creates
+the empty regular protocol file `.export-writer.lock` with
+restrictive exclusive `O_NOFOLLOW` creation and holds one blocking
+exclusive advisory writer lease for payload creation, source
+copying and hashing, payload fsync, source reobservation, staged
+envelope verification, and the wait immediately before
+publication. This is not a public scope and not a graph lease; the
+managed source graph continues to use exactly one shared existing
+publication-lock lease. Before atomic publication the held staging
+directory, writer-lock pathname, writer-lock descriptor, and
+captured identities are revalidated, the exact owned lock metadata
+is removed while its lease is still held, the lease is then released,
+the staging directory is fsynced, the
+lock pathname is proven absent, and the staging directory is
+reverified to contain exactly the export envelope. The published
+destination never contains `.export-writer.lock`. The advisory
+lease is not externally observable after that pathname is removed.
+The lock file is protocol metadata, not proof of ownership, writer
+identity, writer death, crash, or cleanup eligibility. Restrictive
+creation modes, exclusive payload-file creation, fsync of
+completed files and the staging directory, descriptor-relative
+staged verification, and an atomic no-replace directory rename
+then proceed as before. Immediately before that rename the staging
 pathname's no-follow identity must still be the held staging
 descriptor and the originally captured staging inode. After rename
 returns, the destination pathname is inspected descriptor-relative
@@ -938,14 +957,17 @@ concurrently created empty directory is not acceptable. A platform
 missing those descriptor-relative or exclusive-publication
 primitives is rejected. Before-publication failures leave the final
 destination absent. Best-effort cleanup may remove only the exact
-private staging directory and direct children created by this
-invocation, after the pathname, held descriptor, and captured
-creation identity still agree. It never recursively deletes
-an unresolved or replaced pathname, and it never rmdirs a staging
-pathname whose identity is unknown or mismatched. A crash may leave
-the private staging directory; this command does not add a staging
-cleanup tool. After atomic publication succeeds, a later reporting
-or parent-fsync failure never deletes the destination.
+private staging directory, this invocation's writer-lock metadata
+when staging-directory, lock-path, and captured creation identities
+still match, and direct children created by this invocation. It
+never recursively deletes an unresolved or replaced pathname, and
+it never rmdirs a staging pathname whose identity is unknown or
+mismatched. A crash before lock creation may leave a staging
+directory with missing metadata. A crash after lock creation may
+leave the regular lock file; process death releases the kernel
+lease but does not remove the file. This command does not add a
+staging cleanup tool. After atomic publication succeeds, a later
+reporting or parent-fsync failure never deletes the destination.
 
 JSON includes `schema_version`, `ok`, `graph`,
 `requested_snapshot`, `resolved_snapshot`, `destination`, `files`,
@@ -1121,14 +1143,20 @@ exposing rename-away-and-back activity and is not reduced to only
 
 Two complete bounded scans of the direct parent listing must
 agree. The command does not recurse and does not open or read
-child contents. It does not inspect a managed graph, read
+export payload contents. It does not inspect a managed graph, read
 `current`, `snapshots/`, pins, or `.publish.lock`, or acquire a
-graph lease. It does not probe, create, or acquire a writer lock.
-Current-protocol names match `^\.graphrag-export-[0-9a-f]{32}$`
-exactly. Direct entries that start with `.graphrag-export-` but do
-not match that syntax are reported as unrecognized prefixed
-entries and are never silently treated as staging created by this
-project. Unrelated child names are counted only.
+graph lease. For recognized real directories only it may open the
+staging directory descriptor-relative and inspect or
+nonblocking-probe the fixed `.export-writer.lock` protocol entry.
+It never creates, writes, truncates, chmods, replaces, unlinks, or
+renames lock metadata, and it never follows a lock-file symlink.
+Unrecognized prefixed entries and recognized non-directory entries
+are not probed. Current-protocol names match
+`^\.graphrag-export-[0-9a-f]{32}$` exactly. Direct entries that
+start with `.graphrag-export-` but do not match that syntax are
+reported as unrecognized prefixed entries and are never silently
+treated as staging created by this project. Unrelated child names
+are counted only.
 
 JSON includes `schema_version`, `ok`, `parent`, `staging_entries`,
 `staging_count`, `unsafe_staging_count`,
@@ -1141,7 +1169,17 @@ unrecognized prefixed record includes `name`, `path`, `kind`,
 `name_matches_current_protocol`, `ownership=unknown`,
 `writer_activity=unknown`, `cleanup_eligible=false`,
 `contents_inspected=false`, and no-follow identity/metadata
-(`dev`, `ino`, `mode`, `size`, `mtime_ns`, `ctime_ns`).
+(`dev`, `ino`, `mode`, `size`, `mtime_ns`, `ctime_ns`). Each
+recognized real directory also reports `writer_lease_state`
+(`metadata_absent`, `metadata_unsafe`, `held_at_scan`, or
+`not_held_at_scan`), `writer_lease_metadata_present`,
+`writer_lease_contended`, `writer_lease_path`, `writer_lease_dev`,
+`writer_lease_ino`, `writer_lease_mode`, `writer_lease_size`,
+`writer_lease_mtime_ns`, and `writer_lease_ctime_ns`. For
+`metadata_absent`, those identity fields are JSON null;
+`writer_lease_path` is still the expected protocol pathname.
+`held_at_scan` does not change `writer_activity`. Probe state and
+lock identity participate in both scans and `inventory_revision`.
 `inventory_revision` is a self-consistency hash of the canonical
 observed recognized/unrecognized records and counts. It is not a
 cleanup CAS token, ownership proof, writer lease, or authorization

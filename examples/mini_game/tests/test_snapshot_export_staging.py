@@ -182,6 +182,7 @@ def _assert_inventory_shape(result: dict, parent: Path) -> None:
         "absence_does_not_prove_cleanup",
         "inventory_performs_no_cleanup",
         "contents_not_inspected",
+        "writer_lease_is_not_activity",
         "not_backup_or_authenticity",
         "observation_window_only",
         "cli_only_not_mcp",
@@ -207,6 +208,42 @@ def _assert_entry_nonclaims(entry: dict, *, matches: bool) -> None:
     assert entry["contents_inspected"] is False
     for key in ("dev", "ino", "mode", "size", "mtime_ns", "ctime_ns"):
         assert isinstance(entry[key], int)
+    if matches and entry["kind"] == "directory":
+        assert entry["writer_lease_state"] in {
+            "metadata_absent",
+            "metadata_unsafe",
+            "held_at_scan",
+            "not_held_at_scan",
+        }
+        assert entry["writer_lease_metadata_present"] is (
+            entry["writer_lease_state"] != "metadata_absent"
+        )
+        assert entry["writer_lease_contended"] is (
+            entry["writer_lease_state"] == "held_at_scan"
+        )
+        assert entry["writer_lease_path"].endswith("/.export-writer.lock")
+        if entry["writer_lease_state"] == "metadata_absent":
+            for key in (
+                "writer_lease_dev",
+                "writer_lease_ino",
+                "writer_lease_mode",
+                "writer_lease_size",
+                "writer_lease_mtime_ns",
+                "writer_lease_ctime_ns",
+            ):
+                assert entry[key] is None
+        else:
+            for key in (
+                "writer_lease_dev",
+                "writer_lease_ino",
+                "writer_lease_mode",
+                "writer_lease_size",
+                "writer_lease_mtime_ns",
+                "writer_lease_ctime_ns",
+            ):
+                assert isinstance(entry[key], int)
+    else:
+        assert "writer_lease_state" not in entry
 
 
 def test_empty_parent(tmp_path: Path):
@@ -694,6 +731,7 @@ def test_implementation_does_not_mutate_or_invoke_producers():
     assert "snapshot_export_verify(" not in source
     assert "snapshot_export_reconcile(" not in source
     assert "probe_staging_writer_lease" not in source
+    assert "acquire_export_writer_lease" not in source
     assert "publish_byog_snapshot" not in source
     assert "read_bytes" not in source
     assert "write_bytes" not in source

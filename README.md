@@ -432,11 +432,27 @@ graph, acquire a graph lease, or mutate the destination. Absence does
 not prove apply failed; presence does not prove apply created the
 path; revision equality is only the saved plan's payload contract
 during the observation window. It performs no recovery and authorizes
-no deletion. `snapshot-export-staging --parent <directory>` lists
+no deletion. `snapshot-export-apply` creates
+`.export-writer.lock` immediately after anchoring its private staging
+directory and holds an exclusive advisory writer lease for payload
+copy, fsync, source reobservation, staged verification, and the wait
+immediately before publication. The lock pathname is removed while
+that lease is still held, then the lease is released before the atomic
+no-replace rename. The published destination never contains
+`.export-writer.lock`, and the export
+revision stays byte-compatible with export-plan, export-verify, and
+export-reconcile. The lock file is protocol metadata, not ownership,
+writer identity, writer death, or cleanup eligibility. The advisory
+lease is not externally observable after the pathname is removed.
+`snapshot-export-staging --parent <directory>` lists
 direct `.graphrag-export-*` children under one selected parent after
-a crash or leftover private staging directory. It does not inspect a
+a crash or leftover private staging directory. For recognized real
+directories only it may inspect and nonblocking-probe the fixed
+`.export-writer.lock` entry (`metadata_absent`, `metadata_unsafe`,
+`held_at_scan`, `not_held_at_scan`). It does not inspect a
 managed graph, infer ownership or writer activity, plan cleanup, or
-delete anything. A matching name is not proof that apply created the
+delete anything. `held_at_scan` does not change `writer_activity`.
+A matching name is not proof that apply created the
 entry. The composite plan, apply, reconcile, export-plan,
 export-apply, export-verify, export-reconcile, and
 export-staging
@@ -856,11 +872,21 @@ modules, plugins, and PCH fail explicitly. See
   --destination <new-dir> --expected-export-revision sha256:<hex>
   --export-confirmed` copies that CAS-verified payload set into a
   newly created destination. It does not mutate the graph or
-  overwrite an existing path. Publication is bound to the held
+  overwrite an existing path. Immediately after creating the
+  private staging directory it creates `.export-writer.lock` and
+  holds an exclusive advisory writer lease through payload
+  construction, staged verification, and the wait immediately
+  before publication. That lock pathname is removed while the
+  lease is still held, then the lease is released before the atomic
+  no-replace rename. The published destination never contains
+  `.export-writer.lock`.
+  Publication is bound to the held
   staging inode; a later parent-fsync or destination-identity
   failure emits `ok=false`, `partial=true`, and exit 1 without
   deleting the destination. A crash may leave the private
-  sibling staging directory. `graphrag-code snapshot-export-verify
+  sibling staging directory and, if created, the regular lock
+  file; process death releases the kernel lease but does not
+  remove the file. `graphrag-code snapshot-export-verify
   --export-dir <directory> --expected-export-revision sha256:<hex>`
   rechecks one standalone export directory against that same
   canonical revision. It does not inspect a graph or mutate the
@@ -872,8 +898,10 @@ modules, plugins, and PCH fail explicitly. See
   does not recover, retry, or prove that apply created or deleted
   the path. `graphrag-code snapshot-export-staging --parent
   <directory>` inventories leftover private
-  `.graphrag-export-*` children under that parent. It does not
-  inspect contents, infer liveness, or recommend deletion. Advisory
+  `.graphrag-export-*` children under that parent. Recognized real
+  directories may report a cooperative `.export-writer.lock` probe.
+  It does not inspect export payload contents, infer liveness, or
+  recommend deletion. Advisory
   locks protect
   only cooperating processes. None of these commands is an MCP tool.
 - `scripts/persisted_graph_doctor.py` / `graphrag-code doctor` – **read-only
