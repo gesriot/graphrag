@@ -19,7 +19,8 @@ snapshot-staging-cleanup-plan, snapshot-staging-cleanup,
 snapshot-maintenance-plan, snapshot-maintenance-apply,
 snapshot-maintenance-reconcile, snapshot-export-plan,
 snapshot-export-apply, snapshot-export-verify,
-snapshot-export-reconcile, snapshot-export-staging, port_eval).
+snapshot-export-reconcile, snapshot-export-staging,
+snapshot-export-staging-cleanup-plan, port_eval).
 """
 from __future__ import annotations
 
@@ -55,6 +56,7 @@ app = typer.Typer(
         "snapshot-export-verify → "
         "snapshot-export-reconcile → "
         "snapshot-export-staging → "
+        "snapshot-export-staging-cleanup-plan → "
         "port-eval. Relative "
         "paths are resolved from the invoking working directory."
     ),
@@ -83,6 +85,7 @@ _DELEGATE_MODULES = {
     "snapshot_export_verify.py": "graphrag_code.snapshot_export_verify",
     "snapshot_export_reconcile.py": "graphrag_code.snapshot_export_reconcile",
     "snapshot_export_staging.py": "graphrag_code.snapshot_export_staging",
+    "snapshot_export_staging_cleanup_plan.py": "graphrag_code.snapshot_export_staging_cleanup_plan",
     "audit_call_edges.py": "graphrag_code.audit_call_edges",
     "port_eval.py": "graphrag_code.port_eval",
 }
@@ -1391,13 +1394,42 @@ def snapshot_export_staging(
     graph lease, infer ownership or writer activity, or mutate the
     parent. Recognized real directories may report a cooperative
     .export-writer.lock probe. A matching name is not proof of
-    creation. Not a backup and not authorization to delete anything.
-    Intentionally absent from MCP.
+    creation. cleanup_supported stays false. The separate
+    snapshot-export-staging-cleanup-plan command classifies leftovers
+    without applying. Not a backup and not authorization to delete
+    anything. Intentionally absent from MCP.
     """
     args = ["--parent", str(parent)]
     if json_out is True:
         args.append("--json")
     _delegate("snapshot_export_staging.py", args)
+
+
+@app.command("snapshot-export-staging-cleanup-plan")
+def snapshot_export_staging_cleanup_plan(
+    parent: Path = typer.Option(
+        ...,
+        "--parent",
+        help="Parent directory to classify, relative to cwd.",
+    ),
+    json_out: bool = typer.Option(
+        False,
+        "--json",
+        help="same JSON shape as snapshot_export_staging_cleanup_plan.py --json",
+    ),
+):
+    """Classify leftover .graphrag-export-* children under one parent.
+
+    Read-only schema-1 cleanup plan. Does not delete, rename, apply,
+    inspect a managed graph, or inspect export payload contents.
+    deletion_candidates means only selected by this plan, not
+    ownership or authorization to delete. apply_supported is false.
+    Intentionally absent from MCP.
+    """
+    args = ["--parent", str(parent)]
+    if json_out is True:
+        args.append("--json")
+    _delegate("snapshot_export_staging_cleanup_plan.py", args)
 
 
 @app.command("audit-graph")

@@ -1204,6 +1204,74 @@ claim. Changes after the final observation are outside the
 observation window. The command is intentionally absent from MCP.
 The fixed MCP tool set remains 11 read-only tools.
 
+`graphrag-code snapshot-export-staging-cleanup-plan --parent
+<directory>` is the read-only schema-1 cleanup plan over that same
+inventory. Surfaces are also
+`python -m graphrag_code.snapshot_export_staging_cleanup_plan` and
+`scripts/snapshot_export_staging_cleanup_plan.py`. It reuses the
+export-staging descriptor-relative, no-follow, bounded two-scan
+observation scope. It does not invoke a public CLI, does not
+perform a second path-based scan, and does not inspect a managed
+graph. The parent descriptor plus retained recognized staging and
+lock descriptors stay open through plan construction,
+serialization, stdout write, and flush. Continuous protection is
+not claimed after that observation scope ends. Inventory schema 1
+is unchanged: `cleanup_supported` stays false, recognized-directory
+`cleanup_eligible` stays false, `contents_inspected` stays false,
+and `writer_activity` stays unknown. `held_at_scan` is only
+instantaneous cooperative contention. `not_held_at_scan` is not
+ownership, writer death, abandonment, age, or permission to
+delete.
+
+JSON includes `schema_version`, `ok`, `parent`,
+`observed_inventory_revision`, `staging_entries`, `staging_count`,
+`unrecognized_prefixed_entries`, `unrecognized_prefixed_count`,
+`other_entry_count`, `deletion_candidates`,
+`deletion_candidate_count`, `blocked_entries`, `blocked_count`,
+`ownership_inference=false`, `cleanup_applied=false`,
+`apply_supported=false`, `plan_revision`, and `notices`. A
+deletion candidate is reported only when the direct child name
+matches `^\.graphrag-export-[0-9a-f]{32}$`, the held descriptor
+observes a real directory, `writer_lease_state` is
+`not_held_at_scan`, lock metadata is present, non-contended, a
+safe regular single-linked empty file, and the lock mode has no
+group or other permission bits, and both scans plus retained
+identities agree. Export payload contents are not opened to
+classify a candidate. Every other export-staging-prefixed entry is
+blocked, not omitted, with one of
+`non_directory_staging_entry`, `unrecognized_staging_name`,
+`writer_lease_metadata_absent`, `writer_lease_metadata_unsafe`,
+`held_writer_lease`, `nonempty_writer_lease_metadata`,
+`permissive_writer_lease_metadata`, or
+`unverifiable_writer_lease_state`. Unrelated parent entries remain
+counted only. Names are ordered by raw filesystem bytes.
+
+`deletion_candidates` means only selected by this read-only plan.
+It is not ownership, cleanup eligibility, proof that apply created
+the directory, proof that a writer died, or authorization to
+delete. A writer may start after the plan is emitted.
+
+`plan_revision` is `sha256:` plus the SHA-256 of compact UTF-8
+JSON (`sort_keys=True`, `separators=(",", ":")`,
+`ensure_ascii=True`, `allow_nan=False`, no trailing newline) of
+exactly these decision keys: `schema_version`,
+`observed_inventory_revision`, `deletion_candidates`,
+`blocked_entries`, `ownership_inference`, `cleanup_applied`, and
+`apply_supported`. Presentation fields such as `ok`, `parent`,
+`notices`, redundant counts, and `staging_entries` are excluded.
+`observed_inventory_revision` already binds the complete inventory
+observation, including writer-lease state and lock identity.
+`plan_revision` is a self-consistency token, not a cleanup CAS
+token. This command does not accept `--expected-plan-revision`, a
+confirmation flag, a saved plan file, or an apply result.
+
+Stable candidates and stable blocked entries emit the complete
+report and exit 0. Unsafe parent structure, descriptor/path
+identity change, or concurrent observation change is exit 1,
+empty stdout. Malformed arguments or unsupported safe primitives
+are exit 2, empty stdout. The command is intentionally absent
+from MCP. The fixed MCP tool set remains 11 read-only tools.
+
 The plan command does not delete, rename, quarantine, pin,
 activate, publish, repair, reindex, or create a lock. It does not
 change `current`, published snapshots, `.snapshot-pins.json`,

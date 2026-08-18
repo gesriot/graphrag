@@ -65,6 +65,7 @@ These generic installed commands operate on user-supplied directories:
 - `graphrag-code snapshot-export-verify --export-dir <directory> --expected-export-revision sha256:<hex>`
 - `graphrag-code snapshot-export-reconcile --plan-file <saved-plan.json> --destination <path> [--apply-result-file <saved-apply-result.json>]`
 - `graphrag-code snapshot-export-staging --parent <directory>`
+- `graphrag-code snapshot-export-staging-cleanup-plan --parent <directory>`
 - `graphrag-code mcp --graph <root> --indexer auto`
 
 `graphrag-code mcp` is a local stdio MCP adapter over one existing graph.
@@ -85,8 +86,9 @@ The server exposes a fixed read-only tool set: `graph_status`,
 `snapshot_export_plan`,
 `snapshot_export_apply`,
 `snapshot_export_verify`,
-`snapshot_export_reconcile`, or
-`snapshot_export_staging` tool:
+`snapshot_export_reconcile`,
+`snapshot_export_staging`, or
+`snapshot_export_staging_cleanup_plan` tool:
 activating a retained snapshot, writing operator retention pins,
 planning keep-last retention, pruning CAS-verified candidates,
 listing staging directories, emitting a read-only staging cleanup
@@ -94,8 +96,9 @@ plan, applying that plan, composing both maintenance plans,
 applying the composite plan, reconciling a saved plan against
 the live graph, planning a snapshot export, applying that
 export, verifying a standalone export directory, reconciling a
-saved export plan against a destination, or inventorying leftover
-export-apply staging names is an
+saved export plan against a destination, inventorying leftover
+export-apply staging names, or emitting a read-only export-staging
+cleanup plan is an
 explicit CLI operation and is intentionally absent from MCP. Tool arguments cannot select another
 graph. There is no indexing, publishing, retention, port-eval,
 compiler/Clang, SQL, or shell tool. Snapshot history is a bounded local
@@ -453,9 +456,21 @@ directories only it may inspect and nonblocking-probe the fixed
 managed graph, infer ownership or writer activity, plan cleanup, or
 delete anything. `held_at_scan` does not change `writer_activity`.
 A matching name is not proof that apply created the
-entry. The composite plan, apply, reconcile, export-plan,
-export-apply, export-verify, export-reconcile, and
-export-staging
+entry. Inventory `cleanup_supported` stays false.
+`snapshot-export-staging-cleanup-plan --parent <directory>`
+is a separate read-only schema-1 classification of those
+same leftovers. A deletion candidate is reported only for a
+recognized real directory whose `.export-writer.lock` is a
+present, empty, restrictive-mode, single-linked regular file
+that was not held at both agreeing scans. Everything else
+with the export-staging prefix is blocked with a stable
+reason. `deletion_candidates` means only selected by this
+plan; it is not ownership, writer death, or authorization to
+delete. `apply_supported` is false; this milestone does not
+apply, delete, or accept a confirmation flag. The composite
+plan, apply, reconcile, export-plan, export-apply,
+export-verify, export-reconcile, export-staging, and
+export-staging-cleanup-plan
 commands are intentionally absent from MCP. The MCP
 tool set remains exactly 11 read-only tools.
 
@@ -901,7 +916,12 @@ modules, plugins, and PCH fail explicitly. See
   `.graphrag-export-*` children under that parent. Recognized real
   directories may report a cooperative `.export-writer.lock` probe.
   It does not inspect export payload contents, infer liveness, or
-  recommend deletion. Advisory
+  recommend deletion.
+  `graphrag-code snapshot-export-staging-cleanup-plan --parent
+  <directory>` classifies those leftovers into
+  `deletion_candidates` or blocked entries without mutating
+  anything. `not_held_at_scan` is not permission to delete.
+  `apply_supported` is false. Advisory
   locks protect
   only cooperating processes. None of these commands is an MCP tool.
 - `scripts/persisted_graph_doctor.py` / `graphrag-code doctor` – **read-only

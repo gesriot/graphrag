@@ -684,9 +684,21 @@ def _snapshot_export_staging_scope(parent: object) -> Iterator[Dict[str, Any]]:
         os.close(parent_fd)
 
 
+@contextmanager
+def export_staging_observation_scope(parent: object) -> Iterator[Dict[str, Any]]:
+    """Yield one two-scan inventory while parent and probe descriptors stay held.
+
+    Shared by snapshot-export-staging and the read-only cleanup plan. This
+    is not a public CLI, not a second path-based scan, and does not
+    inspect a managed graph.
+    """
+    with _snapshot_export_staging_scope(parent) as result:
+        yield result
+
+
 def snapshot_export_staging(parent: Path) -> Dict[str, Any]:
     """Build one export-staging inventory without writing files."""
-    with _snapshot_export_staging_scope(parent) as result:
+    with export_staging_observation_scope(parent) as result:
         return result
 
 
@@ -697,7 +709,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             ".graphrag-export-* children under one parent directory. "
             "Does not delete, infer ownership, or inspect export payload "
             "contents. May observe .export-writer.lock on recognized "
-            "real directories only. Not an MCP tool."
+            "real directories only. cleanup_supported stays false. "
+            "snapshot-export-staging-cleanup-plan is the separate "
+            "read-only classification command. Not an MCP tool."
         )
     )
     parser.add_argument(

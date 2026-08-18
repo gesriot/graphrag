@@ -159,7 +159,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`1808 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`1826 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
@@ -344,9 +344,20 @@ recognized real directories it may observe
 ``.export-writer.lock`` as ``metadata_absent``,
 ``metadata_unsafe``, ``held_at_scan``, or ``not_held_at_scan``. It does
 not inspect a graph, infer ownership or writer activity, plan
-cleanup, or delete anything. The
+cleanup, or delete anything. Inventory ``cleanup_supported`` stays
+false. ``graphrag-code snapshot-export-staging-cleanup-plan``
+(also ``python -m
+graphrag_code.snapshot_export_staging_cleanup_plan`` and
+``scripts/snapshot_export_staging_cleanup_plan.py``) is a
+read-only schema-1 classification of those leftovers. A candidate
+requires a recognized real directory whose writer-lock metadata is
+present, empty, restrictive-mode, single-linked, and
+``not_held_at_scan`` on both agreeing scans. Prefixed
+non-candidates are blocked. ``deletion_candidates`` is not
+authorization to delete. ``apply_supported`` is false. The
 composite plan, apply, reconcile, export-plan, export-apply,
-export-verify, export-reconcile, and export-staging commands are
+export-verify, export-reconcile, export-staging, and
+export-staging-cleanup-plan commands are
 intentionally absent from MCP.
 Advisory locks do not protect against non-cooperating programs. This is
 not natural-language search, an HTTP service, repair, reindex, or
