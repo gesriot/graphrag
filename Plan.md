@@ -119,7 +119,7 @@ definitions are all present; 113 re-exports are reported separately rather
 than inflated into duplicate graph entities. The `sqlparse.split` target named
 by the Rust port is therefore an actual graph entity, not merely a module API
 outside the graph. See `examples/sqlparse/PROVENANCE.md` for the census and
-call-oracle effect. The current full-suite expectation is **1898 passed, 2 xfailed**;
+call-oracle effect. The current full-suite expectation is **1916 passed, 2 xfailed**;
 this 2026-08-14 persisted-integrity doctor update supersedes the earlier 721-passed /
 2026-07-26 gate snapshot. The product CLI is the installable ``graphrag-code``
 console command (`python -m graphrag_code`); source-checkout ``scripts/*.py``
@@ -336,17 +336,35 @@ stored snapshot envelope, and classifies an already-published
 matching id or an existing ``.staging-<id>`` as blocked. It does
 not import, copy, activate, create staging, or mutate either
 tree. ``import_performed`` is always false. ``import_revision`` is
-only a self-consistency/CAS-ready plan token and is not currently
-accepted by any mutation command. A future import apply command
-is outside this milestone. Standalone prune and
+a self-consistency/CAS-ready plan token.
+``graphrag-code snapshot-import-apply --graph <root>
+--export-dir <directory> --expected-import-revision sha256:<hex>
+--import-confirmed`` is the CAS apply. It reproduces that plan
+from held source descriptors under one shared existing-lock
+lease, copies exact source bytes into ``.staging-<snapshot-id>``,
+holds ``.staging-writer.lock`` through copying, then acquires one
+exclusive existing-lock graph lease for native no-replace
+publication. It preserves the source manifest id, leaves
+``current`` unchanged, does not inspect or change pins, and does
+not run retention. It does not overwrite an existing snapshot id.
+A post-publication identity or fsync failure emits
+``ok=false``, ``partial=true``, and exit 1 without rolling back
+the published snapshot. Pre-publication cleanup reacquires the
+exclusive graph lease and identity-checks/claims this invocation's
+writer-lock inode; it leaves replaced or unverifiable metadata in
+place. A partial result never infers an unchanged current pointer:
+``current_after`` is null and ``current_unchanged=false`` unless the
+post-publication proof completed. A crash may leave ``.staging-<id>`` and
+its writer-lock metadata. Successful import is not activation,
+backup, authenticity, or recoverability. Standalone prune and
 staging cleanup remain available. Neither prune, staging
 inventory, the staging cleanup plan, staging cleanup apply, the
 composite maintenance plan, the composite apply, reconcile, the
 export plan, the export apply, the export verify, the export
 reconcile, the export staging inventory, the export staging
 cleanup plan, the export staging cleanup apply, the export
-staging cleanup reconcile, nor the import plan is an
-MCP tool. MCP remains exactly 11
+staging cleanup reconcile, the import plan, nor the import apply
+is an MCP tool. MCP remains exactly 11
 read-only tools and stays strict. Advisory locks do not protect
 against non-cooperating programs. No search, UI, HTTP service,
 repair, or reindex is added.

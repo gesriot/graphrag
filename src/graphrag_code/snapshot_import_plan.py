@@ -1108,6 +1108,91 @@ def _held_standalone_export_observation(
         os.close(directory_fd)
 
 
+def _open_anchored_graph(
+    graph_path: Path,
+    graph_path_identity: Tuple[int, int, int, int, int],
+) -> Tuple[Path, int, Tuple[int, int, int, int, int]]:
+    """Open and canonicalize one managed graph directory.
+
+    Caller owns the returned directory descriptor and must close it.
+    The shared existing-lock lease must already be held.
+    """
+    try:
+        graph_fd, opened_graph_identity = _open_directory_nofollow(
+            graph_path, label="graph root"
+        )
+    except (SnapshotExportPlanError, SnapshotExportPlanIntegrityError) as error:
+        raise _from_export_error(error) from error
+    try:
+        opened_graph = os.fstat(graph_fd)
+        graph_identity = _complete_directory_identity(opened_graph)
+        if graph_identity != graph_path_identity:
+            raise SnapshotImportPlanIntegrityError(
+                "graph root changed before target observation"
+            )
+        _observe_held_directory(
+            graph_path, graph_fd, graph_identity, label="graph root"
+        )
+        try:
+            canonical_graph = graph_path.resolve(strict=True)
+        except (OSError, RuntimeError) as error:
+            raise SnapshotImportPlanIntegrityError(
+                f"graph root changed during canonicalization: {graph_path}"
+            ) from error
+        _observe_held_directory(
+            canonical_graph, graph_fd, graph_identity, label="graph root"
+        )
+        if opened_graph_identity != (
+            opened_graph.st_dev,
+            opened_graph.st_ino,
+            opened_graph.st_mtime_ns,
+            opened_graph.st_mode,
+        ):
+            raise SnapshotImportPlanIntegrityError(
+                "graph root changed before target observation"
+            )
+        return canonical_graph, graph_fd, graph_identity
+    except Exception:
+        os.close(graph_fd)
+        raise
+
+
+def _observe_fresh_import_plan(
+    graph_path: Path,
+    graph_fd: int,
+    graph_identity: Tuple[int, int, int, int, int],
+    source: Mapping[str, Any],
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Build one schema-1 import plan from already-held source and graph.
+
+    Caller must hold the shared existing-lock lease. Source directory and
+    payload descriptors stay open. This is the same decision contract the
+    public plan command emits; it is not a second path-based CLI invocation.
+    """
+    _observe_held_directory(
+        graph_path, graph_fd, graph_identity, label="graph root"
+    )
+    target = _observe_target_unlocked(graph_path, source["snapshot_id"])
+    _observe_held_directory(
+        graph_path, graph_fd, graph_identity, label="graph root"
+    )
+    _observe_held_directory(
+        source["export_directory"],
+        source["directory_fd"],
+        source["directory_identity"],
+        label="export directory",
+    )
+    final_tokens = _capture_target_tokens(graph_path)
+    if final_tokens != target["tokens"]:
+        raise SnapshotImportPlanIntegrityError(
+            "publication lock, current, snapshots listing, or "
+            "staging changed during import plan"
+        )
+    _reobserve_held_source(source)
+    result = _build_result(graph_path, source, target)
+    return result, target
+
+
 def _reobserve_held_source(source: Mapping[str, Any]) -> None:
     """Revalidate the complete source after target observation.
 
@@ -1207,62 +1292,16 @@ def _snapshot_import_plan_scope(
                 graph_path, graph_path_identity, label="graph root"
             )
             with graph_read_lease(graph_path, allow_unlocked_managed=False):
+                graph_path, graph_fd, graph_identity = _open_anchored_graph(
+                    graph_path, graph_path_identity
+                )
                 try:
-                    graph_fd, opened_graph_identity = _open_directory_nofollow(
-                        graph_path, label="graph root"
+                    result, _target = _observe_fresh_import_plan(
+                        graph_path,
+                        graph_fd,
+                        graph_identity,
+                        source,
                     )
-                except (
-                    SnapshotExportPlanError,
-                    SnapshotExportPlanIntegrityError,
-                ) as error:
-                    raise _from_export_error(error) from error
-                try:
-                    opened_graph = os.fstat(graph_fd)
-                    graph_identity = _complete_directory_identity(opened_graph)
-                    if graph_identity != graph_path_identity:
-                        raise SnapshotImportPlanIntegrityError(
-                            "graph root changed before target observation"
-                        )
-                    _observe_held_directory(
-                        graph_path, graph_fd, graph_identity, label="graph root"
-                    )
-                    try:
-                        canonical_graph = graph_path.resolve(strict=True)
-                    except (OSError, RuntimeError) as error:
-                        raise SnapshotImportPlanIntegrityError(
-                            f"graph root changed during canonicalization: {graph_path}"
-                        ) from error
-                    _observe_held_directory(
-                        canonical_graph, graph_fd, graph_identity, label="graph root"
-                    )
-                    graph_path = canonical_graph
-                    if opened_graph_identity != (
-                        opened_graph.st_dev,
-                        opened_graph.st_ino,
-                        opened_graph.st_mtime_ns,
-                        opened_graph.st_mode,
-                    ):
-                        raise SnapshotImportPlanIntegrityError(
-                            "graph root changed before target observation"
-                        )
-                    target = _observe_target_unlocked(graph_path, source["snapshot_id"])
-                    _observe_held_directory(
-                        graph_path, graph_fd, graph_identity, label="graph root"
-                    )
-                    _observe_held_directory(
-                        source["export_directory"],
-                        source["directory_fd"],
-                        source["directory_identity"],
-                        label="export directory",
-                    )
-                    final_tokens = _capture_target_tokens(graph_path)
-                    if final_tokens != target["tokens"]:
-                        raise SnapshotImportPlanIntegrityError(
-                            "publication lock, current, snapshots listing, or "
-                            "staging changed during import plan"
-                        )
-                    _reobserve_held_source(source)
-                    result = _build_result(graph_path, source, target)
                     _after_import_result_ready(
                         source["export_directory"],
                         graph_path,

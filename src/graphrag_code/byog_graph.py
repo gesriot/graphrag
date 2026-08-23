@@ -968,6 +968,11 @@ class _HeldStagingWriterLease:
         self._identity = identity
         self._closed = False
 
+    @property
+    def inode_identity(self) -> Tuple[int, int]:
+        """Identity of the regular protocol file held by this lease."""
+        return self._identity
+
     def release_and_remove(self) -> None:
         """Drop the kernel lease and unlink this publisher's lock metadata."""
         self.close()

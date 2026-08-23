@@ -22,7 +22,7 @@ snapshot-export-apply, snapshot-export-verify,
 snapshot-export-reconcile, snapshot-export-staging,
 snapshot-export-staging-cleanup-plan, snapshot-export-staging-cleanup,
 snapshot-export-staging-cleanup-reconcile, snapshot-import-plan,
-port_eval).
+snapshot-import-apply, port_eval).
 """
 from __future__ import annotations
 
@@ -62,6 +62,7 @@ app = typer.Typer(
         "snapshot-export-staging-cleanup → "
         "snapshot-export-staging-cleanup-reconcile → "
         "snapshot-import-plan → "
+        "snapshot-import-apply → "
         "port-eval. Relative "
         "paths are resolved from the invoking working directory."
     ),
@@ -94,6 +95,7 @@ _DELEGATE_MODULES = {
     "snapshot_export_staging_cleanup.py": "graphrag_code.snapshot_export_staging_cleanup",
     "snapshot_export_staging_cleanup_reconcile.py": "graphrag_code.snapshot_export_staging_cleanup_reconcile",
     "snapshot_import_plan.py": "graphrag_code.snapshot_import_plan",
+    "snapshot_import_apply.py": "graphrag_code.snapshot_import_apply",
     "audit_call_edges.py": "graphrag_code.audit_call_edges",
     "port_eval.py": "graphrag_code.port_eval",
 }
@@ -1564,6 +1566,54 @@ def snapshot_import_plan(
     if json_out is True:
         args.append("--json")
     _delegate("snapshot_import_plan.py", args)
+
+
+@app.command("snapshot-import-apply")
+def snapshot_import_apply(
+    graph: Path = typer.Option(..., "--graph", "-g", help="Managed BYOG graph root"),
+    export_dir: Path = typer.Option(
+        ...,
+        "--export-dir",
+        help="Standalone export directory, relative to cwd.",
+    ),
+    expected_import_revision: str = typer.Option(
+        ...,
+        "--expected-import-revision",
+        help="sha256:<64 lowercase hex> from a fresh snapshot-import-plan",
+    ),
+    import_confirmed: bool = typer.Option(
+        False,
+        "--import-confirmed",
+        help="Required to create staging and publish the imported snapshot.",
+    ),
+    json_out: bool = typer.Option(
+        False,
+        "--json",
+        help="same JSON shape as snapshot_import_apply.py --json",
+    ),
+):
+    """Publish one standalone snapshot export as a retained snapshot.
+
+    Recomputes a fresh schema-1 import plan under one shared existing-lock
+    lease and copies only when --expected-import-revision still matches
+    and the plan is import-ready. Does not change current, pins, or
+    retention. Does not overwrite an existing snapshot id. The copy is
+    not a backup and is not an activation. Never creates .publish.lock.
+    Intentionally absent from MCP.
+    """
+    args = [
+        "--graph",
+        str(graph),
+        "--export-dir",
+        str(export_dir),
+        "--expected-import-revision",
+        expected_import_revision,
+    ]
+    if import_confirmed:
+        args.append("--import-confirmed")
+    if json_out is True:
+        args.append("--json")
+    _delegate("snapshot_import_apply.py", args)
 
 
 @app.command("audit-graph")

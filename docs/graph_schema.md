@@ -1503,9 +1503,9 @@ integers, names are canonical direct names, lists are unique and
 ordered by UTF-8 bytes, and revisions are exactly
 `sha256:<64 lowercase hex>`. The plan is not a backup and is not
 a claim of authenticity, provenance, portability,
-recoverability, or successful future import. A future import
-apply command is outside this milestone. `import_revision` is
-not currently accepted by any mutation command.
+recoverability, or successful future import. `import_revision`
+is the compare-and-swap token consumed by
+`snapshot-import-apply`.
 
 Stable valid observation, including a blocked plan, exits 0 with
 one complete human or JSON result. Unsafe source/target
@@ -1525,6 +1525,161 @@ It does not invoke an extractor, compiler, Clang, publisher,
 public CLI, export apply, snapshot import apply, or any mutation
 scope. Serialization, stdout, and flush failures must not be
 misreported as a valid plan.
+
+`graphrag-code snapshot-import-apply --graph <root>
+--export-dir <directory> --expected-import-revision sha256:<hex>
+--import-confirmed` publishes one validated standalone export as
+a retained snapshot in an existing managed BYOG graph. Apply
+schema version is 1. Surfaces are also
+`python -m graphrag_code.snapshot_import_apply` and
+`scripts/snapshot_import_apply.py`. The command is CLI-only and
+intentionally absent from MCP. The fixed MCP tool set remains 11
+read-only tools. `--import-confirmed` is mandatory, including for
+an empty or impossible action. Missing confirmation is exit 2,
+empty stdout, and no mutation. `--expected-import-revision` must
+be exactly `sha256:<64 lowercase hex>` with no whitespace
+normalization.
+
+Before mutation, apply reproduces the current schema-1
+snapshot-import-plan contract from held source descriptors under
+one shared existing-lock target lease. It does not invoke a
+public CLI or `snapshot_import_plan()` as a detached second
+path-based operation. A stale revision or a revision for a
+blocked plan is exit 1, empty stdout, and creates nothing.
+`import_ready=true` and both `target_snapshot_present=false` and
+`target_staging_present=false` are required. Unsupported
+no-replace publication fails before staging creation when
+possible. The command never creates or adopts `.publish.lock`.
+
+After the fresh plan matches, apply retains anchored graph-root
+and snapshots-directory descriptors, releases the shared graph
+lease, revalidates that both pathnames still name the held
+directories, rejects a real-directory replacement between the
+initial snapshots inspection and descriptor open by comparing the
+complete directory identity, and creates exactly `.staging-<snapshot-id>`
+descriptor-relative with exclusive creation (`exist_ok` is never
+used). It immediately acquires the cooperative
+`.staging-writer.lock` protocol through `staging_writer_lease`
+and holds that exclusive writer lease through copying, staged
+verification, source reobservation, and the wait for the graph
+exclusive publication lease. The unavoidable
+directory-creation-to-writer-lock window remains unverifiable.
+The lock is protocol metadata, not ownership or liveness
+evidence.
+
+Copy uses only the planned payload set from held source
+descriptors. Each destination file is created descriptor-relative
+with `O_CREAT|O_EXCL|O_NOFOLLOW`, streamed with bounded memory,
+fsynced, and compared by byte count and SHA-256 against the
+fresh plan. `.staging-writer.lock` is not copied as payload and
+is not added to `manifest.files`. After copying, apply fsyncs
+the staging directory, requires the staged export revision to
+equal `source_export_revision`, reruns the complete
+language-independent persisted-envelope audit through held
+descriptors, and reobserves the source.
+
+Publication acquires one exclusive existing-lock graph lease
+while still holding source, graph, snapshots, and staging
+descriptors and the staging writer lease. It does not acquire a
+nested shared graph lease and does not blindly recompute the
+public import plan after staging creation. Under the exclusive
+lease it validates the captured CAS decision: graph root and
+snapshots directory still name the held inodes; `.publish.lock`
+still has the expected identity; `current` value and identity
+are unchanged; the complete published snapshot set is unchanged;
+the final `<snapshot-id>` remains absent; exact
+`.staging-<snapshot-id>` names the held staging inode. Unrelated
+staging payload changes are not scanned during this revalidation;
+only an unsafe snapshots entry or a change to the target CAS fields
+fails it. Before promotion it removes
+`.staging-writer.lock` through `release_and_remove()` while the
+graph lease is exclusive, proves the lock pathname is absent,
+reverifies the staged envelope, and fsyncs staging again.
+Promotion uses the native descriptor-relative no-replace
+primitive. There is no `os.rename` fallback.
+
+After native rename returns, apply proves `<snapshot-id>` names
+the inode previously held as staging, proves
+`.staging-<snapshot-id>` is absent, reverifies the final exact
+envelope and source export revision, proves `current` is
+unchanged, proves published history is exactly the prior set
+plus the imported id, reobserves the held source once more after
+the final target observation, and fsyncs the snapshots directory. The
+exclusive graph lease and relevant descriptors stay held through
+result serialization, stdout write, and flush. The command never
+updates `current`, runs keep-last retention, inspects or changes
+pins, or deletes another snapshot. The standalone export is
+never mutated.
+
+Successful import means only that the language-independent
+persisted snapshot envelope and observed bytes were copied and
+atomically added to retained history. It is not authenticity,
+provenance, backup quality, portability, recoverability, restore
+success, or semantic equivalence. A later activation remains a
+separate explicit `snapshot-activate --activate-confirmed`
+operation.
+
+Before successful staging mkdir, any failure emits empty stdout:
+exit 1 for CAS/integrity/concurrency/unsafe structure; exit 2
+for malformed arguments, missing confirmation, missing paths,
+unlocked/unmanaged graph, bounds, or unsupported primitives.
+After staging mkdir, filesystem mutation has occurred. Any
+pre-publication failure attempts only descriptor-relative
+cleanup of this command's proven staging inode, never follows
+symlinks or removes a replacement, never calls broad
+`shutil.rmtree` on an unresolved path, and reacquires the graph
+lease exclusively for cleanup. When this invocation's writer-lock
+metadata is present, cleanup nonblockingly claims and identity-checks
+that exact inode before removing owned payloads or the lock. A
+missing, replaced, unsafe, or contended writer lock leaves the stage
+for the existing cleanup workflow. The result reports whether cleanup
+was attempted and whether the staging pathname remains, emits a
+complete partial result, and exits 1. A crash may leave
+`.staging-<id>` and its persistent writer-lock metadata. Existing
+staging inventory/cleanup commands are the only later cleanup
+path. Once native publication returns success, the published
+snapshot is never deleted or rolled back. A later identity,
+verification, current-proof, or fsync failure emits a complete
+partial result, exits 1, reports `publication_performed=true`,
+and requires a fresh plan before any further operation.
+
+JSON includes `schema_version`, `ok`, `graph`,
+`export_directory`, `snapshot_id`, `expected_import_revision`,
+`observed_import_revision`, `source_export_revision`,
+`planned_files`, `file_count`, `total_size_bytes`,
+`import_confirmed`, `import_performed`, `publication_attempted`,
+`publication_performed`, `snapshot_verified_after_publication`,
+`current_before`, `current_after`, `current_unchanged`,
+`staging_created`, `staging_cleanup_attempted`,
+`staging_remaining`, `snapshots_fsync_confirmed`, `partial`,
+`filesystem_may_have_changed`, `retry_requires_fresh_plan`,
+`graph_mutated`, `export_mutated`, `activation_performed`,
+`retention_performed`, `error`, and `notices`. Complete success
+requires `ok=true`, `import_confirmed=true`,
+`import_performed=true`, `publication_attempted=true`,
+`publication_performed=true`,
+`snapshot_verified_after_publication=true`,
+`current_before == current_after`, `current_unchanged=true`,
+`staging_created=true`, `staging_remaining=false`,
+`snapshots_fsync_confirmed=true`, `partial=false`,
+`filesystem_may_have_changed=true`,
+`retry_requires_fresh_plan=false`, `graph_mutated=true`,
+`export_mutated=false`, `activation_performed=false`,
+`retention_performed=false`, `error=null`, and equal expected
+and observed import revisions. `import_performed` means native
+publication completed, not that current changed. Complete
+success is exit 0 with one complete human or JSON result.
+Failure before staging creation is exit 1 or 2 as classified,
+empty stdout. Any failure after staging creation is exit 1 with
+one complete partial result. Diagnostics may also go to stderr.
+For a partial result, `current_after` is `null` and
+`current_unchanged=false` unless the post-publication target
+observation completed and proved both the value and identity.
+`publication_attempted=true` means the native no-replace primitive
+was actually called, including an `EEXIST` refusal; it is not set by
+pre-publication validation alone.
+Broken stdout/flush must not release target protection early or
+be reported as success.
 
 ## Entity Types (code domain, start with these)
 - file

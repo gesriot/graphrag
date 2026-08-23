@@ -159,7 +159,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`1898 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`1916 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
@@ -385,13 +385,22 @@ adding one standalone snapshot export to an existing managed
 graph. It does not import, copy, activate, or mutate either
 tree. It proves only the language-independent stored snapshot
 envelope and observed bytes, and it does not run a Clang overlay
-audit. An already-published matching id is still blocked. A
-future import apply command is outside this milestone. The
+audit. An already-published matching id is still blocked.
+``graphrag-code snapshot-import-apply`` (also ``python -m
+graphrag_code.snapshot_import_apply`` and
+``scripts/snapshot_import_apply.py``) is the CAS-guarded apply
+of that plan: it publishes the export as a retained snapshot
+without changing ``current``, pins, or retention, and without
+overwriting an existing snapshot id. Its partial-result path does not
+infer that ``current`` stayed unchanged, and cleanup removes writer-lock
+metadata only after an exclusive graph lease and an identity-checked
+claim of the inode created by the invocation. Successful import is not
+activation, backup, authenticity, or recoverability. The
 composite plan, apply, reconcile, export-plan, export-apply,
 export-verify, export-reconcile, export-staging,
 export-staging-cleanup-plan, export-staging-cleanup,
-export-staging-cleanup-reconcile, and import-plan commands
-are intentionally absent from MCP.
+export-staging-cleanup-reconcile, import-plan, and import-apply
+commands are intentionally absent from MCP.
 Advisory locks do not protect against non-cooperating programs. This is
 not natural-language search, an HTTP service, repair, reindex, or
 semantic equivalence.
