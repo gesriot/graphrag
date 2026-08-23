@@ -68,6 +68,7 @@ These generic installed commands operate on user-supplied directories:
 - `graphrag-code snapshot-export-staging-cleanup-plan --parent <directory>`
 - `graphrag-code snapshot-export-staging-cleanup --parent <directory> --expected-plan-revision sha256:<hex> --cleanup-confirmed`
 - `graphrag-code snapshot-export-staging-cleanup-reconcile --parent <directory> --plan-file <saved-cleanup-plan.json> [--apply-result-file <saved-cleanup-result.json>]`
+- `graphrag-code snapshot-import-plan --graph <root> --export-dir <directory>`
 - `graphrag-code mcp --graph <root> --indexer auto`
 
 `graphrag-code mcp` is a local stdio MCP adapter over one existing graph.
@@ -91,8 +92,9 @@ The server exposes a fixed read-only tool set: `graph_status`,
 `snapshot_export_reconcile`,
 `snapshot_export_staging`,
 `snapshot_export_staging_cleanup_plan`,
-`snapshot_export_staging_cleanup`, or
-`snapshot_export_staging_cleanup_reconcile` tool:
+`snapshot_export_staging_cleanup`,
+`snapshot_export_staging_cleanup_reconcile`, or
+`snapshot_import_plan` tool:
 activating a retained snapshot, writing operator retention pins,
 planning keep-last retention, pruning CAS-verified candidates,
 listing staging directories, emitting a read-only staging cleanup
@@ -102,8 +104,10 @@ the live graph, planning a snapshot export, applying that
 export, verifying a standalone export directory, reconciling a
 saved export plan against a destination, inventorying leftover
 export-apply staging names, emitting a read-only export-staging
-cleanup plan, applying that export-staging cleanup plan, or reconciling a
-saved export-staging cleanup plan against the live parent is an
+cleanup plan, applying that export-staging cleanup plan,
+reconciling a saved export-staging cleanup plan against the live
+parent, or planning the import of one standalone snapshot export
+into an existing managed graph is an
 explicit CLI operation and is intentionally absent from MCP. Tool arguments cannot select another
 graph. There is no indexing, publishing, retention, port-eval,
 compiler/Clang, SQL, or shell tool. Snapshot history is a bounded local
@@ -500,12 +504,26 @@ graph, or emit a retry token. Absence does not prove apply
 deleted an entry; presence does not prove apply failed;
 matching identity does not prove ownership or continuous
 identity. A fresh schema-2 cleanup plan is required before
-any later apply. The composite plan, apply, reconcile,
-export-plan, export-apply, export-verify, export-reconcile,
-export-staging, export-staging-cleanup-plan,
-export-staging-cleanup, and export-staging-cleanup-reconcile
-commands are intentionally absent from MCP. The MCP
-tool set remains exactly 11 read-only tools.
+any later apply. `snapshot-import-plan --graph <root>
+--export-dir <directory>` is a read-only plan for adding one
+standalone snapshot export to an existing managed graph. It
+anchors and validates the export, holds its descriptors while it
+observes the target under one shared existing-lock lease, then
+rechecks the complete source under that lease. It validates the
+language-independent stored snapshot envelope and reports whether
+that snapshot id is
+already published or whether `.staging-<id>` is already present.
+It does not import, copy, activate, create staging, or mutate
+the graph or the export. `import_performed` is always false.
+`import_revision` is only a self-consistency/CAS-ready plan
+token and is not currently accepted by any mutation command. A
+future import apply command is outside this milestone. The
+composite plan, apply, reconcile, export-plan, export-apply,
+export-verify, export-reconcile, export-staging,
+export-staging-cleanup-plan, export-staging-cleanup,
+export-staging-cleanup-reconcile, and import-plan commands are
+intentionally absent from MCP. The MCP tool set remains exactly
+11 read-only tools.
 
 Query and context-pack commands accept optional
 `--snapshot <id|current>`. Omitting it preserves the existing default
@@ -970,7 +988,13 @@ modules, plugins, and PCH fail explicitly. See
   optional saved apply result. It does not recover, retry,
   mutate, or prove that apply deleted or failed to delete a
   name. A fresh cleanup plan is required before any later
-  apply. None of these commands is an MCP tool.
+  apply. `graphrag-code snapshot-import-plan --graph <root>
+  --export-dir <directory>` reports a read-only plan for adding
+  one standalone snapshot export to an existing managed graph.
+  It does not import, copy, activate, or mutate either tree. An
+  already-published matching id is still blocked. A future
+  import apply command is outside this milestone. None of these
+  commands is an MCP tool.
 - `scripts/persisted_graph_doctor.py` / `graphrag-code doctor` – **read-only
   persisted-integrity doctor** for any BYOG graph. Selects one snapshot,
   validates the language-independent envelope, then runs every applicable

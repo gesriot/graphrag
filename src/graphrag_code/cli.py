@@ -21,7 +21,7 @@ snapshot-maintenance-reconcile, snapshot-export-plan,
 snapshot-export-apply, snapshot-export-verify,
 snapshot-export-reconcile, snapshot-export-staging,
 snapshot-export-staging-cleanup-plan, snapshot-export-staging-cleanup,
-snapshot-export-staging-cleanup-reconcile,
+snapshot-export-staging-cleanup-reconcile, snapshot-import-plan,
 port_eval).
 """
 from __future__ import annotations
@@ -61,6 +61,7 @@ app = typer.Typer(
         "snapshot-export-staging-cleanup-plan → "
         "snapshot-export-staging-cleanup → "
         "snapshot-export-staging-cleanup-reconcile → "
+        "snapshot-import-plan → "
         "port-eval. Relative "
         "paths are resolved from the invoking working directory."
     ),
@@ -92,6 +93,7 @@ _DELEGATE_MODULES = {
     "snapshot_export_staging_cleanup_plan.py": "graphrag_code.snapshot_export_staging_cleanup_plan",
     "snapshot_export_staging_cleanup.py": "graphrag_code.snapshot_export_staging_cleanup",
     "snapshot_export_staging_cleanup_reconcile.py": "graphrag_code.snapshot_export_staging_cleanup_reconcile",
+    "snapshot_import_plan.py": "graphrag_code.snapshot_import_plan",
     "audit_call_edges.py": "graphrag_code.audit_call_edges",
     "port_eval.py": "graphrag_code.port_eval",
 }
@@ -1534,6 +1536,34 @@ def snapshot_export_staging_cleanup_reconcile(
     if json_out is True:
         args.append("--json")
     _delegate("snapshot_export_staging_cleanup_reconcile.py", args)
+
+
+@app.command("snapshot-import-plan")
+def snapshot_import_plan(
+    graph: Path = typer.Option(..., "--graph", "-g", help="Managed BYOG graph root"),
+    export_dir: Path = typer.Option(
+        ...,
+        "--export-dir",
+        help="Standalone export directory, relative to cwd.",
+    ),
+    json_out: bool = typer.Option(
+        False,
+        "--json",
+        help="same JSON shape as snapshot_import_plan.py --json",
+    ),
+):
+    """Report a read-only plan for importing one standalone snapshot export.
+
+    Observes a standalone export directory and one existing managed graph,
+    then emits a deterministic schema-1 plan. Does not import, copy,
+    activate, create staging, or mutate the graph or the export. The plan
+    is not a backup and is not authorization to import or delete anything.
+    Never creates .publish.lock. Intentionally absent from MCP.
+    """
+    args = ["--graph", str(graph), "--export-dir", str(export_dir)]
+    if json_out is True:
+        args.append("--json")
+    _delegate("snapshot_import_plan.py", args)
 
 
 @app.command("audit-graph")

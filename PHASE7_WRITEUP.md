@@ -159,7 +159,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`1878 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`1898 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
@@ -377,11 +377,20 @@ schema-2 cleanup plan and optional saved schema-1 apply result.
 It does not mutate, claim a writer lease, inspect a managed
 graph, recover, or prove that apply deleted or failed to delete
 a name. A fresh schema-2 cleanup plan is required before any
-later apply. The
+later apply.
+``graphrag-code snapshot-import-plan`` (also ``python -m
+graphrag_code.snapshot_import_plan`` and
+``scripts/snapshot_import_plan.py``) is a read-only plan for
+adding one standalone snapshot export to an existing managed
+graph. It does not import, copy, activate, or mutate either
+tree. It proves only the language-independent stored snapshot
+envelope and observed bytes, and it does not run a Clang overlay
+audit. An already-published matching id is still blocked. A
+future import apply command is outside this milestone. The
 composite plan, apply, reconcile, export-plan, export-apply,
 export-verify, export-reconcile, export-staging,
-export-staging-cleanup-plan, export-staging-cleanup, and
-export-staging-cleanup-reconcile commands
+export-staging-cleanup-plan, export-staging-cleanup,
+export-staging-cleanup-reconcile, and import-plan commands
 are intentionally absent from MCP.
 Advisory locks do not protect against non-cooperating programs. This is
 not natural-language search, an HTTP service, repair, reindex, or

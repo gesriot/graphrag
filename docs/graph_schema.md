@@ -807,7 +807,8 @@ make `result_consistent_with_observation=false`.
 Replacements cannot be proven identical from the saved public plan
 or result. A new maintenance plan is still required before any later
 mutation. The composite plan, apply, reconcile, export-plan,
-export-apply, export-verify, export-reconcile, and export-staging
+export-apply, export-verify, export-reconcile, export-staging,
+and import-plan
 commands are
 intentionally absent from MCP. The fixed MCP tool set
 remains 11 read-only tools.
@@ -1381,6 +1382,149 @@ remain outside the protection boundary. No ownership, liveness,
 backup, authenticity, or recovery is claimed. Fresh publisher
 writer-lock creation remains concurrent. Reacquiring existing
 writer-lock metadata stays nonblocking while gated.
+
+`graphrag-code snapshot-import-plan --graph <root>
+--export-dir <directory>` is a read-only plan for adding one
+standalone snapshot export to an existing managed BYOG graph.
+Import-plan schema version is 1. `--graph` and `--export-dir`
+are required. Relative paths resolve from the invoking cwd.
+Surfaces are also `python -m graphrag_code.snapshot_import_plan`
+and `scripts/snapshot_import_plan.py`. The command is CLI-only
+and intentionally absent from MCP. The fixed MCP tool set
+remains 11 read-only tools.
+
+The source export directory must be an existing real directory,
+never a symlink. Listing, stat, open, and read operations are
+descriptor-relative and no-follow. Payloads receive two complete
+bounded-memory streaming observations before target inspection and
+a final complete recheck after target observation. Manifest reads
+are bounded at 1 MiB and use strict UTF-8 and strict JSON,
+including rejection of duplicate keys and NaN/Infinity. Complete
+file identities include ctime so a same-size rewrite with
+restored mtime fails closed. The accepted payload set is the
+published snapshot envelope. Nested directories, symlinked
+payloads, FIFOs, sockets, devices, temporary remnants, protocol
+files, and unexpected entries fail closed. A pathname swap must
+not redirect a parquet dataframe read: parquet bytes are read
+only from already anchored regular descriptors. The export
+directory and relevant payload descriptors stay held through
+target observation, result construction, serialization, stdout
+write, and stdout flush.
+
+Before declaring the source importable, the command validates
+the language-independent persisted snapshot envelope with
+`validate_persisted_byog_snapshot`: manifest `id`, schema,
+counts, files, total size, corpus-hash shape, source-root shape,
+git-commit shape, and created-at shape; required parquet
+presence; optional `call_observations.parquet` presence/count
+agreement; loaded parquet row census; and the exact producer
+file set. It does not run any language-specific or Clang overlay
+audit. This milestone proves only the language-independent
+stored snapshot envelope and observed bytes. It does not compare
+`source_root`, `git_commit`, or `created_at` with the current
+host. A stable invalid envelope is an integrity failure: exit 1,
+empty stdout. The command does not emit an `import_ready` plan
+for an invalid source.
+
+The target must be an existing real managed
+`current + snapshots/` graph with an already-existing regular
+`.publish.lock`. The command never creates or adopts that lock.
+Legacy-flat and unlocked managed graphs are out of scope and
+fail closed. It holds exactly one shared existing-lock graph
+lease and does not acquire a nested graph lease. Under that
+lease it observes `current`, the complete bounded published
+snapshot list, and the stable snapshot-staging inventory.
+`current` must be a canonical published id and a member of the
+published set. Existing stable unlocked helpers are used while
+the outer shared lease is held. The graph lease stays held
+through result construction, serialization, stdout write, and
+stdout flush.
+
+The source manifest `id` is the proposed target snapshot id. It
+is preserved exactly; the command does not generate a
+replacement id or rewrite the manifest. The corresponding
+private target staging name is exactly `.staging-<snapshot-id>`.
+A structurally valid observation always emits a complete plan,
+even when blocked. `blocking_reasons` is an exact unique
+deterministic list drawn only from
+`snapshot_id_already_published` and
+`target_staging_name_present`. `target_snapshot_present` is
+membership in `published_snapshots`. `target_staging_present` is
+the exact staging pathname. `import_ready=true` only when both
+are false and `blocking_reasons` is empty. An already-published
+matching id is still blocked; the command does not compare it
+for idempotent equivalence, overwrite it, replace it, or call it
+successfully imported. Other unrelated staging entries are
+reported through counts/notices and do not independently block
+this source id. Concurrent target changes detected during
+observation fail closed.
+
+JSON includes `schema_version`, `ok`, `graph`,
+`export_directory`, `snapshot_id`, `source_export_revision`,
+`files`, `file_count`, `total_size_bytes`,
+`source_envelope_valid`, `current`, `published_snapshots`,
+`published_count`, `target_staging_name`,
+`target_snapshot_present`, `target_staging_present`,
+`staging_count`, `blocking_reasons`, `import_ready`,
+`import_revision`, `import_performed=false`,
+`graph_mutated=false`, `export_mutated=false`,
+`fresh_plan_required_before_import=true`, and `notices`.
+`ok=true` means the complete read succeeded, not that import
+occurred. Emitted results always have
+`source_envelope_valid=true`. Observed `source_export_revision`
+is byte-compatible with the snapshot-export-plan,
+snapshot-export-apply, and snapshot-export-verify canonical
+export-revision contract. `import_revision` is
+`sha256:<hex>` of compact canonical JSON (`sort_keys=True`,
+`separators=(",", ":")`, `ensure_ascii=True`, `allow_nan=False`,
+no trailing newline) over:
+
+```json
+{
+  "blocking_reasons": [],
+  "current": "<published-id>",
+  "fresh_plan_required_before_import": true,
+  "import_performed": false,
+  "import_ready": true,
+  "published_snapshots": ["<published-id>"],
+  "schema_version": 1,
+  "snapshot_id": "<published-id>",
+  "source_envelope_valid": true,
+  "source_export_revision": "sha256:<hex>",
+  "target_snapshot_present": false,
+  "target_staging_name": ".staging-<published-id>",
+  "target_staging_present": false
+}
+```
+
+Absolute graph/export paths, counts, notices, `ok`, and the
+mutation flags are presentation-only. JSON booleans are not
+integers, names are canonical direct names, lists are unique and
+ordered by UTF-8 bytes, and revisions are exactly
+`sha256:<64 lowercase hex>`. The plan is not a backup and is not
+a claim of authenticity, provenance, portability,
+recoverability, or successful future import. A future import
+apply command is outside this milestone. `import_revision` is
+not currently accepted by any mutation command.
+
+Stable valid observation, including a blocked plan, exits 0 with
+one complete human or JSON result. Unsafe source/target
+structure, invalid persisted source envelope, symlink/replacement,
+descriptor/path mismatch, or concurrent change is exit 1, empty
+stdout. Malformed arguments, missing paths, legacy/unmanaged/
+unlocked target, invalid encoding/JSON, bounds, or unsupported
+safe primitives are exit 2, empty stdout. Diagnostics go only to
+stderr.
+
+The command does not create a snapshot or staging directory;
+copy, rename, link, replace, truncate, chmod, unlink, or delete
+anything; change `current`; or create or modify `.publish.lock`,
+`.snapshot-pins.json`, or any writer lock. It does not activate,
+pin, prune, clean staging, import, restore, recover, or repair.
+It does not invoke an extractor, compiler, Clang, publisher,
+public CLI, export apply, snapshot import apply, or any mutation
+scope. Serialization, stdout, and flush failures must not be
+misreported as a valid plan.
 
 ## Entity Types (code domain, start with these)
 - file
