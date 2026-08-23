@@ -159,7 +159,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`1854 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`1878 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
@@ -368,11 +368,20 @@ an empty candidate set. Apply claims every selected existing
 writer lock before the first deletion. Recursive deletion is not
 transactionally atomic. A partial result always requires a fresh
 schema-2 plan. No ownership, liveness, backup, authenticity, or
-recovery is claimed. Export-staging reconcile is not part of this
-milestone. The
+recovery is claimed. ``graphrag-code
+snapshot-export-staging-cleanup-reconcile`` (also ``python -m
+graphrag_code.snapshot_export_staging_cleanup_reconcile`` and
+``scripts/snapshot_export_staging_cleanup_reconcile.py``) is the
+separate observation-only aftermath inspection of a saved
+schema-2 cleanup plan and optional saved schema-1 apply result.
+It does not mutate, claim a writer lease, inspect a managed
+graph, recover, or prove that apply deleted or failed to delete
+a name. A fresh schema-2 cleanup plan is required before any
+later apply. The
 composite plan, apply, reconcile, export-plan, export-apply,
 export-verify, export-reconcile, export-staging,
-export-staging-cleanup-plan, and export-staging-cleanup commands
+export-staging-cleanup-plan, export-staging-cleanup, and
+export-staging-cleanup-reconcile commands
 are intentionally absent from MCP.
 Advisory locks do not protect against non-cooperating programs. This is
 not natural-language search, an HTTP service, repair, reindex, or

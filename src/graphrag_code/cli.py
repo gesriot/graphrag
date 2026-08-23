@@ -21,6 +21,7 @@ snapshot-maintenance-reconcile, snapshot-export-plan,
 snapshot-export-apply, snapshot-export-verify,
 snapshot-export-reconcile, snapshot-export-staging,
 snapshot-export-staging-cleanup-plan, snapshot-export-staging-cleanup,
+snapshot-export-staging-cleanup-reconcile,
 port_eval).
 """
 from __future__ import annotations
@@ -59,6 +60,7 @@ app = typer.Typer(
         "snapshot-export-staging → "
         "snapshot-export-staging-cleanup-plan → "
         "snapshot-export-staging-cleanup → "
+        "snapshot-export-staging-cleanup-reconcile → "
         "port-eval. Relative "
         "paths are resolved from the invoking working directory."
     ),
@@ -89,6 +91,7 @@ _DELEGATE_MODULES = {
     "snapshot_export_staging.py": "graphrag_code.snapshot_export_staging",
     "snapshot_export_staging_cleanup_plan.py": "graphrag_code.snapshot_export_staging_cleanup_plan",
     "snapshot_export_staging_cleanup.py": "graphrag_code.snapshot_export_staging_cleanup",
+    "snapshot_export_staging_cleanup_reconcile.py": "graphrag_code.snapshot_export_staging_cleanup_reconcile",
     "audit_call_edges.py": "graphrag_code.audit_call_edges",
     "port_eval.py": "graphrag_code.port_eval",
 }
@@ -1487,6 +1490,50 @@ def snapshot_export_staging_cleanup(
     if json_out is True:
         args.append("--json")
     _delegate("snapshot_export_staging_cleanup.py", args)
+
+
+@app.command("snapshot-export-staging-cleanup-reconcile")
+def snapshot_export_staging_cleanup_reconcile(
+    parent: Path = typer.Option(
+        ...,
+        "--parent",
+        help="Parent directory to observe, relative to cwd.",
+    ),
+    plan_file: Path = typer.Option(
+        ...,
+        "--plan-file",
+        help="Saved schema-2 snapshot-export-staging-cleanup-plan JSON.",
+    ),
+    apply_result_file: Optional[Path] = typer.Option(
+        None,
+        "--apply-result-file",
+        help="Optional saved schema-1 snapshot-export-staging-cleanup JSON.",
+    ),
+    json_out: bool = typer.Option(
+        False,
+        "--json",
+        help="same JSON shape as snapshot_export_staging_cleanup_reconcile.py --json",
+    ),
+):
+    """Reconcile a saved export-staging cleanup plan against one parent.
+
+    Observation only. Does not mutate, claim a writer lease, inspect a
+    managed graph, or emit a retry token. Absence does not prove apply
+    deleted an entry; presence does not prove apply failed. A fresh
+    schema-2 cleanup plan is required before any later apply.
+    Intentionally absent from MCP.
+    """
+    args = [
+        "--parent",
+        str(parent),
+        "--plan-file",
+        str(plan_file),
+    ]
+    if apply_result_file is not None:
+        args.extend(["--apply-result-file", str(apply_result_file)])
+    if json_out is True:
+        args.append("--json")
+    _delegate("snapshot_export_staging_cleanup_reconcile.py", args)
 
 
 @app.command("audit-graph")

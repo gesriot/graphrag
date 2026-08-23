@@ -119,7 +119,7 @@ definitions are all present; 113 re-exports are reported separately rather
 than inflated into duplicate graph entities. The `sqlparse.split` target named
 by the Rust port is therefore an actual graph entity, not merely a module API
 outside the graph. See `examples/sqlparse/PROVENANCE.md` for the census and
-call-oracle effect. The current full-suite expectation is **1854 passed, 2 xfailed**;
+call-oracle effect. The current full-suite expectation is **1878 passed, 2 xfailed**;
 this 2026-08-14 persisted-integrity doctor update supersedes the earlier 721-passed /
 2026-07-26 gate snapshot. The product CLI is the installable ``graphrag-code``
 console command (`python -m graphrag_code`); source-checkout ``scripts/*.py``
@@ -316,14 +316,23 @@ A partial result always requires a fresh schema-2 plan; there is
 no rollback, trash, quarantine, or recovery. Advisory locks
 protect only cooperating processes. Non-cooperating processes
 remain outside the protection boundary. No ownership, liveness,
-backup, authenticity, or recovery is claimed. Export-staging
-reconcile is not part of this milestone. Standalone prune and
+backup, authenticity, or recovery is claimed.
+``graphrag-code snapshot-export-staging-cleanup-reconcile --parent
+<directory> --plan-file <saved-cleanup-plan.json>`` is the
+read-only aftermath inspection for that saved schema-2 plan and
+an optional saved schema-1 apply result. It does not mutate,
+claim a writer lease, inspect a managed graph, or emit a retry
+token. Absence does not prove apply deleted an entry; presence
+does not prove apply failed; matching identity does not prove
+ownership or continuous identity. A fresh schema-2 cleanup plan
+is required before any later apply. Standalone prune and
 staging cleanup remain available. Neither prune, staging
 inventory, the staging cleanup plan, staging cleanup apply, the
 composite maintenance plan, the composite apply, reconcile, the
 export plan, the export apply, the export verify, the export
 reconcile, the export staging inventory, the export staging
-cleanup plan, nor the export staging cleanup apply is an
+cleanup plan, the export staging cleanup apply, nor the export
+staging cleanup reconcile is an
 MCP tool. MCP remains exactly 11
 read-only tools and stays strict. Advisory locks do not protect
 against non-cooperating programs. No search, UI, HTTP service,

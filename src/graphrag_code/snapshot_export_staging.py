@@ -674,8 +674,9 @@ def held_export_staging_observation_scope(
 ) -> Iterator[HeldExportStagingObservation]:
     """Yield one two-scan observation while parent and probe descriptors stay held.
 
-    Internal helper for inventory, cleanup plan, and cleanup apply. The
-    yielded object is not public JSON and must not be serialized.
+    Internal helper for inventory, cleanup plan, cleanup apply, and
+    cleanup reconcile. The yielded object is not public JSON and must
+    not be serialized.
     """
     _require_descriptor_reads()
     path = _parent_path(parent)
@@ -726,9 +727,9 @@ def _snapshot_export_staging_scope(parent: object) -> Iterator[Dict[str, Any]]:
 def export_staging_observation_scope(parent: object) -> Iterator[Dict[str, Any]]:
     """Yield one two-scan inventory while parent and probe descriptors stay held.
 
-    Shared by snapshot-export-staging and the read-only cleanup plan. This
-    is not a public CLI, not a second path-based scan, and does not
-    inspect a managed graph.
+    Shared by snapshot-export-staging, the read-only cleanup plan, and
+    snapshot-export-staging-cleanup-reconcile. This is not a public CLI,
+    not a second path-based scan, and does not inspect a managed graph.
     """
     with _snapshot_export_staging_scope(parent) as result:
         yield result

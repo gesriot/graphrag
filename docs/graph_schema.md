@@ -1292,8 +1292,58 @@ A partial result reports `ok=false`, `partial=true`,
 `filesystem_may_have_changed=true`, and
 `retry_requires_fresh_plan=true`; there is no rollback, trash,
 quarantine, or recovery. A fresh schema-2 plan is mandatory after
-any partial result. Apply-result schema version is 1. Export-staging
-reconcile is not part of this milestone.
+any partial result. Apply-result schema version is 1.
+
+`graphrag-code snapshot-export-staging-cleanup-reconcile --parent
+<directory> --plan-file <saved-cleanup-plan.json>
+[--apply-result-file <saved-cleanup-result.json>]` is the
+read-only aftermath reconciliation. Surfaces are also
+`python -m graphrag_code.snapshot_export_staging_cleanup_reconcile`
+and `scripts/snapshot_export_staging_cleanup_reconcile.py`. Input
+validation of the saved schema-2 plan and optional schema-1 apply
+result completes before the parent is observed. Both input files
+are bounded regular files (1 MiB), opened read-only with
+`O_NOFOLLOW`; complete file identity includes ctime so a
+same-size rewrite with restored mtime is detected. The command
+reuses the export-staging descriptor-relative, no-follow, bounded
+two-scan observation internally and does not invoke a public CLI.
+The parent descriptor stays open through result construction,
+serialization, stdout write, and flush. It may nonblockingly
+probe the fixed writer lock exactly as inventory does; it never
+claims that lock.
+
+Reconcile-result schema version is 1. JSON includes
+`schema_version`, `ok`, `parent`, `input_plan_revision`,
+`input_observed_inventory_revision`, `apply_result_supplied`,
+`apply_result_valid` (`true` or `null`), `declared_apply_outcome`
+(`not_supplied`, `complete`, or `partial`),
+`observed_inventory_revision`, `candidate_observations`,
+`blocked_observations`, `new_prefixed_entries`,
+`all_planned_candidates_absent_at_reconcile`,
+`result_consistent_with_observation` (`true`, `false`, or `null`),
+`discrepancies`, `reconciliation_is_observation_only=true`,
+`deletion_cause_proven=false`, `recovery_performed=false`,
+`fresh_plan_required_before_mutation=true`, and `notices`. It does
+not emit a current cleanup `plan_revision`. Candidate states are
+`absent_at_reconcile`, `present_candidate_at_reconcile`,
+`present_blocked_at_reconcile`, `present_non_directory_at_reconcile`,
+and `unsafe_symlink_at_reconcile`. With a saved apply result,
+conservative discrepancy codes include `declared_deleted_but_present`,
+`declared_remaining_but_absent`, `declared_remaining_but_non_directory`,
+`declared_remaining_but_identity_changed`, and `new_prefixed_entry`.
+Without an apply result, `result_consistent_with_observation` is
+null. `ok=true` means this observation completed, not that apply
+succeeded.
+
+Absence does not prove cleanup apply deleted the entry. Presence
+does not prove cleanup failed. Matching identity does not prove
+ownership or continuous identity. Held/non-held writer-lease
+observation does not prove liveness or death. Advisory locks
+protect only cooperating processes. Reconciliation performs no
+recovery or mutation. It is not a retry token or authorization to
+delete. A fresh cleanup plan is required before any later apply.
+It is not backup, authenticity, provenance, or recoverability
+evidence.
 
 Stable candidates and stable blocked entries emit the complete
 plan report and exit 0. Unsafe parent structure, descriptor/path
@@ -1305,22 +1355,32 @@ exits 0. A failure before the first mutation emits no stdout
 exit 2 for malformed arguments, missing confirmation, unsafe or
 missing parent, bounds, or unsupported primitives). Once any
 unlink/rmdir may have happened, apply emits a complete partial
-result and exits 1. Both commands are intentionally absent
-from MCP. The fixed MCP tool set remains 11 read-only tools.
+result and exits 1. Reconcile emits a complete result and exits 0
+for every stable observation, including absent candidates,
+present candidates, blocked candidates, identity changes, newly
+appearing prefixed names, and result/observation discrepancies.
+Parent mismatch, unsafe parent structure, concurrent observation
+change, or a valid apply-result/plan mismatch is exit 1, empty
+stdout. Malformed arguments, invalid/oversized/symlinked input
+files, invalid schemas, missing parent, bounds, or unsupported
+primitives are exit 2, empty stdout. All three commands are
+intentionally absent from MCP. The fixed MCP tool set remains 11
+read-only tools.
 
 The plan command does not delete, rename, quarantine, pin,
 activate, publish, repair, reindex, or create a lock. It does not
 change `current`, published snapshots, `.snapshot-pins.json`,
 staging directories, payload files, writer-lock bytes/metadata, or
 publication-lock metadata. Apply deletes only the recomputed
-deletion candidates under the selected parent. Neither command
-inspects a managed graph, export destination, or export
-authenticity. Advisory locks protect only cooperating processes.
-Non-cooperating processes remain outside the protection boundary.
-No ownership, liveness, backup, authenticity, or recovery is
-claimed. Fresh publisher writer-lock creation remains concurrent.
-Reacquiring existing writer-lock metadata stays nonblocking while
-gated.
+deletion candidates under the selected parent. Reconcile observes
+only; it does not claim a writer lease or emit a current cleanup
+`plan_revision`. None of these commands inspects a managed graph,
+export destination, or export authenticity. Advisory locks
+protect only cooperating processes. Non-cooperating processes
+remain outside the protection boundary. No ownership, liveness,
+backup, authenticity, or recovery is claimed. Fresh publisher
+writer-lock creation remains concurrent. Reacquiring existing
+writer-lock metadata stays nonblocking while gated.
 
 ## Entity Types (code domain, start with these)
 - file
