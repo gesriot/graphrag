@@ -1205,7 +1205,7 @@ observation window. The command is intentionally absent from MCP.
 The fixed MCP tool set remains 11 read-only tools.
 
 `graphrag-code snapshot-export-staging-cleanup-plan --parent
-<directory>` is the read-only schema-1 cleanup plan over that same
+<directory>` is the read-only schema-2 cleanup plan over that same
 inventory. Surfaces are also
 `python -m graphrag_code.snapshot_export_staging_cleanup_plan` and
 `scripts/snapshot_export_staging_cleanup_plan.py`. It reuses the
@@ -1220,8 +1220,11 @@ is unchanged: `cleanup_supported` stays false, recognized-directory
 `cleanup_eligible` stays false, `contents_inspected` stays false,
 and `writer_activity` stays unknown. `held_at_scan` is only
 instantaneous cooperative contention. `not_held_at_scan` is not
-ownership, writer death, abandonment, age, or permission to
-delete.
+ownership, writer death, abandonment, age, permission to delete,
+or the apply command's exclusive writer-lock claim. Cleanup-plan
+schema 1 was read-only/pre-apply (`apply_supported=false`) and is
+not accepted by apply. Schema 2 sets `apply_supported=true` and
+keeps `cleanup_applied=false`.
 
 JSON includes `schema_version`, `ok`, `parent`,
 `observed_inventory_revision`, `staging_entries`, `staging_count`,
@@ -1229,7 +1232,7 @@ JSON includes `schema_version`, `ok`, `parent`,
 `other_entry_count`, `deletion_candidates`,
 `deletion_candidate_count`, `blocked_entries`, `blocked_count`,
 `ownership_inference=false`, `cleanup_applied=false`,
-`apply_supported=false`, `plan_revision`, and `notices`. A
+`apply_supported=true`, `plan_revision`, and `notices`. A
 deletion candidate is reported only when the direct child name
 matches `^\.graphrag-export-[0-9a-f]{32}$`, the held descriptor
 observes a real directory, `writer_lease_state` is
@@ -1261,23 +1264,61 @@ exactly these decision keys: `schema_version`,
 `notices`, redundant counts, and `staging_entries` are excluded.
 `observed_inventory_revision` already binds the complete inventory
 observation, including writer-lease state and lock identity.
-`plan_revision` is a self-consistency token, not a cleanup CAS
-token. This command does not accept `--expected-plan-revision`, a
-confirmation flag, a saved plan file, or an apply result.
+Because `schema_version` and `apply_supported` participate in that
+payload, schema-1 revisions differ from schema-2 revisions. This
+command does not accept `--expected-plan-revision`, a confirmation
+flag, a saved plan file, or an apply result. `cleanup_applied`
+stays false. `apply_supported` is true because
+`graphrag-code snapshot-export-staging-cleanup --parent
+<directory> --expected-plan-revision sha256:<hex>
+--cleanup-confirmed` is the separate CAS apply. Surfaces are also
+`python -m graphrag_code.snapshot_export_staging_cleanup` and
+`scripts/snapshot_export_staging_cleanup.py`. That command
+anchors the selected parent as a real no-follow directory, holds
+that descriptor through recomputation, comparison, claim,
+revalidation, deletion, result serialization, stdout write, and
+stdout flush, recomputes the complete schema-2 plan from a fresh
+bounded two-scan observation, compares `plan_revision`,
+nonblockingly claims every selected existing `.export-writer.lock`
+before the first deletion, revalidates parent, staging-directory,
+and lock identities, and deletes only those candidates.
+Descriptor-relative no-follow recursion unlinks symlinks as
+symlinks and never follows them. Schema-1 revisions are rejected.
+There is no dry-run and no caller-supplied deletion list.
+Confirmation is required even when the candidate set is empty.
+There is no graph lease because this operates on an arbitrary
+export parent. Recursive deletion is not transactionally atomic.
+A partial result reports `ok=false`, `partial=true`,
+`filesystem_may_have_changed=true`, and
+`retry_requires_fresh_plan=true`; there is no rollback, trash,
+quarantine, or recovery. A fresh schema-2 plan is mandatory after
+any partial result. Apply-result schema version is 1. Export-staging
+reconcile is not part of this milestone.
 
 Stable candidates and stable blocked entries emit the complete
-report and exit 0. Unsafe parent structure, descriptor/path
+plan report and exit 0. Unsafe parent structure, descriptor/path
 identity change, or concurrent observation change is exit 1,
 empty stdout. Malformed arguments or unsupported safe primitives
-are exit 2, empty stdout. The command is intentionally absent
+are exit 2, empty stdout. A complete empty or nonempty apply
+exits 0. A failure before the first mutation emits no stdout
+(exit 1 for stale revision, contention, or identity/integrity;
+exit 2 for malformed arguments, missing confirmation, unsafe or
+missing parent, bounds, or unsupported primitives). Once any
+unlink/rmdir may have happened, apply emits a complete partial
+result and exits 1. Both commands are intentionally absent
 from MCP. The fixed MCP tool set remains 11 read-only tools.
 
 The plan command does not delete, rename, quarantine, pin,
 activate, publish, repair, reindex, or create a lock. It does not
 change `current`, published snapshots, `.snapshot-pins.json`,
 staging directories, payload files, writer-lock bytes/metadata, or
-publication-lock metadata. Advisory locks protect only cooperating
-processes. Fresh publisher writer-lock creation remains concurrent.
+publication-lock metadata. Apply deletes only the recomputed
+deletion candidates under the selected parent. Neither command
+inspects a managed graph, export destination, or export
+authenticity. Advisory locks protect only cooperating processes.
+Non-cooperating processes remain outside the protection boundary.
+No ownership, liveness, backup, authenticity, or recovery is
+claimed. Fresh publisher writer-lock creation remains concurrent.
 Reacquiring existing writer-lock metadata stays nonblocking while
 gated.
 

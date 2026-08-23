@@ -10,6 +10,9 @@ This module is an internal helper. It is not a CLI command, not an MCP
 tool, and not a graph lease. Apply uses exclusive creation plus a
 blocking advisory lease. Inventory may inspect and nonblocking-probe
 only that fixed lock name on recognized real staging directories.
+Cleanup apply may take a fresh nonblocking exclusive claim on an
+already-open existing lock descriptor. It never creates, replaces,
+truncates, chmods, rewrites, or follows that file.
 
 The pathname is removed while the advisory lease is still held, then
 the lease is released before atomic publication. After that removal
@@ -100,6 +103,11 @@ def _after_export_writer_lock_removed_while_held(
     return None
 
 
+def _after_existing_export_writer_claim(staging_path: Path, lock_fd: int) -> None:
+    """Test hook after an existing leftover writer lock is claimed."""
+    return None
+
+
 def require_export_writer_lock_backend() -> str:
     backend = _available_lock_backend()
     if backend is None:
@@ -133,6 +141,17 @@ def require_export_writer_lock_primitives() -> None:
         raise ExportWriterLeaseError(
             "safe descriptor-relative no-follow export-writer lock "
             f"creation is unsupported on {sys.platform!r}"
+        )
+
+
+def require_export_writer_lock_cleanup_primitives() -> None:
+    """Probe plus descriptor-relative unlink/rmdir. Never creates a lock."""
+    require_export_writer_lock_probe_primitives()
+    supported = getattr(os, "supports_dir_fd", set())
+    if os.unlink not in supported or os.rmdir not in supported:
+        raise ExportWriterLeaseError(
+            "safe descriptor-relative no-follow export-writer cleanup "
+            f"is unsupported on {sys.platform!r}"
         )
 
 
@@ -439,6 +458,86 @@ class HeldExportWriterLease:
             )
         finally:
             self.close()
+
+
+def claim_existing_export_writer_lease(
+    *,
+    parent_fd: int,
+    staging_name: str,
+    staging_fd: int,
+    staging_identity: Tuple[int, int],
+    lock_fd: int,
+    expected_lock_identity: Tuple[int, int, int, int, int, int],
+    staging_path: Path,
+) -> HeldExportWriterLease:
+    """Nonblocking exclusive claim of an existing ``.export-writer.lock``.
+
+    Never creates, truncates, writes, chmods, replaces, or follows the
+    lock. Uses the caller's already-open no-follow descriptors. On
+    success the returned lease owns ``lock_fd`` and will close it.
+    Failure leaves ``lock_fd`` open for the caller. This is not
+    ownership, writer death, or a graph lease.
+    """
+    require_export_writer_lock_cleanup_primitives()
+    if not isinstance(lock_fd, int) or lock_fd < 0:
+        raise ExportWriterLeaseIntegrityError(
+            "export writer lock descriptor is missing for "
+            f"{Path(staging_path) / EXPORT_STAGING_WRITER_LOCK_NAME}"
+        )
+    _require_staging_held(parent_fd, staging_name, staging_fd, staging_identity)
+    opened = _require_lock_fd_matches(
+        lock_fd,
+        staging_fd,
+        expected_lock_identity,
+        staging_path=Path(staging_path),
+    )
+    if opened.st_size != 0:
+        raise ExportWriterLeaseUnsafe(
+            "export writer lock is not an empty regular file: "
+            f"{Path(staging_path) / EXPORT_STAGING_WRITER_LOCK_NAME}"
+        )
+    if stat.S_IMODE(opened.st_mode) & 0o077:
+        raise ExportWriterLeaseUnsafe(
+            "export writer lock mode is permissive: "
+            f"{Path(staging_path) / EXPORT_STAGING_WRITER_LOCK_NAME}"
+        )
+    backend: Optional[str] = None
+    try:
+        try:
+            backend = _acquire_backend(lock_fd, blocking=False)
+        except StagingWriterLockContention as error:
+            raise ExportWriterLeaseIntegrityError(
+                "export writer lease is held by a cooperating process: "
+                f"{Path(staging_path)}"
+            ) from error
+        _require_staging_held(
+            parent_fd, staging_name, staging_fd, staging_identity
+        )
+        _require_lock_fd_matches(
+            lock_fd,
+            staging_fd,
+            expected_lock_identity,
+            staging_path=Path(staging_path),
+        )
+        held = HeldExportWriterLease(
+            parent_fd=parent_fd,
+            staging_name=staging_name,
+            staging_fd=staging_fd,
+            staging_identity=staging_identity,
+            lock_fd=lock_fd,
+            backend=backend,
+            lock_identity=expected_lock_identity,
+            staging_path=Path(staging_path),
+        )
+        _after_existing_export_writer_claim(Path(staging_path), lock_fd)
+        return held
+    except Exception:
+        if backend is not None:
+            try:
+                _release_lock(lock_fd, backend)
+            except OSError:
+                pass
+        raise
 
 
 def acquire_export_writer_lease(

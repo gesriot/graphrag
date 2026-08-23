@@ -119,7 +119,7 @@ definitions are all present; 113 re-exports are reported separately rather
 than inflated into duplicate graph entities. The `sqlparse.split` target named
 by the Rust port is therefore an actual graph entity, not merely a module API
 outside the graph. See `examples/sqlparse/PROVENANCE.md` for the census and
-call-oracle effect. The current full-suite expectation is **1826 passed, 2 xfailed**;
+call-oracle effect. The current full-suite expectation is **1854 passed, 2 xfailed**;
 this 2026-08-14 persisted-integrity doctor update supersedes the earlier 721-passed /
 2026-07-26 gate snapshot. The product CLI is the installable ``graphrag-code``
 console command (`python -m graphrag_code`); source-checkout ``scripts/*.py``
@@ -292,18 +292,38 @@ matching name is not proof that apply created the entry.
 ``held_at_scan`` does not change ``writer_activity``.
 Inventory ``cleanup_supported`` stays false.
 ``graphrag-code snapshot-export-staging-cleanup-plan --parent
-<directory>`` is a separate read-only schema-1 classification of
-those leftovers. A candidate requires a recognized real directory
+<directory>`` is a separate read-only schema-2 classification of
+those leftovers. Cleanup-plan schema 1 was read-only/pre-apply
+(``apply_supported=false``) and is not accepted by apply. Schema 2
+sets ``apply_supported=true`` and keeps ``cleanup_applied=false``.
+A candidate requires a recognized real directory
 whose writer-lock metadata is present, empty, restrictive-mode,
 single-linked, and ``not_held_at_scan`` on both agreeing scans.
 Prefixed non-candidates are blocked, not omitted.
 ``deletion_candidates`` is not authorization to delete.
-``apply_supported`` is false. Standalone prune and staging cleanup
-remain available. Neither prune, staging inventory, the staging
-cleanup plan, staging cleanup apply, the composite maintenance
-plan, the composite apply, reconcile, the export plan, the export
-apply, the export verify, the export reconcile, the export staging
-inventory, nor the export staging cleanup plan is an
+The plan does not accept an expected revision or confirmation.
+``graphrag-code snapshot-export-staging-cleanup --parent
+<directory> --expected-plan-revision sha256:<hex>
+--cleanup-confirmed`` is the separate CAS apply. There is no
+dry-run; the plan command is the preview. Confirmation is required
+even when the candidate set is empty. Apply anchors the selected
+parent, recomputes the schema-2 plan, compares the caller token,
+nonblockingly claims every selected existing writer lock,
+revalidates parent/staging/lock identities, and only then deletes.
+There is no graph lease because this operates on an arbitrary
+export parent. Recursive deletion is not transactionally atomic.
+A partial result always requires a fresh schema-2 plan; there is
+no rollback, trash, quarantine, or recovery. Advisory locks
+protect only cooperating processes. Non-cooperating processes
+remain outside the protection boundary. No ownership, liveness,
+backup, authenticity, or recovery is claimed. Export-staging
+reconcile is not part of this milestone. Standalone prune and
+staging cleanup remain available. Neither prune, staging
+inventory, the staging cleanup plan, staging cleanup apply, the
+composite maintenance plan, the composite apply, reconcile, the
+export plan, the export apply, the export verify, the export
+reconcile, the export staging inventory, the export staging
+cleanup plan, nor the export staging cleanup apply is an
 MCP tool. MCP remains exactly 11
 read-only tools and stays strict. Advisory locks do not protect
 against non-cooperating programs. No search, UI, HTTP service,

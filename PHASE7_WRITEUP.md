@@ -159,7 +159,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`1826 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`1854 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
@@ -349,16 +349,31 @@ false. ``graphrag-code snapshot-export-staging-cleanup-plan``
 (also ``python -m
 graphrag_code.snapshot_export_staging_cleanup_plan`` and
 ``scripts/snapshot_export_staging_cleanup_plan.py``) is a
-read-only schema-1 classification of those leftovers. A candidate
+read-only schema-2 classification of those leftovers. Schema 1
+was read-only/pre-apply (``apply_supported=false``) and is not
+accepted by apply. Schema 2 sets ``apply_supported=true`` and
+keeps ``cleanup_applied=false``. A candidate
 requires a recognized real directory whose writer-lock metadata is
 present, empty, restrictive-mode, single-linked, and
 ``not_held_at_scan`` on both agreeing scans. Prefixed
 non-candidates are blocked. ``deletion_candidates`` is not
-authorization to delete. ``apply_supported`` is false. The
+authorization to delete. The plan does not accept an expected
+revision or confirmation. ``graphrag-code
+snapshot-export-staging-cleanup`` (also ``python -m
+graphrag_code.snapshot_export_staging_cleanup`` and
+``scripts/snapshot_export_staging_cleanup.py``) is the separate
+CAS apply. There is no dry-run and no graph lease. Confirmation
+and a matching schema-2 ``plan_revision`` are required even for
+an empty candidate set. Apply claims every selected existing
+writer lock before the first deletion. Recursive deletion is not
+transactionally atomic. A partial result always requires a fresh
+schema-2 plan. No ownership, liveness, backup, authenticity, or
+recovery is claimed. Export-staging reconcile is not part of this
+milestone. The
 composite plan, apply, reconcile, export-plan, export-apply,
-export-verify, export-reconcile, export-staging, and
-export-staging-cleanup-plan commands are
-intentionally absent from MCP.
+export-verify, export-reconcile, export-staging,
+export-staging-cleanup-plan, and export-staging-cleanup commands
+are intentionally absent from MCP.
 Advisory locks do not protect against non-cooperating programs. This is
 not natural-language search, an HTTP service, repair, reindex, or
 semantic equivalence.

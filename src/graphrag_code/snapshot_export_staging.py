@@ -159,6 +159,25 @@ _COMMAND_NOTICES: Tuple[Dict[str, str], ...] = (
 )
 
 
+class HeldExportStagingObservation:
+    """Internal two-scan observation. Not part of public JSON."""
+
+    def __init__(
+        self,
+        *,
+        parent_path: Path,
+        parent_fd: int,
+        parent_identity: Tuple[int, int, int, int, int, int],
+        inventory: Dict[str, Any],
+        held: Dict[str, Tuple[Optional[int], Optional[int]]],
+    ) -> None:
+        self.parent_path = parent_path
+        self.parent_fd = parent_fd
+        self.parent_identity = parent_identity
+        self.inventory = inventory
+        self.held = held
+
+
 class SnapshotExportStagingError(Exception):
     """Malformed arguments, missing parent, bounds, or unsupported platform. Exit 2."""
 
@@ -650,8 +669,14 @@ def _build_result(
 
 
 @contextmanager
-def _snapshot_export_staging_scope(parent: object) -> Iterator[Dict[str, Any]]:
-    """Yield one inventory while the parent descriptor stays held."""
+def held_export_staging_observation_scope(
+    parent: object,
+) -> Iterator[HeldExportStagingObservation]:
+    """Yield one two-scan observation while parent and probe descriptors stay held.
+
+    Internal helper for inventory, cleanup plan, and cleanup apply. The
+    yielded object is not public JSON and must not be serialized.
+    """
     _require_descriptor_reads()
     path = _parent_path(parent)
     parent_fd, parent_identity = _open_parent(path)
@@ -676,12 +701,25 @@ def _snapshot_export_staging_scope(parent: object) -> Iterator[Dict[str, Any]]:
         result = _build_result(parent_resolved, second)
         _after_result_ready(parent_resolved, parent_fd, result)
         _after_probe_descriptors_ready(parent_resolved, parent_fd, held)
-        yield result
+        yield HeldExportStagingObservation(
+            parent_path=parent_resolved,
+            parent_fd=parent_fd,
+            parent_identity=parent_identity,
+            inventory=result,
+            held=held,
+        )
     except ExportWriterLeaseError as error:
         raise _wrap_writer_lease_error(error) from error
     finally:
         close_held_probe_fds(held)
         os.close(parent_fd)
+
+
+@contextmanager
+def _snapshot_export_staging_scope(parent: object) -> Iterator[Dict[str, Any]]:
+    """Yield one inventory while the parent descriptor stays held."""
+    with held_export_staging_observation_scope(parent) as observation:
+        yield observation.inventory
 
 
 @contextmanager
@@ -711,7 +749,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             "contents. May observe .export-writer.lock on recognized "
             "real directories only. cleanup_supported stays false. "
             "snapshot-export-staging-cleanup-plan is the separate "
-            "read-only classification command. Not an MCP tool."
+            "read-only schema-2 classification command. "
+            "snapshot-export-staging-cleanup is the separate CAS apply. "
+            "Not an MCP tool."
         )
     )
     parser.add_argument(

@@ -24,10 +24,14 @@ and ``writer_activity`` stays unknown. ``held_at_scan`` is only
 instantaneous cooperative contention. ``not_held_at_scan`` is not
 ownership, writer death, abandonment, age, or permission to delete.
 
-Cleanup-plan schema 1 is plan-only (``apply_supported=false``). This
-command does not accept ``--expected-plan-revision``, a confirmation
-flag, a saved plan file, or an apply result. MCP stays exactly 11
-read-only tools; this command is CLI-only.
+Cleanup-plan schema 1 was read-only/pre-apply
+(``apply_supported=false``) and is not accepted by apply. Schema 2
+sets ``apply_supported=true``. This command still does not apply or
+accept ``--expected-plan-revision``. ``cleanup_applied`` stays false.
+``apply_supported`` is true because a separate CAS apply command
+exists. Observed non-contention here is not that apply's exclusive
+writer-lock claim. Schema-1 plan revisions must not be accepted by
+apply. MCP stays exactly 11 read-only tools; this command is CLI-only.
 
 Usage:
     graphrag-code snapshot-export-staging-cleanup-plan --parent <directory> [--json]
@@ -53,7 +57,7 @@ from graphrag_code.snapshot_export_staging import (
     is_current_export_staging_name,
 )
 
-PLAN_SCHEMA_VERSION = 1
+PLAN_SCHEMA_VERSION = 2
 _PLAN_REVISION_KEYS = (
     "apply_supported",
     "blocked_entries",
@@ -81,19 +85,27 @@ _COMMAND_NOTICES: Tuple[Dict[str, str], ...] = (
         "message": (
             "not_held_at_scan is only a successful nonblocking probe at "
             "that scan. It is not ownership, writer death, abandonment, "
-            "age, or permission to delete. held_at_scan is only "
+            "age, permission to delete, or the apply command's exclusive "
+            "writer-lock claim. Apply recomputes this plan and claims "
+            "existing writer locks itself. held_at_scan is only "
             "instantaneous cooperative contention and does not change "
             "writer_activity."
         ),
     },
     {
-        "code": "apply_not_implemented",
+        "code": "apply_is_separate_cas_command",
         "kind": "notice",
         "message": (
-            "Cleanup-plan schema 1 sets apply_supported=false. This "
-            "command does not apply, delete, or accept "
-            "--expected-plan-revision, a confirmation flag, a saved "
-            "plan file, or an apply result. cleanup_applied stays false."
+            "Cleanup-plan schema 2 sets apply_supported=true. Schema 1 "
+            "was read-only/pre-apply and is not accepted by apply. "
+            "snapshot-export-staging-cleanup is the separate CAS apply: "
+            "it anchors the selected parent, recomputes and compares "
+            "this plan_revision, nonblockingly claims every selected "
+            "existing writer lock, revalidates parent, staging-directory, "
+            "and writer-lock identities, and holds those claims through "
+            "deletion. This command does not accept or apply a revision. "
+            "cleanup_applied stays false. There is no graph lease "
+            "because this operates on an arbitrary export parent."
         ),
     },
     {
@@ -227,7 +239,9 @@ def format_result(result: Mapping[str, Any]) -> str:
         f"observed_inventory_revision={result.get('observed_inventory_revision')} "
         f"plan_revision={result.get('plan_revision')}"
         f"{suffix} "
-        "plan-only; apply_supported=false; not authorization to delete"
+        "plan-only; apply_supported=true; "
+        "snapshot-export-staging-cleanup is the separate CAS apply; "
+        "not authorization to delete"
     )
 
 
@@ -303,7 +317,7 @@ def _plan_from_inventory(inventory: Mapping[str, Any]) -> Dict[str, Any]:
         "blocked_count": len(blocked),
         "ownership_inference": False,
         "cleanup_applied": False,
-        "apply_supported": False,
+        "apply_supported": True,
         "notices": [dict(notice) for notice in _COMMAND_NOTICES],
     }
     result["plan_revision"] = plan_revision_of(result)
@@ -335,11 +349,13 @@ def snapshot_export_staging_cleanup_plan(parent: Path) -> Dict[str, Any]:
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Report a read-only schema-1 export-staging cleanup plan from "
+            "Report a read-only schema-2 export-staging cleanup plan from "
             "the schema-1 inventory. Does not delete, quarantine, apply, "
-            "or infer ownership. apply_supported is false. "
-            "cleanup_applied stays false. Does not inspect a managed "
-            "graph or export payload contents. Not an MCP tool. "
+            "or infer ownership. apply_supported is true because "
+            "snapshot-export-staging-cleanup is the separate CAS apply. "
+            "cleanup_applied stays false. Schema-1 revisions are not "
+            "accepted by apply. Does not inspect a managed graph or "
+            "export payload contents. Not an MCP tool. "
             "deletion_candidates is not permission to delete."
         )
     )

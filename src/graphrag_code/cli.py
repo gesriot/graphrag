@@ -20,7 +20,8 @@ snapshot-maintenance-plan, snapshot-maintenance-apply,
 snapshot-maintenance-reconcile, snapshot-export-plan,
 snapshot-export-apply, snapshot-export-verify,
 snapshot-export-reconcile, snapshot-export-staging,
-snapshot-export-staging-cleanup-plan, port_eval).
+snapshot-export-staging-cleanup-plan, snapshot-export-staging-cleanup,
+port_eval).
 """
 from __future__ import annotations
 
@@ -57,6 +58,7 @@ app = typer.Typer(
         "snapshot-export-reconcile → "
         "snapshot-export-staging → "
         "snapshot-export-staging-cleanup-plan → "
+        "snapshot-export-staging-cleanup → "
         "port-eval. Relative "
         "paths are resolved from the invoking working directory."
     ),
@@ -86,6 +88,7 @@ _DELEGATE_MODULES = {
     "snapshot_export_reconcile.py": "graphrag_code.snapshot_export_reconcile",
     "snapshot_export_staging.py": "graphrag_code.snapshot_export_staging",
     "snapshot_export_staging_cleanup_plan.py": "graphrag_code.snapshot_export_staging_cleanup_plan",
+    "snapshot_export_staging_cleanup.py": "graphrag_code.snapshot_export_staging_cleanup",
     "audit_call_edges.py": "graphrag_code.audit_call_edges",
     "port_eval.py": "graphrag_code.port_eval",
 }
@@ -1396,7 +1399,8 @@ def snapshot_export_staging(
     .export-writer.lock probe. A matching name is not proof of
     creation. cleanup_supported stays false. The separate
     snapshot-export-staging-cleanup-plan command classifies leftovers
-    without applying. Not a backup and not authorization to delete
+    without applying. snapshot-export-staging-cleanup is the separate
+    CAS apply. Not a backup and not authorization to delete
     anything. Intentionally absent from MCP.
     """
     args = ["--parent", str(parent)]
@@ -1420,16 +1424,69 @@ def snapshot_export_staging_cleanup_plan(
 ):
     """Classify leftover .graphrag-export-* children under one parent.
 
-    Read-only schema-1 cleanup plan. Does not delete, rename, apply,
+    Read-only schema-2 cleanup plan. Does not delete, rename, apply,
     inspect a managed graph, or inspect export payload contents.
     deletion_candidates means only selected by this plan, not
-    ownership or authorization to delete. apply_supported is false.
-    Intentionally absent from MCP.
+    ownership or authorization to delete. Schema 1 was
+    read-only/pre-apply and is not accepted by apply. apply_supported
+    is true because snapshot-export-staging-cleanup is the separate
+    CAS apply. cleanup_applied stays false. Intentionally absent
+    from MCP.
     """
     args = ["--parent", str(parent)]
     if json_out is True:
         args.append("--json")
     _delegate("snapshot_export_staging_cleanup_plan.py", args)
+
+
+@app.command("snapshot-export-staging-cleanup")
+def snapshot_export_staging_cleanup(
+    parent: Path = typer.Option(
+        ...,
+        "--parent",
+        help="Parent directory to clean, relative to cwd.",
+    ),
+    expected_plan_revision: str = typer.Option(
+        ...,
+        "--expected-plan-revision",
+        help="sha256:<64 lowercase hex> from snapshot-export-staging-cleanup-plan",
+    ),
+    cleanup_confirmed: bool = typer.Option(
+        False,
+        "--cleanup-confirmed",
+        help=(
+            "Required to delete CAS-verified deletion-candidate "
+            "directories. snapshot-export-staging-cleanup-plan is the "
+            "preview; this command has no dry-run. The command still "
+            "refuses to delete if the recomputed plan_revision no "
+            "longer matches. Never an MCP tool."
+        ),
+    ),
+    json_out: bool = typer.Option(
+        False,
+        "--json",
+        help="same JSON shape as snapshot_export_staging_cleanup.py --json",
+    ),
+):
+    """Delete the CAS-verified snapshot-export-staging-cleanup-plan candidates.
+
+    Applies exactly the recomputed schema-2 plan whose plan_revision
+    matches --expected-plan-revision. Anchors the selected parent.
+    Claims every selected existing writer lock before the first
+    deletion. Does not take a graph lease. Recursive deletion is not
+    transactionally atomic. Intentionally absent from MCP.
+    """
+    args = [
+        "--parent",
+        str(parent),
+        "--expected-plan-revision",
+        expected_plan_revision,
+    ]
+    if cleanup_confirmed is True:
+        args.append("--cleanup-confirmed")
+    if json_out is True:
+        args.append("--json")
+    _delegate("snapshot_export_staging_cleanup.py", args)
 
 
 @app.command("audit-graph")

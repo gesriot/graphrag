@@ -69,6 +69,7 @@ FORBIDDEN = frozenset(
         "snapshot_export_plan",
         "snapshot_export_verify",
         "snapshot_export_reconcile",
+        "snapshot_export_staging_cleanup",
         "snapshot_history",
         "snapshot_diff",
         "retained_snapshot_read",
@@ -193,7 +194,7 @@ def _notice_codes(result: dict) -> list[str]:
 
 
 def _assert_plan_shape(result: dict, parent: Path) -> None:
-    assert result["schema_version"] == 1
+    assert result["schema_version"] == 2
     assert result["ok"] is True
     assert result["parent"] == str(parent.resolve())
     assert result["staging_count"] == len(result["staging_entries"])
@@ -204,7 +205,7 @@ def _assert_plan_shape(result: dict, parent: Path) -> None:
     assert result["blocked_count"] == len(result["blocked_entries"])
     assert result["ownership_inference"] is False
     assert result["cleanup_applied"] is False
-    assert result["apply_supported"] is False
+    assert result["apply_supported"] is True
     assert result["plan_revision"] == plan_revision_of(result)
     assert result["plan_revision"].startswith("sha256:")
     assert len(result["plan_revision"]) == len("sha256:") + 64
@@ -212,7 +213,7 @@ def _assert_plan_shape(result: dict, parent: Path) -> None:
     assert _notice_codes(result) == [
         "plan_not_authorization",
         "observed_non_contention_not_claim",
-        "apply_not_implemented",
+        "apply_is_separate_cas_command",
         "inventory_semantics_unchanged",
         "cli_only_not_mcp",
     ]
@@ -233,7 +234,8 @@ def _assert_plan_shape(result: dict, parent: Path) -> None:
     text = format_result(result)
     assert str(parent.resolve()) in text
     assert "plan-only" in text
-    assert "apply_supported=false" in text
+    assert "apply_supported=true" in text
+    assert "snapshot-export-staging-cleanup is the separate CAS apply" in text
     assert "not authorization to delete" in text
     lowered = json.dumps(result).lower() + text.lower()
     for word in FORBIDDEN_WORDS:
@@ -841,13 +843,13 @@ def test_deterministic_plan_revision_and_json(tmp_path: Path):
     assert "deletion_candidate_count" not in payload
     assert "blocked_count" not in payload
     assert "staging_entries" not in payload
-    assert payload["schema_version"] == 1
+    assert payload["schema_version"] == 2
     assert payload["deletion_candidates"] == first["deletion_candidates"]
     assert payload["blocked_entries"] == first["blocked_entries"]
     assert payload["observed_inventory_revision"] == first["observed_inventory_revision"]
     assert payload["ownership_inference"] is False
     assert payload["cleanup_applied"] is False
-    assert payload["apply_supported"] is False
+    assert payload["apply_supported"] is True
     encoded = result_to_json(first)
     assert encoded.endswith("\n")
     parsed = json.loads(encoded)
@@ -1041,6 +1043,8 @@ def test_implementation_does_not_mutate_or_invoke_producers():
         }
     )
     assert "plan-only" in human
+    assert "apply_supported=true" in human
+    assert "snapshot-export-staging-cleanup is the separate CAS apply" in human
     assert "not authorization to delete" in human
 
 
@@ -1052,6 +1056,7 @@ def test_mcp_remains_exactly_eleven_and_byog_roots_unchanged(tmp_path: Path):
     assert len(TOOL_NAMES) == 11
     assert "snapshot_export_staging" not in TOOL_NAMES
     assert "snapshot_export_staging_cleanup_plan" not in TOOL_NAMES
+    assert "snapshot_export_staging_cleanup" not in TOOL_NAMES
     graph = tmp_path / "g"
     _publish(graph, "a")
     session = build_session(graph, "python")
@@ -1065,6 +1070,7 @@ def test_mcp_remains_exactly_eleven_and_byog_roots_unchanged(tmp_path: Path):
             assert names == set(TOOL_NAMES)
             assert len(names) == 11
             assert "snapshot_export_staging_cleanup_plan" not in names
+            assert "snapshot_export_staging_cleanup" not in names
 
     anyio_run(_body)
     after = {path.name: _root_fingerprint(path) for path in BYOG_ROOTS}
