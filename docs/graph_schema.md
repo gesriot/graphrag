@@ -808,7 +808,7 @@ Replacements cannot be proven identical from the saved public plan
 or result. A new maintenance plan is still required before any later
 mutation. The composite plan, apply, reconcile, export-plan,
 export-apply, export-verify, export-reconcile, export-staging,
-import-plan, and transfer-plan
+import-plan, transfer-plan, and transfer-apply
 commands are
 intentionally absent from MCP. The fixed MCP tool set
 remains 11 read-only tools.
@@ -1976,8 +1976,48 @@ modify `.publish.lock`. `transfer_performed` is always false.
 Neither graph is mutated. A ready plan does not authorize a
 later apply without freshly reproducing the complete plan and
 matching `transfer_revision`. Advisory locks protect only
-cooperating processes. Future transfer apply and reconciliation
-are outside this milestone.
+cooperating processes. Transfer reconciliation remains outside
+this milestone.
+
+`graphrag-code snapshot-transfer-apply --source-graph <root>
+--snapshot <id|current> --target-graph <root>
+--expected-transfer-revision sha256:<hex> --transfer-confirmed`
+publishes one retained snapshot from a managed BYOG graph into
+the retained history of a different managed BYOG graph without
+creating a standalone export directory. Apply schema version is
+1. Surfaces are also
+`python -m graphrag_code.snapshot_transfer_apply` and
+`scripts/snapshot_transfer_apply.py`. The command is CLI-only
+and intentionally absent from MCP. The fixed MCP tool set remains
+11 read-only tools. `--transfer-confirmed` is mandatory.
+`--expected-transfer-revision` must be exactly
+`sha256:<64 lowercase hex>`.
+
+It holds one shared existing-lock lease on the source and one
+exclusive existing-lock lease on the target. Both are acquired
+in the snapshot-transfer-plan global order: canonical UTF-8 path
+bytes, then `(st_dev, st_ino)`. Shared versus exclusive mode is
+assigned by graph role. Both existing regular lock descriptors
+are opened and identity-bound before either blocking acquisition;
+their pathnames and graph-root identities are rechecked after
+acquisition. The command does not nest
+`graph_read_lease` inside `graph_exclusive_lease`. Same-graph
+identity is rejected before nested acquisition. After both
+leases are held it reproduces the current schema-1
+snapshot-transfer-plan contract from held descriptors and copies
+only when the token still matches and the plan is
+transfer-ready. A stale or blocked revision creates nothing.
+
+Exact source bytes are copied into `.staging-<snapshot-id>`
+under a cooperative `.staging-writer.lock`. Publication uses the
+native descriptor-relative no-replace rename. The source graph
+is never mutated. Both `current` pointers stay unchanged. An
+already-published matching id is never overwritten. After
+publication succeeds the published snapshot is never rolled
+back. A crash may leave `.staging-<id>` and writer-lock
+metadata. Successful transfer is not activation, backup,
+authenticity, provenance, portability, recoverability, or
+semantic equivalence.
 
 ## Entity Types (code domain, start with these)
 - file

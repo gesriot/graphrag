@@ -72,6 +72,7 @@ These generic installed commands operate on user-supplied directories:
 - `graphrag-code snapshot-import-apply --graph <root> --export-dir <directory> --expected-import-revision sha256:<hex> --import-confirmed`
 - `graphrag-code snapshot-import-reconcile --graph <root> --plan-file <saved-import-plan.json> [--apply-result-file <saved-import-apply-result.json>]`
 - `graphrag-code snapshot-transfer-plan --source-graph <root> --snapshot <id|current> --target-graph <root>`
+- `graphrag-code snapshot-transfer-apply --source-graph <root> --snapshot <id|current> --target-graph <root> --expected-transfer-revision sha256:<hex> --transfer-confirmed`
 - `graphrag-code mcp --graph <root> --indexer auto`
 
 `graphrag-code mcp` is a local stdio MCP adapter over one existing graph.
@@ -99,8 +100,9 @@ The server exposes a fixed read-only tool set: `graph_status`,
 `snapshot_export_staging_cleanup_reconcile`,
 `snapshot_import_plan`,
 `snapshot_import_apply`,
-`snapshot_import_reconcile`, or
-`snapshot_transfer_plan` tool:
+`snapshot_import_reconcile`,
+`snapshot_transfer_plan`, or
+`snapshot_transfer_apply` tool:
 activating a retained snapshot, writing operator retention pins,
 planning keep-last retention, pruning CAS-verified candidates,
 listing staging directories, emitting a read-only staging cleanup
@@ -115,8 +117,9 @@ reconciling a saved export-staging cleanup plan against the live
 parent, planning the import of one standalone snapshot export,
 applying that import as a retained snapshot
 into an existing managed graph, reconciling a saved import
-plan against the live graph, or planning a direct snapshot
-transfer between two managed graphs is an
+plan against the live graph, planning a direct snapshot
+transfer between two managed graphs, or applying that transfer
+is an
 explicit CLI operation and is intentionally absent from MCP. Tool arguments cannot select another
 graph. There is no indexing, publishing, retention, port-eval,
 compiler/Clang, SQL, or shell tool. Snapshot history is a bounded local
@@ -564,15 +567,26 @@ snapshot id is already published on the target or whether
 including path aliases for the same inode, is rejected before
 nested leases. It does not export, import, copy, activate, or
 mutate either graph. `transfer_performed` is always false.
-`transfer_revision` is a self-consistency/CAS-ready plan token;
-no mutation command in this milestone accepts it. A ready plan
-does not authorize a later apply without freshly reproducing the
-complete plan and matching `transfer_revision`. The composite plan,
+`transfer_revision` is a self-consistency/CAS-ready plan token
+accepted only by `snapshot-transfer-apply` after that command
+freshly reproduces the same plan. A ready plan does not authorize
+a later apply without freshly reproducing the complete plan and
+matching `transfer_revision`.
+`snapshot-transfer-apply --source-graph <root> --snapshot
+<id|current> --target-graph <root> --expected-transfer-revision
+sha256:<hex> --transfer-confirmed` is the CAS apply. It holds one
+source-shared and one target-exclusive existing-lock lease in the
+same global path-byte order, copies exact source bytes into
+`.staging-<id>`, holds `.staging-writer.lock` through copying, then
+publishes with a native no-replace rename. It does not change
+`current`, pins, or retention, mutate the source graph, or
+overwrite an existing snapshot id. Successful transfer is not
+activation, backup, authenticity, or recoverability. The composite plan,
 apply, reconcile, export-plan, export-apply, export-verify,
 export-reconcile, export-staging, export-staging-cleanup-plan,
 export-staging-cleanup, export-staging-cleanup-reconcile,
-import-plan, import-apply, import-reconcile, and
-transfer-plan commands are
+import-plan, import-apply, import-reconcile, transfer-plan, and
+transfer-apply commands are
 intentionally absent from MCP. The MCP tool set remains exactly
 11 read-only tools.
 
@@ -1062,7 +1076,13 @@ modules, plugins, and PCH fail explicitly. See
   standalone export. It does not copy, activate, or mutate
   either graph. An already-published matching id is still
   blocked. Same-graph identity is rejected before nested
-  leases. None of these
+  leases.
+  `graphrag-code snapshot-transfer-apply --source-graph <root>
+  --snapshot <id|current> --target-graph <root>
+  --expected-transfer-revision sha256:<hex> --transfer-confirmed`
+  is the CAS apply: it publishes that snapshot into the target
+  retained history without changing `current`, pins, or
+  retention. It is not an activation or a backup. None of these
   commands is an MCP tool.
 - `scripts/persisted_graph_doctor.py` / `graphrag-code doctor` – **read-only
   persisted-integrity doctor** for any BYOG graph. Selects one snapshot,

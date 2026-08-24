@@ -20,8 +20,9 @@ not run any language-specific or Clang overlay audit. The plan is not
 a backup and is not a claim of authenticity, provenance, portability,
 recoverability, or successful future transfer. A later transfer apply
 must freshly reproduce the complete plan. ``transfer_revision`` is a
-self-consistency/CAS-ready token for that future command; no mutation
-command in this milestone accepts it.
+self-consistency/CAS-ready token accepted only by
+``snapshot-transfer-apply`` after that command freshly reproduces the
+same plan.
 
 Both graph arguments may be relative to the invoking cwd. Each must be
 an existing real directory, never a symlink, and a managed
@@ -74,9 +75,11 @@ from graphrag_code.byog_graph import (
     ByogPublicationLockError,
     ByogReaderLockError,
     _validate_managed_snapshot_layout,
+    graph_lease_order_key,
     graph_read_lease,
     is_published_snapshot_id,
     is_staging_snapshot_name,
+    ordered_graph_lease_pair,
 )
 from graphrag_code.byog_snapshot_integrity import MANIFEST_NAME
 from graphrag_code.snapshot_export_plan import (
@@ -267,33 +270,6 @@ def _byte_sort(values: Sequence[str]) -> List[str]:
 
 def _inode(identity: Tuple[int, ...]) -> Tuple[int, int]:
     return (int(identity[0]), int(identity[1]))
-
-
-def graph_lease_order_key(
-    canonical: Path, identity: Tuple[int, int]
-) -> Tuple[bytes, int, int]:
-    """Global two-graph lease order, independent of source/target role.
-
-    Primary key: canonical UTF-8 path bytes of the real graph root.
-    Tie-breaker: ``(st_dev, st_ino)``. A future source-shared /
-    target-exclusive transfer apply must use this same order so
-    opposing A→B and B→A operations cannot create a lock cycle.
-    """
-    return (str(canonical).encode("utf-8"), int(identity[0]), int(identity[1]))
-
-
-def ordered_graph_lease_pair(
-    left: Path,
-    left_identity: Tuple[int, int],
-    right: Path,
-    right_identity: Tuple[int, int],
-) -> Tuple[Path, Path]:
-    """Return ``(first, second)`` in the documented global lease order."""
-    left_key = graph_lease_order_key(left, left_identity)
-    right_key = graph_lease_order_key(right, right_identity)
-    if left_key <= right_key:
-        return left, right
-    return right, left
 
 
 def _from_export_error(error: Exception) -> SnapshotTransferPlanError:
@@ -1192,6 +1168,105 @@ def _reobserve_held_source(source: Mapping[str, Any]) -> None:
     )
 
 
+def _observe_fresh_transfer_plan(
+    source_path: Path,
+    source_fd: int,
+    source_identity: Tuple[int, int, int, int, int],
+    source_snapshots_path: Path,
+    source_snapshots_fd: int,
+    source_snapshots_identity: Tuple[int, int, int, int, int],
+    target_path: Path,
+    target_fd: int,
+    target_identity: Tuple[int, int, int, int, int],
+    target_snapshots_path: Path,
+    target_snapshots_fd: int,
+    target_snapshots_identity: Tuple[int, int, int, int, int],
+    requested: str,
+) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+    """Build one schema-1 transfer plan from already-held descriptors.
+
+    Caller must already hold the two-graph leases. Source payload
+    descriptors stay open on success; the caller closes them. This is
+    the same decision contract the public plan command emits and is not
+    a second path-based CLI invocation.
+    """
+    _observe_directory(
+        source_path, source_fd, source_identity, label="source graph root"
+    )
+    _observe_directory(
+        target_path, target_fd, target_identity, label="target graph root"
+    )
+    _observe_directory(
+        source_snapshots_path,
+        source_snapshots_fd,
+        source_snapshots_identity,
+        label="snapshots directory",
+    )
+    _observe_directory(
+        target_snapshots_path,
+        target_snapshots_fd,
+        target_snapshots_identity,
+        label="snapshots directory",
+    )
+    source = _observe_held_source_snapshot(
+        source_path,
+        requested,
+        source_snapshots_fd,
+        source_snapshots_identity,
+    )
+    try:
+        _observe_directory(
+            target_path, target_fd, target_identity, label="target graph root"
+        )
+        _observe_directory(
+            target_snapshots_path,
+            target_snapshots_fd,
+            target_snapshots_identity,
+            label="snapshots directory",
+        )
+        target = _observe_target_unlocked(target_path, source["snapshot_id"])
+        _observe_directory(
+            target_path, target_fd, target_identity, label="target graph root"
+        )
+        _after_transfer_before_source_final_recheck(source_path, target_path)
+        _reobserve_held_source(source)
+        _observe_directory(
+            source_path, source_fd, source_identity, label="source graph root"
+        )
+        _observe_directory(
+            source_snapshots_path,
+            source_snapshots_fd,
+            source_snapshots_identity,
+            label="snapshots directory",
+        )
+        _after_transfer_source_final_recheck(source_path, target_path)
+        final_target = _capture_target_tokens(target_path)
+        if final_target != target["tokens"]:
+            raise SnapshotTransferPlanIntegrityError(
+                "publication lock, current, snapshots listing, or "
+                "staging changed during transfer plan"
+            )
+        _observe_directory(
+            target_path, target_fd, target_identity, label="target graph root"
+        )
+        _observe_directory(
+            target_snapshots_path,
+            target_snapshots_fd,
+            target_snapshots_identity,
+            label="snapshots directory",
+        )
+        result = _build_result(source_path, target_path, source, target)
+        return result, source, target
+    except Exception:
+        for fd in source["payload_fds"].values():
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        os.close(int(source["directory_fd"]))
+        raise
+
+
 def _build_result(
     source_graph: Path,
     target_graph: Path,
@@ -1330,75 +1405,22 @@ def _snapshot_transfer_plan_scope(
                             target_path, target_fd, target_identity
                         )
                         try:
-                            source = _observe_held_source_snapshot(
+                            result, source, _target = _observe_fresh_transfer_plan(
                                 source_path,
-                                requested,
+                                source_fd,
+                                source_identity,
+                                _source_snapshots,
                                 source_snapshots_fd,
                                 source_snapshots_identity,
+                                target_path,
+                                target_fd,
+                                target_identity,
+                                _target_snapshots,
+                                target_snapshots_fd,
+                                target_snapshots_identity,
+                                requested,
                             )
                             try:
-                                _observe_directory(
-                                    target_path,
-                                    target_fd,
-                                    target_identity,
-                                    label="target graph root",
-                                )
-                                _observe_directory(
-                                    _target_snapshots,
-                                    target_snapshots_fd,
-                                    target_snapshots_identity,
-                                    label="snapshots directory",
-                                )
-                                target = _observe_target_unlocked(
-                                    target_path, source["snapshot_id"]
-                                )
-                                _observe_directory(
-                                    target_path,
-                                    target_fd,
-                                    target_identity,
-                                    label="target graph root",
-                                )
-                                _after_transfer_before_source_final_recheck(
-                                    source_path, target_path
-                                )
-                                _reobserve_held_source(source)
-                                _observe_directory(
-                                    source_path,
-                                    source_fd,
-                                    source_identity,
-                                    label="source graph root",
-                                )
-                                _observe_directory(
-                                    _source_snapshots,
-                                    source_snapshots_fd,
-                                    source_snapshots_identity,
-                                    label="snapshots directory",
-                                )
-                                _after_transfer_source_final_recheck(
-                                    source_path, target_path
-                                )
-                                final_target = _capture_target_tokens(target_path)
-                                if final_target != target["tokens"]:
-                                    raise SnapshotTransferPlanIntegrityError(
-                                        "publication lock, current, snapshots "
-                                        "listing, or staging changed during "
-                                        "transfer plan"
-                                    )
-                                _observe_directory(
-                                    target_path,
-                                    target_fd,
-                                    target_identity,
-                                    label="target graph root",
-                                )
-                                _observe_directory(
-                                    _target_snapshots,
-                                    target_snapshots_fd,
-                                    target_snapshots_identity,
-                                    label="snapshots directory",
-                                )
-                                result = _build_result(
-                                    source_path, target_path, source, target
-                                )
                                 _after_transfer_result_ready(
                                     source_path,
                                     target_path,

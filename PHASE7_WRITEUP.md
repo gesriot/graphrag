@@ -159,7 +159,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`1957 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`1972 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
@@ -417,13 +417,20 @@ either tree. Same-graph identity is rejected before nested
 leases. The two shared existing-lock leases are acquired in
 canonical UTF-8 path-byte order with an inode tie-breaker.
 ``transfer_performed`` is always false. ``transfer_revision`` is a
-self-consistency/CAS-ready plan token; no mutation command in
-this milestone accepts it. The
+self-consistency/CAS-ready plan token accepted only by
+``snapshot-transfer-apply``.
+``graphrag-code snapshot-transfer-apply`` (also ``python -m
+graphrag_code.snapshot_transfer_apply`` and
+``scripts/snapshot_transfer_apply.py``) is the CAS-guarded apply
+of that plan: it copies the snapshot into a different managed
+graph without changing ``current``, pins, or retention, and
+without overwriting an existing snapshot id. Successful transfer
+is not activation, backup, authenticity, or recoverability. The
 composite plan, apply, reconcile, export-plan, export-apply,
 export-verify, export-reconcile, export-staging,
 export-staging-cleanup-plan, export-staging-cleanup,
 export-staging-cleanup-reconcile, import-plan, import-apply,
-import-reconcile, and transfer-plan
+import-reconcile, transfer-plan, and transfer-apply
 commands are intentionally absent from MCP.
 Advisory locks do not protect against non-cooperating programs. This is
 not natural-language search, an HTTP service, repair, reindex, or

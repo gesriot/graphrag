@@ -765,6 +765,222 @@ def graph_exclusive_lease(graph_root: Path) -> Iterator[None]:
         os.close(fd)
 
 
+def graph_lease_order_key(
+    canonical: Path, identity: Tuple[int, int]
+) -> Tuple[bytes, int, int]:
+    """Global two-graph lease order, independent of source/target role.
+
+    Primary key: canonical UTF-8 path bytes of the real graph root.
+    Tie-breaker: ``(st_dev, st_ino)``. Source-shared / target-exclusive
+    transfer apply uses this same order so opposing A→B and B→A
+    operations cannot create a lock cycle.
+    """
+    return (str(canonical).encode("utf-8"), int(identity[0]), int(identity[1]))
+
+
+def ordered_graph_lease_pair(
+    left: Path,
+    left_identity: Tuple[int, int],
+    right: Path,
+    right_identity: Tuple[int, int],
+) -> Tuple[Path, Path]:
+    """Return ``(first, second)`` in the documented global lease order."""
+    left_key = graph_lease_order_key(left, left_identity)
+    right_key = graph_lease_order_key(right, right_identity)
+    if left_key <= right_key:
+        return left, right
+    return right, left
+
+
+def _after_graph_mixed_lease_one_held(_root: Path, _exclusive: bool) -> None:
+    """Test hook after one mixed-mode lock is held and before the next acquire."""
+    return None
+
+
+def _root_lease_inode(root: Path) -> Tuple[int, int]:
+    import stat as stat_mod
+
+    try:
+        info = Path(root).lstat()
+    except FileNotFoundError as error:
+        raise ByogPublicationLockError(
+            f"graph root disappeared before mixed-mode lease acquisition: {root}"
+        ) from error
+    except OSError as error:
+        raise ByogPublicationLockError(
+            f"cannot inspect graph root {root}: {error}"
+        ) from error
+    if stat_mod.S_ISLNK(info.st_mode) or not stat_mod.S_ISDIR(info.st_mode):
+        raise ByogPublicationLockError(
+            f"graph root is not a real directory: {root}"
+        )
+    return (info.st_dev, info.st_ino)
+
+
+def _require_root_lease_inode(
+    root: Path, expected: Tuple[int, int]
+) -> None:
+    observed = _root_lease_inode(root)
+    if observed != expected:
+        raise ByogPublicationLockError(
+            "graph root changed during mixed-mode lease acquisition: "
+            f"{root}"
+        )
+
+
+def _require_managed_for_mixed_lease(root: Path, *, exclusive: bool) -> None:
+    try:
+        managed = _validate_managed_snapshot_layout(root)
+    except ByogReaderLockError as error:
+        if exclusive:
+            raise ByogPublicationLockError(str(error)) from error
+        raise
+    if managed:
+        return
+    if exclusive:
+        raise ByogPublicationLockError(
+            "exclusive existing-lock lease requires a managed "
+            f"current + snapshots/ graph: {root}"
+        )
+    raise ByogReaderLockError(
+        "legacy flat-parquet directory has no retained snapshot history: "
+        f"{root}"
+    )
+
+
+def _open_mixed_lock_fd(lock_path: Path, *, exclusive: bool) -> int:
+    if exclusive:
+        return _open_existing_exclusive_lock_fd(lock_path)
+    return _open_shared_lock_fd(lock_path)
+
+
+def _acquire_mixed_lock(fd: int, lock_path: Path, *, exclusive: bool) -> str:
+    try:
+        backend = _acquire_lock(fd, exclusive=exclusive)
+    except ByogPublicationLockError as error:
+        if exclusive:
+            raise
+        raise ByogReaderLockError(str(error)) from error
+    except OSError as error:
+        if exclusive:
+            raise ByogPublicationLockError(
+                f"cannot acquire exclusive publication lock {lock_path}: {error}"
+            ) from error
+        raise ByogReaderLockError(
+            f"cannot acquire shared publication lock {lock_path}: {error}"
+        ) from error
+    try:
+        _validate_existing_exclusive_lock_fd(fd, lock_path)
+    except ByogPublicationLockError as error:
+        if exclusive:
+            raise
+        raise ByogReaderLockError(str(error)) from error
+    return backend
+
+
+@contextmanager
+def graph_source_shared_target_exclusive_leases(
+    source_root: Path,
+    target_root: Path,
+) -> Iterator[None]:
+    """Hold source-shared and target-exclusive existing-lock leases.
+
+    Both ``.publish.lock`` files are opened read-only without following
+    symlinks and are never created, truncated, chmodded, written, or
+    replaced. Shared vs exclusive mode is assigned by graph role, not
+    by acquisition order. The two held descriptors are flocked in the
+    global two-graph order (canonical UTF-8 path bytes, then
+    ``(st_dev, st_ino)``). This is not a lock upgrade and does not nest
+    ``graph_read_lease`` inside ``graph_exclusive_lease``.
+
+    Both lock identities are opened and bound before either potentially
+    blocking acquisition. After each acquisition its pathname/inode and
+    graph-root identity are revalidated, and both are revalidated after
+    both are held. Release is reverse acquisition order. Failure to
+    acquire or revalidate the second lock releases the first.
+    """
+    source = Path(source_root)
+    target = Path(target_root)
+    _require_managed_for_mixed_lease(source, exclusive=False)
+    _require_managed_for_mixed_lease(target, exclusive=True)
+    source_inode = _root_lease_inode(source)
+    target_inode = _root_lease_inode(target)
+    if source_inode == target_inode:
+        raise ByogPublicationLockError(
+            "source-graph and target-graph must be different directory "
+            f"identities: {source} and {target}"
+        )
+    ordered = [
+        (source, source_inode, False),
+        (target, target_inode, True),
+    ]
+    ordered.sort(key=lambda item: graph_lease_order_key(item[0], item[1]))
+    held: List[
+        Tuple[int, Optional[str], Path, Path, Tuple[int, int], bool]
+    ] = []
+    try:
+        # Bind both existing lock identities before either potentially
+        # blocking acquisition. Otherwise the second pathname could be
+        # replaced while the first acquisition waits, silently moving this
+        # operation into a different lock domain.
+        for root, root_inode, exclusive in ordered:
+            _require_root_lease_inode(root, root_inode)
+            lock_path = root / PUBLICATION_LOCK_NAME
+            fd = _open_mixed_lock_fd(lock_path, exclusive=exclusive)
+            held.append(
+                (fd, None, lock_path, root, root_inode, exclusive)
+            )
+        for index, (
+            fd,
+            _backend,
+            lock_path,
+            root,
+            root_inode,
+            exclusive,
+        ) in enumerate(held):
+            try:
+                backend = _acquire_mixed_lock(fd, lock_path, exclusive=exclusive)
+            except Exception:
+                raise
+            held[index] = (
+                fd,
+                backend,
+                lock_path,
+                root,
+                root_inode,
+                exclusive,
+            )
+            _require_root_lease_inode(root, root_inode)
+            _after_graph_mixed_lease_one_held(root, exclusive)
+        for fd, _backend, lock_path, root, root_inode, exclusive in held:
+            try:
+                _validate_existing_exclusive_lock_fd(fd, lock_path)
+            except ByogPublicationLockError as error:
+                if exclusive:
+                    raise
+                raise ByogReaderLockError(str(error)) from error
+            _require_root_lease_inode(root, root_inode)
+        yield
+    finally:
+        for (
+            fd,
+            backend,
+            _lock_path,
+            _root,
+            _root_inode,
+            _exclusive,
+        ) in reversed(held):
+            if backend is not None:
+                try:
+                    _release_lock(fd, backend)
+                except OSError:
+                    pass
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
 def _remove_staging_dir(stage_dir: Path) -> None:
     if not stage_dir.exists():
         return

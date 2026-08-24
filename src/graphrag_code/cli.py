@@ -23,7 +23,7 @@ snapshot-export-reconcile, snapshot-export-staging,
 snapshot-export-staging-cleanup-plan, snapshot-export-staging-cleanup,
 snapshot-export-staging-cleanup-reconcile, snapshot-import-plan,
 snapshot-import-apply, snapshot-import-reconcile, snapshot-transfer-plan,
-port_eval).
+snapshot-transfer-apply, port_eval).
 """
 from __future__ import annotations
 
@@ -66,6 +66,7 @@ app = typer.Typer(
         "snapshot-import-apply → "
         "snapshot-import-reconcile → "
         "snapshot-transfer-plan → "
+        "snapshot-transfer-apply → "
         "port-eval. Relative "
         "paths are resolved from the invoking working directory."
     ),
@@ -101,6 +102,7 @@ _DELEGATE_MODULES = {
     "snapshot_import_apply.py": "graphrag_code.snapshot_import_apply",
     "snapshot_import_reconcile.py": "graphrag_code.snapshot_import_reconcile",
     "snapshot_transfer_plan.py": "graphrag_code.snapshot_transfer_plan",
+    "snapshot_transfer_apply.py": "graphrag_code.snapshot_transfer_apply",
     "audit_call_edges.py": "graphrag_code.audit_call_edges",
     "port_eval.py": "graphrag_code.port_eval",
 }
@@ -1700,6 +1702,65 @@ def snapshot_transfer_plan(
     if json_out is True:
         args.append("--json")
     _delegate("snapshot_transfer_plan.py", args)
+
+
+@app.command("snapshot-transfer-apply")
+def snapshot_transfer_apply(
+    source_graph: Path = typer.Option(
+        ...,
+        "--source-graph",
+        help="Managed source BYOG graph root, relative to cwd.",
+    ),
+    snapshot: str = typer.Option(
+        ...,
+        "--snapshot",
+        help="current or a canonical retained published snapshot id.",
+    ),
+    target_graph: Path = typer.Option(
+        ...,
+        "--target-graph",
+        help="Managed target BYOG graph root, relative to cwd.",
+    ),
+    expected_transfer_revision: str = typer.Option(
+        ...,
+        "--expected-transfer-revision",
+        help="sha256:<64 lowercase hex> from a fresh snapshot-transfer-plan",
+    ),
+    transfer_confirmed: bool = typer.Option(
+        False,
+        "--transfer-confirmed",
+        help="Required to create staging and publish the transferred snapshot.",
+    ),
+    json_out: bool = typer.Option(
+        False,
+        "--json",
+        help="same JSON shape as snapshot_transfer_apply.py --json",
+    ),
+):
+    """Publish one retained snapshot into a different managed graph.
+
+    Recomputes a fresh schema-1 transfer plan under mixed-mode
+    source-shared / target-exclusive existing-lock leases and copies
+    only when --expected-transfer-revision still matches. Does not
+    mutate the source graph, change current, pins, or retention, or
+    overwrite an existing snapshot id. Never creates .publish.lock.
+    Intentionally absent from MCP.
+    """
+    args = [
+        "--source-graph",
+        str(source_graph),
+        "--snapshot",
+        snapshot,
+        "--target-graph",
+        str(target_graph),
+        "--expected-transfer-revision",
+        expected_transfer_revision,
+    ]
+    if transfer_confirmed is True:
+        args.append("--transfer-confirmed")
+    if json_out is True:
+        args.append("--json")
+    _delegate("snapshot_transfer_apply.py", args)
 
 
 @app.command("audit-graph")

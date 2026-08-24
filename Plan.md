@@ -119,7 +119,7 @@ definitions are all present; 113 re-exports are reported separately rather
 than inflated into duplicate graph entities. The `sqlparse.split` target named
 by the Rust port is therefore an actual graph entity, not merely a module API
 outside the graph. See `examples/sqlparse/PROVENANCE.md` for the census and
-call-oracle effect. The current full-suite expectation is **1957 passed, 2 xfailed**;
+call-oracle effect. The current full-suite expectation is **1972 passed, 2 xfailed**;
 this 2026-08-14 persisted-integrity doctor update supersedes the earlier 721-passed /
 2026-07-26 gate snapshot. The product CLI is the installable ``graphrag-code``
 console command (`python -m graphrag_code`); source-checkout ``scripts/*.py``
@@ -386,10 +386,24 @@ snapshot envelope, classifies an already-published matching id or
 an existing ``.staging-<id>`` as blocked, and does not export,
 import, copy, activate, create staging, or mutate either tree.
 ``transfer_performed`` is always false. ``transfer_revision`` is a
-self-consistency/CAS-ready plan token; no mutation command in this
-milestone accepts it. A ready plan does not authorize a later apply
+self-consistency/CAS-ready plan token accepted only by
+``snapshot-transfer-apply`` after that command freshly reproduces
+the same plan. A ready plan does not authorize a later apply
 without freshly reproducing the complete plan and matching
-``transfer_revision``. Standalone prune and
+``transfer_revision``.
+``graphrag-code snapshot-transfer-apply --source-graph <root>
+--snapshot <id|current> --target-graph <root>
+--expected-transfer-revision sha256:<hex> --transfer-confirmed``
+is the CAS apply. It holds one source-shared and one
+target-exclusive existing-lock lease acquired in that same global
+order, copies exact source bytes into ``.staging-<snapshot-id>``,
+holds ``.staging-writer.lock`` through copying, then publishes with
+a native no-replace rename. It preserves the source snapshot id,
+leaves both ``current`` pointers unchanged, does not inspect or
+change pins, and does not run retention. It does not overwrite an
+existing snapshot id. A crash may leave ``.staging-<id>`` and its
+writer-lock metadata. Successful transfer is not activation,
+backup, authenticity, or recoverability. Standalone prune and
 staging cleanup remain available. Neither prune, staging
 inventory, the staging cleanup plan, staging cleanup apply, the
 composite maintenance plan, the composite apply, reconcile, the
@@ -397,7 +411,7 @@ export plan, the export apply, the export verify, the export
 reconcile, the export staging inventory, the export staging
 cleanup plan, the export staging cleanup apply, the export
 staging cleanup reconcile, the import plan, the import apply, the
-import reconcile, nor the transfer plan
+import reconcile, the transfer plan, nor the transfer apply
 is an MCP tool. MCP remains exactly 11
 read-only tools and stays strict. Advisory locks do not protect
 against non-cooperating programs. No search, UI, HTTP service,
