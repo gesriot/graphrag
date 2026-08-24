@@ -355,6 +355,21 @@ def test_load_gate_manifest_rejects_type_context_on_python(tmp_path: Path):
     with pytest.raises(ValueError, match="only valid for C"):
         load_gate_manifest(path)
 
+    valid = json.loads(MANIFEST.read_text())
+    charset = next(entry for entry in valid["ports"] if entry["id"] == "charset_normalizer")
+    full_examples = next(check for check in charset["checks"] if check["name"] == "full examples pytest")
+    assert full_examples["timeout_seconds"] == 1200
+    assert load_gate_manifest(MANIFEST)["charset_normalizer"]["checks"][2]["timeout_seconds"] == 1200
+    for invalid_timeout in (True, 0, 3601, 1.5, "1200"):
+        invalid = json.loads(MANIFEST.read_text())
+        invalid_charset = next(
+            entry for entry in invalid["ports"] if entry["id"] == "charset_normalizer"
+        )
+        invalid_charset["checks"][2]["timeout_seconds"] = invalid_timeout
+        path.write_text(json.dumps(invalid))
+        with pytest.raises(ValueError, match="timeout_seconds"):
+            load_gate_manifest(path)
+
 
 # ---------------------------------------------------------------------------
 # Index flag wiring + Clang probe
@@ -592,6 +607,7 @@ def test_gen_context_packs_validates_type_requirements(tmp_path: Path):
 
 
 def test_declared_gate_fails_when_packs_incomplete(monkeypatch):
+    observed: dict[str, int] = {}
     gate = {
         "id": "toy",
         "kind": "port",
@@ -599,7 +615,13 @@ def test_declared_gate_fails_when_packs_incomplete(monkeypatch):
         "port": "examples/inih_rust",
         "indexer": "c",
         "symbols": ["ini:ini_parse"],
-        "checks": [],
+        "checks": [
+            {
+                "name": "bounded long check",
+                "command": ["unused"],
+                "timeout_seconds": 123,
+            }
+        ],
         "manual_fixes": 0,
         "run_binary": False,
     }
@@ -616,6 +638,18 @@ def test_declared_gate_fails_when_packs_incomplete(monkeypatch):
         "port_eval._tool_probe",
         lambda tool: {"status": "ok", "tool": tool},
     )
+
+    def fake_run(cmd, cwd, timeout=600, env=None):
+        observed["timeout"] = timeout
+        return {
+            "status": "ok",
+            "returncode": 0,
+            "cmd": " ".join(cmd),
+            "output_tail": [],
+            "elapsed_seconds": 0.0,
+        }
+
+    monkeypatch.setattr("port_eval._run", fake_run)
 
     def fake_build_eval_report(**kwargs):
         return {
@@ -659,6 +693,7 @@ def test_declared_gate_fails_when_packs_incomplete(monkeypatch):
     result = run_declared_gate(gate, full=False, scale=False, differential_full=False)
     assert result["status"] == "fail"
     assert result["port_eval"]["context_packs"]["complete"] is False
+    assert observed["timeout"] == 123
 
 
 # ---------------------------------------------------------------------------

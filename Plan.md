@@ -119,7 +119,7 @@ definitions are all present; 113 re-exports are reported separately rather
 than inflated into duplicate graph entities. The `sqlparse.split` target named
 by the Rust port is therefore an actual graph entity, not merely a module API
 outside the graph. See `examples/sqlparse/PROVENANCE.md` for the census and
-call-oracle effect. The current full-suite expectation is **1936 passed, 2 xfailed**;
+call-oracle effect. The current full-suite expectation is **1957 passed, 2 xfailed**;
 this 2026-08-14 persisted-integrity doctor update supersedes the earlier 721-passed /
 2026-07-26 gate snapshot. The product CLI is the installable ``graphrag-code``
 console command (`python -m graphrag_code`); source-checkout ``scripts/*.py``
@@ -369,14 +369,35 @@ presence does not prove apply created it; matching revision
 proves only payload-contract equality during the bounded
 observation window. A present snapshot receives a final complete
 held-payload recheck after target-state observation. A fresh import
-plan is required before any later apply. Standalone prune and
+plan is required before any later apply.
+``graphrag-code snapshot-transfer-plan --source-graph <root>
+--snapshot <id|current> --target-graph <root>`` is a read-only
+plan for a future direct transfer of one retained snapshot from
+one managed ``current + snapshots/`` graph to a different managed
+graph, without first creating a standalone export directory. It
+holds one shared existing-lock lease on each graph for the
+complete joint observation. The two leases are acquired in one
+deterministic global order independent of source/target role:
+canonical UTF-8 path bytes of the real graph root, then
+``(st_dev, st_ino)`` as a stable identity tie-breaker. Same-graph
+identity, including path aliases for the same inode, is rejected
+before nested leases. It validates the language-independent stored
+snapshot envelope, classifies an already-published matching id or
+an existing ``.staging-<id>`` as blocked, and does not export,
+import, copy, activate, create staging, or mutate either tree.
+``transfer_performed`` is always false. ``transfer_revision`` is a
+self-consistency/CAS-ready plan token; no mutation command in this
+milestone accepts it. A ready plan does not authorize a later apply
+without freshly reproducing the complete plan and matching
+``transfer_revision``. Standalone prune and
 staging cleanup remain available. Neither prune, staging
 inventory, the staging cleanup plan, staging cleanup apply, the
 composite maintenance plan, the composite apply, reconcile, the
 export plan, the export apply, the export verify, the export
 reconcile, the export staging inventory, the export staging
 cleanup plan, the export staging cleanup apply, the export
-staging cleanup reconcile, the import plan, the import apply, nor the import reconcile
+staging cleanup reconcile, the import plan, the import apply, the
+import reconcile, nor the transfer plan
 is an MCP tool. MCP remains exactly 11
 read-only tools and stays strict. Advisory locks do not protect
 against non-cooperating programs. No search, UI, HTTP service,

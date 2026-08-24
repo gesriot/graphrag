@@ -260,6 +260,7 @@
         {
           "name": "full examples pytest",
           "when": "full",
+          "timeout_seconds": 1200,
           "command": [
             "{python}",
             "-m",

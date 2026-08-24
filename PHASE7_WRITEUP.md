@@ -159,7 +159,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`1936 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`1957 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
@@ -406,12 +406,24 @@ staging, run retention, or mutate either tree. Snapshot absence
 does not prove apply failed; presence does not prove apply
 created it. A present snapshot receives a final complete
 held-payload recheck after target-state observation. A fresh import
-plan is required before any later apply. The
+plan is required before any later apply.
+``graphrag-code snapshot-transfer-plan`` (also ``python -m
+graphrag_code.snapshot_transfer_plan`` and
+``scripts/snapshot_transfer_plan.py``) is a read-only plan for
+transferring one retained snapshot from one managed graph to a
+different managed graph without first creating a standalone
+export. It does not export, import, copy, activate, or mutate
+either tree. Same-graph identity is rejected before nested
+leases. The two shared existing-lock leases are acquired in
+canonical UTF-8 path-byte order with an inode tie-breaker.
+``transfer_performed`` is always false. ``transfer_revision`` is a
+self-consistency/CAS-ready plan token; no mutation command in
+this milestone accepts it. The
 composite plan, apply, reconcile, export-plan, export-apply,
 export-verify, export-reconcile, export-staging,
 export-staging-cleanup-plan, export-staging-cleanup,
-export-staging-cleanup-reconcile, import-plan, import-apply, and
-import-reconcile
+export-staging-cleanup-reconcile, import-plan, import-apply,
+import-reconcile, and transfer-plan
 commands are intentionally absent from MCP.
 Advisory locks do not protect against non-cooperating programs. This is
 not natural-language search, an HTTP service, repair, reindex, or

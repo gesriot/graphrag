@@ -808,7 +808,7 @@ Replacements cannot be proven identical from the saved public plan
 or result. A new maintenance plan is still required before any later
 mutation. The composite plan, apply, reconcile, export-plan,
 export-apply, export-verify, export-reconcile, export-staging,
-and import-plan
+import-plan, and transfer-plan
 commands are
 intentionally absent from MCP. The fixed MCP tool set
 remains 11 read-only tools.
@@ -1836,6 +1836,148 @@ deletion, cleanup, repair, pinning, pruning, or retention. This
 is not backup, authenticity, provenance, portability,
 recoverability, restore success, or semantic-equivalence
 evidence. Advisory locks protect only cooperating processes.
+
+`graphrag-code snapshot-transfer-plan --source-graph <root>
+--snapshot <id|current> --target-graph <root>` is a read-only
+plan for a future direct transfer of one retained published
+snapshot from one managed BYOG graph to a different managed
+BYOG graph, without first creating a standalone export
+directory. Transfer-plan schema version is 1. `--source-graph`,
+`--snapshot`, and `--target-graph` are required. `--snapshot`
+accepts exactly `current` or a canonical retained published
+snapshot id; staging names are rejected. Relative paths resolve
+from the invoking cwd. Surfaces are also
+`python -m graphrag_code.snapshot_transfer_plan` and
+`scripts/snapshot_transfer_plan.py`. The command is CLI-only
+and intentionally absent from MCP. The fixed MCP tool set
+remains 11 read-only tools.
+
+Both graph arguments must name existing real directories, never
+symlinks, and managed `current + snapshots/` graphs with
+already-existing regular `.publish.lock` files. The command
+never creates, adopts, truncates, chmods, or replaces either
+lock. Legacy-flat and unlocked managed graphs fail closed. The
+source and target must be different directory identities,
+including two path aliases that resolve to the same
+`(st_dev, st_ino)`. Same-graph identity is malformed
+invocation: exit 2, empty stdout. That check happens before any
+nested lease.
+
+One shared existing-lock lease is held on each graph for the
+complete joint observation, result construction, serialization,
+stdout write, and flush. The two leases are acquired in one
+deterministic global order independent of source/target role:
+sort by canonical UTF-8 path bytes of the real graph root, then
+by `(st_dev, st_ino)` as a stable identity tie-breaker. A future
+source-shared/target-exclusive transfer apply must use this same
+order so opposing A→B and B→A operations cannot create a lock
+cycle. Both graph roots and both `snapshots/` directories are
+anchored with no-follow directory descriptors and identity
+checks. The command does not invoke public export or import
+CLIs and does not create a detached observation window.
+
+`--snapshot` is resolved exactly once under the source lease.
+The selected source snapshot must be a real retained directory,
+never a symlink. Source current, published history, and the
+snapshots listing are bounded and validated. The selected
+payload set is observed using the established
+snapshot-export-plan/import-plan contracts: bounded streaming
+SHA-256, held no-follow descriptors, canonical manifest
+validation, expected payload names, Parquet envelope
+validation, hardlink anomaly rejection, and no nested names or
+temporary remnants. Canonical schema-1 export file records and
+the `export_revision` contract are reused. Source descriptors
+stay held through result serialization, stdout write, and
+flush. After target observation, every held source payload is
+rechecked and source current/history/listing is validated
+again. A same-size rewrite with restored mtime in the late
+joint-observation window fails closed.
+
+The target is observed under the same joint lease window:
+`current`, complete published history, and staging inventory.
+The command inspects exact target snapshot-id membership and
+exact `.staging-<snapshot-id>` presence. It does not open or
+compare an already-published target snapshot payload; presence
+blocks transfer regardless of content. Blocking reason codes
+are exactly `snapshot_id_already_published` and
+`target_staging_name_present`. Unrelated target staging entries
+are notices/counts, not blockers. Target current/history/exact
+staging is rechecked after the final source payload
+observation. Lock/root/listing/current/exact-staging
+replacement or disagreement between bounded observations fails
+closed.
+
+JSON includes `schema_version`, `ok`, `source_graph`,
+`target_graph`, `requested_snapshot`, `snapshot_id`,
+`source_current`, `source_published_snapshots`, `files`,
+`file_count`, `total_size_bytes`, `source_export_revision`,
+`source_envelope_valid=true`, `target_current`,
+`target_published_snapshots`, `target_published_count`,
+`target_staging_name=.staging-<snapshot-id>`,
+`target_snapshot_present`, `target_staging_present`,
+`target_staging_count`, `blocking_reasons`, `transfer_ready`,
+`transfer_revision`, `transfer_performed=false`,
+`source_graph_mutated=false`, `target_graph_mutated=false`,
+`fresh_plan_required_before_transfer=true`, and `notices`.
+`ok=true` means the complete read succeeded, not that transfer
+occurred. `blocking_reasons` is the exact unique UTF-8-byte-sorted
+set implied by the two target presence flags. `transfer_ready`
+is true exactly when that list is empty. Observed
+`source_export_revision` is byte-compatible with the
+snapshot-export-plan canonical export-revision contract.
+`transfer_revision` is `sha256:<hex>` of compact canonical JSON
+(`sort_keys=True`, `separators=(",", ":")`, `ensure_ascii=True`,
+`allow_nan=False`, no trailing newline) over:
+
+```json
+{
+  "blocking_reasons": [],
+  "fresh_plan_required_before_transfer": true,
+  "schema_version": 1,
+  "snapshot_id": "<published-id>",
+  "source_envelope_valid": true,
+  "source_export_revision": "sha256:<hex>",
+  "target_current": "<published-id>",
+  "target_published_snapshots": ["<published-id>"],
+  "target_snapshot_present": false,
+  "target_staging_name": ".staging-<published-id>",
+  "target_staging_present": false,
+  "transfer_performed": false,
+  "transfer_ready": true
+}
+```
+
+The complete ordered source file records are bound indirectly
+through `source_export_revision`. Absolute graph paths, counts,
+`requested_snapshot`, notices, `ok`, and the mutation
+presentation flags are not revision inputs. `transfer_revision`
+is only a self-consistency/CAS-ready token for a future
+command; no mutation command accepts it in this milestone.
+JSON booleans are not integers, names are canonical direct
+names, lists are unique and ordered by UTF-8 bytes, and
+revisions are exactly `sha256:<64 lowercase hex>`. The plan is
+not a backup and is not a claim of authenticity, provenance,
+portability, recoverability, or successful future transfer.
+
+Stable valid observation, including a blocked plan, exits 0 with
+one complete human or JSON result. Unsafe structure, invalid
+source envelope, descriptor/path replacement, concurrent
+change, or inconsistent observations is exit 1, empty stdout.
+Malformed arguments, same graph identity, missing paths,
+symlinked roots, unmanaged/unlocked graphs, exceeded bounds, or
+unsupported safe-read primitives are exit 2, empty stdout.
+Diagnostics may go to stderr.
+
+The command does not create a snapshot, export, or staging
+directory; copy, rename, link, replace, truncate, chmod,
+unlink, or delete anything; change `current`; inspect or change
+pins; run retention, prune, or clean staging; or create or
+modify `.publish.lock`. `transfer_performed` is always false.
+Neither graph is mutated. A ready plan does not authorize a
+later apply without freshly reproducing the complete plan and
+matching `transfer_revision`. Advisory locks protect only
+cooperating processes. Future transfer apply and reconciliation
+are outside this milestone.
 
 ## Entity Types (code domain, start with these)
 - file

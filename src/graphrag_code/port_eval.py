@@ -854,6 +854,27 @@ def to_markdown(r: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+DEFAULT_DECLARED_CHECK_TIMEOUT_SECONDS = 600
+MAX_DECLARED_CHECK_TIMEOUT_SECONDS = 3600
+
+
+def _declared_check_timeout(check: Dict[str, Any], *, label: str) -> int:
+    """Return one bounded manifest timeout without accepting bool-as-int."""
+    timeout = check.get(
+        "timeout_seconds", DEFAULT_DECLARED_CHECK_TIMEOUT_SECONDS
+    )
+    if (
+        isinstance(timeout, bool)
+        or not isinstance(timeout, int)
+        or not 1 <= timeout <= MAX_DECLARED_CHECK_TIMEOUT_SECONDS
+    ):
+        raise ValueError(
+            f"{label}: timeout_seconds must be an integer from 1 to "
+            f"{MAX_DECLARED_CHECK_TIMEOUT_SECONDS}"
+        )
+    return timeout
+
+
 def load_gate_manifest(path: Path) -> Dict[str, Dict[str, Any]]:
     """Load and fail closed on the small declarative port-gate manifest."""
     data = json.loads(path.read_text())
@@ -880,6 +901,15 @@ def load_gate_manifest(path: Path) -> Dict[str, Dict[str, Any]]:
                 raise ValueError(f"{path}: {ident}: unknown indexer {entry['indexer']!r}")
         elif not isinstance(entry.get("gap"), str) or not entry["gap"]:
             raise ValueError(f"{path}: {ident}: gap entries need a named gap")
+        checks = entry.get("checks", [])
+        if not isinstance(checks, list):
+            raise ValueError(f"{path}: {ident}: checks must be a list")
+        for index, check in enumerate(checks):
+            if not isinstance(check, dict):
+                raise ValueError(f"{path}: {ident}: check {index} must be an object")
+            _declared_check_timeout(
+                check, label=f"{path}: {ident}: check {index}"
+            )
         gates[ident] = entry
 
     # Published graphs are not port-gate inputs: source profiles deliberately
@@ -1033,6 +1063,9 @@ def load_aggregate_checks(path: Path) -> List[Dict[str, Any]]:
         when = check.get("when", "always")
         if when not in {"always", "full", "scale", "differential-full"}:
             raise ValueError(f"{path}: aggregate check {name!r} has invalid when={when!r}")
+        _declared_check_timeout(
+            check, label=f"{path}: aggregate check {name!r}"
+        )
         loaded.append(check)
     return loaded
 
@@ -1214,7 +1247,10 @@ def _run_declared_check(
     cwd = (_repo() / declared_cwd).resolve()
     if _repo() not in cwd.parents and cwd != _repo():
         raise ValueError(f"{name}: cwd must stay within the repository")
-    result = _run(_expand_gate_command(command), cwd, env=declared_env)
+    timeout = _declared_check_timeout(check, label=name)
+    result = _run(
+        _expand_gate_command(command), cwd, timeout=timeout, env=declared_env
+    )
     result["name"] = name
     successful_skip_marker = check.get("successful_skip_marker")
     if successful_skip_marker is not None:

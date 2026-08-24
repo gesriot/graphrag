@@ -22,7 +22,8 @@ snapshot-export-apply, snapshot-export-verify,
 snapshot-export-reconcile, snapshot-export-staging,
 snapshot-export-staging-cleanup-plan, snapshot-export-staging-cleanup,
 snapshot-export-staging-cleanup-reconcile, snapshot-import-plan,
-snapshot-import-apply, snapshot-import-reconcile, port_eval).
+snapshot-import-apply, snapshot-import-reconcile, snapshot-transfer-plan,
+port_eval).
 """
 from __future__ import annotations
 
@@ -64,6 +65,7 @@ app = typer.Typer(
         "snapshot-import-plan → "
         "snapshot-import-apply → "
         "snapshot-import-reconcile → "
+        "snapshot-transfer-plan → "
         "port-eval. Relative "
         "paths are resolved from the invoking working directory."
     ),
@@ -98,6 +100,7 @@ _DELEGATE_MODULES = {
     "snapshot_import_plan.py": "graphrag_code.snapshot_import_plan",
     "snapshot_import_apply.py": "graphrag_code.snapshot_import_apply",
     "snapshot_import_reconcile.py": "graphrag_code.snapshot_import_reconcile",
+    "snapshot_transfer_plan.py": "graphrag_code.snapshot_transfer_plan",
     "audit_call_edges.py": "graphrag_code.audit_call_edges",
     "port_eval.py": "graphrag_code.port_eval",
 }
@@ -1652,6 +1655,51 @@ def snapshot_import_reconcile(
     if json_out is True:
         args.append("--json")
     _delegate("snapshot_import_reconcile.py", args)
+
+
+@app.command("snapshot-transfer-plan")
+def snapshot_transfer_plan(
+    source_graph: Path = typer.Option(
+        ...,
+        "--source-graph",
+        help="Managed source BYOG graph root, relative to cwd.",
+    ),
+    snapshot: str = typer.Option(
+        ...,
+        "--snapshot",
+        help="current or a canonical retained published snapshot id.",
+    ),
+    target_graph: Path = typer.Option(
+        ...,
+        "--target-graph",
+        help="Managed target BYOG graph root, relative to cwd.",
+    ),
+    json_out: bool = typer.Option(
+        False,
+        "--json",
+        help="same JSON shape as snapshot_transfer_plan.py --json",
+    ),
+):
+    """Report a read-only plan for transferring one retained snapshot.
+
+    Observes one retained snapshot in a managed graph and a different
+    managed target graph, then emits a deterministic schema-1 plan.
+    Does not export, import, copy, activate, or mutate either graph.
+    The plan is not a backup and is not authorization to transfer or
+    delete anything. Never creates .publish.lock. Intentionally absent
+    from MCP.
+    """
+    args = [
+        "--source-graph",
+        str(source_graph),
+        "--snapshot",
+        snapshot,
+        "--target-graph",
+        str(target_graph),
+    ]
+    if json_out is True:
+        args.append("--json")
+    _delegate("snapshot_transfer_plan.py", args)
 
 
 @app.command("audit-graph")
