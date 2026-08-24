@@ -119,7 +119,7 @@ definitions are all present; 113 re-exports are reported separately rather
 than inflated into duplicate graph entities. The `sqlparse.split` target named
 by the Rust port is therefore an actual graph entity, not merely a module API
 outside the graph. See `examples/sqlparse/PROVENANCE.md` for the census and
-call-oracle effect. The current full-suite expectation is **1916 passed, 2 xfailed**;
+call-oracle effect. The current full-suite expectation is **1936 passed, 2 xfailed**;
 this 2026-08-14 persisted-integrity doctor update supersedes the earlier 721-passed /
 2026-07-26 gate snapshot. The product CLI is the installable ``graphrag-code``
 console command (`python -m graphrag_code`); source-checkout ``scripts/*.py``
@@ -356,14 +356,27 @@ place. A partial result never infers an unchanged current pointer:
 ``current_after`` is null and ``current_unchanged=false`` unless the
 post-publication proof completed. A crash may leave ``.staging-<id>`` and
 its writer-lock metadata. Successful import is not activation,
-backup, authenticity, or recoverability. Standalone prune and
+backup, authenticity, or recoverability.
+``graphrag-code snapshot-import-reconcile --graph <root>
+--plan-file <saved-import-plan.json>`` is the read-only
+aftermath inspection for that saved schema-1 plan and an
+optional saved schema-1 apply result. It holds one shared
+existing-lock graph lease, validates the saved inputs completely
+before observing the graph, and does not retry, recover, copy,
+publish, activate, pin, prune, clean staging, run retention, or
+mutate either tree. Snapshot absence does not prove apply failed;
+presence does not prove apply created it; matching revision
+proves only payload-contract equality during the bounded
+observation window. A present snapshot receives a final complete
+held-payload recheck after target-state observation. A fresh import
+plan is required before any later apply. Standalone prune and
 staging cleanup remain available. Neither prune, staging
 inventory, the staging cleanup plan, staging cleanup apply, the
 composite maintenance plan, the composite apply, reconcile, the
 export plan, the export apply, the export verify, the export
 reconcile, the export staging inventory, the export staging
 cleanup plan, the export staging cleanup apply, the export
-staging cleanup reconcile, the import plan, nor the import apply
+staging cleanup reconcile, the import plan, the import apply, nor the import reconcile
 is an MCP tool. MCP remains exactly 11
 read-only tools and stays strict. Advisory locks do not protect
 against non-cooperating programs. No search, UI, HTTP service,

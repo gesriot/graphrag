@@ -1681,6 +1681,162 @@ pre-publication validation alone.
 Broken stdout/flush must not release target protection early or
 be reported as success.
 
+`graphrag-code snapshot-import-reconcile --graph <root>
+--plan-file <saved-import-plan.json>
+[--apply-result-file <saved-import-apply-result.json>]` is a
+read-only aftermath inspection of one saved schema-1
+snapshot-import-plan, an optional saved schema-1
+snapshot-import-apply result, and the current state of the
+target managed graph. Reconcile schema version is 1. Surfaces
+are also `python -m graphrag_code.snapshot_import_reconcile`
+and `scripts/snapshot_import_reconcile.py`. The command is
+CLI-only and intentionally absent from MCP. The fixed MCP tool
+set remains 11 read-only tools.
+
+Saved plan and apply-result files may be relative to the
+invoking cwd. They must be bounded regular files (maximum
+1 MiB), opened read-only without following symlinks, and
+protected against pathname replacement, truncation, growth,
+same-size rewrite with restored mtime, and non-standard JSON
+constants. Each file must contain one JSON object. Complete
+input validation finishes before the graph is observed.
+Malformed, oversized, symlinked, replaced, or unsupported
+inputs are exit 2 with empty stdout.
+
+Saved import-plan validation covers the complete schema-1
+producer contract: `schema_version=1`, `ok=true`, absolute
+canonical `graph` and `export_directory` strings, canonical
+`snapshot_id`, exact canonical `files` sorted by UTF-8 bytes,
+`file_count` and `total_size_bytes`, required/optional envelope
+names with no unexpected names, `source_envelope_valid=true`,
+`current` and `published_snapshots` semantics, exact
+`target_staging_name=.staging-<snapshot-id>`,
+`target_snapshot_present` membership consistency,
+`target_staging_present` and `blocking_reasons` consistency,
+`import_ready` consistency, `import_performed=false`,
+`graph_mutated=false`, `export_mutated=false`,
+`fresh_plan_required_before_import=true`, and `notices` as an
+array. Published-history and staging counts must also stay within
+the producer bounds. `source_export_revision` is recomputed from
+schema version, snapshot id, and the complete file records using
+the existing export-revision contract. `import_revision` is
+recomputed through
+`canonical_import_revision_payload` / `import_revision_of`.
+Any contradiction or mismatched declared revision is malformed
+saved input: exit 2, empty stdout. The explicit `--graph` must
+resolve to the same canonical graph stored in the saved plan. A
+structurally valid plan referring to another graph is an
+integrity mismatch: exit 1, empty stdout.
+
+An optional saved apply result must match the saved plan exactly
+for `graph`, `export_directory`, `snapshot_id`,
+`expected_import_revision`, `observed_import_revision`,
+`source_export_revision`, `planned_files`, `file_count`,
+`total_size_bytes`, and `current_before`. Both expected and
+observed import revisions must equal the saved plan's validated
+`import_revision`. A saved apply result is impossible for a
+blocked saved plan; that is an integrity mismatch. Only
+outcomes the current producer can emit are accepted:
+exact complete success; emitted pre-publication partial; and
+emitted post-publication partial. The validated declaration is
+classified as `not_supplied`, `complete`,
+`pre_publication_partial`, or `post_publication_partial`. A
+structurally valid apply result referring to another plan,
+graph, export, or snapshot is exit 1 with empty stdout.
+
+The graph must be an existing real managed
+`current + snapshots/` graph with an already-existing regular
+`.publish.lock`. The command never creates, adopts, truncates,
+chmods, or replaces that lock. One shared existing-lock graph
+lease covers target observation, result construction,
+serialization, stdout write, and stdout flush. Graph-root and
+snapshots-directory descriptors are anchored with no-follow
+opens and complete identity checks. The command does not inspect
+or modify operator pins, claim pins, retention configuration, or
+the standalone export directory. Unrelated staging payload
+contents are not read. Unrelated staging name changes are not
+independently relevant unless they make the snapshots structure
+unsafe.
+
+If `<graph>/snapshots/<snapshot-id>` is stably absent, the
+result reports `published_snapshot_state=absent`,
+`observed_snapshot_export_revision=null`, and
+`snapshot_matches_plan=false`. A present target must be a real
+retained snapshot directory, never a symlink. Its exact
+top-level payload set is observed through held descriptors using
+the existing import/export hashing and persisted-envelope
+contracts internally. The command does not invoke a public CLI
+and does not create a detached nested observation window. Two
+initial complete bounded observations and streaming SHA-256
+hashes are followed by a final complete held-payload recheck
+after the second target-state scan, then a third target-state
+scan. These checks detect same-size rewrites with restored mtime,
+inode replacement, listing changes, symlink/FIFO/device/socket
+payloads, hardlink anomalies rejected by the envelope contract,
+manifest or Parquet envelope corruption, and directory
+replacement. A present structurally valid snapshot receives
+`matches_plan` or `revision_mismatch`. The observed snapshot
+export revision is computed using the saved plan's snapshot id
+and the observed exact file records. An invalid or concurrently
+changing retained snapshot is an integrity failure: exit 1,
+empty stdout. A stable valid revision mismatch is a normal
+completed observation: exit 0, `ok=true`.
+
+JSON includes `schema_version`, `ok`, `graph`, `plan_file`,
+`apply_result_file`, `input_import_revision`,
+`source_export_revision`, `snapshot_id`, `planned_files`,
+`file_count`, `total_size_bytes`, `apply_result_supplied`,
+`apply_result_valid`, `declared_apply_outcome`, `current`,
+`current_matches_plan`, `snapshot_active`,
+`published_snapshots`, `published_count`,
+`published_snapshot_present`, `published_snapshot_state`,
+`observed_snapshot_export_revision`, `snapshot_matches_plan`,
+`target_staging_name`, `target_staging_present`,
+`published_history_matches_plan_plus_target`,
+`creation_cause_proven=false`, `recovery_performed=false`,
+`graph_mutated=false`, `export_observed=false`,
+`export_mutated=false`, `activation_performed=false`,
+`retention_performed=false`,
+`fresh_plan_required_before_import=true`, and `notices`.
+`published_history_matches_plan_plus_target` is set equality of
+the live published set with the saved plan's published set union
+`{snapshot_id}`; it is not proof that apply caused the
+difference. `current_matches_plan` is current-value equality
+with the saved plan and does not claim continuous identity.
+`snapshot_active` means only that current currently names
+`snapshot_id`; import apply never activates. `ok=true` means
+the complete read-only reconciliation observation succeeded. It
+does not mean import apply succeeded, that the snapshot exists,
+that it matches, that staging was cleaned, or that current
+stayed unchanged.
+
+Stable valid observation, including target snapshot absent,
+matching, or revision-mismatch, exact staging present, current
+differing from the saved plan, and additional or removed
+retained snapshots, exits 0 with one complete human or JSON
+result. Unsafe graph/snapshot/staging structure, invalid present
+snapshot envelope, graph or input-plan/apply-result mismatch, or
+concurrent change during observation is exit 1, empty stdout.
+Malformed arguments, missing/oversized/symlinked/invalid saved
+input files, invalid saved schemas or semantic contradictions,
+missing paths, unmanaged/unlocked graph, or unsupported
+safe-read primitives are exit 2, empty stdout. Diagnostics may
+go to stderr.
+
+Snapshot absence does not prove apply failed or that another
+actor deleted it. Snapshot presence does not prove apply created
+it. Exact staging presence does not prove apply left it; exact
+staging absence does not prove apply cleaned it. A saved
+complete or partial result is a declaration being compared, not
+independently authenticated provenance. The source standalone
+export is not observed and may have changed or disappeared. A
+fresh import plan is required before any later apply.
+Reconciliation performs no retry, recovery, restore, activation,
+deletion, cleanup, repair, pinning, pruning, or retention. This
+is not backup, authenticity, provenance, portability,
+recoverability, restore success, or semantic-equivalence
+evidence. Advisory locks protect only cooperating processes.
+
 ## Entity Types (code domain, start with these)
 - file
 - module / package

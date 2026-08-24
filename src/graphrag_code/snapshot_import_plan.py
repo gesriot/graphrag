@@ -18,9 +18,9 @@ envelope and observed bytes. It does not compare ``source_root``,
 not run any language-specific or Clang overlay audit. The plan is not
 a backup and is not a claim of authenticity, provenance, portability,
 recoverability, or successful future import. A future import apply
-command is outside this milestone. ``import_revision`` is only a
-self-consistency/CAS-ready plan token and is not currently accepted by
-any mutation command.
+attempt still requires a fresh plan. ``import_revision`` is a
+self-consistency/CAS token accepted only by the explicit
+``snapshot-import-apply`` command for that freshly reproduced plan.
 
 The source export directory may be relative to the invoking cwd. It
 must be an existing real directory, never a symlink. Payload reads are
@@ -141,16 +141,18 @@ _COMMAND_NOTICES: Tuple[Dict[str, str], ...] = (
         "kind": "notice",
         "message": (
             "import_revision is a self-consistency/CAS-ready plan token for "
-            "this exact observed source and target. It is not currently "
-            "accepted by any mutation command."
+            "this exact observed source and target. It is accepted only by "
+            "the explicit snapshot-import-apply command after that command "
+            "freshly reproduces the same plan."
         ),
     },
     {
         "code": "fresh_plan_required_before_import",
         "kind": "notice",
         "message": (
-            "fresh_plan_required_before_import is always true. A future "
-            "import apply command is outside this milestone."
+            "fresh_plan_required_before_import is always true. "
+            "snapshot-import-apply accepts only a freshly reproduced "
+            "matching plan."
         ),
     },
     {

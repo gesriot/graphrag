@@ -22,7 +22,7 @@ snapshot-export-apply, snapshot-export-verify,
 snapshot-export-reconcile, snapshot-export-staging,
 snapshot-export-staging-cleanup-plan, snapshot-export-staging-cleanup,
 snapshot-export-staging-cleanup-reconcile, snapshot-import-plan,
-snapshot-import-apply, port_eval).
+snapshot-import-apply, snapshot-import-reconcile, port_eval).
 """
 from __future__ import annotations
 
@@ -63,6 +63,7 @@ app = typer.Typer(
         "snapshot-export-staging-cleanup-reconcile → "
         "snapshot-import-plan → "
         "snapshot-import-apply → "
+        "snapshot-import-reconcile → "
         "port-eval. Relative "
         "paths are resolved from the invoking working directory."
     ),
@@ -96,6 +97,7 @@ _DELEGATE_MODULES = {
     "snapshot_export_staging_cleanup_reconcile.py": "graphrag_code.snapshot_export_staging_cleanup_reconcile",
     "snapshot_import_plan.py": "graphrag_code.snapshot_import_plan",
     "snapshot_import_apply.py": "graphrag_code.snapshot_import_apply",
+    "snapshot_import_reconcile.py": "graphrag_code.snapshot_import_reconcile",
     "audit_call_edges.py": "graphrag_code.audit_call_edges",
     "port_eval.py": "graphrag_code.port_eval",
 }
@@ -1614,6 +1616,42 @@ def snapshot_import_apply(
     if json_out is True:
         args.append("--json")
     _delegate("snapshot_import_apply.py", args)
+
+
+@app.command("snapshot-import-reconcile")
+def snapshot_import_reconcile(
+    graph: Path = typer.Option(..., "--graph", "-g", help="Managed BYOG graph root"),
+    plan_file: Path = typer.Option(
+        ...,
+        "--plan-file",
+        help="Saved schema-1 snapshot-import-plan JSON, relative to cwd.",
+    ),
+    apply_result_file: Optional[Path] = typer.Option(
+        None,
+        "--apply-result-file",
+        help="Optional saved schema-1 snapshot-import-apply JSON.",
+    ),
+    json_out: bool = typer.Option(
+        False,
+        "--json",
+        help="same JSON shape as snapshot_import_reconcile.py --json",
+    ),
+):
+    """Reconcile a saved import plan against one managed graph.
+
+    Observation only. Does not retry, recover, copy, publish, activate,
+    pin, prune, clean staging, run retention, or mutate the graph or the
+    standalone export. Snapshot absence does not prove apply failed;
+    presence does not prove apply created it. A fresh import plan is
+    required before any later apply. Never creates .publish.lock.
+    Intentionally absent from MCP.
+    """
+    args = ["--graph", str(graph), "--plan-file", str(plan_file)]
+    if apply_result_file is not None:
+        args.extend(["--apply-result-file", str(apply_result_file)])
+    if json_out is True:
+        args.append("--json")
+    _delegate("snapshot_import_reconcile.py", args)
 
 
 @app.command("audit-graph")

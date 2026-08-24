@@ -159,7 +159,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`1916 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`1936 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
@@ -395,11 +395,23 @@ overwriting an existing snapshot id. Its partial-result path does not
 infer that ``current`` stayed unchanged, and cleanup removes writer-lock
 metadata only after an exclusive graph lease and an identity-checked
 claim of the inode created by the invocation. Successful import is not
-activation, backup, authenticity, or recoverability. The
+activation, backup, authenticity, or recoverability.
+``graphrag-code snapshot-import-reconcile`` (also ``python -m
+graphrag_code.snapshot_import_reconcile`` and
+``scripts/snapshot_import_reconcile.py``) is the separate
+observation-only aftermath inspection of a saved schema-1 import
+plan and optional saved schema-1 apply result. It does not
+retry, recover, copy, publish, activate, pin, prune, clean
+staging, run retention, or mutate either tree. Snapshot absence
+does not prove apply failed; presence does not prove apply
+created it. A present snapshot receives a final complete
+held-payload recheck after target-state observation. A fresh import
+plan is required before any later apply. The
 composite plan, apply, reconcile, export-plan, export-apply,
 export-verify, export-reconcile, export-staging,
 export-staging-cleanup-plan, export-staging-cleanup,
-export-staging-cleanup-reconcile, import-plan, and import-apply
+export-staging-cleanup-reconcile, import-plan, import-apply, and
+import-reconcile
 commands are intentionally absent from MCP.
 Advisory locks do not protect against non-cooperating programs. This is
 not natural-language search, an HTTP service, repair, reindex, or

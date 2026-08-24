@@ -70,6 +70,7 @@ These generic installed commands operate on user-supplied directories:
 - `graphrag-code snapshot-export-staging-cleanup-reconcile --parent <directory> --plan-file <saved-cleanup-plan.json> [--apply-result-file <saved-cleanup-result.json>]`
 - `graphrag-code snapshot-import-plan --graph <root> --export-dir <directory>`
 - `graphrag-code snapshot-import-apply --graph <root> --export-dir <directory> --expected-import-revision sha256:<hex> --import-confirmed`
+- `graphrag-code snapshot-import-reconcile --graph <root> --plan-file <saved-import-plan.json> [--apply-result-file <saved-import-apply-result.json>]`
 - `graphrag-code mcp --graph <root> --indexer auto`
 
 `graphrag-code mcp` is a local stdio MCP adapter over one existing graph.
@@ -95,8 +96,9 @@ The server exposes a fixed read-only tool set: `graph_status`,
 `snapshot_export_staging_cleanup_plan`,
 `snapshot_export_staging_cleanup`,
 `snapshot_export_staging_cleanup_reconcile`,
-`snapshot_import_plan`, or
-`snapshot_import_apply` tool:
+`snapshot_import_plan`,
+`snapshot_import_apply`, or
+`snapshot_import_reconcile` tool:
 activating a retained snapshot, writing operator retention pins,
 planning keep-last retention, pruning CAS-verified candidates,
 listing staging directories, emitting a read-only staging cleanup
@@ -109,8 +111,9 @@ export-apply staging names, emitting a read-only export-staging
 cleanup plan, applying that export-staging cleanup plan,
 reconciling a saved export-staging cleanup plan against the live
 parent, planning the import of one standalone snapshot export,
-or applying that import as a retained snapshot
-into an existing managed graph is an
+applying that import as a retained snapshot
+into an existing managed graph, or reconciling a saved import
+plan against the live graph is an
 explicit CLI operation and is intentionally absent from MCP. Tool arguments cannot select another
 graph. There is no indexing, publishing, retention, port-eval,
 compiler/Clang, SQL, or shell tool. Snapshot history is a bounded local
@@ -533,12 +536,24 @@ result; cleanup reacquires the exclusive graph lease and removes
 writer-lock metadata only after claiming the exact inode created by
 this invocation. Unproven partial `current_after` is null rather
 than being reported as unchanged. Successful import is not activation,
-backup, authenticity, or recoverability. The composite plan,
+backup, authenticity, or recoverability.
+`snapshot-import-reconcile --graph <root> --plan-file
+<saved-import-plan.json>` is the separate observation-only
+aftermath inspection of that saved schema-1 plan and an optional
+saved schema-1 apply result. It does not retry, recover, copy,
+publish, activate, pin, prune, clean staging, run retention, or
+mutate either tree. Snapshot absence does not prove apply failed;
+presence does not prove apply created it; matching revision
+proves only payload-contract equality during the bounded
+observation window. A present snapshot receives a final complete
+held-payload recheck after target-state observation. A fresh import
+plan is required before any later apply. The composite plan,
 apply, reconcile, export-plan, export-apply, export-verify,
 export-reconcile, export-staging, export-staging-cleanup-plan,
 export-staging-cleanup, export-staging-cleanup-reconcile,
-import-plan, and import-apply commands are intentionally absent
-from MCP. The MCP tool set remains exactly 11 read-only tools.
+import-plan, import-apply, and import-reconcile commands are
+intentionally absent from MCP. The MCP tool set remains exactly
+11 read-only tools.
 
 Query and context-pack commands accept optional
 `--snapshot <id|current>`. Omitting it preserves the existing default
@@ -1012,7 +1027,13 @@ modules, plugins, and PCH fail explicitly. See
   --export-dir <directory> --expected-import-revision sha256:<hex>
   --import-confirmed` is the CAS apply: it publishes that export
   as a retained snapshot without changing `current`, pins, or
-  retention. It is not an activation or a backup. None of these
+  retention. It is not an activation or a backup.
+  `graphrag-code snapshot-import-reconcile --graph <root>
+  --plan-file <saved-import-plan.json>` observes that graph
+  against the saved schema-1 plan and optional saved apply
+  result. It does not retry, recover, mutate, or prove that
+  apply created, cleaned, or activated anything. A fresh import
+  plan is required before any later apply. None of these
   commands is an MCP tool.
 - `scripts/persisted_graph_doctor.py` / `graphrag-code doctor` – **read-only
   persisted-integrity doctor** for any BYOG graph. Selects one snapshot,
