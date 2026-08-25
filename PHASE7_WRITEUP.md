@@ -47,8 +47,11 @@ precise call structure. The intended path is:
    `uses_data` / `data_dependencies` when present). `subgraph` is a bounded
    cycle-safe multi-hop induced subgraph over stored relationships, not an
    alias for one-hop `neighbors`, and not natural-language search, GraphRAG,
-   visualization, or semantic inference. MCP remains exactly 12 read-only
-   tools and includes `subgraph` immediately after `neighbors`.
+   or semantic inference. `--dot` is a deterministic Graphviz DOT
+   interchange for that producer result; the project does not invoke
+   Graphviz, render an image, or provide an interactive UI. MCP remains
+   exactly 12 read-only tools, does not expose DOT, and includes `subgraph`
+   immediately after `neighbors`.
 6. **Golden-first porting gate** – before Rust: license/provenance, a golden
    contract the **reference language** already passes, then a clean graph audit,
    then porting. Recorded in [Plan.md](Plan.md) (“Porting gate”).
@@ -163,7 +166,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`2004 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`2020 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`

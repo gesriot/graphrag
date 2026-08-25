@@ -309,9 +309,11 @@ reindex, natural-language search, or semantic equivalence.
 and `scripts/graph_query.py subgraph` expose one retained-snapshot
 read of a bounded induced subgraph. `ByogGraph.subgraph(...)` and the
 pure helper `compute_bounded_subgraph(...)` are the same contract.
-This is **not** an alias for `neighbors` (one-hop titles). MCP exposes
-the same contract as the twelfth read-only tool, immediately after
-`neighbors`. The fixed MCP surface is exactly 12 tools.
+This is **not** an alias for `neighbors` (one-hop titles). `--dot` serializes
+the same producer result as deterministic Graphviz DOT interchange on
+stdout; Graphviz is not invoked. MCP exposes the structured JSON contract
+as the twelfth read-only tool, immediately after `neighbors`, and does
+not expose DOT. The fixed MCP surface is exactly 12 tools.
 
 ```text
 graphrag-code subgraph <symbol-or-module> \
@@ -322,7 +324,7 @@ graphrag-code subgraph <symbol-or-module> \
   [--max-nodes N] \
   [--max-edges N] \
   [--edge-type TYPE ...] \
-  [--json]
+  [--json | --dot]
 ```
 
 | Property | Contract |
@@ -335,11 +337,12 @@ graphrag-code subgraph <symbol-or-module> \
 | Caps | Defaults: depth 3, nodes 50, edges 100. Hard maxima match MCP query limits: depth 32, nodes 500, edges 500. `max_nodes` minimum 1 so a resolved root is never dropped. Caps truncate **returned** lists; `n_nodes_total` / `n_edges_total` stay exact for the complete reachable induced set within depth and filter. Node truncation may therefore reduce returned edges before `max_edges` is reached |
 | Ordering | Root node first; remaining nodes by minimum depth then UTF-8 title bytes. Edges by `(min(endpoint depths), UTF-8 source, UTF-8 target, type, relationship id)`. Independent of parquet row order, hash iteration, locale, and pandas incidental order |
 | Records | Explicit JSON-safe node/edge schema (`title`/`depth` plus stored `id`, `type`, `description`, `source_file`, `span`, `extractor`, `confidence`, `is_deterministic`; edges also `weight`, `fact_kind`). Pandas/Arrow nulls → JSON null. NaN is normalized to null; Inf is refused. Missing values are never stringified as `"nan"` |
-| JSON | `sort_keys=True`, `allow_nan=False`, stable arrays |
-| Snapshot / lease | Same retained-snapshot read scope as other queries. `current` and explicit historical ids. Historical reads never activate or change `current`. Shared reader lease and retained descriptors are held through materialization, JSON/human serialization, and stdout flush. No nested public query. No `.publish.lock` creation. Unlocked legacy compatibility is unchanged and not broadened |
-| MCP | Twelfth read-only tool, registered immediately after `neighbors`. Envelope `data` is the exact `ByogGraph.subgraph` result. `truncated` is `nodes_truncated or edges_truncated`; `total` / `returned` are the sums of the node and edge counts. Limits include the validated `direction`, `max_depth`, `max_nodes`, `max_edges`, `edge_types`, and `max_envelope_bytes`. The producer is the only truncation source. The 1 MiB envelope limit fails closed. MCP always uses `allow_unlocked_managed=False` |
-| Malformed args | Bad direction, limits, or filters: exit 2, no speculative/partial stdout |
-| Non-claims | Not natural-language search, semantic inference, GraphRAG, community detection, visualization, architecture understanding, indexing, or completeness beyond stored relationships |
+| JSON | `sort_keys=True`, `allow_nan=False`, stable arrays. Default human output is unchanged. `--json` and `--dot` are mutually exclusive |
+| DOT | Deterministic Graphviz DOT interchange on stdout from the same producer result (`src/graphrag_code/subgraph_dot.py`). Non-strict `digraph graphrag_subgraph`. Schema version `1`. Internal ids `n0000`… in producer node order; titles are never identifiers. Edges keep stored `source -> target` orientation. Graph metadata (quoted): schema version, resolved, root when resolved, direction, max_depth, max_nodes, max_edges, canonical `edge_types` as JSON text (`null` for no filter or a non-empty JSON array, preserving commas and distinguishing a literal `"all"` type), totals, returned counts, truncation flags. Nodes: `label`/`title`, persisted title, depth, type when present, `is_root`. Edges: relationship type as `label`, persisted id, type, depth. Presentation baseline only: `rankdir=LR`, box nodes, root `peripheries=2`. No descriptions, snippets, spans, weights, confidence, or extra dataframe columns. One shared quoted-string escaper. Counts, caps, truncation flags, root order/depth, edge ids/endpoints, direction, and canonical edge-type metadata are checked before rendering. Hard limit 1,000,000 UTF-8 bytes including the final newline; overflow and invalid renderer input fail closed with exit 2 and empty stdout. Graphviz is not invoked or required. No output-file option |
+| Snapshot / lease | Same retained-snapshot read scope as other queries. `current` and explicit historical ids. Historical reads never activate or change `current`. Shared reader lease and retained descriptors are held through materialization, subgraph computation, JSON/human/DOT serialization, stdout write, and stdout flush. No nested public query. No `.publish.lock` creation. Unlocked legacy compatibility is unchanged and not broadened |
+| MCP | Twelfth read-only tool, registered immediately after `neighbors`. Envelope `data` is the exact `ByogGraph.subgraph` result. `truncated` is `nodes_truncated or edges_truncated`; `total` / `returned` are the sums of the node and edge counts. Limits include the validated `direction`, `max_depth`, `max_nodes`, `max_edges`, `edge_types`, and `max_envelope_bytes`. The producer is the only truncation source. The 1 MiB envelope limit fails closed. MCP always uses `allow_unlocked_managed=False`. MCP does not expose DOT or a format parameter; the fixed surface remains exactly 12 tools |
+| Malformed args | Bad direction, limits, or filters, or combined `--json --dot`: exit 2, no speculative/partial stdout |
+| Non-claims | Not natural-language search, semantic inference, GraphRAG, community detection, architecture understanding, indexing, completeness beyond stored relationships, an image renderer, an interactive UI, or a semantic/community visualization. `--dot` is interchange only; truncation and totals still come only from the bounded subgraph producer |
 
 `type_closure` remains a **uses_type-only** consumer with its existing
 direction names, defaults, and output schema. Subgraph is relation-generic

@@ -22,6 +22,7 @@ Example:
     uv run python scripts/graph_query.py types-used-by ini:ini_parse --graph byog_inih
     uv run python scripts/graph_query.py type-closure ini:ini_parse --direction dependencies --max-depth 2
     uv run python scripts/graph_query.py subgraph sim:run_simulation --graph byog_mini_game --direction both
+    uv run python scripts/graph_query.py subgraph sim:run_simulation --graph byog_mini_game --dot
     uv run python scripts/graph_query.py observations sim:run_simulation --graph byog_mini_game
 """
 
@@ -55,6 +56,7 @@ from graphrag_code.snapshot_read import (
     SnapshotReadError,
     retained_snapshot_read,
 )
+from graphrag_code.subgraph_dot import dumps_subgraph_dot
 
 app = typer.Typer(help="Local BYOG graph queries (callers, callees, impact, etc.)")
 
@@ -492,8 +494,28 @@ def cli_subgraph(
         help="Exact relationship-type allow-list (repeatable). Omit for all types.",
     ),
     json_output: bool = typer.Option(False, "--json"),
+    dot_output: bool = typer.Option(
+        False,
+        "--dot",
+        help=(
+            "Write deterministic Graphviz DOT to stdout. Interchange only; "
+            "does not invoke Graphviz or render an image. Mutually exclusive "
+            "with --json."
+        ),
+    ),
 ):
-    """Bounded cycle-safe multi-hop induced subgraph (structural exploration only)."""
+    """Bounded cycle-safe multi-hop induced subgraph (structural exploration only).
+
+    ``--dot`` is Graphviz DOT interchange on stdout: Graphviz is not invoked
+    and no image is rendered. ``--json`` and ``--dot`` are mutually exclusive.
+    """
+    if json_output and dot_output:
+        typer.secho(
+            "--json and --dot are mutually exclusive",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(2)
     try:
         with _scoped_graph(graph, snapshot) as g:
             result = g.subgraph(
@@ -506,6 +528,9 @@ def cli_subgraph(
             )
             if json_output:
                 print(dumps_subgraph_json(result), flush=True)
+            elif dot_output:
+                sys.stdout.write(dumps_subgraph_dot(result))
+                sys.stdout.flush()
             else:
                 print(format_subgraph_human(result), flush=True)
     except ValueError as e:

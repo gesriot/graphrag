@@ -119,7 +119,7 @@ definitions are all present; 113 re-exports are reported separately rather
 than inflated into duplicate graph entities. The `sqlparse.split` target named
 by the Rust port is therefore an actual graph entity, not merely a module API
 outside the graph. See `examples/sqlparse/PROVENANCE.md` for the census and
-call-oracle effect. The current full-suite expectation is **2004 passed, 2 xfailed**;
+call-oracle effect. The current full-suite expectation is **2020 passed, 2 xfailed**;
 this 2026-08-14 persisted-integrity doctor update supersedes the earlier 721-passed /
 2026-07-26 gate snapshot. The product CLI is the installable ``graphrag-code``
 console command (`python -m graphrag_code`); source-checkout ``scripts/*.py``
@@ -564,13 +564,13 @@ Output: Rust crate(s) mirroring (or improving) original structure + updated grap
   - `index <repo>`
   - `query-global <question>`
   - `query-symbol <symbol>`
-  - `subgraph <symbol-or-module>` – **implemented** as a bounded cycle-safe BFS induced subgraph over stored relationships (`--direction outgoing|incoming|both`, `--max-depth` / `--max-nodes` / `--max-edges`, exact `--edge-type` allow-list). Caps truncate returned material; totals within depth/filter stay exact. Direction does not rewrite stored edge orientation. This is deterministic structural exploration only: not natural-language search, semantic inference, GraphRAG, community detection, visualization, architecture understanding, or completeness beyond stored relationships. MCP stays exactly 12 read-only tools and exposes `subgraph` immediately after `neighbors`.
+  - `subgraph <symbol-or-module>` – **implemented** as a bounded cycle-safe BFS induced subgraph over stored relationships (`--direction outgoing|incoming|both`, `--max-depth` / `--max-nodes` / `--max-edges`, exact `--edge-type` allow-list). Caps truncate returned material; totals within depth/filter stay exact. Direction does not rewrite stored edge orientation. `--dot` is a deterministic Graphviz DOT interchange over that same producer result (stdout only; Graphviz is not invoked or required; not an image renderer or interactive UI). `--json` and `--dot` are mutually exclusive. This is deterministic structural exploration only: not natural-language search, semantic inference, GraphRAG, community detection, architecture understanding, completeness beyond stored relationships, or a semantic/community visualization. MCP stays exactly 12 read-only tools, does not expose DOT, and registers `subgraph` immediately after `neighbors`.
   - `context-pack <symbol-or-module> --purpose port-to-rust`
 - CLI / simple TUI or Streamlit/Gradio web UI for:
   - "Index this repo".
   - Natural language questions over the code graph.
   - "Show me the subgraph for module X and its direct dependencies".
-  - Visualize communities/hierarchy (export to Graphviz, or integrate Memgraph Lab / Neo4j Browser style).
+  - Visualize communities/hierarchy (interactive UI / Memgraph Lab / Neo4j Browser style still future). Bounded `subgraph --dot` is implemented as deterministic Graphviz DOT interchange on stdout; it does not invoke Graphviz, render an image, infer communities, or provide a UI.
 - Support "explain this function in context of the broader system".
 - **Verification:** Developer can explore a medium codebase faster and more accurately than with grep + ad hoc file reads. Quantitative: fewer tool calls needed for architecture questions (inspired by Codebase-Memory evaluations). Context packs are stable/reproducible and include enough provenance for review.
 

@@ -165,14 +165,21 @@ and parallel rows are evidence. Returned edges are endpoint-closed over
 the returned nodes; node truncation never leaves a returned dangling edge,
 while `n_edges_total` still describes the complete reachable induced set.
 JSON is deterministic (`sort_keys`,
-`allow_nan=false`) with pandas/Arrow nulls as JSON null. Unresolved or
-ambiguous queries exit 0 with `resolved=false` and empty material;
-malformed direction/limits/filters exit 2 with no partial stdout. This is
-deterministic structural graph exploration only: not natural-language
-search, semantic inference, GraphRAG, community detection, visualization,
-architecture understanding, or completeness beyond stored relationships.
-MCP stays exactly 12 read-only tools; `subgraph` is the twelfth, immediately
-after `neighbors`.
+`allow_nan=false`) with pandas/Arrow nulls as JSON null. `--dot` writes a
+deterministic Graphviz DOT interchange for the same producer result
+(non-strict `digraph`, stored edge orientation, producer node/edge order,
+internal `n0000` identifiers). It does not invoke Graphviz, render an
+image, or provide an interactive UI. `--json` and `--dot` are mutually
+exclusive. Unresolved or ambiguous queries exit 0 with `resolved=false`
+and empty material (including a valid empty digraph under `--dot`);
+malformed direction/limits/filters or combined `--json --dot` exit 2 with
+no partial stdout. DOT is capped at 1,000,000 UTF-8 bytes and fails closed
+before writing. This is deterministic structural graph exploration only:
+not natural-language search, semantic inference, GraphRAG, community
+detection, architecture understanding, completeness beyond stored
+relationships, or a semantic/community visualization. MCP stays exactly 12
+read-only tools and does not expose DOT; `subgraph` is the twelfth,
+immediately after `neighbors`.
 
 `adopt-publication-lock` is an explicit migration, never an automatic
 MCP or doctor side effect. `--offline-confirmed` is required to create
@@ -685,6 +692,7 @@ uv run python scripts/index_python.py --package <pkg> --graph <out>
 uv run python scripts/index_c.py --package <pkg> --graph <out>
 uv run python scripts/graph_query.py symbol <title> --graph <root>
 uv run python scripts/graph_query.py subgraph <symbol-or-module> --graph <root>
+uv run python scripts/graph_query.py subgraph <symbol-or-module> --graph <root> --dot
 uv run python scripts/context_pack.py <title> --graph <root>
 uv run python scripts/port_eval.py --all-gates --full
 ```

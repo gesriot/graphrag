@@ -453,11 +453,22 @@ def subgraph(
         help="Exact relationship-type allow-list (repeatable). Omit for all types.",
     ),
     json_out: bool = typer.Option(False, "--json"),
+    dot_out: bool = typer.Option(
+        False,
+        "--dot",
+        help=(
+            "Write deterministic Graphviz DOT to stdout. Interchange only; "
+            "does not invoke Graphviz or render an image. Mutually exclusive "
+            "with --json."
+        ),
+    ),
 ):
     """Bounded cycle-safe multi-hop induced subgraph (graph_query.py subgraph).
 
-    Deterministic structural exploration over stored relationships. Not
-    natural-language search, GraphRAG, visualization, or semantic inference.
+    Deterministic structural exploration over stored relationships. ``--dot``
+    is a Graphviz DOT interchange on stdout: it does not invoke Graphviz,
+    render an image, or provide an interactive UI. Not natural-language
+    search, GraphRAG, community detection, or semantic inference.
     """
     args = _append_snapshot(
         [
@@ -480,6 +491,8 @@ def subgraph(
         args.extend(["--edge-type", rel_type])
     if json_out:
         args.append("--json")
+    if dot_out:
+        args.append("--dot")
     _delegate("graph_query.py", args)
 
 
