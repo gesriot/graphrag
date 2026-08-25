@@ -13,7 +13,7 @@ command does not take a nested graph-root lease. It never creates,
 truncates, rewrites, chmods, or replaces ``.publish.lock``. It never
 creates or changes ``.snapshot-pins.json``, ``current``, published
 snapshots, staging directories, payload files, or writer-lock
-bytes/metadata. MCP stays exactly 11 read-only tools; this command is
+bytes/metadata. MCP stays exactly 12 read-only tools; this command is
 CLI-only.
 
 ``maintenance_revision`` is informational. No apply command accepts it.

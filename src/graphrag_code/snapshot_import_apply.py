@@ -233,7 +233,7 @@ _COMMAND_NOTICES: Tuple[Dict[str, str], ...] = (
         "kind": "notice",
         "message": (
             "snapshot-import-apply is CLI-only and intentionally absent "
-            "from the fixed 11-tool MCP set."
+            "from the fixed 12-tool MCP set."
         ),
     },
 )

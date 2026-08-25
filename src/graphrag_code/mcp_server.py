@@ -23,14 +23,22 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from mcp.server import MCPServer
 from mcp_types import ToolAnnotations
-from pydantic import ConfigDict
+from pydantic import ConfigDict, StrictInt
 
 from graphrag_code.byog_graph import (
+    DEFAULT_SUBGRAPH_MAX_DEPTH,
+    DEFAULT_SUBGRAPH_MAX_EDGES,
+    DEFAULT_SUBGRAPH_MAX_NODES,
     DEFAULT_TYPE_CLOSURE_MAX_DEPTH,
     DEFAULT_TYPE_CLOSURE_MAX_EDGES,
     DEFAULT_TYPE_CLOSURE_MAX_NODES,
+    HARD_MAX_SUBGRAPH_DEPTH,
+    HARD_MAX_SUBGRAPH_EDGES,
+    HARD_MAX_SUBGRAPH_NODES,
+    SUBGRAPH_DIRECTIONS,
     TYPE_CLOSURE_DIRECTIONS,
     ByogReaderLockError,
+    _normalize_edge_types,
 )
 from graphrag_code.byog_snapshot_graph_audit import SnapshotGraphAuditError
 from graphrag_code.context_pack import _assemble_context_pack_from_tables
@@ -85,6 +93,7 @@ TOOL_NAMES = (
     "callers",
     "callees",
     "neighbors",
+    "subgraph",
     "impact",
     "type_closure",
     "context_pack",
@@ -132,6 +141,24 @@ def _require_str(name: str, value: Any) -> str:
 def _reject_non_finite(name: str, value: Any) -> None:
     if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
         raise GraphMcpError(f"{name} must be a finite number, got {value!r}")
+
+
+def _require_edge_types(value: Any) -> Optional[List[str]]:
+    """Canonical MCP edge-type filter: null/empty = all types; else exact list."""
+    if value is None:
+        return None
+    if isinstance(value, (str, bytes)):
+        raise GraphMcpError(
+            "edge_types must be an array of strings or null, not a scalar string"
+        )
+    if not isinstance(value, (list, tuple)):
+        raise GraphMcpError(
+            f"edge_types must be an array of strings or null, got {value!r}"
+        )
+    try:
+        return _normalize_edge_types(value)
+    except ValueError as exc:
+        raise GraphMcpError(str(exc)) from exc
 
 
 def _truncate_list(items: Sequence[Any], max_items: int) -> Tuple[List[Any], int, int, bool]:
@@ -424,6 +451,78 @@ class GraphMcpSession:
                     truncated=truncated,
                     total=in_total + out_total,
                     returned=in_ret + out_ret,
+                )
+        except (ByogReaderLockError, SnapshotReadError) as exc:
+            raise GraphMcpError(str(exc)) from exc
+
+    def subgraph(
+        self,
+        symbol: Any,
+        direction: Any = "both",
+        max_depth: Any = DEFAULT_SUBGRAPH_MAX_DEPTH,
+        max_nodes: Any = DEFAULT_SUBGRAPH_MAX_NODES,
+        max_edges: Any = DEFAULT_SUBGRAPH_MAX_EDGES,
+        edge_types: Any = None,
+        snapshot: Any = CURRENT_REF,
+    ) -> Dict[str, Any]:
+        title = _require_str("symbol", symbol)
+        if not isinstance(direction, str) or direction not in SUBGRAPH_DIRECTIONS:
+            raise GraphMcpError(
+                f"direction must be one of {sorted(SUBGRAPH_DIRECTIONS)}, got {direction!r}"
+            )
+        for name, value in (
+            ("max_depth", max_depth),
+            ("max_nodes", max_nodes),
+            ("max_edges", max_edges),
+        ):
+            _reject_non_finite(name, value)
+        depth = _require_int(
+            "max_depth", max_depth, minimum=0, maximum=HARD_MAX_SUBGRAPH_DEPTH
+        )
+        nodes = _require_int(
+            "max_nodes", max_nodes, minimum=1, maximum=HARD_MAX_SUBGRAPH_NODES
+        )
+        edges = _require_int(
+            "max_edges", max_edges, minimum=0, maximum=HARD_MAX_SUBGRAPH_EDGES
+        )
+        types = _require_edge_types(edge_types)
+        try:
+            with self._scope(snapshot) as scope:
+                if scope.snap_id is None:
+                    raise GraphMcpError(
+                        f"graph has no published snapshot for {snapshot!r}"
+                    )
+                try:
+                    result = scope.load_graph().subgraph(
+                        title,
+                        direction=direction,
+                        max_depth=depth,
+                        max_nodes=nodes,
+                        max_edges=edges,
+                        edge_types=types,
+                    )
+                except ValueError as exc:
+                    raise GraphMcpError(str(exc)) from exc
+                truncated = bool(
+                    result.get("nodes_truncated") or result.get("edges_truncated")
+                )
+                return _envelope(
+                    tool="subgraph",
+                    graph=self.graph_root,
+                    snapshot=scope.snap_id,
+                    data=result,
+                    limits={
+                        "direction": direction,
+                        "max_depth": depth,
+                        "max_nodes": nodes,
+                        "max_edges": edges,
+                        "edge_types": types,
+                    },
+                    truncated=truncated,
+                    total=int(result.get("n_nodes_total") or 0)
+                    + int(result.get("n_edges_total") or 0),
+                    returned=int(result.get("n_nodes_returned") or 0)
+                    + int(result.get("n_edges_returned") or 0),
                 )
         except (ByogReaderLockError, SnapshotReadError) as exc:
             raise GraphMcpError(str(exc)) from exc
@@ -730,6 +829,33 @@ def build_mcp_server(session: GraphMcpSession) -> MCPServer:
         snapshot: str = CURRENT_REF,
     ) -> Dict[str, Any]:
         return session.neighbors(symbol, max_items, snapshot)
+
+    @mcp.tool(
+        name="subgraph",
+        description=(
+            "Bounded cycle-safe multi-hop induced subgraph. Deterministic "
+            "structural exploration only."
+        ),
+        annotations=READ_ONLY_TOOL,
+    )
+    def subgraph(
+        symbol: str,
+        direction: str = "both",
+        max_depth: StrictInt = DEFAULT_SUBGRAPH_MAX_DEPTH,
+        max_nodes: StrictInt = DEFAULT_SUBGRAPH_MAX_NODES,
+        max_edges: StrictInt = DEFAULT_SUBGRAPH_MAX_EDGES,
+        edge_types: Optional[List[str]] = None,
+        snapshot: str = CURRENT_REF,
+    ) -> Dict[str, Any]:
+        return session.subgraph(
+            symbol,
+            direction,
+            max_depth,
+            max_nodes,
+            max_edges,
+            edge_types,
+            snapshot,
+        )
 
     @mcp.tool(
         name="impact",

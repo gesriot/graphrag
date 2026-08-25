@@ -778,7 +778,7 @@ def test_implementation_boundaries_mcp_and_byog_roots(tmp_path: Path):
     )
     assert "graph_exclusive_lease" not in apply_src
     assert "staging_writer_lease(" not in apply_src
-    assert len(TOOL_NAMES) == 11
+    assert len(TOOL_NAMES) == 12
     assert "snapshot_export_staging" not in TOOL_NAMES
     assert "snapshot_export_writer_lease" not in TOOL_NAMES
 
@@ -795,7 +795,7 @@ def test_implementation_boundaries_mcp_and_byog_roots(tmp_path: Path):
         async with Client(server) as client:
             names = {tool.name for tool in (await client.list_tools()).tools}
             assert names == set(TOOL_NAMES)
-            assert len(names) == 11
+            assert len(names) == 12
 
     from anyio import run as anyio_run
 

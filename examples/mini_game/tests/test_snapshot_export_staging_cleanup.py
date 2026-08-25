@@ -1444,7 +1444,7 @@ def test_mcp_remains_exactly_eleven_and_byog_roots_unchanged(tmp_path: Path):
 
     before = {path.name: _root_fingerprint(path) for path in BYOG_ROOTS}
     assert len(before) == 15
-    assert len(TOOL_NAMES) == 11
+    assert len(TOOL_NAMES) == 12
     assert "snapshot_export_staging_cleanup" not in TOOL_NAMES
     assert "snapshot_export_staging_cleanup_plan" not in TOOL_NAMES
     graph = tmp_path / "g"
@@ -1458,7 +1458,7 @@ def test_mcp_remains_exactly_eleven_and_byog_roots_unchanged(tmp_path: Path):
         async with Client(server) as client:
             names = {tool.name for tool in (await client.list_tools()).tools}
             assert names == set(TOOL_NAMES)
-            assert len(names) == 11
+            assert len(names) == 12
             assert "snapshot_export_staging_cleanup" not in names
 
     anyio_run(_body)

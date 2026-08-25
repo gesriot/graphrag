@@ -1656,7 +1656,7 @@ def test_no_mutation_no_producer_invocation_and_mcp_remains_eleven(
 
     before = {path.name: _root_fingerprint(path) for path in BYOG_ROOTS}
     assert len(before) == 15
-    assert len(TOOL_NAMES) == 11
+    assert len(TOOL_NAMES) == 12
     assert "snapshot_import_reconcile" not in TOOL_NAMES
     assert "snapshot_import_plan" not in TOOL_NAMES
     assert "snapshot_import_apply" not in TOOL_NAMES
@@ -1669,7 +1669,7 @@ def test_no_mutation_no_producer_invocation_and_mcp_remains_eleven(
         async with Client(server) as client:
             names = {tool.name for tool in (await client.list_tools()).tools}
             assert names == set(TOOL_NAMES)
-            assert len(names) == 11
+            assert len(names) == 12
             assert "snapshot_import_reconcile" not in names
 
     anyio_run(_body)

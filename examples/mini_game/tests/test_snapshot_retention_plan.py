@@ -997,7 +997,7 @@ def test_mcp_tool_set_remains_exactly_eleven(tmp_path: Path):
 
     graph = tmp_path / "g"
     _publish(graph, "a")
-    assert len(TOOL_NAMES) == 11
+    assert len(TOOL_NAMES) == 12
     assert "snapshot_retention_plan" not in TOOL_NAMES
     assert "snapshot_retention" not in TOOL_NAMES
     session = build_session(graph, "python")
@@ -1009,7 +1009,7 @@ def test_mcp_tool_set_remains_exactly_eleven(tmp_path: Path):
         async with Client(server) as client:
             names = {tool.name for tool in (await client.list_tools()).tools}
             assert names == set(TOOL_NAMES)
-            assert len(names) == 11
+            assert len(names) == 12
             assert "snapshot_retention_plan" not in names
 
     anyio_run(_body)

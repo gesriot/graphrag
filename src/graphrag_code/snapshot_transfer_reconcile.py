@@ -44,7 +44,7 @@ scopes and does not create a nested observation window.
 
 ``ok=true`` means this read-only reconciliation completed. It does not
 mean apply succeeded or that either snapshot matches. A fresh transfer
-plan is required before any later apply. MCP stays exactly 11
+plan is required before any later apply. MCP stays exactly 12
 read-only tools; this command is CLI-only.
 
 Usage:
@@ -272,7 +272,7 @@ _COMMAND_NOTICES: Tuple[Dict[str, str], ...] = (
         "kind": "notice",
         "message": (
             "snapshot-transfer-reconcile is CLI-only and intentionally "
-            "absent from the fixed 11-tool MCP set."
+            "absent from the fixed 12-tool MCP set."
         ),
     },
 )

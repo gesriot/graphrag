@@ -8,7 +8,9 @@ Run:
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
+import math
 import os
 import stat
 import subprocess
@@ -27,7 +29,16 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from graphrag_code import index_c as pkg_index_c  # type: ignore
 from graphrag_code import index_python as pkg_index_python  # type: ignore
-from graphrag_code.byog_graph import ByogGraph, publish_byog_snapshot  # type: ignore
+from graphrag_code.byog_graph import (  # type: ignore
+    DEFAULT_SUBGRAPH_MAX_DEPTH,
+    DEFAULT_SUBGRAPH_MAX_EDGES,
+    DEFAULT_SUBGRAPH_MAX_NODES,
+    HARD_MAX_SUBGRAPH_DEPTH,
+    HARD_MAX_SUBGRAPH_EDGES,
+    HARD_MAX_SUBGRAPH_NODES,
+    ByogGraph,
+    publish_byog_snapshot,
+)
 from graphrag_code.mcp_server import (  # type: ignore
     HARD_MAX_ENVELOPE_BYTES,
     TOOL_NAMES,
@@ -225,8 +236,9 @@ def test_tools_list_is_exactly_documented(tmp_path: Path):
         async with Client(server) as client:
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
-            assert sorted(names) == sorted(TOOL_NAMES)
-            assert len(names) == len(set(names)) == len(TOOL_NAMES) == 11
+            assert names == list(TOOL_NAMES)
+            assert len(names) == len(set(names)) == len(TOOL_NAMES) == 12
+            assert names[names.index("neighbors") + 1] == "subgraph"
             assert "snapshot_activate" not in names
             for tool in tools:
                 assert tool.input_schema["additionalProperties"] is False
@@ -299,6 +311,9 @@ def test_query_and_graph_walks_match_byog_graph(tmp_path: Path):
     assert session.callers(symbol)["data"] == view.callers(symbol)
     assert session.callees(symbol)["data"] == view.callees(symbol)
     assert session.neighbors(symbol)["data"] == view.neighbors(symbol)
+    assert session.subgraph(symbol)["data"] == json.loads(
+        json.dumps(view.subgraph(symbol), allow_nan=False, default=str)
+    )
     assert session.impact(symbol)["data"] == view.impact(symbol)
 
 
@@ -607,6 +622,7 @@ def test_mcp_calls_do_not_mutate_graph(
     session.callers(symbol)
     session.callees(symbol)
     session.neighbors(symbol)
+    session.subgraph(symbol)
     session.impact(symbol)
     session.type_closure(symbol)
     session.context_pack(symbol)
@@ -798,3 +814,554 @@ def test_relative_graph_uses_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     graph = _py_graph(tmp_path)
     monkeypatch.chdir(tmp_path)
     assert resolve_graph_root(Path(graph.name)) == graph.resolve()
+
+
+def _publish_walk(tmp_path: Path, *, marker: str = "cur") -> Path:
+    ents = [
+        {
+            "id": f"ent:root:{marker}",
+            "title": f"demo:{marker}",
+            "type": "function",
+            "source_file": f"{marker}.py",
+            "extractor": "tree-sitter-python",
+            "description": f"root-{marker}",
+        },
+        {
+            "id": f"ent:mid:{marker}",
+            "title": f"demo:{marker}_mid",
+            "type": "function",
+            "source_file": f"{marker}.py",
+            "extractor": "tree-sitter-python",
+        },
+        {
+            "id": f"ent:leaf:{marker}",
+            "title": f"demo:{marker}_leaf",
+            "type": "function",
+            "source_file": f"{marker}.py",
+            "extractor": "tree-sitter-python",
+        },
+        {
+            "id": f"ent:user:{marker}",
+            "title": f"demo:{marker}_user",
+            "type": "function",
+            "source_file": f"{marker}.py",
+            "extractor": "tree-sitter-python",
+        },
+        {
+            "id": f"ent:other:{marker}",
+            "title": f"demo:{marker}_other",
+            "type": "function",
+            "source_file": f"{marker}.py",
+            "extractor": "tree-sitter-python",
+        },
+    ]
+    rels = [
+        {
+            "id": f"rel:calls:{marker}:root-mid",
+            "source": f"demo:{marker}",
+            "target": f"demo:{marker}_mid",
+            "type": "calls",
+            "extractor": "tree-sitter-python",
+        },
+        {
+            "id": f"rel:calls:{marker}:mid-leaf",
+            "source": f"demo:{marker}_mid",
+            "target": f"demo:{marker}_leaf",
+            "type": "calls",
+            "extractor": "tree-sitter-python",
+        },
+        {
+            "id": f"rel:uses:{marker}:root-leaf",
+            "source": f"demo:{marker}",
+            "target": f"demo:{marker}_leaf",
+            "type": "uses_type",
+            "extractor": "tree-sitter-python",
+        },
+        {
+            "id": f"rel:calls:{marker}:user-root",
+            "source": f"demo:{marker}_user",
+            "target": f"demo:{marker}",
+            "type": "calls",
+            "extractor": "tree-sitter-python",
+        },
+        {
+            "id": f"rel:contains:{marker}:file-root",
+            "source": f"{marker}.py",
+            "target": f"demo:{marker}",
+            "type": "contains",
+            "extractor": "tree-sitter-python",
+        },
+    ]
+    tus = [
+        {
+            "id": f"tu:{marker}",
+            "title": f"{marker}.py",
+            "source_file": f"{marker}.py",
+            "entity_id": f"ent:root:{marker}",
+        }
+    ]
+    graph = tmp_path / f"byog_{marker}"
+    publish_byog_snapshot(
+        pd.DataFrame(ents),
+        pd.DataFrame(rels),
+        pd.DataFrame(tus),
+        graph,
+        settings_text=f"mcp: {marker}\n",
+        keep_last=5,
+    )
+    return graph
+
+
+def test_subgraph_mcp_schema_defaults_and_unknown_args(tmp_path: Path):
+    graph = _publish_walk(tmp_path)
+    session = _session(graph, "python")
+    sig = inspect.signature(GraphMcpSession.subgraph)
+    assert list(sig.parameters) == [
+        "self",
+        "symbol",
+        "direction",
+        "max_depth",
+        "max_nodes",
+        "max_edges",
+        "edge_types",
+        "snapshot",
+    ]
+    assert sig.parameters["direction"].default == "both"
+    assert sig.parameters["max_depth"].default == DEFAULT_SUBGRAPH_MAX_DEPTH
+    assert sig.parameters["max_nodes"].default == DEFAULT_SUBGRAPH_MAX_NODES
+    assert sig.parameters["max_edges"].default == DEFAULT_SUBGRAPH_MAX_EDGES
+    assert sig.parameters["edge_types"].default is None
+    assert sig.parameters["snapshot"].default == "current"
+    assert "graph" not in sig.parameters
+
+    defaulted = session.subgraph("demo:cur")
+    assert defaulted["tool"] == "subgraph"
+    assert defaulted["ok"] is True
+    assert defaulted["data"]["direction"] == "both"
+    assert defaulted["data"]["max_depth"] == DEFAULT_SUBGRAPH_MAX_DEPTH
+    assert defaulted["limits"]["direction"] == "both"
+    assert defaulted["limits"]["max_depth"] == DEFAULT_SUBGRAPH_MAX_DEPTH
+    assert defaulted["limits"]["max_nodes"] == DEFAULT_SUBGRAPH_MAX_NODES
+    assert defaulted["limits"]["max_edges"] == DEFAULT_SUBGRAPH_MAX_EDGES
+    assert defaulted["limits"]["edge_types"] is None
+    assert defaulted["limits"]["max_envelope_bytes"] == HARD_MAX_ENVELOPE_BYTES
+
+    server = build_mcp_server(session)
+
+    async def _body():
+        async with Client(server) as client:
+            tools = (await client.list_tools()).tools
+            names = [tool.name for tool in tools]
+            assert names == list(TOOL_NAMES)
+            sub = next(tool for tool in tools if tool.name == "subgraph")
+            assert sub.annotations.read_only_hint is True
+            assert sub.input_schema["additionalProperties"] is False
+            props = sub.input_schema["properties"]
+            assert props["direction"]["default"] == "both"
+            assert props["max_depth"]["default"] == DEFAULT_SUBGRAPH_MAX_DEPTH
+            extra = await client.call_tool(
+                "subgraph",
+                {"symbol": "demo:cur", "graph": str(tmp_path / "other")},
+            )
+            assert extra.is_error is True
+            scalar = await client.call_tool(
+                "subgraph",
+                {"symbol": "demo:cur", "edge_types": "calls"},
+            )
+            assert scalar.is_error is True
+            for invalid_args in (
+                {"max_depth": True},
+                {"max_depth": 1.0},
+                {"max_nodes": True},
+                {"max_edges": False},
+                {"edge_types": ["calls", None]},
+                {"edge_types": ["calls", 1]},
+            ):
+                invalid = await client.call_tool(
+                    "subgraph",
+                    {"symbol": "demo:cur", **invalid_args},
+                )
+                assert invalid.is_error is True, invalid_args
+
+    _run(_body)
+
+
+def test_subgraph_mcp_semantics_parity_snapshots_and_filters(tmp_path: Path):
+    graph = tmp_path / "g"
+    older = publish_byog_snapshot(
+        pd.DataFrame(
+            [
+                {
+                    "id": "ent:old",
+                    "title": "demo:old",
+                    "type": "function",
+                    "source_file": "old.py",
+                    "extractor": "tree-sitter-python",
+                },
+                {
+                    "id": "ent:old_mid",
+                    "title": "demo:old_mid",
+                    "type": "function",
+                    "source_file": "old.py",
+                    "extractor": "tree-sitter-python",
+                },
+            ]
+        ),
+        pd.DataFrame(
+            [
+                {
+                    "id": "rel:old",
+                    "source": "demo:old",
+                    "target": "demo:old_mid",
+                    "type": "calls",
+                    "extractor": "tree-sitter-python",
+                }
+            ]
+        ),
+        pd.DataFrame(
+            [
+                {
+                    "id": "tu:old",
+                    "title": "old.py",
+                    "source_file": "old.py",
+                    "entity_id": "ent:old",
+                }
+            ]
+        ),
+        graph,
+        settings_text="mcp: old\n",
+        keep_last=5,
+    )
+    newer = _publish_walk(tmp_path, marker="new")
+    # Re-home the newer payload as a second snapshot of `graph`.
+    newer_ents = pd.read_parquet(newer / "snapshots" / _current(newer) / "entities.parquet")
+    newer_rels = pd.read_parquet(
+        newer / "snapshots" / _current(newer) / "relationships.parquet"
+    )
+    newer_tus = pd.read_parquet(newer / "snapshots" / _current(newer) / "text_units.parquet")
+    current = publish_byog_snapshot(
+        newer_ents,
+        newer_rels,
+        newer_tus,
+        graph,
+        settings_text="mcp: new\n",
+        keep_last=5,
+    )
+    assert _current(graph) == current.name
+    before = _payload_hashes(graph)
+    session = _session(graph, "python")
+    view = ByogGraph(graph)
+
+    outgoing = session.subgraph(
+        "demo:new", direction="outgoing", max_depth=2, max_nodes=20, max_edges=20
+    )
+    incoming = session.subgraph(
+        "demo:new", direction="incoming", max_depth=1, max_nodes=20, max_edges=20
+    )
+    both = session.subgraph(
+        "demo:new", direction="both", max_depth=1, max_nodes=20, max_edges=20
+    )
+    filtered = session.subgraph(
+        "demo:new",
+        direction="outgoing",
+        max_depth=2,
+        edge_types=["uses_type", "calls", "calls"],
+    )
+    assert filtered["limits"]["edge_types"] == ["calls", "uses_type"]
+    assert filtered["data"]["edge_types"] == ["calls", "uses_type"]
+    assert {edge["type"] for edge in filtered["data"]["edges"]} <= {"calls", "uses_type"}
+
+    titles_out = {node["title"] for node in outgoing["data"]["nodes"]}
+    assert "demo:new" in titles_out and "demo:new_mid" in titles_out
+    assert "demo:new_user" not in titles_out
+    titles_in = {node["title"] for node in incoming["data"]["nodes"]}
+    assert "demo:new_user" in titles_in
+    assert all(
+        edge["source"] == "demo:new_user" or edge["target"] == "demo:new"
+        or edge["source"] == "demo:new"
+        for edge in incoming["data"]["edges"]
+    )
+
+    capped = session.subgraph(
+        "demo:new", direction="outgoing", max_depth=2, max_nodes=2, max_edges=10
+    )
+    assert capped["data"]["n_nodes_total"] > capped["data"]["n_nodes_returned"]
+    assert capped["truncated"] is True
+    assert capped["total"] == (
+        capped["data"]["n_nodes_total"] + capped["data"]["n_edges_total"]
+    )
+    assert capped["returned"] == (
+        capped["data"]["n_nodes_returned"] + capped["data"]["n_edges_returned"]
+    )
+    returned_titles = {node["title"] for node in capped["data"]["nodes"]}
+    assert "demo:new" in returned_titles
+    assert all(
+        edge["source"] in returned_titles and edge["target"] in returned_titles
+        for edge in capped["data"]["edges"]
+    )
+
+    missing = session.subgraph("does-not-exist")
+    assert missing["data"]["resolved"] is False
+    assert missing["data"]["nodes"] == []
+    assert missing["total"] == 0
+    amb = session.subgraph("demo:")
+    assert amb["data"]["resolved"] is False
+
+    direct = view.subgraph(
+        "demo:new", direction="outgoing", max_depth=2, max_nodes=20, max_edges=20
+    )
+    assert outgoing["data"] == json.loads(json.dumps(direct, allow_nan=False, default=str))
+    again = session.subgraph(
+        "demo:new", direction="outgoing", max_depth=2, max_nodes=20, max_edges=20
+    )
+    assert again == outgoing
+
+    historical = session.subgraph("demo:old", snapshot=older.name)
+    assert historical["snapshot"] == older.name
+    assert historical["data"]["root"] == "demo:old"
+    assert "demo:new" not in json.dumps(historical)
+    assert session.subgraph("demo:new", snapshot="current")["data"]["root"] == "demo:new"
+    assert _current(graph) == current.name
+    assert _payload_hashes(graph) == before
+    assert both["data"]["direction"] == "both"
+
+    server = build_mcp_server(session)
+
+    async def _body():
+        async with Client(server) as client:
+            payload = _payload(
+                await client.call_tool(
+                    "subgraph",
+                    {
+                        "symbol": "demo:old",
+                        "snapshot": older.name,
+                        "direction": "outgoing",
+                    },
+                )
+            )
+            assert payload["tool"] == "subgraph"
+            assert payload["snapshot"] == older.name
+            assert payload["data"]["root"] == "demo:old"
+
+    _run(_body)
+
+
+def test_subgraph_mcp_validation_malformed_and_envelope(tmp_path: Path):
+    graph = _publish_walk(tmp_path)
+    session = _session(graph, "python")
+    with pytest.raises(GraphMcpError, match="direction"):
+        session.subgraph("demo:cur", direction="sideways")
+    with pytest.raises(GraphMcpError, match="max_depth"):
+        session.subgraph("demo:cur", max_depth=True)
+    with pytest.raises(GraphMcpError, match="max_depth"):
+        session.subgraph("demo:cur", max_depth=1.5)
+    with pytest.raises(GraphMcpError, match="max_depth"):
+        session.subgraph("demo:cur", max_depth=float("nan"))
+    with pytest.raises(GraphMcpError, match="max_nodes"):
+        session.subgraph("demo:cur", max_nodes=math.inf)
+    with pytest.raises(GraphMcpError, match="max_nodes"):
+        session.subgraph("demo:cur", max_nodes=0)
+    with pytest.raises(GraphMcpError, match="max_nodes"):
+        session.subgraph("demo:cur", max_nodes=-1)
+    with pytest.raises(GraphMcpError, match="max_depth"):
+        session.subgraph("demo:cur", max_depth=HARD_MAX_SUBGRAPH_DEPTH + 1)
+    with pytest.raises(GraphMcpError, match="max_edges"):
+        session.subgraph("demo:cur", max_edges=HARD_MAX_SUBGRAPH_EDGES + 1)
+    with pytest.raises(GraphMcpError, match="array of strings"):
+        session.subgraph("demo:cur", edge_types="calls")
+    with pytest.raises(GraphMcpError, match="invalid edge-type filter"):
+        session.subgraph("demo:cur", edge_types=[""])
+    with pytest.raises(GraphMcpError, match="invalid edge-type filter"):
+        session.subgraph("demo:cur", edge_types=[" calls"])
+    with pytest.raises(GraphMcpError, match="snapshot"):
+        session.subgraph("demo:cur", snapshot="..")
+
+    empty_ok = session.subgraph("demo:cur", edge_types=[])
+    assert empty_ok["limits"]["edge_types"] is None
+    assert empty_ok["data"]["edge_types"] is None
+
+    bad = tmp_path / "bad"
+    publish_byog_snapshot(
+        pd.DataFrame(
+            [
+                {
+                    "id": "ent:a",
+                    "title": "A",
+                    "type": "function",
+                    "source_file": "a.py",
+                    "extractor": "tree-sitter-python",
+                }
+            ]
+        ),
+        pd.DataFrame(
+            [
+                {
+                    "id": "rel:bad",
+                    "source": "A",
+                    "target": None,
+                    "type": "calls",
+                    "extractor": "tree-sitter-python",
+                }
+            ]
+        ),
+        pd.DataFrame(
+            [{"id": "tu:a", "title": "a.py", "source_file": "a.py", "entity_id": "ent:a"}]
+        ),
+        bad,
+        settings_text="mcp: bad\n",
+        keep_last=1,
+    )
+    with pytest.raises(GraphMcpError, match="invalid target"):
+        _session(bad, "python").subgraph("A")
+
+    huge = tmp_path / "huge"
+    description = "x" * (HARD_MAX_ENVELOPE_BYTES + 1)
+    publish_byog_snapshot(
+        pd.DataFrame(
+            [
+                {
+                    "id": "ent:huge",
+                    "title": "m:huge",
+                    "type": "function",
+                    "description": description,
+                    "source_file": "m.py",
+                    "extractor": "tree-sitter-python",
+                }
+            ]
+        ),
+        pd.DataFrame(columns=["id", "source", "target", "type"]),
+        pd.DataFrame(
+            [{"id": "tu:1", "title": "m.py", "source_file": "m.py", "entity_id": "ent:huge"}]
+        ),
+        huge,
+        settings_text="mcp: huge\n",
+        keep_last=1,
+    )
+    with pytest.raises(GraphMcpError, match="response envelope exceeds hard limit"):
+        _session(huge, "python").subgraph("m:huge")
+
+    many = tmp_path / "many"
+    n = 40
+    ents = [
+        {
+            "id": "ent:root",
+            "title": "mod:root",
+            "type": "function",
+            "source_file": "m.py",
+            "extractor": "tree-sitter-python",
+            "description": "ok",
+        }
+    ] + [
+        {
+            "id": f"ent:{i:03d}",
+            "title": f"mod:n{i:03d}",
+            "type": "function",
+            "source_file": "m.py",
+            "extractor": "tree-sitter-python",
+        }
+        for i in range(n)
+    ]
+    rels = [
+        {
+            "id": f"rel:{i:03d}",
+            "source": "mod:root",
+            "target": f"mod:n{i:03d}",
+            "type": "calls",
+            "extractor": "tree-sitter-python",
+        }
+        for i in range(n)
+    ]
+    publish_byog_snapshot(
+        pd.DataFrame(ents),
+        pd.DataFrame(rels),
+        pd.DataFrame(
+            [{"id": "tu:1", "title": "m.py", "source_file": "m.py", "entity_id": "ent:root"}]
+        ),
+        many,
+        settings_text="mcp: many\n",
+        keep_last=1,
+    )
+    large = _session(many, "python").subgraph(
+        "mod:root", direction="outgoing", max_depth=1, max_nodes=50, max_edges=50
+    )
+    assert large["ok"] is True
+    assert large["data"]["n_nodes_total"] == n + 1
+    assert large["truncated"] is False
+
+
+def _mcp_paused_subgraph(graph: str, pinned, resume, q) -> None:
+    sys.path.insert(0, str(Path(__file__).parents[3] / "src"))
+    from contextlib import contextmanager
+    import graphrag_code.snapshot_read as scope_mod
+    from graphrag_code.mcp_server import GraphMcpSession
+
+    orig = scope_mod.graph_read_lease
+
+    @contextmanager
+    def wrapped(root, *args, **kwargs):
+        with orig(root, *args, **kwargs):
+            pinned.set()
+            if not resume.wait(timeout=20):
+                q.put("timeout")
+                return
+            yield
+
+    scope_mod.graph_read_lease = wrapped
+    session = GraphMcpSession(
+        Path(graph),
+        configured_indexer="python",
+        resolved_indexer="python",
+        preflight={"indexer": "python", "indexer_resolution": {}},
+    )
+    payload = session.subgraph("demo:cur")
+    q.put(payload["snapshot"])
+
+
+def test_subgraph_mcp_publisher_wait_and_no_nested_query(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import multiprocessing
+
+    graph = _publish_walk(tmp_path)
+    first = _current(graph)
+    first_dir = graph / "snapshots" / first
+    before = _payload_hashes(graph)
+    session = _session(graph, "python")
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("nested public query or CLI invoked from MCP subgraph")
+
+    monkeypatch.setattr("graphrag_code.graph_query.subgraph", boom)
+    monkeypatch.setattr("graphrag_code.graph_query.cli_subgraph", boom)
+    monkeypatch.setattr("graphrag_code.cli.subgraph", boom)
+    payload = session.subgraph("demo:cur", max_depth=1)
+    assert payload["ok"] is True
+    assert _payload_hashes(graph) == before
+
+    ctx = multiprocessing.get_context("spawn")
+    pinned = ctx.Event()
+    resume = ctx.Event()
+    about = ctx.Event()
+    got = ctx.Event()
+    q = ctx.Queue()
+    reader = ctx.Process(
+        target=_mcp_paused_subgraph, args=(str(graph), pinned, resume, q)
+    )
+    from test_reader_lease import _cleanup_processes, _publisher
+
+    pub = ctx.Process(target=_publisher, args=(str(graph), "next", 1, about, got, q))
+    try:
+        reader.start()
+        assert pinned.wait(timeout=20)
+        pub.start()
+        assert about.wait(timeout=20)
+        assert not got.is_set()
+        assert _current(graph) == first
+        assert (first_dir / "entities.parquet").is_file()
+        resume.set()
+        reader.join(timeout=20)
+        pub.join(timeout=20)
+        assert not reader.is_alive() and not pub.is_alive()
+        assert got.is_set()
+    finally:
+        _cleanup_processes(pub, reader, release=resume)

@@ -84,9 +84,8 @@ stderr.
 
 The server exposes a fixed read-only tool set: `graph_status`,
 `graph_doctor`, `query_symbol`, `callers`, `callees`, `neighbors`,
-`impact`, `type_closure`, `context_pack`, `snapshot_history`, and
-`snapshot_diff`. There is no `subgraph` MCP tool in this milestone.
-There is no `snapshot_activate`, `snapshot_pin`,
+`subgraph`, `impact`, `type_closure`, `context_pack`, `snapshot_history`, and
+`snapshot_diff`. There is no `snapshot_activate`, `snapshot_pin`,
 `snapshot_unpin`, `snapshot_retention_plan`, `snapshot_prune`,
 `snapshot_staging`, `snapshot_staging_cleanup_plan`,
 `snapshot_staging_cleanup`, `snapshot_maintenance_plan`,
@@ -141,7 +140,7 @@ rest of the call, and reports that canonical id in the response
 envelope. `current` is resolved exactly once when it is selected; an
 explicit id does not read `current`. Cooperating publishers and
 keep-last retention wait until the call releases the lock. The MCP tool
-set remains exactly 11 read-only tools. `snapshot_history` and
+set remains exactly 12 read-only tools. `snapshot_history` and
 `snapshot_diff` keep their own reference contracts. A managed graph without that regular lock file is rejected during
 MCP startup. MCP never creates the lock, and neither does the doctor or
 `ByogGraph`. To add the protocol to an existing pre-lock managed graph
@@ -172,7 +171,8 @@ malformed direction/limits/filters exit 2 with no partial stdout. This is
 deterministic structural graph exploration only: not natural-language
 search, semantic inference, GraphRAG, community detection, visualization,
 architecture understanding, or completeness beyond stored relationships.
-MCP stays exactly 11 read-only tools and has no `subgraph` tool.
+MCP stays exactly 12 read-only tools; `subgraph` is the twelfth, immediately
+after `neighbors`.
 
 `adopt-publication-lock` is an explicit migration, never an automatic
 MCP or doctor side effect. `--offline-confirmed` is required to create
@@ -257,7 +257,7 @@ regular `.publish.lock` and never create that file. Listing holds one
 shared lease; pin and unpin hold one exclusive lease. Advisory locks
 protect only cooperating processes. Manual or lock-ignoring deletion can
 still remove a pinned snapshot. These commands are intentionally absent
-from MCP. The MCP tool set remains exactly 11 read-only tools.
+from MCP. The MCP tool set remains exactly 12 read-only tools.
 
 `snapshot-retention-plan --graph <root> --keep-last <N>` is a read-only
 report of what cooperating keep-last cleanup would retain and delete. It
@@ -625,7 +625,7 @@ export-staging-cleanup-reconcile, import-plan, import-apply,
 import-reconcile, transfer-plan, transfer-apply, and
 transfer-reconcile commands are
 intentionally absent from MCP. The MCP tool set remains exactly
-11 read-only tools.
+12 read-only tools.
 
 Query and context-pack commands accept optional
 `--snapshot <id|current>`. Omitting it preserves the existing default

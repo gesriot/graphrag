@@ -21,7 +21,7 @@ and stdout flush. The command does not call a public scope that takes
 a nested graph lease. The selected directory stays anchored by a
 no-follow descriptor, and payload files are opened relative to it and
 hashed twice by bounded-memory streaming. A platform missing those safe
-descriptor primitives is rejected. MCP stays exactly 11 read-only
+descriptor primitives is rejected. MCP stays exactly 12 read-only
 tools; this command is CLI-only.
 
 ``export_revision`` is a self-consistency token for this exact observed
@@ -144,7 +144,7 @@ _COMMAND_NOTICES: Tuple[Dict[str, str], ...] = (
         "kind": "notice",
         "message": (
             "snapshot-export-plan is CLI-only and intentionally absent "
-            "from the fixed 11-tool MCP set."
+            "from the fixed 12-tool MCP set."
         ),
     },
 )

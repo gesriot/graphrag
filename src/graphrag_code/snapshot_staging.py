@@ -29,7 +29,7 @@ The command requires an already-adopted regular ``.publish.lock`` and
 never creates, truncates, rewrites, chmods, or replaces that lock. It
 never creates or changes ``.snapshot-pins.json``, ``current``, snapshot
 payloads, or staging entries. Advisory locks protect only cooperating
-processes. MCP stays exactly 11 read-only tools; this command is
+processes. MCP stays exactly 12 read-only tools; this command is
 CLI-only.
 
 Usage:

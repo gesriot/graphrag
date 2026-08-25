@@ -280,7 +280,7 @@ Query, context-pack, doctor, and status tools accept an optional selector:
   `context-pack`.
 - MCP: optional last argument `snapshot: str = "current"` on
   `graph_status`, `graph_doctor`, `query_symbol`, `callers`, `callees`,
-  `neighbors`, `impact`, `type_closure`, and `context_pack`.
+  `neighbors`, `subgraph`, `impact`, `type_closure`, and `context_pack`.
 
 Historical reads do not require `snapshot-activate` and never change
 `current`. Omitting CLI `--snapshot` preserves the existing default
@@ -298,7 +298,7 @@ keep-last retention cannot delete the selected snapshot during the
 call. Explicit query/context CLI selectors require that existing regular
 lock and never create it. Only their omitted-selector compatibility path
 may read a pre-lock managed graph without a lease; that path has no
-retention guarantee. MCP remains strict and remains exactly 11 read-only tools.
+retention guarantee. MCP remains strict and remains exactly 12 read-only tools.
 `snapshot_history` and `snapshot_diff` keep their own reference
 contracts. This is not activation, publication, retention, repair,
 reindex, natural-language search, or semantic equivalence.
@@ -309,8 +309,9 @@ reindex, natural-language search, or semantic equivalence.
 and `scripts/graph_query.py subgraph` expose one retained-snapshot
 read of a bounded induced subgraph. `ByogGraph.subgraph(...)` and the
 pure helper `compute_bounded_subgraph(...)` are the same contract.
-This is **not** an alias for `neighbors` (one-hop titles). MCP stays
-exactly 11 read-only tools and has no `subgraph` tool.
+This is **not** an alias for `neighbors` (one-hop titles). MCP exposes
+the same contract as the twelfth read-only tool, immediately after
+`neighbors`. The fixed MCP surface is exactly 12 tools.
 
 ```text
 graphrag-code subgraph <symbol-or-module> \
@@ -336,6 +337,7 @@ graphrag-code subgraph <symbol-or-module> \
 | Records | Explicit JSON-safe node/edge schema (`title`/`depth` plus stored `id`, `type`, `description`, `source_file`, `span`, `extractor`, `confidence`, `is_deterministic`; edges also `weight`, `fact_kind`). Pandas/Arrow nulls → JSON null. NaN is normalized to null; Inf is refused. Missing values are never stringified as `"nan"` |
 | JSON | `sort_keys=True`, `allow_nan=False`, stable arrays |
 | Snapshot / lease | Same retained-snapshot read scope as other queries. `current` and explicit historical ids. Historical reads never activate or change `current`. Shared reader lease and retained descriptors are held through materialization, JSON/human serialization, and stdout flush. No nested public query. No `.publish.lock` creation. Unlocked legacy compatibility is unchanged and not broadened |
+| MCP | Twelfth read-only tool, registered immediately after `neighbors`. Envelope `data` is the exact `ByogGraph.subgraph` result. `truncated` is `nodes_truncated or edges_truncated`; `total` / `returned` are the sums of the node and edge counts. Limits include the validated `direction`, `max_depth`, `max_nodes`, `max_edges`, `edge_types`, and `max_envelope_bytes`. The producer is the only truncation source. The 1 MiB envelope limit fails closed. MCP always uses `allow_unlocked_managed=False` |
 | Malformed args | Bad direction, limits, or filters: exit 2, no speculative/partial stdout |
 | Non-claims | Not natural-language search, semantic inference, GraphRAG, community detection, visualization, architecture understanding, indexing, or completeness beyond stored relationships |
 
@@ -351,7 +353,7 @@ registry. `graphrag-code snapshot-pin <published-id> --graph <root>
 `snapshot-unpin` write only `<graph>/.snapshot-pins.json`. This is
 retention metadata, not activation, publication, reindexing, backup,
 replication, or a distributed lease. It is intentionally absent from
-MCP. The fixed MCP tool set remains 11 read-only tools.
+MCP. The fixed MCP tool set remains 12 read-only tools.
 
 Canonical registry schema:
 
@@ -409,7 +411,7 @@ snapshot or claim semantic equivalence.
 is a read-only report of what cooperating keep-last cleanup would
 retain and delete. It shares `plan_snapshot_retention` with
 `_cleanup_old_snapshots_locked`. The command is intentionally absent
-from MCP. The fixed MCP tool set remains 11 read-only tools.
+from MCP. The fixed MCP tool set remains 12 read-only tools.
 
 The effective protected set is `current` UNION existing doc-claim pins
 UNION existing operator pins. `keep_last` has an effective minimum of
@@ -525,7 +527,7 @@ and `filesystem_may_have_changed=false`. Pre-deletion failures leave
 stdout empty.
 
 The command is intentionally absent from MCP. The fixed MCP tool set
-remains 11 read-only tools.
+remains 12 read-only tools.
 
 ### Snapshot staging inventory
 
@@ -603,7 +605,7 @@ and stdout flush. It does not take a nested lease. Relative `--graph`
 paths resolve from the invoking cwd. A symlinked graph root,
 `snapshots/`, `current`, or publication lock is rejected without
 following it. The command is intentionally absent from MCP. The fixed
-MCP tool set remains 11 read-only tools.
+MCP tool set remains 12 read-only tools.
 
 ### Snapshot staging cleanup plan
 
@@ -687,7 +689,7 @@ read-only tools.
 Standalone `snapshot-prune` and `snapshot-staging-cleanup` remain
 available, and `snapshot-maintenance-apply` is the composite CAS
 apply. The command is intentionally absent from MCP. The fixed MCP
-tool set remains 11 read-only tools.
+tool set remains 12 read-only tools.
 
 The command requires a managed `current + snapshots/` graph and an
 already-adopted regular `.publish.lock`. It never creates, truncates,
@@ -851,7 +853,7 @@ export-apply, export-verify, export-reconcile, export-staging,
 import-plan, transfer-plan, and transfer-apply
 commands are
 intentionally absent from MCP. The fixed MCP tool set
-remains 11 read-only tools.
+remains 12 read-only tools.
 
 `graphrag-code snapshot-export-plan --graph <root> --snapshot
 <id|current>` is a read-only inspection of one retained published
@@ -919,7 +921,7 @@ continuous protection against lock-ignoring changes after the final
 observation.
 Ordinary invalid selectors or unsupported layout are exit 2, empty
 stdout. The command is intentionally absent from MCP. The fixed MCP
-tool set remains 11 read-only tools.
+tool set remains 12 read-only tools.
 
 `graphrag-code snapshot-export-apply --graph <root> --snapshot
 <id|current> --destination <new-dir> --expected-export-revision
@@ -1039,7 +1041,7 @@ Integrity or concurrency failures before publication are exit 1,
 empty stdout.
 A fully emitted successful result exits 0. The command is
 intentionally absent from MCP. The fixed MCP tool set remains
-11 read-only tools.
+12 read-only tools.
 
 `graphrag-code snapshot-export-verify --export-dir <directory>
 --expected-export-revision sha256:<64 lowercase hex>` is the
@@ -1096,7 +1098,7 @@ structure, symlinks, invalid envelope content, or concurrent
 changes are exit 1, empty stdout. The verification is not a
 backup, authentic, recoverable, complete source evidence, or
 authorization to delete anything. The command is intentionally
-absent from MCP. The fixed MCP tool set remains 11 read-only
+absent from MCP. The fixed MCP tool set remains 12 read-only
 tools.
 
 `graphrag-code snapshot-export-reconcile --plan-file
@@ -1165,7 +1167,7 @@ equality with the saved plan's canonical payload contract during
 the observation window. A fresh export plan is still required
 before any later apply. Reconciliation performs no recovery and
 authorizes no deletion. The command is intentionally absent from
-MCP. The fixed MCP tool set remains 11 read-only tools.
+MCP. The fixed MCP tool set remains 12 read-only tools.
 
 `graphrag-code snapshot-export-staging --parent <directory>` is the
 read-only structural inventory of private snapshot-export-apply
@@ -1243,7 +1245,7 @@ inspected, so this is not export verification. This is not a
 backup, recovery, authenticity, provenance, or recoverability
 claim. Changes after the final observation are outside the
 observation window. The command is intentionally absent from MCP.
-The fixed MCP tool set remains 11 read-only tools.
+The fixed MCP tool set remains 12 read-only tools.
 
 `graphrag-code snapshot-export-staging-cleanup-plan --parent
 <directory>` is the read-only schema-2 cleanup plan over that same
@@ -1431,7 +1433,7 @@ are required. Relative paths resolve from the invoking cwd.
 Surfaces are also `python -m graphrag_code.snapshot_import_plan`
 and `scripts/snapshot_import_plan.py`. The command is CLI-only
 and intentionally absent from MCP. The fixed MCP tool set
-remains 11 read-only tools.
+remains 12 read-only tools.
 
 The source export directory must be an existing real directory,
 never a symlink. Listing, stat, open, and read operations are
@@ -1731,7 +1733,7 @@ target managed graph. Reconcile schema version is 1. Surfaces
 are also `python -m graphrag_code.snapshot_import_reconcile`
 and `scripts/snapshot_import_reconcile.py`. The command is
 CLI-only and intentionally absent from MCP. The fixed MCP tool
-set remains 11 read-only tools.
+set remains 12 read-only tools.
 
 Saved plan and apply-result files may be relative to the
 invoking cwd. They must be bounded regular files (maximum
@@ -1890,7 +1892,7 @@ from the invoking cwd. Surfaces are also
 `python -m graphrag_code.snapshot_transfer_plan` and
 `scripts/snapshot_transfer_plan.py`. The command is CLI-only
 and intentionally absent from MCP. The fixed MCP tool set
-remains 11 read-only tools.
+remains 12 read-only tools.
 
 Both graph arguments must name existing real directories, never
 symlinks, and managed `current + snapshots/` graphs with
@@ -2028,7 +2030,7 @@ creating a standalone export directory. Apply schema version is
 `python -m graphrag_code.snapshot_transfer_apply` and
 `scripts/snapshot_transfer_apply.py`. The command is CLI-only
 and intentionally absent from MCP. The fixed MCP tool set remains
-11 read-only tools. `--transfer-confirmed` is mandatory.
+12 read-only tools. `--transfer-confirmed` is mandatory.
 `--expected-transfer-revision` must be exactly
 `sha256:<64 lowercase hex>`.
 
@@ -2068,7 +2070,7 @@ managed graphs. Reconcile schema version is 1. Surfaces are also
 `python -m graphrag_code.snapshot_transfer_reconcile` and
 `scripts/snapshot_transfer_reconcile.py`. The command is
 CLI-only and intentionally absent from MCP. The fixed MCP tool
-set remains 11 read-only tools.
+set remains 12 read-only tools.
 
 Saved plan and apply-result files may be relative to the
 invoking cwd. They must be bounded regular files (maximum

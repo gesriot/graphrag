@@ -411,7 +411,7 @@ def test_installed_wheel_historical_query(tmp_path: Path, built_wheel_and_sdist)
     assert _current(graph) == newer.name
 
 
-def test_mcp_nine_tools_return_historical_snapshot(tmp_path: Path):
+def test_mcp_query_tools_return_historical_snapshot(tmp_path: Path):
     from anyio import run as anyio_run
 
     graph, older, newer = _two(tmp_path)
@@ -424,6 +424,7 @@ def test_mcp_nine_tools_return_historical_snapshot(tmp_path: Path):
         "callers",
         "callees",
         "neighbors",
+        "subgraph",
         "impact",
         "type_closure",
         "context_pack",
@@ -435,7 +436,7 @@ def test_mcp_nine_tools_return_historical_snapshot(tmp_path: Path):
         async with Client(server) as client:
             tools = {tool.name for tool in (await client.list_tools()).tools}
             assert tools == set(TOOL_NAMES)
-            assert len(tools) == 11
+            assert len(tools) == 12
             for name in selectable:
                 if name in {"graph_status", "graph_doctor"}:
                     result = await client.call_tool(name, {"snapshot": older.name})
