@@ -8,6 +8,7 @@ Provides:
 - types_used_by(symbol)   # outgoing uses_type targets
 - type_users(symbol)      # incoming uses_type sources
 - type_closure(symbol)    # bounded cycle-safe transitive uses_type
+- subgraph(symbol)        # bounded cycle-safe multi-hop induced subgraph
 - neighbors(symbol)
 - dependency_order()
 - impact(symbol)
@@ -20,6 +21,7 @@ Example:
     uv run python scripts/graph_query.py callers sim:run_simulation --graph byog_mini_game
     uv run python scripts/graph_query.py types-used-by ini:ini_parse --graph byog_inih
     uv run python scripts/graph_query.py type-closure ini:ini_parse --direction dependencies --max-depth 2
+    uv run python scripts/graph_query.py subgraph sim:run_simulation --graph byog_mini_game --direction both
     uv run python scripts/graph_query.py observations sim:run_simulation --graph byog_mini_game
 """
 
@@ -28,17 +30,24 @@ from __future__ import annotations
 import json
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator, List, Dict, Any, Optional
+from typing import Iterator, List, Dict, Any, Optional, Sequence
 
 import pandas as pd
 import sys
 import typer
 
 from graphrag_code.byog_graph import (  # re-export for backward compat
+    DEFAULT_SUBGRAPH_MAX_DEPTH,
+    DEFAULT_SUBGRAPH_MAX_EDGES,
+    DEFAULT_SUBGRAPH_MAX_NODES,
     DEFAULT_TYPE_CLOSURE_MAX_DEPTH,
     DEFAULT_TYPE_CLOSURE_MAX_EDGES,
     DEFAULT_TYPE_CLOSURE_MAX_NODES,
+    HARD_MAX_SUBGRAPH_DEPTH,
+    HARD_MAX_SUBGRAPH_EDGES,
+    HARD_MAX_SUBGRAPH_NODES,
     ByogGraph,
+    compute_bounded_subgraph,
     compute_uses_type_closure,
     load_graph,
 )
@@ -194,6 +203,77 @@ def format_type_closure_human(result: Dict[str, Any]) -> str:
     for edge in result.get("edges") or []:
         lines.append(
             f"  {edge.get('depth')}\t{edge.get('source')} -> {edge.get('target')}\t{edge.get('id')}"
+        )
+    return "\n".join(lines)
+
+
+def subgraph(
+    ents: pd.DataFrame,
+    rels: pd.DataFrame,
+    symbol: str,
+    *,
+    direction: str = "both",
+    max_depth: int = DEFAULT_SUBGRAPH_MAX_DEPTH,
+    max_nodes: int = DEFAULT_SUBGRAPH_MAX_NODES,
+    max_edges: int = DEFAULT_SUBGRAPH_MAX_EDGES,
+    edge_types: Optional[Sequence[str]] = None,
+) -> Dict[str, Any]:
+    """Bounded cycle-safe multi-hop induced subgraph (delegates to pure BFS)."""
+    title = _resolve_symbol(ents, symbol)
+    return compute_bounded_subgraph(
+        ents,
+        rels,
+        title,
+        direction=direction,
+        max_depth=max_depth,
+        max_nodes=max_nodes,
+        max_edges=max_edges,
+        edge_types=edge_types,
+    )
+
+
+def dumps_subgraph_json(result: Dict[str, Any]) -> str:
+    """Deterministic JSON for subgraph results (sort_keys, allow_nan=False)."""
+    return json.dumps(
+        result,
+        indent=2,
+        ensure_ascii=False,
+        sort_keys=True,
+        allow_nan=False,
+    )
+
+
+def format_subgraph_human(result: Dict[str, Any]) -> str:
+    """Stable human-readable subgraph report (shared by graph_query wrappers)."""
+    lines: List[str] = []
+    root = result.get("root")
+    lines.append(f"root: {root if root is not None else 'null'}")
+    lines.append(f"resolved: {bool(result.get('resolved'))}")
+    lines.append(f"direction: {result.get('direction')}")
+    lines.append(f"max_depth: {result.get('max_depth')}")
+    lines.append(f"max_nodes: {result.get('max_nodes')}")
+    lines.append(f"max_edges: {result.get('max_edges')}")
+    edge_types = result.get("edge_types")
+    if edge_types:
+        lines.append("edge_types: " + ",".join(str(item) for item in edge_types))
+    else:
+        lines.append("edge_types: all")
+    n_ret = int(result.get("n_nodes_returned") or 0)
+    n_tot = int(result.get("n_nodes_total") or 0)
+    e_ret = int(result.get("n_edges_returned") or 0)
+    e_tot = int(result.get("n_edges_total") or 0)
+    trunc_n = " truncated" if result.get("nodes_truncated") else ""
+    trunc_e = " truncated" if result.get("edges_truncated") else ""
+    lines.append(f"nodes ({n_ret}/{n_tot}){trunc_n}:")
+    for node in result.get("nodes") or []:
+        node_type = node.get("type")
+        type_bit = f"\t{node_type}" if node_type is not None else ""
+        lines.append(f"  {node.get('depth')}\t{node.get('title')}{type_bit}")
+    lines.append(f"edges ({e_ret}/{e_tot}){trunc_e}:")
+    for edge in result.get("edges") or []:
+        lines.append(
+            f"  {edge.get('depth')}\t{edge.get('source')} -> {edge.get('target')}\t"
+            f"{edge.get('type')}\t{edge.get('id')}"
         )
     return "\n".join(lines)
 
@@ -376,6 +456,58 @@ def cli_type_closure(
                 print(json.dumps(result, indent=2, ensure_ascii=False))
             else:
                 print(format_type_closure_human(result))
+    except ValueError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from e
+
+
+@app.command("subgraph")
+def cli_subgraph(
+    symbol: str,
+    graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
+    direction: str = typer.Option(
+        "both",
+        "--direction",
+        help="outgoing, incoming, or both (reachability only)",
+    ),
+    max_depth: int = typer.Option(
+        DEFAULT_SUBGRAPH_MAX_DEPTH,
+        "--max-depth",
+        help=f"Maximum BFS depth (0..{HARD_MAX_SUBGRAPH_DEPTH})",
+    ),
+    max_nodes: int = typer.Option(
+        DEFAULT_SUBGRAPH_MAX_NODES,
+        "--max-nodes",
+        help=f"Max nodes returned (1..{HARD_MAX_SUBGRAPH_NODES}); totals stay exact",
+    ),
+    max_edges: int = typer.Option(
+        DEFAULT_SUBGRAPH_MAX_EDGES,
+        "--max-edges",
+        help=f"Max edges returned (0..{HARD_MAX_SUBGRAPH_EDGES}); totals stay exact",
+    ),
+    edge_type: List[str] = typer.Option(
+        [],
+        "--edge-type",
+        help="Exact relationship-type allow-list (repeatable). Omit for all types.",
+    ),
+    json_output: bool = typer.Option(False, "--json"),
+):
+    """Bounded cycle-safe multi-hop induced subgraph (structural exploration only)."""
+    try:
+        with _scoped_graph(graph, snapshot) as g:
+            result = g.subgraph(
+                symbol,
+                direction=direction,
+                max_depth=max_depth,
+                max_nodes=max_nodes,
+                max_edges=max_edges,
+                edge_types=edge_type or None,
+            )
+            if json_output:
+                print(dumps_subgraph_json(result), flush=True)
+            else:
+                print(format_subgraph_human(result), flush=True)
     except ValueError as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from e

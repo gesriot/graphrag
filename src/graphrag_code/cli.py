@@ -37,6 +37,9 @@ from typing import Any, Optional
 import typer
 
 from graphrag_code.byog_graph import (
+    DEFAULT_SUBGRAPH_MAX_DEPTH,
+    DEFAULT_SUBGRAPH_MAX_EDGES,
+    DEFAULT_SUBGRAPH_MAX_NODES,
     DEFAULT_TYPE_CLOSURE_MAX_DEPTH,
     DEFAULT_TYPE_CLOSURE_MAX_EDGES,
     DEFAULT_TYPE_CLOSURE_MAX_NODES,
@@ -436,21 +439,48 @@ def subgraph(
     symbol: str = typer.Argument(..., help="Symbol or module"),
     graph: Path = _graph_opt(),
     snapshot: Optional[str] = _snapshot_opt(),
+    direction: str = typer.Option(
+        "both",
+        "--direction",
+        help="outgoing, incoming, or both (reachability only)",
+    ),
+    max_depth: int = typer.Option(DEFAULT_SUBGRAPH_MAX_DEPTH, "--max-depth"),
+    max_nodes: int = typer.Option(DEFAULT_SUBGRAPH_MAX_NODES, "--max-nodes"),
+    max_edges: int = typer.Option(DEFAULT_SUBGRAPH_MAX_EDGES, "--max-edges"),
+    edge_type: list[str] = typer.Option(
+        [],
+        "--edge-type",
+        help="Exact relationship-type allow-list (repeatable). Omit for all types.",
+    ),
     json_out: bool = typer.Option(False, "--json"),
 ):
-    """Local subgraph around a symbol — same data as neighbors (no separate pipeline stage).
+    """Bounded cycle-safe multi-hop induced subgraph (graph_query.py subgraph).
 
-    Plan Phase 3 names this command; today it is exactly graph_query neighbors
-    (incoming + outgoing edges). A multi-hop induced subgraph is not a distinct
-    existing invocation, so this does not invent one.
+    Deterministic structural exploration over stored relationships. Not
+    natural-language search, GraphRAG, visualization, or semantic inference.
     """
-    if not json_out:
-        _delegate(
-            "graph_query.py",
-            _append_snapshot(["neighbors", symbol, "--graph", str(graph)], snapshot),
-        )
-        return
-    _json_query(graph, snapshot, lambda g: g.neighbors(symbol))
+    args = _append_snapshot(
+        [
+            "subgraph",
+            symbol,
+            "--graph",
+            str(graph),
+            "--direction",
+            direction,
+            "--max-depth",
+            str(max_depth),
+            "--max-nodes",
+            str(max_nodes),
+            "--max-edges",
+            str(max_edges),
+        ],
+        snapshot,
+    )
+    for rel_type in edge_type:
+        args.extend(["--edge-type", rel_type])
+    if json_out:
+        args.append("--json")
+    _delegate("graph_query.py", args)
 
 
 @app.command("dependency-order")

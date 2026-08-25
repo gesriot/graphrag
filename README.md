@@ -42,7 +42,7 @@ graphs, `examples/`, or experimental evidence.
 These generic installed commands operate on user-supplied directories:
 
 - `graphrag-code doctor`
-- `graphrag-code query-symbol` / `callers` / `callees`
+- `graphrag-code query-symbol` / `callers` / `callees` / `neighbors` / `subgraph`
 - `graphrag-code context-pack`
 - `graphrag-code index-python` / `index-c`
 - `graphrag-code adopt-publication-lock --graph <root> --indexer auto --offline-confirmed`
@@ -85,7 +85,8 @@ stderr.
 The server exposes a fixed read-only tool set: `graph_status`,
 `graph_doctor`, `query_symbol`, `callers`, `callees`, `neighbors`,
 `impact`, `type_closure`, `context_pack`, `snapshot_history`, and
-`snapshot_diff`. There is no `snapshot_activate`, `snapshot_pin`,
+`snapshot_diff`. There is no `subgraph` MCP tool in this milestone.
+There is no `snapshot_activate`, `snapshot_pin`,
 `snapshot_unpin`, `snapshot_retention_plan`, `snapshot_prune`,
 `snapshot_staging`, `snapshot_staging_cleanup_plan`,
 `snapshot_staging_cleanup`, `snapshot_maintenance_plan`,
@@ -149,6 +150,29 @@ offline confirmation. This is not a distributed lease service and does
 not protect against tools that ignore `.publish.lock`. Manual deletion
 or corruption still returns a controlled error. This is agent access to
 a local graph, not a UI, HTTP service, or semantic search backend.
+
+`graphrag-code subgraph` (also `python -m graphrag_code.graph_query subgraph`
+and `scripts/graph_query.py subgraph`) is a bounded cycle-safe multi-hop
+induced subgraph over one retained BYOG snapshot. It is **not** an alias
+for `neighbors`. Root resolution is the existing exact / module-alias /
+unique-partial contract. `--direction outgoing|incoming|both` controls
+reachability only; returned edge `source`/`target` stay as stored.
+Omitted `--edge-type` means all relationship types; repeated values are
+an exact allow-list (no aliases). Caps (`--max-depth` default 3, hard 32;
+`--max-nodes` default 50, hard 500, minimum 1 so the resolved root is
+always returned; `--max-edges` default 100, hard 500) truncate **returned**
+material while `n_*_total` stays exact within depth and filter. Self-edges
+and parallel rows are evidence. Returned edges are endpoint-closed over
+the returned nodes; node truncation never leaves a returned dangling edge,
+while `n_edges_total` still describes the complete reachable induced set.
+JSON is deterministic (`sort_keys`,
+`allow_nan=false`) with pandas/Arrow nulls as JSON null. Unresolved or
+ambiguous queries exit 0 with `resolved=false` and empty material;
+malformed direction/limits/filters exit 2 with no partial stdout. This is
+deterministic structural graph exploration only: not natural-language
+search, semantic inference, GraphRAG, community detection, visualization,
+architecture understanding, or completeness beyond stored relationships.
+MCP stays exactly 11 read-only tools and has no `subgraph` tool.
 
 `adopt-publication-lock` is an explicit migration, never an automatic
 MCP or doctor side effect. `--offline-confirmed` is required to create
@@ -660,6 +684,7 @@ uv run python scripts/snapshot_staging_cleanup.py --graph <root> --expected-plan
 uv run python scripts/index_python.py --package <pkg> --graph <out>
 uv run python scripts/index_c.py --package <pkg> --graph <out>
 uv run python scripts/graph_query.py symbol <title> --graph <root>
+uv run python scripts/graph_query.py subgraph <symbol-or-module> --graph <root>
 uv run python scripts/context_pack.py <title> --graph <root>
 uv run python scripts/port_eval.py --all-gates --full
 ```

@@ -303,6 +303,46 @@ retention guarantee. MCP remains strict and remains exactly 11 read-only tools.
 contracts. This is not activation, publication, retention, repair,
 reindex, natural-language search, or semantic equivalence.
 
+### Bounded multi-hop subgraph query
+
+`graphrag-code subgraph`, `python -m graphrag_code.graph_query subgraph`,
+and `scripts/graph_query.py subgraph` expose one retained-snapshot
+read of a bounded induced subgraph. `ByogGraph.subgraph(...)` and the
+pure helper `compute_bounded_subgraph(...)` are the same contract.
+This is **not** an alias for `neighbors` (one-hop titles). MCP stays
+exactly 11 read-only tools and has no `subgraph` tool.
+
+```text
+graphrag-code subgraph <symbol-or-module> \
+  --graph <root> \
+  [--snapshot <id|current>] \
+  [--direction outgoing|incoming|both] \
+  [--max-depth N] \
+  [--max-nodes N] \
+  [--max-edges N] \
+  [--edge-type TYPE ...] \
+  [--json]
+```
+
+| Property | Contract |
+| --- | --- |
+| Root resolution | Existing exact title, unique module alias, or unique case-insensitive partial. No fuzzy or semantic resolution. Unresolved or ambiguous queries complete with `resolved=false`, empty material, exact zero totals, deterministic JSON, exit 0 |
+| Traversal | BFS over relationship rows, cycle-safe, recording minimum depth from the root. Self-edges are evidence and do not duplicate the root or loop |
+| Direction | `outgoing` follows stored source→target; `incoming` follows target→source; `both` follows either endpoint. Default `both`. Direction governs discovery only; returned `source`/`target` keep stored orientation |
+| Edge-type filter | Omitted `--edge-type` means all relationship types. Repeated values are an exact allow-list (UTF-8-byte sorted, unique). Empty, whitespace-padded, or non-string filters are rejected. No relation aliases |
+| Induced edges | After the reachable node set within `max_depth` is known, the complete induced total counts filtered relationship rows whose **both** endpoints are reachable. Returned edges are additionally endpoint-closed over returned nodes, so no returned edge refers to a node hidden by `max_nodes`. Parallel rows are preserved |
+| Caps | Defaults: depth 3, nodes 50, edges 100. Hard maxima match MCP query limits: depth 32, nodes 500, edges 500. `max_nodes` minimum 1 so a resolved root is never dropped. Caps truncate **returned** lists; `n_nodes_total` / `n_edges_total` stay exact for the complete reachable induced set within depth and filter. Node truncation may therefore reduce returned edges before `max_edges` is reached |
+| Ordering | Root node first; remaining nodes by minimum depth then UTF-8 title bytes. Edges by `(min(endpoint depths), UTF-8 source, UTF-8 target, type, relationship id)`. Independent of parquet row order, hash iteration, locale, and pandas incidental order |
+| Records | Explicit JSON-safe node/edge schema (`title`/`depth` plus stored `id`, `type`, `description`, `source_file`, `span`, `extractor`, `confidence`, `is_deterministic`; edges also `weight`, `fact_kind`). Pandas/Arrow nulls → JSON null. NaN is normalized to null; Inf is refused. Missing values are never stringified as `"nan"` |
+| JSON | `sort_keys=True`, `allow_nan=False`, stable arrays |
+| Snapshot / lease | Same retained-snapshot read scope as other queries. `current` and explicit historical ids. Historical reads never activate or change `current`. Shared reader lease and retained descriptors are held through materialization, JSON/human serialization, and stdout flush. No nested public query. No `.publish.lock` creation. Unlocked legacy compatibility is unchanged and not broadened |
+| Malformed args | Bad direction, limits, or filters: exit 2, no speculative/partial stdout |
+| Non-claims | Not natural-language search, semantic inference, GraphRAG, community detection, visualization, architecture understanding, indexing, or completeness beyond stored relationships |
+
+`type_closure` remains a **uses_type-only** consumer with its existing
+direction names, defaults, and output schema. Subgraph is relation-generic
+and does not replace or wrap that helper.
+
 ### Operator-managed snapshot retention pins
 
 `graphrag-code snapshot-pins --graph <root>` lists the operator pin
@@ -2659,6 +2699,7 @@ When `scripts/index_c.py --clang-type-uses` is enabled (default **off**),
 | `ByogGraph.types_used_by(symbol)` | Sorted unique outgoing `uses_type` target titles |
 | `ByogGraph.type_users(symbol)` | Sorted unique incoming `uses_type` source titles |
 | `ByogGraph.type_closure(symbol, …)` | Bounded cycle-safe BFS over **only** `uses_type` (directions: `dependencies` / `users` / `both`); min depths; self-edges as evidence without node duplication; caps truncate **returned** lists while `n_*_total` stay exact within `max_depth`; malformed rows or duplicate relationship IDs fail closed |
+| `ByogGraph.subgraph(symbol, …)` | Separate relation-generic bounded induced subgraph (see [Bounded multi-hop subgraph query](#bounded-multi-hop-subgraph-query)); does **not** wrap or rename `type_closure` |
 | CLI | `graph_query.py types-used-by` / `type-users` / `type-closure`; same via `graphrag_code.py` (delegation; human + `--json` parity); negative limits / bad directions / malformed `uses_type` rows exit non-zero |
 | Context pack (outgoing, depth 1) | `type_dependencies` + `type_dependency_edges` (+ totals/truncated) |
 | Context pack (incoming, depth 1) | `type_user_edges` (+ totals/truncated) |

@@ -11,6 +11,7 @@ All deterministic, no external API.
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -32,6 +33,64 @@ TYPE_CLOSURE_DIRECTIONS = frozenset({"dependencies", "users", "both"})
 DEFAULT_TYPE_CLOSURE_MAX_DEPTH = 3
 DEFAULT_TYPE_CLOSURE_MAX_NODES = 50
 DEFAULT_TYPE_CLOSURE_MAX_EDGES = 100
+
+# Bounded multi-hop subgraph (relation-generic structural exploration).
+# Caps match the existing MCP query hard limits (depth 32, 500/500).
+SUBGRAPH_DIRECTIONS = frozenset({"outgoing", "incoming", "both"})
+DEFAULT_SUBGRAPH_MAX_DEPTH = 3
+DEFAULT_SUBGRAPH_MAX_NODES = 50
+DEFAULT_SUBGRAPH_MAX_EDGES = 100
+HARD_MAX_SUBGRAPH_DEPTH = 32
+HARD_MAX_SUBGRAPH_NODES = 500
+HARD_MAX_SUBGRAPH_EDGES = 500
+SUBGRAPH_NODE_FIELDS = (
+    "title",
+    "depth",
+    "id",
+    "type",
+    "description",
+    "source_file",
+    "span",
+    "extractor",
+    "confidence",
+    "is_deterministic",
+)
+SUBGRAPH_EDGE_FIELDS = (
+    "id",
+    "source",
+    "target",
+    "type",
+    "depth",
+    "description",
+    "weight",
+    "source_file",
+    "span",
+    "extractor",
+    "confidence",
+    "is_deterministic",
+    "fact_kind",
+)
+_SUBGRAPH_NODE_PROVENANCE = (
+    "id",
+    "type",
+    "description",
+    "source_file",
+    "span",
+    "extractor",
+    "confidence",
+    "is_deterministic",
+)
+_SUBGRAPH_EDGE_PROVENANCE = (
+    "description",
+    "weight",
+    "source_file",
+    "span",
+    "extractor",
+    "confidence",
+    "is_deterministic",
+    "fact_kind",
+)
+_SUBGRAPH_REL_REQUIRED = ("id", "source", "target", "type")
 
 PUBLICATION_LOCK_NAME = ".publish.lock"
 STAGING_NAME_PREFIX = ".staging-"
@@ -2473,6 +2532,34 @@ class ByogGraph:
             max_edges=max_edges,
         )
 
+    def subgraph(
+        self,
+        symbol: str,
+        *,
+        direction: str = "both",
+        max_depth: int = DEFAULT_SUBGRAPH_MAX_DEPTH,
+        max_nodes: int = DEFAULT_SUBGRAPH_MAX_NODES,
+        max_edges: int = DEFAULT_SUBGRAPH_MAX_EDGES,
+        edge_types: Optional[Sequence[str]] = None,
+    ) -> Dict[str, Any]:
+        """Bounded cycle-safe multi-hop induced subgraph (BFS, min depth).
+
+        Relation-generic structural exploration over stored relationship
+        rows. Caps limit **returned** material; ``n_*_total`` counts remain
+        exact within ``max_depth`` and the type filter. Direction controls
+        reachability only; returned ``source``/``target`` stay as stored.
+        """
+        return compute_bounded_subgraph(
+            self.ents,
+            self.rels,
+            self.resolve(symbol),
+            direction=direction,
+            max_depth=max_depth,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
+            edge_types=edge_types,
+        )
+
     def neighbors(self, symbol: str) -> Dict[str, List[str]]:
         title = self.resolve(symbol)
         if not title:
@@ -2785,6 +2872,389 @@ def compute_uses_type_closure(
         "max_depth": max_depth,
         "max_nodes": max_nodes,
         "max_edges": max_edges,
+        "nodes": nodes_out,
+        "edges": edges_out,
+        "n_nodes_total": n_nodes_total,
+        "n_edges_total": n_edges_total,
+        "n_nodes_returned": len(nodes_out),
+        "n_edges_returned": len(edges_out),
+        "nodes_truncated": n_nodes_total > len(nodes_out),
+        "edges_truncated": n_edges_total > len(edges_out),
+    }
+
+
+def _utf8_key(value: str) -> bytes:
+    return value.encode("utf-8")
+
+
+def _require_limit_int(name: str, value: Any, *, minimum: int, maximum: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        raise ValueError(
+            f"{name} must be an integer >= {minimum}, got {value!r}"
+        )
+    if value > maximum:
+        raise ValueError(f"{name} must be <= {maximum}, got {value!r}")
+    return value
+
+
+def _require_nonempty_str(raw: Any, field: str, loc: Any) -> str:
+    is_null = raw is None
+    if not is_null:
+        try:
+            is_null = bool(pd.isna(raw))
+        except (TypeError, ValueError):
+            is_null = False
+    if is_null or not isinstance(raw, str) or not raw:
+        raise ValueError(f"relationship at row {loc!r} has invalid {field}={raw!r}")
+    return raw
+
+
+def _normalize_edge_types(
+    edge_types: Optional[Sequence[str]],
+) -> Optional[List[str]]:
+    if edge_types is None:
+        return None
+    if isinstance(edge_types, (str, bytes)):
+        raise ValueError(
+            "edge_types must be a sequence of exact type strings, not a single string"
+        )
+    seen: set[str] = set()
+    out: List[str] = []
+    for item in edge_types:
+        if not isinstance(item, str) or not item or item.strip() != item:
+            raise ValueError(f"invalid edge-type filter {item!r}")
+        if "\x00" in item:
+            raise ValueError(f"invalid edge-type filter {item!r}")
+        if item not in seen:
+            seen.add(item)
+            out.append(item)
+    if not out:
+        return None
+    out.sort(key=_utf8_key)
+    return out
+
+
+def _subgraph_json_value(raw: Any) -> Any:
+    """Normalize a stored scalar to a JSON-safe value.
+
+    Pandas/Arrow nulls and NaN become JSON null. Inf is refused. Missing
+    values are never stringified as ``"nan"``.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, int) and not isinstance(raw, bool):
+        return int(raw)
+    if isinstance(raw, float):
+        if math.isnan(raw):
+            return None
+        if math.isinf(raw):
+            raise ValueError(f"non-finite number is not JSON-safe: {raw!r}")
+        return float(raw)
+    try:
+        if raw is getattr(pd, "NA", object()) or raw is getattr(pd, "NaT", object()):
+            return None
+    except Exception:
+        pass
+    try:
+        if bool(pd.isna(raw)):
+            return None
+    except (TypeError, ValueError):
+        pass
+    item = getattr(raw, "item", None)
+    if callable(item):
+        try:
+            converted = item()
+        except (ValueError, AttributeError, TypeError):
+            converted = None
+        else:
+            if converted is not raw:
+                return _subgraph_json_value(converted)
+    raise ValueError(f"unsupported subgraph field value {raw!r}")
+
+
+def _empty_subgraph(
+    *,
+    root: Optional[str],
+    direction: str,
+    max_depth: int,
+    max_nodes: int,
+    max_edges: int,
+    edge_types: Optional[List[str]],
+    resolved: bool,
+) -> Dict[str, Any]:
+    return {
+        "root": root,
+        "resolved": resolved,
+        "direction": direction,
+        "max_depth": max_depth,
+        "max_nodes": max_nodes,
+        "max_edges": max_edges,
+        "edge_types": edge_types,
+        "nodes": [],
+        "edges": [],
+        "n_nodes_total": 0,
+        "n_edges_total": 0,
+        "n_nodes_returned": 0,
+        "n_edges_returned": 0,
+        "nodes_truncated": False,
+        "edges_truncated": False,
+    }
+
+
+def _entity_lookup(ents: Optional[pd.DataFrame]) -> Dict[str, Any]:
+    by_title: Dict[str, Any] = {}
+    if ents is None or len(ents) == 0 or "title" not in ents.columns:
+        return by_title
+    ranked: List[Tuple[bytes, bytes, Any]] = []
+    for row_index, row in ents.iterrows():
+        raw_title = row.get("title")
+        try:
+            if raw_title is None or bool(pd.isna(raw_title)):
+                continue
+        except (TypeError, ValueError):
+            if raw_title is None:
+                continue
+        if not isinstance(raw_title, str) or not raw_title:
+            continue
+        raw_id = row.get("id") if "id" in row.index else ""
+        id_text = raw_id if isinstance(raw_id, str) else ""
+        ranked.append((_utf8_key(raw_title), _utf8_key(id_text), row))
+    ranked.sort(key=lambda item: (item[0], item[1]))
+    for title_key, _id_key, row in ranked:
+        title = title_key.decode("utf-8")
+        if title not in by_title:
+            by_title[title] = row
+    return by_title
+
+
+def _node_record(title: str, depth: int, entity_row: Any) -> Dict[str, Any]:
+    record: Dict[str, Any] = {
+        "title": title,
+        "depth": int(depth),
+        "id": None,
+        "type": None,
+        "description": None,
+        "source_file": None,
+        "span": None,
+        "extractor": None,
+        "confidence": None,
+        "is_deterministic": None,
+    }
+    if entity_row is None:
+        return record
+    for field in _SUBGRAPH_NODE_PROVENANCE:
+        if field in entity_row.index:
+            record[field] = _subgraph_json_value(entity_row.get(field))
+    return record
+
+
+def _edge_record(
+    *,
+    rid: str,
+    source: str,
+    target: str,
+    rel_type: str,
+    depth: int,
+    row: Any,
+) -> Dict[str, Any]:
+    record: Dict[str, Any] = {
+        "id": rid,
+        "source": source,
+        "target": target,
+        "type": rel_type,
+        "depth": int(depth),
+        "description": None,
+        "weight": None,
+        "source_file": None,
+        "span": None,
+        "extractor": None,
+        "confidence": None,
+        "is_deterministic": None,
+        "fact_kind": None,
+    }
+    for field in _SUBGRAPH_EDGE_PROVENANCE:
+        if field in row.index:
+            record[field] = _subgraph_json_value(row.get(field))
+    return record
+
+
+def compute_bounded_subgraph(
+    ents: Optional[pd.DataFrame],
+    rels: Optional[pd.DataFrame],
+    root_title: Optional[str],
+    *,
+    direction: str = "both",
+    max_depth: int = DEFAULT_SUBGRAPH_MAX_DEPTH,
+    max_nodes: int = DEFAULT_SUBGRAPH_MAX_NODES,
+    max_edges: int = DEFAULT_SUBGRAPH_MAX_EDGES,
+    edge_types: Optional[Sequence[str]] = None,
+) -> Dict[str, Any]:
+    """Pure BFS induced subgraph over stored relationship rows.
+
+    Direction controls which endpoints are followed during discovery.
+    Returned edge ``source``/``target`` keep stored orientation. Caps
+    truncate returned lists only; totals within ``max_depth`` and the
+    type filter stay exact. Self-edges are evidence and do not duplicate
+    the root or loop forever.
+    """
+    if not isinstance(direction, str) or direction not in SUBGRAPH_DIRECTIONS:
+        raise ValueError(
+            f"unsupported subgraph direction {direction!r}; "
+            f"expected one of {sorted(SUBGRAPH_DIRECTIONS)}"
+        )
+    max_depth = _require_limit_int(
+        "max_depth", max_depth, minimum=0, maximum=HARD_MAX_SUBGRAPH_DEPTH
+    )
+    max_nodes = _require_limit_int(
+        "max_nodes",
+        max_nodes,
+        minimum=1,
+        maximum=HARD_MAX_SUBGRAPH_NODES,
+    )
+    max_edges = _require_limit_int(
+        "max_edges", max_edges, minimum=0, maximum=HARD_MAX_SUBGRAPH_EDGES
+    )
+    normalized_types = _normalize_edge_types(edge_types)
+
+    if root_title is None:
+        return _empty_subgraph(
+            root=None,
+            direction=direction,
+            max_depth=max_depth,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
+            edge_types=normalized_types,
+            resolved=False,
+        )
+    if not isinstance(root_title, str) or not root_title:
+        raise ValueError(
+            f"root_title must be a non-empty resolved title or null, got {root_title!r}"
+        )
+
+    allow = None if normalized_types is None else set(normalized_types)
+    follow_out = direction in ("outgoing", "both")
+    follow_in = direction in ("incoming", "both")
+
+    out_adj: Dict[str, List[str]] = defaultdict(list)
+    in_adj: Dict[str, List[str]] = defaultdict(list)
+    filtered_rows: List[Tuple[str, str, str, str, Any]] = []
+    seen_ids: set[str] = set()
+
+    if rels is not None and len(rels) > 0:
+        missing_columns = sorted(set(_SUBGRAPH_REL_REQUIRED) - set(rels.columns))
+        if missing_columns:
+            raise ValueError(
+                "relationship table is missing required columns "
+                f"{missing_columns!r}"
+            )
+        for row_index, row in rels.iterrows():
+            values: Dict[str, str] = {}
+            for field in _SUBGRAPH_REL_REQUIRED:
+                values[field] = _require_nonempty_str(row.get(field), field, row_index)
+            rel_type = values["type"]
+            if allow is not None and rel_type not in allow:
+                continue
+            rid = values["id"]
+            if rid in seen_ids:
+                raise ValueError(f"duplicate relationship id {rid!r}")
+            seen_ids.add(rid)
+            src = values["source"]
+            tgt = values["target"]
+            filtered_rows.append((rid, src, tgt, rel_type, row))
+            out_adj[src].append(tgt)
+            in_adj[tgt].append(src)
+
+    for adj in (out_adj, in_adj):
+        for key in list(adj.keys()):
+            adj[key] = sorted(set(adj[key]), key=_utf8_key)
+
+    depth_of: Dict[str, int] = {root_title: 0}
+    queue: deque[str] = deque([root_title])
+    while queue:
+        cur = queue.popleft()
+        cur_depth = depth_of[cur]
+        if cur_depth >= max_depth:
+            continue
+        hops: List[str] = []
+        if follow_out:
+            hops.extend(out_adj.get(cur, []))
+        if follow_in:
+            hops.extend(in_adj.get(cur, []))
+        for neighbor in sorted(set(hops), key=_utf8_key):
+            if neighbor == cur:
+                continue
+            if neighbor not in depth_of:
+                next_depth = cur_depth + 1
+                depth_of[neighbor] = next_depth
+                if next_depth < max_depth:
+                    queue.append(neighbor)
+
+    entity_by_title = _entity_lookup(ents)
+    reachable = set(depth_of)
+    nodes_all = [
+        _node_record(title, depth, entity_by_title.get(title))
+        for title, depth in depth_of.items()
+    ]
+    root_nodes = [node for node in nodes_all if node["title"] == root_title]
+    other_nodes = [node for node in nodes_all if node["title"] != root_title]
+    other_nodes.sort(key=lambda node: (int(node["depth"]), _utf8_key(str(node["title"]))))
+    nodes_all = root_nodes + other_nodes
+
+    edges_all: List[Dict[str, Any]] = []
+    for rid, src, tgt, rel_type, row in filtered_rows:
+        if src not in reachable or tgt not in reachable:
+            continue
+        edge_depth = min(int(depth_of[src]), int(depth_of[tgt]))
+        edges_all.append(
+            _edge_record(
+                rid=rid,
+                source=src,
+                target=tgt,
+                rel_type=rel_type,
+                depth=edge_depth,
+                row=row,
+            )
+        )
+    edges_all.sort(
+        key=lambda edge: (
+            int(edge["depth"]),
+            _utf8_key(str(edge["source"])),
+            _utf8_key(str(edge["target"])),
+            _utf8_key(str(edge["type"])),
+            _utf8_key(str(edge["id"])),
+        )
+    )
+
+    n_nodes_total = len(nodes_all)
+    n_edges_total = len(edges_all)
+    nodes_out = nodes_all[:max_nodes]
+    if not nodes_out or nodes_out[0]["title"] != root_title:
+        raise ValueError(
+            "max_nodes must be large enough to return the resolved root"
+        )
+    returned_titles = {str(node["title"]) for node in nodes_out}
+    # Keep the returned material referentially closed: an edge is useful only
+    # when both endpoint records are present. n_edges_total still describes
+    # the complete induced relationship set before node/edge caps.
+    returnable_edges = [
+        edge
+        for edge in edges_all
+        if edge["source"] in returned_titles and edge["target"] in returned_titles
+    ]
+    edges_out = returnable_edges[:max_edges]
+
+    return {
+        "root": root_title,
+        "resolved": True,
+        "direction": direction,
+        "max_depth": max_depth,
+        "max_nodes": max_nodes,
+        "max_edges": max_edges,
+        "edge_types": normalized_types,
         "nodes": nodes_out,
         "edges": edges_out,
         "n_nodes_total": n_nodes_total,
