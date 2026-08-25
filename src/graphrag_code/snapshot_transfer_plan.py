@@ -76,7 +76,7 @@ from graphrag_code.byog_graph import (
     ByogReaderLockError,
     _validate_managed_snapshot_layout,
     graph_lease_order_key,
-    graph_read_lease,
+    graph_shared_leases,
     is_published_snapshot_id,
     is_staging_snapshot_name,
     ordered_graph_lease_pair,
@@ -1316,9 +1316,8 @@ def _ordered_shared_graph_leases(
     first: Path, second: Path
 ) -> Iterator[None]:
     """Hold two shared existing-lock leases in the documented global order."""
-    with graph_read_lease(first, allow_unlocked_managed=False):
-        with graph_read_lease(second, allow_unlocked_managed=False):
-            yield
+    with graph_shared_leases(first, second):
+        yield
 
 
 @contextmanager

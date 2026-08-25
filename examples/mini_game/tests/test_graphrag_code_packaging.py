@@ -119,6 +119,7 @@ def test_python_module_help():
     assert "snapshot-import-reconcile" in proc.stdout
     assert "snapshot-transfer-plan" in proc.stdout
     assert "snapshot-transfer-apply" in proc.stdout
+    assert "snapshot-transfer-reconcile" in proc.stdout
 
 
 def test_source_script_and_package_expose_same_commands():
@@ -168,6 +169,7 @@ def test_source_script_and_package_expose_same_commands():
         "snapshot-import-reconcile",
         "snapshot-transfer-plan",
         "snapshot-transfer-apply",
+        "snapshot-transfer-reconcile",
     )
     for name in required:
         assert name in packaged

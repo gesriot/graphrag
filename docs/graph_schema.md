@@ -1976,8 +1976,7 @@ modify `.publish.lock`. `transfer_performed` is always false.
 Neither graph is mutated. A ready plan does not authorize a
 later apply without freshly reproducing the complete plan and
 matching `transfer_revision`. Advisory locks protect only
-cooperating processes. Transfer reconciliation remains outside
-this milestone.
+cooperating processes.
 
 `graphrag-code snapshot-transfer-apply --source-graph <root>
 --snapshot <id|current> --target-graph <root>
@@ -2018,6 +2017,160 @@ back. A crash may leave `.staging-<id>` and writer-lock
 metadata. Successful transfer is not activation, backup,
 authenticity, provenance, portability, recoverability, or
 semantic equivalence.
+
+`graphrag-code snapshot-transfer-reconcile --source-graph <root>
+--target-graph <root> --plan-file <saved-transfer-plan.json>
+[--apply-result-file <saved-transfer-apply-result.json>]` is a
+read-only aftermath inspection of one saved schema-1
+snapshot-transfer-plan, an optional saved schema-1
+snapshot-transfer-apply result, and the current states of both
+managed graphs. Reconcile schema version is 1. Surfaces are also
+`python -m graphrag_code.snapshot_transfer_reconcile` and
+`scripts/snapshot_transfer_reconcile.py`. The command is
+CLI-only and intentionally absent from MCP. The fixed MCP tool
+set remains 11 read-only tools.
+
+Saved plan and apply-result files may be relative to the
+invoking cwd. They must be bounded regular files (maximum
+1 MiB), opened read-only without following symlinks, and
+protected against pathname replacement, truncation, growth,
+same-size rewrite with restored mtime, and non-standard JSON
+constants. Each file must contain one JSON object. Complete
+input validation finishes before either graph is observed.
+Malformed, oversized, symlinked, replaced, or unsupported
+inputs are exit 2 with empty stdout.
+
+Saved transfer-plan validation covers the complete schema-1
+producer contract: `schema_version=1`, `ok=true`, canonical
+absolute `source_graph` and `target_graph` paths, canonical
+`requested_snapshot` and `snapshot_id`, unique UTF-8-byte-sorted
+source and target published history, exact file records,
+counts, sizes, hashes, `source_envelope_valid=true`, exact
+`.staging-<snapshot-id>` name, blocking-reason and
+`transfer_ready` consistency, `transfer_performed=false`,
+mutation flags false, `fresh_plan_required_before_transfer=true`,
+and `notices` as an array. `source_export_revision` is
+recomputed from the canonical export-revision contract.
+`transfer_revision` is recomputed through
+`canonical_transfer_revision_payload` / `transfer_revision_of`.
+The saved revision must equal the recomputed revision. The
+explicit `--source-graph` and `--target-graph` must resolve to
+the saved canonical paths. Same-graph identity, including path
+aliases for the same `(st_dev, st_ino)`, is malformed invocation:
+exit 2, empty stdout, before nested leases. A structurally valid
+plan referring to another graph pair is an integrity mismatch:
+exit 1, empty stdout.
+
+An optional saved apply result must match the saved plan exactly
+for source and target graph paths, requested snapshot and
+snapshot id, expected and observed transfer revisions, source
+export revision, planned files, counts, total size, and
+current-before values. Only outcomes the current producer can
+emit are accepted: exact complete success; emitted
+pre-publication partial; and emitted post-publication partial.
+The validated declaration is classified as `not_supplied`,
+`complete`, `pre_publication_partial`, or
+`post_publication_partial`. A saved apply result is impossible
+for a blocked saved plan. A structurally valid result referring
+to another plan, graph pair, revision, snapshot, or file
+contract is an integrity failure: exit 1, empty stdout. A saved
+apply result is only an unauthenticated declaration being
+compared with current state. It is not provenance or proof of
+what created or removed anything.
+
+Both graphs must be existing real managed
+`current + snapshots/` graphs with already-existing regular
+`.publish.lock` files. The command never creates, adopts,
+writes, chmods, truncates, or replaces either lock. One shared
+existing-lock lease is held on each graph for the complete joint
+observation, result construction, serialization, stdout write,
+and flush. The two leases are acquired in the established global
+transfer order independent of source/target role: canonical
+UTF-8 graph-root path bytes, then `(st_dev, st_ino)`. Opposing
+A→B and B→A reconciliations therefore cannot deadlock. Both
+regular lock identities are opened and bound before either
+potentially blocking acquisition; lock pathnames and graph-root
+identities are revalidated after each acquisition and after the
+pair is held. Both
+graph roots and both `snapshots/` directories are anchored with
+no-follow descriptors and complete identities. Graph, snapshots,
+selected-snapshot, and payload descriptors plus both leases stay
+held through stdout flush. The command does not invoke public
+transfer-plan or transfer-apply scopes and does not create a
+nested observation window. It does not inspect operator pins,
+claim pins, retention settings, or staging writer-lock
+ownership/liveness. Exact staging presence is only pathname
+observation.
+
+Each planned snapshot, if present, must be a real retained
+directory, never a symlink. Its exact top-level payload set is
+hashed through held descriptors using bounded streaming and the
+existing persisted-envelope contract. Two complete initial
+observations and a final complete held-payload recheck detect
+same-size rewrites with restored mtime, including mutation
+immediately after an earlier payload's last hash. After source
+and target payload observations the command repeats complete
+graph-root, lock, current, snapshots-listing, exact snapshot,
+and exact staging checks, rechecks all held payloads, then
+repeats the structural scans. A present structurally valid
+snapshot is classified `matches_plan` or `revision_mismatch`.
+Stable absence or a stable valid revision mismatch is a
+completed observation. Invalid envelopes or concurrent
+replacement fail closed: exit 1, empty stdout. Unrelated later
+history or staging entries are normal completed observations
+and are not attributed to apply.
+
+JSON includes `schema_version`, `ok`, `source_graph`,
+`target_graph`, `plan_file`, `apply_result_file`,
+`input_transfer_revision`, `source_export_revision`,
+`snapshot_id`, `planned_files`, `file_count`,
+`total_size_bytes`, `apply_result_supplied`,
+`apply_result_valid`, `declared_apply_outcome`,
+`source_current`, `source_current_matches_plan`,
+`source_published_snapshots`, `source_published_count`,
+`source_history_matches_plan`, `source_snapshot_present`,
+`source_snapshot_state`, `observed_source_export_revision`,
+`source_snapshot_matches_plan`, `target_current`,
+`target_current_matches_plan`, `target_published_snapshots`,
+`target_published_count`,
+`target_history_matches_plan_plus_snapshot`,
+`target_snapshot_present`, `target_snapshot_state`,
+`observed_target_export_revision`,
+`target_snapshot_matches_plan`, `target_staging_name`,
+`target_staging_present`, `transfer_cause_proven=false`,
+`staging_cause_proven=false`, `recovery_performed=false`,
+`source_graph_mutated=false`, `target_graph_mutated=false`,
+`activation_performed=false`, `retention_performed=false`,
+`fresh_plan_required_before_transfer=true`, and `notices`.
+`ok=true` means this read-only reconciliation completed. It does
+not mean apply succeeded or that either snapshot matches.
+
+Stable valid observation, including source/target absence,
+matching, or revision-mismatch, current or history drift, and
+exact staging presence or absence, exits 0 with one complete
+human or JSON result. Unsafe graph/snapshot/staging structure,
+invalid present snapshot envelope, source/target alias mismatch,
+structurally valid cross-input plan/apply-result mismatch, or
+concurrent change during observation is exit 1, empty stdout.
+Malformed arguments, missing/oversized/symlinked/invalid saved
+input files, missing/unmanaged graph, unsafe initial root/lock
+form, or unsupported primitives or exceeded bounds are exit 2,
+empty stdout. Diagnostics may go to stderr.
+
+Source absence does not prove apply modified or deleted it;
+transfer-apply never mutates the source. Target absence does not
+prove apply failed or that another actor did not delete it.
+Target presence does not prove transfer-apply created it.
+Matching revision proves only equality with the saved payload
+contract during the bounded observation window. Staging presence
+does not prove transfer-apply left it; staging absence does not
+prove transfer-apply cleaned it. Current equality does not prove
+activation or non-activation history. Reconciliation performs no
+recovery and authorizes no cleanup or deletion. A fresh transfer
+plan is required before any later apply. This is not backup,
+authenticity, provenance, portability, recoverability, restore
+success, or semantic-equivalence evidence. Advisory locks
+protect only cooperating processes.
 
 ## Entity Types (code domain, start with these)
 - file

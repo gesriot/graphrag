@@ -23,7 +23,7 @@ snapshot-export-reconcile, snapshot-export-staging,
 snapshot-export-staging-cleanup-plan, snapshot-export-staging-cleanup,
 snapshot-export-staging-cleanup-reconcile, snapshot-import-plan,
 snapshot-import-apply, snapshot-import-reconcile, snapshot-transfer-plan,
-snapshot-transfer-apply, port_eval).
+snapshot-transfer-apply, snapshot-transfer-reconcile, port_eval).
 """
 from __future__ import annotations
 
@@ -67,6 +67,7 @@ app = typer.Typer(
         "snapshot-import-reconcile → "
         "snapshot-transfer-plan → "
         "snapshot-transfer-apply → "
+        "snapshot-transfer-reconcile → "
         "port-eval. Relative "
         "paths are resolved from the invoking working directory."
     ),
@@ -103,6 +104,7 @@ _DELEGATE_MODULES = {
     "snapshot_import_reconcile.py": "graphrag_code.snapshot_import_reconcile",
     "snapshot_transfer_plan.py": "graphrag_code.snapshot_transfer_plan",
     "snapshot_transfer_apply.py": "graphrag_code.snapshot_transfer_apply",
+    "snapshot_transfer_reconcile.py": "graphrag_code.snapshot_transfer_reconcile",
     "audit_call_edges.py": "graphrag_code.audit_call_edges",
     "port_eval.py": "graphrag_code.port_eval",
 }
@@ -1761,6 +1763,59 @@ def snapshot_transfer_apply(
     if json_out is True:
         args.append("--json")
     _delegate("snapshot_transfer_apply.py", args)
+
+
+@app.command("snapshot-transfer-reconcile")
+def snapshot_transfer_reconcile(
+    source_graph: Path = typer.Option(
+        ...,
+        "--source-graph",
+        help="Managed source BYOG graph root, relative to cwd.",
+    ),
+    target_graph: Path = typer.Option(
+        ...,
+        "--target-graph",
+        help="Managed target BYOG graph root, relative to cwd.",
+    ),
+    plan_file: Path = typer.Option(
+        ...,
+        "--plan-file",
+        help="Saved schema-1 snapshot-transfer-plan JSON, relative to cwd.",
+    ),
+    apply_result_file: Optional[Path] = typer.Option(
+        None,
+        "--apply-result-file",
+        help="Optional saved schema-1 snapshot-transfer-apply JSON.",
+    ),
+    json_out: bool = typer.Option(
+        False,
+        "--json",
+        help="same JSON shape as snapshot_transfer_reconcile.py --json",
+    ),
+):
+    """Reconcile a saved transfer plan against both managed graphs.
+
+    Observes one saved schema-1 snapshot-transfer-plan, an optional
+    saved schema-1 snapshot-transfer-apply result, and the current
+    states of both graphs. Does not retry, copy, recover, publish,
+    activate, or mutate either graph. A saved apply result is
+    declaration-only. A fresh transfer plan is required before any
+    later apply. Never creates .publish.lock. Intentionally absent
+    from MCP.
+    """
+    args = [
+        "--source-graph",
+        str(source_graph),
+        "--target-graph",
+        str(target_graph),
+        "--plan-file",
+        str(plan_file),
+    ]
+    if apply_result_file is not None:
+        args.extend(["--apply-result-file", str(apply_result_file)])
+    if json_out is True:
+        args.append("--json")
+    _delegate("snapshot_transfer_reconcile.py", args)
 
 
 @app.command("audit-graph")

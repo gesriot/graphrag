@@ -797,6 +797,11 @@ def _after_graph_mixed_lease_one_held(_root: Path, _exclusive: bool) -> None:
     return None
 
 
+def _after_graph_shared_lease_one_held(_root: Path) -> None:
+    """Test hook after one shared pair lock is held before the next acquire."""
+    return None
+
+
 def _root_lease_inode(root: Path) -> Tuple[int, int]:
     import stat as stat_mod
 
@@ -970,6 +975,68 @@ def graph_source_shared_target_exclusive_leases(
             _root_inode,
             _exclusive,
         ) in reversed(held):
+            if backend is not None:
+                try:
+                    _release_lock(fd, backend)
+                except OSError:
+                    pass
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+@contextmanager
+def graph_shared_leases(
+    left_root: Path,
+    right_root: Path,
+) -> Iterator[None]:
+    """Hold two existing publication locks in shared mode.
+
+    Both managed graph roots and both regular ``.publish.lock`` identities
+    are bound before either potentially blocking acquisition. The locks are
+    acquired in the global two-graph order, independent of caller role. Each
+    lock pathname and graph-root identity is revalidated after acquisition
+    and again after both locks are held. Release is in reverse order.
+
+    This prevents a replacement of the not-yet-acquired second lock while
+    the first acquisition waits from silently moving a two-graph read into a
+    different advisory-lock domain.
+    """
+    left = Path(left_root)
+    right = Path(right_root)
+    _require_managed_for_mixed_lease(left, exclusive=False)
+    _require_managed_for_mixed_lease(right, exclusive=False)
+    left_inode = _root_lease_inode(left)
+    right_inode = _root_lease_inode(right)
+    if left_inode == right_inode:
+        raise ByogReaderLockError(
+            "shared graph lease pair requires different directory identities: "
+            f"{left} and {right}"
+        )
+    ordered = [(left, left_inode), (right, right_inode)]
+    ordered.sort(key=lambda item: graph_lease_order_key(item[0], item[1]))
+    held: List[Tuple[int, Optional[str], Path, Path, Tuple[int, int]]] = []
+    try:
+        for root, root_inode in ordered:
+            _require_root_lease_inode(root, root_inode)
+            lock_path = root / PUBLICATION_LOCK_NAME
+            fd = _open_shared_lock_fd(lock_path)
+            held.append((fd, None, lock_path, root, root_inode))
+        for index, (fd, _backend, lock_path, root, root_inode) in enumerate(held):
+            backend = _acquire_mixed_lock(fd, lock_path, exclusive=False)
+            held[index] = (fd, backend, lock_path, root, root_inode)
+            _require_root_lease_inode(root, root_inode)
+            _after_graph_shared_lease_one_held(root)
+        for fd, _backend, lock_path, root, root_inode in held:
+            try:
+                _validate_existing_exclusive_lock_fd(fd, lock_path)
+            except ByogPublicationLockError as error:
+                raise ByogReaderLockError(str(error)) from error
+            _require_root_lease_inode(root, root_inode)
+        yield
+    finally:
+        for fd, backend, _lock_path, _root, _root_inode in reversed(held):
             if backend is not None:
                 try:
                     _release_lock(fd, backend)

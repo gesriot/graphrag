@@ -73,6 +73,7 @@ These generic installed commands operate on user-supplied directories:
 - `graphrag-code snapshot-import-reconcile --graph <root> --plan-file <saved-import-plan.json> [--apply-result-file <saved-import-apply-result.json>]`
 - `graphrag-code snapshot-transfer-plan --source-graph <root> --snapshot <id|current> --target-graph <root>`
 - `graphrag-code snapshot-transfer-apply --source-graph <root> --snapshot <id|current> --target-graph <root> --expected-transfer-revision sha256:<hex> --transfer-confirmed`
+- `graphrag-code snapshot-transfer-reconcile --source-graph <root> --target-graph <root> --plan-file <saved-transfer-plan.json> [--apply-result-file <saved-transfer-apply-result.json>]`
 - `graphrag-code mcp --graph <root> --indexer auto`
 
 `graphrag-code mcp` is a local stdio MCP adapter over one existing graph.
@@ -101,8 +102,9 @@ The server exposes a fixed read-only tool set: `graph_status`,
 `snapshot_import_plan`,
 `snapshot_import_apply`,
 `snapshot_import_reconcile`,
-`snapshot_transfer_plan`, or
-`snapshot_transfer_apply` tool:
+`snapshot_transfer_plan`,
+`snapshot_transfer_apply`, or
+`snapshot_transfer_reconcile` tool:
 activating a retained snapshot, writing operator retention pins,
 planning keep-last retention, pruning CAS-verified candidates,
 listing staging directories, emitting a read-only staging cleanup
@@ -581,12 +583,23 @@ same global path-byte order, copies exact source bytes into
 publishes with a native no-replace rename. It does not change
 `current`, pins, or retention, mutate the source graph, or
 overwrite an existing snapshot id. Successful transfer is not
-activation, backup, authenticity, or recoverability. The composite plan,
-apply, reconcile, export-plan, export-apply, export-verify,
-export-reconcile, export-staging, export-staging-cleanup-plan,
-export-staging-cleanup, export-staging-cleanup-reconcile,
-import-plan, import-apply, import-reconcile, transfer-plan, and
-transfer-apply commands are
+activation, backup, authenticity, or recoverability.
+`snapshot-transfer-reconcile --source-graph <root> --target-graph
+<root> --plan-file <saved-transfer-plan.json>` observes both
+graphs against that saved schema-1 plan and optional saved apply
+result. It is observation-only. It does not retry, copy, recover,
+publish, activate, delete, clean staging, or mutate either graph.
+Source absence does not prove apply modified the source; target
+presence does not prove apply created it; matching revision
+proves only payload-contract equality during the bounded
+observation window. A saved apply result is declaration-only. A
+fresh transfer plan is required before any later apply. The
+composite plan, apply, reconcile, export-plan, export-apply,
+export-verify, export-reconcile, export-staging,
+export-staging-cleanup-plan, export-staging-cleanup,
+export-staging-cleanup-reconcile, import-plan, import-apply,
+import-reconcile, transfer-plan, transfer-apply, and
+transfer-reconcile commands are
 intentionally absent from MCP. The MCP tool set remains exactly
 11 read-only tools.
 
@@ -1082,8 +1095,14 @@ modules, plugins, and PCH fail explicitly. See
   --expected-transfer-revision sha256:<hex> --transfer-confirmed`
   is the CAS apply: it publishes that snapshot into the target
   retained history without changing `current`, pins, or
-  retention. It is not an activation or a backup. None of these
-  commands is an MCP tool.
+  retention. It is not an activation or a backup.
+  `graphrag-code snapshot-transfer-reconcile --source-graph <root>
+  --target-graph <root> --plan-file <saved-transfer-plan.json>`
+  observes both graphs against the saved schema-1 plan and
+  optional saved apply result. It does not retry, recover,
+  mutate, or prove that apply created, cleaned, or activated
+  anything. A fresh transfer plan is required before any later
+  apply. None of these commands is an MCP tool.
 - `scripts/persisted_graph_doctor.py` / `graphrag-code doctor` – **read-only
   persisted-integrity doctor** for any BYOG graph. Selects one snapshot,
   validates the language-independent envelope, then runs every applicable

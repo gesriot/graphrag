@@ -775,7 +775,7 @@ def test_same_graph_rejected_before_nested_leases(
     graph = tmp_path / "graph"
     _publish(graph, "only")
     calls = {"leases": 0}
-    original = transfer_mod.graph_read_lease
+    original = transfer_mod.graph_shared_leases
 
     @contextmanager
     def counted(*args, **kwargs):
@@ -783,7 +783,7 @@ def test_same_graph_rejected_before_nested_leases(
         with original(*args, **kwargs) as lease:
             yield lease
 
-    monkeypatch.setattr(transfer_mod, "graph_read_lease", counted)
+    monkeypatch.setattr(transfer_mod, "graph_shared_leases", counted)
     with pytest.raises(SnapshotTransferPlanError, match="different directory identities"):
         snapshot_transfer_plan(graph, "current", graph / ".")
     assert calls["leases"] == 0
@@ -798,18 +798,16 @@ def test_deterministic_two_graph_lease_order(
     zzz = tmp_path / "zzz"
     _publish(aaa, "aaa")
     _publish(zzz, "zzz")
-    original = transfer_mod.graph_read_lease
+    original = transfer_mod.graph_shared_leases
     observed: list[list[str]] = []
 
     @contextmanager
-    def tracked(root, *args, **kwargs):
-        if not observed or len(observed[-1]) == 2:
-            observed.append([])
-        observed[-1].append(str(Path(root).resolve()))
-        with original(root, *args, **kwargs) as lease:
+    def tracked(first, second):
+        observed.append([str(Path(first).resolve()), str(Path(second).resolve())])
+        with original(first, second) as lease:
             yield lease
 
-    monkeypatch.setattr(transfer_mod, "graph_read_lease", tracked)
+    monkeypatch.setattr(transfer_mod, "graph_shared_leases", tracked)
     forward = snapshot_transfer_plan(aaa, "current", zzz)
     reverse = snapshot_transfer_plan(zzz, "current", aaa)
     assert forward["ok"] is True
@@ -1520,7 +1518,7 @@ def test_descriptors_and_both_leases_held_through_serialization(
     _publish(target, "dst")
     original_json = transfer_mod.result_to_json
     original_format = transfer_mod.format_result
-    original_lease = transfer_mod.graph_read_lease
+    original_lease = transfer_mod.graph_shared_leases
     state = {
         "source_fd": None,
         "target_fd": None,
@@ -1536,13 +1534,13 @@ def test_descriptors_and_both_leases_held_through_serialization(
 
     @contextmanager
     def tracked_lease(*args, **kwargs):
-        state["leases"] += 1
-        state["active_leases"] += 1
+        state["leases"] += 2
+        state["active_leases"] += 2
         try:
             with original_lease(*args, **kwargs) as lease:
                 yield lease
         finally:
-            state["active_leases"] -= 1
+            state["active_leases"] -= 2
 
     def capture_ready(
         _source,
@@ -1598,7 +1596,7 @@ def test_descriptors_and_both_leases_held_through_serialization(
             _assert_held()
             state["flushes"] += 1
 
-    monkeypatch.setattr(transfer_mod, "graph_read_lease", tracked_lease)
+    monkeypatch.setattr(transfer_mod, "graph_shared_leases", tracked_lease)
     monkeypatch.setattr(transfer_mod, "_after_transfer_result_ready", capture_ready)
     monkeypatch.setattr(transfer_mod, "result_to_json", guarded_json)
     monkeypatch.setattr(transfer_mod, "format_result", guarded_format)
@@ -1659,16 +1657,15 @@ def test_no_mutation_no_lock_creation_no_producer_no_mcp(
     def boom(*_args, **_kwargs):
         raise AssertionError("nested graph lease or public mutating/read scope")
 
-    original_lease = transfer_mod.graph_read_lease
+    original_lease = transfer_mod.graph_shared_leases
 
     @contextmanager
     def counted(*args, **kwargs):
-        calls["shared"] += 1
-        assert kwargs.get("allow_unlocked_managed") is False
+        calls["shared"] += 2
         with original_lease(*args, **kwargs) as lease:
             yield lease
 
-    monkeypatch.setattr(transfer_mod, "graph_read_lease", counted)
+    monkeypatch.setattr(transfer_mod, "graph_shared_leases", counted)
     monkeypatch.setattr(transfer_mod, "graph_exclusive_lease", boom, raising=False)
     monkeypatch.setattr(plan_mod, "graph_read_lease", boom)
     monkeypatch.setattr(plan_mod, "snapshot_export_plan", boom)
@@ -1705,7 +1702,7 @@ def test_no_mutation_no_lock_creation_no_producer_no_mcp(
             elif isinstance(func, ast.Attribute):
                 called.add(func.attr)
     assert (imported | called) & FORBIDDEN == set()
-    assert "graph_read_lease" in imported
+    assert "graph_shared_leases" in imported
     assert "export_revision_of" in imported
     assert "snapshot_export_plan(" not in source_text
     assert "snapshot_import_plan(" not in source_text

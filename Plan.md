@@ -119,7 +119,7 @@ definitions are all present; 113 re-exports are reported separately rather
 than inflated into duplicate graph entities. The `sqlparse.split` target named
 by the Rust port is therefore an actual graph entity, not merely a module API
 outside the graph. See `examples/sqlparse/PROVENANCE.md` for the census and
-call-oracle effect. The current full-suite expectation is **1972 passed, 2 xfailed**;
+call-oracle effect. The current full-suite expectation is **1990 passed, 2 xfailed**;
 this 2026-08-14 persisted-integrity doctor update supersedes the earlier 721-passed /
 2026-07-26 gate snapshot. The product CLI is the installable ``graphrag-code``
 console command (`python -m graphrag_code`); source-checkout ``scripts/*.py``
@@ -403,7 +403,19 @@ leaves both ``current`` pointers unchanged, does not inspect or
 change pins, and does not run retention. It does not overwrite an
 existing snapshot id. A crash may leave ``.staging-<id>`` and its
 writer-lock metadata. Successful transfer is not activation,
-backup, authenticity, or recoverability. Standalone prune and
+backup, authenticity, or recoverability.
+``graphrag-code snapshot-transfer-reconcile --source-graph <root>
+--target-graph <root> --plan-file <saved-transfer-plan.json>``
+observes both managed graphs against one saved schema-1
+transfer plan and an optional saved schema-1 apply result. It
+holds one shared existing-lock lease on each graph in the same
+global order, validates saved inputs completely before observing
+either graph, and classifies each planned snapshot as absent,
+matching, or a stable valid revision mismatch. It does not retry,
+copy, recover, publish, activate, delete, clean staging, or
+mutate either graph. A saved apply result is declaration-only.
+A fresh transfer plan is required before any later apply.
+Standalone prune and
 staging cleanup remain available. Neither prune, staging
 inventory, the staging cleanup plan, staging cleanup apply, the
 composite maintenance plan, the composite apply, reconcile, the
@@ -411,7 +423,8 @@ export plan, the export apply, the export verify, the export
 reconcile, the export staging inventory, the export staging
 cleanup plan, the export staging cleanup apply, the export
 staging cleanup reconcile, the import plan, the import apply, the
-import reconcile, the transfer plan, nor the transfer apply
+import reconcile, the transfer plan, the transfer apply, nor
+the transfer reconcile
 is an MCP tool. MCP remains exactly 11
 read-only tools and stays strict. Advisory locks do not protect
 against non-cooperating programs. No search, UI, HTTP service,
