@@ -13,7 +13,7 @@ empty registry instead of unlinking it.
 All three commands require an already-adopted regular ``.publish.lock``.
 They never create, truncate, rewrite, chmod, or replace that lock.
 Missing lock exits 2 and points at ``adopt-publication-lock``. Advisory
-locks protect only cooperating processes. MCP stays exactly 12 read-only
+locks protect only cooperating processes. MCP stays exactly 13 read-only
 tools; these commands are CLI-only.
 
 Usage:

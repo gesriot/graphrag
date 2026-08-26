@@ -31,7 +31,7 @@ accept ``--expected-plan-revision``. ``cleanup_applied`` stays false.
 ``apply_supported`` is true because a separate CAS apply command
 exists. Observed non-contention here is not that apply's exclusive
 writer-lock claim. Schema-1 plan revisions must not be accepted by
-apply. MCP stays exactly 12 read-only tools; this command is CLI-only.
+apply. MCP stays exactly 13 read-only tools; this command is CLI-only.
 
 Usage:
     graphrag-code snapshot-export-staging-cleanup-plan --parent <directory> [--json]
@@ -124,7 +124,7 @@ _COMMAND_NOTICES: Tuple[Dict[str, str], ...] = (
         "kind": "notice",
         "message": (
             "snapshot-export-staging-cleanup-plan is CLI-only and "
-            "intentionally absent from the fixed 12-tool MCP set."
+            "intentionally absent from the fixed 13-tool MCP set."
         ),
     },
 )

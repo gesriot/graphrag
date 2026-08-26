@@ -705,7 +705,9 @@ def test_publisher_waits_through_serialization_scope(tmp_path: Path):
         _cleanup_processes(reader, pub, release=resume)
 
 
-def test_no_nested_public_queries_and_mcp_subgraph_is_twelfth_tool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_no_nested_public_queries_and_mcp_subgraph_precedes_components(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     entities = [_entity("A", "function"), _entity("B", "function")]
     graph = _publish(tmp_path, entities, [_calls("A", "B")])
     g = ByogGraph(graph)
@@ -739,8 +741,9 @@ def test_no_nested_public_queries_and_mcp_subgraph_is_twelfth_tool(tmp_path: Pat
         async with Client(server) as client:
             names = [tool.name for tool in (await client.list_tools()).tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == 12
+            assert len(names) == 13
             assert names[names.index("neighbors") + 1] == "subgraph"
+            assert names[names.index("subgraph") + 1] == "components"
             assert "subgraph" in names
 
     anyio_run(_body)

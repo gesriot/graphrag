@@ -508,8 +508,8 @@ def test_concurrent_publishers_keep_unique_staging_and_publish(tmp_path: Path):
         _cleanup_processes(*procs)
 
 
-def test_mcp_remains_exactly_eleven_and_has_no_staging_tool():
-    assert len(TOOL_NAMES) == 12
+def test_mcp_remains_exactly_thirteen_and_has_no_staging_tool():
+    assert len(TOOL_NAMES) == 13
     assert "snapshot_staging" not in TOOL_NAMES
     assert "staging_writer" not in " ".join(TOOL_NAMES)
 

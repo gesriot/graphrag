@@ -30,13 +30,18 @@ sys.path.insert(0, str(ROOT / "src"))
 from graphrag_code import index_c as pkg_index_c  # type: ignore
 from graphrag_code import index_python as pkg_index_python  # type: ignore
 from graphrag_code.byog_graph import (  # type: ignore
+    DEFAULT_COMPONENTS_MAX_COMPONENTS,
+    DEFAULT_COMPONENTS_MAX_NODES_PER_COMPONENT,
     DEFAULT_SUBGRAPH_MAX_DEPTH,
     DEFAULT_SUBGRAPH_MAX_EDGES,
     DEFAULT_SUBGRAPH_MAX_NODES,
+    HARD_MAX_COMPONENT_NODES,
+    HARD_MAX_COMPONENTS,
     HARD_MAX_SUBGRAPH_DEPTH,
     HARD_MAX_SUBGRAPH_EDGES,
     HARD_MAX_SUBGRAPH_NODES,
     ByogGraph,
+    compute_weakly_connected_components,
     publish_byog_snapshot,
 )
 from graphrag_code.mcp_server import (  # type: ignore
@@ -237,8 +242,9 @@ def test_tools_list_is_exactly_documented(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == len(set(names)) == len(TOOL_NAMES) == 12
+            assert len(names) == len(set(names)) == len(TOOL_NAMES) == 13
             assert names[names.index("neighbors") + 1] == "subgraph"
+            assert names[names.index("subgraph") + 1] == "components"
             assert "snapshot_activate" not in names
             for tool in tools:
                 assert tool.input_schema["additionalProperties"] is False
@@ -260,7 +266,12 @@ def test_every_required_tool_via_sdk_client(tmp_path: Path):
     async def _body():
         async with Client(server) as client:
             for name in TOOL_NAMES:
-                if name in {"graph_status", "graph_doctor", "snapshot_history"}:
+                if name in {
+                    "graph_status",
+                    "graph_doctor",
+                    "snapshot_history",
+                    "components",
+                }:
                     result = await client.call_tool(name)
                 elif name == "snapshot_diff":
                     result = await client.call_tool(name, {"from_snapshot": "current"})
@@ -313,6 +324,9 @@ def test_query_and_graph_walks_match_byog_graph(tmp_path: Path):
     assert session.neighbors(symbol)["data"] == view.neighbors(symbol)
     assert session.subgraph(symbol)["data"] == json.loads(
         json.dumps(view.subgraph(symbol), allow_nan=False, default=str)
+    )
+    assert session.components()["data"] == json.loads(
+        json.dumps(view.components(), allow_nan=False, default=str)
     )
     assert session.impact(symbol)["data"] == view.impact(symbol)
 
@@ -623,6 +637,7 @@ def test_mcp_calls_do_not_mutate_graph(
     session.callees(symbol)
     session.neighbors(symbol)
     session.subgraph(symbol)
+    session.components()
     session.impact(symbol)
     session.type_closure(symbol)
     session.context_pack(symbol)
@@ -1346,6 +1361,473 @@ def test_subgraph_mcp_publisher_wait_and_no_nested_query(
     q = ctx.Queue()
     reader = ctx.Process(
         target=_mcp_paused_subgraph, args=(str(graph), pinned, resume, q)
+    )
+    from test_reader_lease import _cleanup_processes, _publisher
+
+    pub = ctx.Process(target=_publisher, args=(str(graph), "next", 1, about, got, q))
+    try:
+        reader.start()
+        assert pinned.wait(timeout=20)
+        pub.start()
+        assert about.wait(timeout=20)
+        assert not got.is_set()
+        assert _current(graph) == first
+        assert (first_dir / "entities.parquet").is_file()
+        resume.set()
+        reader.join(timeout=20)
+        pub.join(timeout=20)
+        assert not reader.is_alive() and not pub.is_alive()
+        assert got.is_set()
+    finally:
+        _cleanup_processes(pub, reader, release=resume)
+
+
+def _component_entity(title: str, **extra) -> dict:
+    row = {
+        "id": extra.pop("id", f"ent:{title}"),
+        "title": title,
+        "type": extra.pop("type", "function"),
+        "source_file": extra.pop("source_file", "a.py"),
+        "extractor": extra.pop("extractor", "tree-sitter-python"),
+    }
+    row.update(extra)
+    return row
+
+
+def _component_rel(source: str, target: str, rel_type: str, *, rid: str | None = None) -> dict:
+    return {
+        "id": rid or f"rel:{rel_type}:{source}->{target}",
+        "source": source,
+        "target": target,
+        "type": rel_type,
+        "extractor": "tree-sitter-python",
+    }
+
+
+def _publish_components(tmp_path: Path, ents: list, rels: list, *, name: str = "comp") -> Path:
+    graph = tmp_path / name
+    tus = [
+        {
+            "id": f"tu:{row['title']}",
+            "title": row.get("source_file", "a.py"),
+            "source_file": row.get("source_file", "a.py"),
+            "entity_id": row["id"],
+        }
+        for row in ents
+    ]
+    publish_byog_snapshot(
+        pd.DataFrame(ents),
+        pd.DataFrame(rels) if rels else pd.DataFrame(columns=["id", "source", "target", "type"]),
+        pd.DataFrame(tus) if tus else pd.DataFrame(columns=["id", "title", "source_file"]),
+        graph,
+        settings_text=f"mcp: {name}\n",
+        keep_last=5,
+    )
+    return graph
+
+
+def _assert_components_envelope(payload: dict, data: dict) -> None:
+    ready = json.loads(json.dumps(data, allow_nan=False, default=str))
+    returned_nodes = sum(int(item["n_nodes_returned"]) for item in ready["components"])
+    assert payload["tool"] == "components"
+    assert payload["ok"] is True
+    assert payload["schema_version"] == 1
+    assert payload["data"] == ready
+    assert payload["total"] == ready["n_components_total"] + ready["n_nodes_total"]
+    assert payload["returned"] == ready["n_components_returned"] + returned_nodes
+    assert payload["truncated"] is bool(
+        ready["components_truncated"] or ready["nodes_truncated"]
+    )
+    assert payload["limits"]["max_envelope_bytes"] == HARD_MAX_ENVELOPE_BYTES
+
+
+def test_components_mcp_schema_defaults_and_unknown_args(tmp_path: Path):
+    graph = _publish_components(
+        tmp_path,
+        [_component_entity("A"), _component_entity("B")],
+        [_component_rel("A", "B", "calls")],
+    )
+    session = _session(graph, "python")
+    sig = inspect.signature(GraphMcpSession.components)
+    assert list(sig.parameters) == [
+        "self",
+        "max_components",
+        "max_nodes_per_component",
+        "edge_types",
+        "snapshot",
+    ]
+    assert sig.parameters["max_components"].default == DEFAULT_COMPONENTS_MAX_COMPONENTS
+    assert (
+        sig.parameters["max_nodes_per_component"].default
+        == DEFAULT_COMPONENTS_MAX_NODES_PER_COMPONENT
+    )
+    assert sig.parameters["edge_types"].default is None
+    assert sig.parameters["snapshot"].default == "current"
+    assert "graph" not in sig.parameters
+    assert "format" not in sig.parameters
+    assert "dot" not in sig.parameters
+
+    defaulted = session.components()
+    view = ByogGraph(graph).components()
+    _assert_components_envelope(defaulted, view)
+    assert defaulted["limits"]["max_components"] == DEFAULT_COMPONENTS_MAX_COMPONENTS
+    assert (
+        defaulted["limits"]["max_nodes_per_component"]
+        == DEFAULT_COMPONENTS_MAX_NODES_PER_COMPONENT
+    )
+    assert defaulted["limits"]["edge_types"] is None
+
+    server = build_mcp_server(session)
+
+    async def _body():
+        async with Client(server) as client:
+            tools = (await client.list_tools()).tools
+            names = [tool.name for tool in tools]
+            assert names == list(TOOL_NAMES)
+            assert names[names.index("subgraph") + 1] == "components"
+            tool = next(item for item in tools if item.name == "components")
+            assert tool.annotations.read_only_hint is True
+            assert tool.input_schema["additionalProperties"] is False
+            props = tool.input_schema["properties"]
+            assert list(props) == [
+                "max_components",
+                "max_nodes_per_component",
+                "edge_types",
+                "snapshot",
+            ]
+            assert props["max_components"]["type"] == "integer"
+            assert props["max_nodes_per_component"]["type"] == "integer"
+            assert props["max_components"]["default"] == DEFAULT_COMPONENTS_MAX_COMPONENTS
+            assert (
+                props["max_nodes_per_component"]["default"]
+                == DEFAULT_COMPONENTS_MAX_NODES_PER_COMPONENT
+            )
+            assert props["snapshot"]["default"] == "current"
+            extra = await client.call_tool("components", {"graph": str(tmp_path / "other")})
+            assert extra.is_error is True
+            unknown = await client.call_tool("components", {"format": "json"})
+            assert unknown.is_error is True
+            dot = await client.call_tool("components", {"dot": True})
+            assert dot.is_error is True
+            symbol = await client.call_tool("components", {"symbol": "A"})
+            assert symbol.is_error is True
+            scalar = await client.call_tool("components", {"edge_types": "calls"})
+            assert scalar.is_error is True
+            for invalid_args in (
+                {"max_components": True},
+                {"max_components": 1.0},
+                {"max_nodes_per_component": False},
+                {"max_nodes_per_component": 1.5},
+                {"edge_types": ["calls", None]},
+                {"edge_types": ["calls", 1]},
+            ):
+                invalid = await client.call_tool("components", invalid_args)
+                assert invalid.is_error is True, invalid_args
+
+    _run(_body)
+
+
+def test_components_mcp_semantics_parity_snapshots_and_filters(tmp_path: Path):
+    graph = tmp_path / "g"
+    older = publish_byog_snapshot(
+        pd.DataFrame([_component_entity("demo:old", source_file="old.py")]),
+        pd.DataFrame([_component_rel("demo:old", "demo:old", "calls", rid="rel:old")]),
+        pd.DataFrame(
+            [
+                {
+                    "id": "tu:old",
+                    "title": "old.py",
+                    "source_file": "old.py",
+                    "entity_id": "ent:demo:old",
+                }
+            ]
+        ),
+        graph,
+        settings_text="mcp: old\n",
+        keep_last=5,
+    )
+    newer_ents = [
+        _component_entity("A"),
+        _component_entity("B"),
+        _component_entity("C"),
+        _component_entity("Isolated"),
+        _component_entity("Zsmall"),
+    ]
+    newer_rels = [
+        _component_rel("A", "B", "calls", rid="rel:ab"),
+        _component_rel("B", "ghost", "calls", rid="rel:endpoint"),
+        _component_rel("A", "A", "calls", rid="rel:self"),
+        _component_rel("A", "B", "calls", rid="rel:parallel"),
+        _component_rel("C", "Zsmall", "contains", rid="rel:contains"),
+    ]
+    current = publish_byog_snapshot(
+        pd.DataFrame(newer_ents),
+        pd.DataFrame(newer_rels),
+        pd.DataFrame(
+            [
+                {
+                    "id": f"tu:{row['title']}",
+                    "title": "a.py",
+                    "source_file": "a.py",
+                    "entity_id": row["id"],
+                }
+                for row in newer_ents
+            ]
+        ),
+        graph,
+        settings_text="mcp: new\n",
+        keep_last=5,
+    )
+    assert _current(graph) == current.name
+    before = _payload_hashes(graph)
+    session = _session(graph, "python")
+    view = ByogGraph(graph)
+
+    none = session.components()
+    empty = session.components(edge_types=[])
+    explicit_current = session.components(snapshot="current")
+    _assert_components_envelope(none, view.components())
+    assert empty["data"] == none["data"]
+    assert empty["limits"]["edge_types"] is None
+    assert explicit_current["data"] == none["data"]
+    assert explicit_current["snapshot"] == current.name
+    assert none["data"]["n_nodes_total"] == 6
+    assert none["data"]["n_endpoint_only_nodes_total"] == 1
+    reps = [item["representative"] for item in none["data"]["components"]]
+    assert reps == ["A", "C", "Isolated"]
+    big = none["data"]["components"][0]
+    assert big["nodes"] == ["A", "B", "ghost"]
+    assert big["n_edges_total"] == 4
+    assert big["n_endpoint_only_nodes"] == 1
+    iso = none["data"]["components"][2]
+    assert iso["nodes"] == ["Isolated"]
+    assert iso["n_edges_total"] == 0
+
+    filtered = session.components(edge_types=["uses_type", "calls", "calls"])
+    expected_filtered = view.components(edge_types=["uses_type", "calls", "calls"])
+    assert filtered["limits"]["edge_types"] == ["calls", "uses_type"]
+    assert filtered["data"] == json.loads(
+        json.dumps(expected_filtered, allow_nan=False, default=str)
+    )
+    assert filtered["data"]["edge_types"] == ["calls", "uses_type"]
+
+    capped = session.components(max_components=1, max_nodes_per_component=1)
+    expected_capped = view.components(max_components=1, max_nodes_per_component=1)
+    _assert_components_envelope(capped, expected_capped)
+    assert capped["truncated"] is True
+    assert capped["data"]["components_truncated"] is True
+    assert capped["data"]["nodes_truncated"] is True
+
+    historical = session.components(snapshot=older.name)
+    old_ents = pd.read_parquet(graph / "snapshots" / older.name / "entities.parquet")
+    old_rels = pd.read_parquet(
+        graph / "snapshots" / older.name / "relationships.parquet"
+    )
+    old_expected = compute_weakly_connected_components(old_ents, old_rels)
+    assert historical["snapshot"] == older.name
+    assert historical["data"] == json.loads(
+        json.dumps(old_expected, allow_nan=False, default=str)
+    )
+    assert historical["data"]["n_nodes_total"] == 1
+    assert "demo:new" not in json.dumps(historical)
+    assert "A" not in json.dumps(historical["data"])
+    assert _current(graph) == current.name
+    assert _payload_hashes(graph) == before
+
+    server = build_mcp_server(session)
+
+    async def _body():
+        async with Client(server) as client:
+            payload = _payload(
+                await client.call_tool("components", {"snapshot": older.name})
+            )
+            assert payload["tool"] == "components"
+            assert payload["snapshot"] == older.name
+            assert payload["data"] == historical["data"]
+
+    _run(_body)
+
+
+def test_components_mcp_validation_malformed_empty_and_envelope(tmp_path: Path):
+    graph = _publish_components(
+        tmp_path,
+        [_component_entity("A"), _component_entity("B")],
+        [_component_rel("A", "B", "calls")],
+    )
+    session = _session(graph, "python")
+    with pytest.raises(GraphMcpError, match="max_components"):
+        session.components(max_components=True)
+    with pytest.raises(GraphMcpError, match="max_components"):
+        session.components(max_components=1.5)
+    with pytest.raises(GraphMcpError, match="max_components"):
+        session.components(max_components=float("nan"))
+    with pytest.raises(GraphMcpError, match="max_nodes_per_component"):
+        session.components(max_nodes_per_component=math.inf)
+    with pytest.raises(GraphMcpError, match="max_nodes_per_component"):
+        session.components(max_nodes_per_component=0)
+    with pytest.raises(GraphMcpError, match="max_components"):
+        session.components(max_components=-1)
+    with pytest.raises(GraphMcpError, match="max_components"):
+        session.components(max_components=HARD_MAX_COMPONENTS + 1)
+    with pytest.raises(GraphMcpError, match="max_nodes_per_component"):
+        session.components(max_nodes_per_component=HARD_MAX_COMPONENT_NODES + 1)
+    with pytest.raises(GraphMcpError, match="array of strings"):
+        session.components(edge_types="calls")
+    with pytest.raises(GraphMcpError, match="invalid edge-type filter"):
+        session.components(edge_types=[""])
+    with pytest.raises(GraphMcpError, match="invalid edge-type filter"):
+        session.components(edge_types=[" calls"])
+    with pytest.raises(GraphMcpError, match="snapshot"):
+        session.components(snapshot="..")
+
+    empty_ok = session.components(edge_types=[])
+    assert empty_ok["limits"]["edge_types"] is None
+    none_ok = session.components(edge_types=None)
+    assert none_ok["data"] == empty_ok["data"]
+
+    empty_graph = tmp_path / "empty"
+    publish_byog_snapshot(
+        pd.DataFrame(columns=["id", "title", "type", "source_file", "extractor"]),
+        pd.DataFrame(columns=["id", "source", "target", "type", "extractor"]),
+        pd.DataFrame(columns=["id", "title", "source_file"]),
+        empty_graph,
+        settings_text="mcp: empty\n",
+        keep_last=1,
+    )
+    empty_session = GraphMcpSession(
+        empty_graph,
+        configured_indexer="python",
+        resolved_indexer="python",
+        preflight={"indexer": "python", "indexer_resolution": {}},
+    )
+    empty_payload = empty_session.components()
+    expected_empty = json.loads(
+        json.dumps(ByogGraph(empty_graph).components(), allow_nan=False, default=str)
+    )
+    _assert_components_envelope(empty_payload, expected_empty)
+    assert empty_payload["data"]["components"] == []
+    assert empty_payload["truncated"] is False
+
+    bad = tmp_path / "bad"
+    publish_byog_snapshot(
+        pd.DataFrame([_component_entity("A")]),
+        pd.DataFrame(
+            [
+                {
+                    "id": "rel:bad",
+                    "source": "A",
+                    "target": None,
+                    "type": "calls",
+                    "extractor": "tree-sitter-python",
+                }
+            ]
+        ),
+        pd.DataFrame(
+            [{"id": "tu:a", "title": "a.py", "source_file": "a.py", "entity_id": "ent:A"}]
+        ),
+        bad,
+        settings_text="mcp: bad\n",
+        keep_last=1,
+    )
+    with pytest.raises(GraphMcpError, match="invalid target"):
+        GraphMcpSession(
+            bad,
+            configured_indexer="python",
+            resolved_indexer="python",
+            preflight={"indexer": "python", "indexer_resolution": {}},
+        ).components()
+
+    huge = tmp_path / "huge"
+    title = "T" + ("x" * (HARD_MAX_ENVELOPE_BYTES + 1))
+    publish_byog_snapshot(
+        pd.DataFrame([_component_entity(title, id="ent:huge", source_file="m.py")]),
+        pd.DataFrame(columns=["id", "source", "target", "type"]),
+        pd.DataFrame(
+            [{"id": "tu:1", "title": "m.py", "source_file": "m.py", "entity_id": "ent:huge"}]
+        ),
+        huge,
+        settings_text="mcp: huge\n",
+        keep_last=1,
+    )
+    with pytest.raises(GraphMcpError, match="response envelope exceeds hard limit"):
+        GraphMcpSession(
+            huge,
+            configured_indexer="python",
+            resolved_indexer="python",
+            preflight={"indexer": "python", "indexer_resolution": {}},
+        ).components(max_components=1, max_nodes_per_component=1)
+
+
+def _mcp_paused_components(graph: str, pinned, resume, q) -> None:
+    sys.path.insert(0, str(Path(__file__).parents[3] / "src"))
+    import graphrag_code.mcp_server as mcp_mod
+
+    orig_envelope = mcp_mod._envelope
+
+    def wrapped_envelope(**kwargs):
+        payload = orig_envelope(**kwargs)
+        pinned.set()
+        if not resume.wait(timeout=20):
+            q.put("timeout")
+        return payload
+
+    mcp_mod._envelope = wrapped_envelope
+    session = mcp_mod.GraphMcpSession(
+        Path(graph),
+        configured_indexer="python",
+        resolved_indexer="python",
+        preflight={"indexer": "python", "indexer_resolution": {}},
+    )
+    payload = session.components()
+    q.put(payload["snapshot"])
+
+
+def test_components_mcp_publisher_wait_and_no_nested_query(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import multiprocessing
+
+    graph = _publish_components(
+        tmp_path,
+        [_component_entity("A"), _component_entity("B")],
+        [_component_rel("A", "B", "calls")],
+    )
+    first = _current(graph)
+    first_dir = graph / "snapshots" / first
+    before = _payload_hashes(graph)
+    session = _session(graph, "python")
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("nested public query or CLI invoked from MCP components")
+
+    producer_calls = 0
+    producer = ByogGraph.components
+
+    def counted_producer(self, *args, **kwargs):
+        nonlocal producer_calls
+        producer_calls += 1
+        return producer(self, *args, **kwargs)
+
+    monkeypatch.setattr("graphrag_code.graph_query.components", boom)
+    monkeypatch.setattr("graphrag_code.graph_query.cli_components", boom)
+    monkeypatch.setattr("graphrag_code.cli.components", boom)
+    monkeypatch.setattr("graphrag_code.graph_query.subgraph", boom)
+    monkeypatch.setattr(ByogGraph, "components", counted_producer)
+    payload = session.components()
+    assert payload["ok"] is True
+    assert producer_calls == 1
+    assert _payload_hashes(graph) == before
+    assert not list(graph.glob(".staging-*"))
+    assert not list(tmp_path.glob("*.dot"))
+
+    ctx = multiprocessing.get_context("spawn")
+    pinned = ctx.Event()
+    resume = ctx.Event()
+    about = ctx.Event()
+    got = ctx.Event()
+    q = ctx.Queue()
+    reader = ctx.Process(
+        target=_mcp_paused_components, args=(str(graph), pinned, resume, q)
     )
     from test_reader_lease import _cleanup_processes, _publisher
 

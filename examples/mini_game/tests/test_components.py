@@ -1,6 +1,7 @@
 """Weakly connected components over the persisted structural graph.
 
-Topology summary only. Does not add MCP, DOT, NetworkX, or Graphviz.
+Topology summary only. MCP exposes the existing producer. No DOT,
+NetworkX, or Graphviz.
 """
 from __future__ import annotations
 
@@ -702,7 +703,7 @@ def test_no_nested_query_networkx_graphviz_and_subgraph_unchanged(
     ) == sub
 
 
-def test_mcp_remains_twelve_tools_without_components(tmp_path: Path):
+def test_mcp_exposes_components_as_thirteenth_tool(tmp_path: Path):
     from anyio import run as anyio_run
     from mcp import Client
 
@@ -711,19 +712,58 @@ def test_mcp_remains_twelve_tools_without_components(tmp_path: Path):
     graph = _publish(tmp_path, [_entity("A"), _entity("B")], [_calls("A", "B")])
     session = build_session(graph, "python")
     server = build_mcp_server(session)
-    assert not hasattr(session, "components")
-    params = list(inspect.signature(GraphMcpSession.subgraph).parameters)
-    assert "components" not in params
+    params = list(inspect.signature(GraphMcpSession.components).parameters)
+    assert params == [
+        "self",
+        "max_components",
+        "max_nodes_per_component",
+        "edge_types",
+        "snapshot",
+    ]
+    assert "graph" not in params
+    assert "format" not in params
+    assert "dot" not in params
+    assert "symbol" not in params
+
+    expected = ByogGraph(graph).components()
+    payload = session.components()
+    assert payload["tool"] == "components"
+    assert payload["ok"] is True
+    assert payload["data"] == json.loads(json.dumps(expected, allow_nan=False, default=str))
+    sub = session.subgraph("A", direction="outgoing", max_depth=1)
+    assert sub["tool"] == "subgraph"
+    assert sub["data"]["root"] == "A"
 
     async def _body():
         async with Client(server) as client:
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == 12
-            assert "components" not in names
-            for tool in tools:
-                props = tool.input_schema.get("properties") or {}
-                assert "components" not in props
+            assert len(names) == len(set(names)) == 13
+            assert names[names.index("neighbors") + 1] == "subgraph"
+            assert names[names.index("subgraph") + 1] == "components"
+            assert names[names.index("components") + 1] == "impact"
+            tool = next(item for item in tools if item.name == "components")
+            assert tool.annotations.read_only_hint is True
+            assert tool.annotations.destructive_hint is False
+            assert tool.annotations.idempotent_hint is True
+            assert tool.annotations.open_world_hint is False
+            assert tool.input_schema["additionalProperties"] is False
+            props = tool.input_schema.get("properties") or {}
+            assert list(props) == [
+                "max_components",
+                "max_nodes_per_component",
+                "edge_types",
+                "snapshot",
+            ]
+            assert "dot" not in props
+            assert "format" not in props
+            assert "graph" not in props
+            body = await client.call_tool("components", {})
+            data = body.structured_content
+            if isinstance(data, dict) and set(data) == {"result"}:
+                data = data["result"]
+            assert data["tool"] == "components"
+            assert data["data"] == payload["data"]
 
     anyio_run(_body)

@@ -1179,10 +1179,10 @@ def test_implementation_does_not_invoke_producers_or_public_scopes():
         assert word not in lowered
 
 
-def test_mcp_remains_exactly_eleven(tmp_path: Path):
+def test_mcp_remains_exactly_thirteen(tmp_path: Path):
     from anyio import run as anyio_run
 
-    assert len(TOOL_NAMES) == 12
+    assert len(TOOL_NAMES) == 13
     assert "snapshot_maintenance_apply" not in TOOL_NAMES
     assert "snapshot_maintenance_plan" not in TOOL_NAMES
     graph = tmp_path / "g"
@@ -1196,7 +1196,7 @@ def test_mcp_remains_exactly_eleven(tmp_path: Path):
         async with Client(server) as client:
             names = {tool.name for tool in (await client.list_tools()).tools}
             assert names == set(TOOL_NAMES)
-            assert len(names) == 12
+            assert len(names) == 13
             assert "snapshot_maintenance_apply" not in names
 
     anyio_run(_body)

@@ -1707,7 +1707,7 @@ def test_no_public_producer_mcp_byog_and_contracts(tmp_path: Path, monkeypatch):
         assert word not in lowered
     from anyio import run as anyio_run
 
-    assert len(TOOL_NAMES) == 12
+    assert len(TOOL_NAMES) == 13
     assert "snapshot_import_apply" not in TOOL_NAMES
     assert "snapshot_import_plan" not in TOOL_NAMES
     session = build_session(target, "python")
@@ -1719,7 +1719,7 @@ def test_no_public_producer_mcp_byog_and_contracts(tmp_path: Path, monkeypatch):
         async with Client(server) as client:
             names = {tool.name for tool in (await client.list_tools()).tools}
             assert names == set(TOOL_NAMES)
-            assert len(names) == 12
+            assert len(names) == 13
             assert "snapshot_import_apply" not in names
 
     anyio_run(_body)

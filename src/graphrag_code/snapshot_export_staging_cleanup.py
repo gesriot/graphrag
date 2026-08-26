@@ -25,7 +25,7 @@ processes. No writer death, ownership, age, PID, process, host,
 boot-id, or timeout is inferred. Recursive deletion is not
 transactionally atomic. A partial result always requires a fresh
 plan. There is no rollback, trash, quarantine, or recovery. MCP
-stays exactly 12 read-only tools; this command is CLI-only.
+stays exactly 13 read-only tools; this command is CLI-only.
 
 Usage:
     graphrag-code snapshot-export-staging-cleanup --parent <directory> \\
@@ -143,7 +143,7 @@ _COMMAND_NOTICES: Tuple[Dict[str, str], ...] = (
         "kind": "notice",
         "message": (
             "snapshot-export-staging-cleanup is CLI-only and "
-            "intentionally absent from the fixed 12-tool MCP set."
+            "intentionally absent from the fixed 13-tool MCP set."
         ),
     },
 )

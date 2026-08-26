@@ -38,7 +38,7 @@ existing-lock graph lease covers target observation, result
 construction, serialization, stdout write, and flush. The command does
 not acquire a nested graph lease.
 
-MCP stays exactly 12 read-only tools; this command is CLI-only.
+MCP stays exactly 13 read-only tools; this command is CLI-only.
 
 Usage:
     graphrag-code snapshot-import-plan --graph <root> --export-dir <directory> [--json]
@@ -182,7 +182,7 @@ _COMMAND_NOTICES: Tuple[Dict[str, str], ...] = (
         "kind": "notice",
         "message": (
             "snapshot-import-plan is CLI-only and intentionally absent "
-            "from the fixed 12-tool MCP set."
+            "from the fixed 13-tool MCP set."
         ),
     },
 )

@@ -10,7 +10,7 @@ not overwrite, merge with, delete, or rename a pre-existing destination
 entry. It does not create an archive. It does not preserve or claim to
 preserve ownership, timestamps, xattrs, ACLs, hardlinks, or provenance.
 The copy is not a backup, authentic, recoverable, or authorization to
-delete anything. MCP stays exactly 12 read-only tools; this command is
+delete anything. MCP stays exactly 13 read-only tools; this command is
 CLI-only.
 
 ``--snapshot``, ``--destination``, ``--expected-export-revision``, and
@@ -204,7 +204,7 @@ _COMMAND_NOTICES: Tuple[Dict[str, str], ...] = (
         "kind": "notice",
         "message": (
             "snapshot-export-apply is CLI-only and intentionally absent "
-            "from the fixed 12-tool MCP set."
+            "from the fixed 13-tool MCP set."
         ),
     },
 )
