@@ -42,7 +42,7 @@ graphs, `examples/`, or experimental evidence.
 These generic installed commands operate on user-supplied directories:
 
 - `graphrag-code doctor`
-- `graphrag-code query-symbol` / `callers` / `callees` / `neighbors` / `subgraph`
+- `graphrag-code query-symbol` / `callers` / `callees` / `neighbors` / `subgraph` / `components`
 - `graphrag-code context-pack`
 - `graphrag-code index-python` / `index-c`
 - `graphrag-code adopt-publication-lock --graph <root> --indexer auto --offline-confirmed`
@@ -180,6 +180,26 @@ detection, architecture understanding, completeness beyond stored
 relationships, or a semantic/community visualization. MCP stays exactly 12
 read-only tools and does not expose DOT; `subgraph` is the twelfth,
 immediately after `neighbors`.
+
+`graphrag-code components` (also `python -m graphrag_code.graph_query components`
+and `scripts/graph_query.py components`) is a deterministic read-only
+weakly-connected-components summary over one retained BYOG snapshot. Weak
+connectivity ignores stored edge direction only for membership; persisted
+edges are not rewritten. The node universe is every persisted entity title
+plus every selected relationship endpoint. Isolated entities are one-node
+components. Endpoint-only titles are structural endpoints without an entity
+record, not reconstructed entities. `--edge-type` is an exact allow-list
+(omit for all types). Caps (`--max-components` default 20, hard 100;
+`--max-nodes-per-component` default 20, hard 100; both minimum 1) truncate
+**returned** material while totals stay exact. Components are ordered by
+descending exact node count, then descending exact selected relationship-row
+count, then representative UTF-8 bytes. A representative is only the
+smallest UTF-8 title in that component, not a leader or architectural root.
+Component size is not importance. This is structural topology only: not
+semantic community detection, Leiden, clustering, centrality, hierarchy,
+architecture inference, GraphRAG, natural-language analysis, an indexer, a
+renderer, or a UI. MCP stays exactly 12 read-only tools and does not expose
+`components`.
 
 `adopt-publication-lock` is an explicit migration, never an automatic
 MCP or doctor side effect. `--offline-confirmed` is required to create
@@ -693,6 +713,7 @@ uv run python scripts/index_c.py --package <pkg> --graph <out>
 uv run python scripts/graph_query.py symbol <title> --graph <root>
 uv run python scripts/graph_query.py subgraph <symbol-or-module> --graph <root>
 uv run python scripts/graph_query.py subgraph <symbol-or-module> --graph <root> --dot
+uv run python scripts/graph_query.py components --graph <root>
 uv run python scripts/context_pack.py <title> --graph <root>
 uv run python scripts/port_eval.py --all-gates --full
 ```

@@ -276,7 +276,7 @@ Query, context-pack, doctor, and status tools accept an optional selector:
 
 - CLI: `--snapshot <published-id|current>` on `query-symbol`, `callers`,
   `callees`, `types-used-by`, `type-users`, `type-closure`, `neighbors`,
-  `subgraph`, `dependency-order`, `impact`, `observations`, and
+  `subgraph`, `components`, `dependency-order`, `impact`, `observations`, and
   `context-pack`.
 - MCP: optional last argument `snapshot: str = "current"` on
   `graph_status`, `graph_doctor`, `query_symbol`, `callers`, `callees`,
@@ -347,6 +347,43 @@ graphrag-code subgraph <symbol-or-module> \
 `type_closure` remains a **uses_type-only** consumer with its existing
 direction names, defaults, and output schema. Subgraph is relation-generic
 and does not replace or wrap that helper.
+
+### Weakly connected components summary
+
+`graphrag-code components`, `python -m graphrag_code.graph_query components`,
+and `scripts/graph_query.py components` expose one retained-snapshot
+read of a weakly-connected-components grouping summary.
+`ByogGraph.components(...)` and `compute_weakly_connected_components(...)`
+are the same contract. Direction is ignored only for membership; persisted
+edges are not rewritten and are not returned. This milestone has no DOT
+output. MCP does not expose `components`. The fixed MCP surface remains
+exactly 12 tools.
+
+```text
+graphrag-code components \
+  --graph <root> \
+  [--snapshot <id|current>] \
+  [--edge-type TYPE ...] \
+  [--max-components N] \
+  [--max-nodes-per-component N] \
+  [--json]
+```
+
+| Property | Contract |
+| --- | --- |
+| Node universe | Every unique non-empty persisted entity title, plus every unique source or target from a **selected** relationship row. Isolated entities are one-node components. Endpoint-only titles lack an entity record and are not reconstructed entities |
+| Connectivity | Undirected for membership only. Self-edges count as one selected row and do not duplicate the node. Parallel rows each count. Stored direction and dependency semantics are not rewritten |
+| Edge-type filter | Omitted / empty `--edge-type` means all types. Repeated values are an exact allow-list (UTF-8-byte sorted, unique). A scalar string is invalid for the Python API. Empty, whitespace-padded, NUL, or non-string filters are rejected. Filtering happens after fail-closed validation of every relationship row, so malformed rows cannot hide behind the filter. Filtered-out endpoints are not invented; unreached entity titles remain isolated |
+| Caps | Defaults: 20 components and 20 node titles per returned component. Hard maxima 100 / 100. Minimum 1. Caps truncate **returned** lists; all totals stay exact for the snapshot and filter. `max_components` keeps the first components in canonical order. `max_nodes_per_component` is applied per returned component |
+| Ordering | Within a component, titles by UTF-8 bytes; representative is the first/smallest title. Components by descending exact node count, then descending exact selected relationship-row count, then representative UTF-8 bytes. Independent of parquet row order, hash iteration, locale, and pandas incidental order |
+| Totals | Global `n_nodes_total` is the exact topology-node universe. `n_edges_total` is the exact selected relationship-row count. `n_entity_nodes_total` / `n_endpoint_only_nodes_total` partition that universe. Per-component node/edge totals are exact before output caps. The sum of all exact component node counts equals global `n_nodes_total`; the sum of all exact component edge counts equals global `n_edges_total` |
+| Truncation | `components_truncated` iff returned components are fewer than total. Top-level `nodes_truncated` iff any **returned** component's node list is truncated. A component omitted by `max_components` does not set top-level `nodes_truncated` |
+| Records | Bounded topology summary only: no descriptions, snippets, spans, weights, confidence, or extra dataframe columns |
+| JSON / human | Deterministic JSON (`sort_keys=True`, `allow_nan=False`, `ensure_ascii=False`). Human output is derived from the same mapping. One trailing newline on stdout |
+| Snapshot / lease | Same retained-snapshot read scope as other queries. Lease held through load, computation, serialization, stdout write, and flush. No nested public query. No `.publish.lock` creation |
+| MCP | Not exposed. The read-only tool set remains exactly 12 |
+| Malformed args | Bad limits, filters, duplicate titles/ids, missing columns, or invalid scalars: exit 2, empty stdout |
+| Non-claims | Not a semantic community, Leiden clustering, centrality, hierarchy, architecture, importance ranking, GraphRAG, natural-language analysis, indexer, renderer, or UI. Weak connectivity is not directed reachability or dependency order |
 
 ### Operator-managed snapshot retention pins
 

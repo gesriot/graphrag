@@ -43,6 +43,13 @@ DEFAULT_SUBGRAPH_MAX_EDGES = 100
 HARD_MAX_SUBGRAPH_DEPTH = 32
 HARD_MAX_SUBGRAPH_NODES = 500
 HARD_MAX_SUBGRAPH_EDGES = 500
+
+# Weakly connected components (structural grouping summary only).
+DEFAULT_COMPONENTS_MAX_COMPONENTS = 20
+DEFAULT_COMPONENTS_MAX_NODES_PER_COMPONENT = 20
+HARD_MAX_COMPONENTS = 100
+HARD_MAX_COMPONENT_NODES = 100
+_COMPONENTS_ENT_REQUIRED = ("title",)
 SUBGRAPH_NODE_FIELDS = (
     "title",
     "depth",
@@ -2560,6 +2567,27 @@ class ByogGraph:
             edge_types=edge_types,
         )
 
+    def components(
+        self,
+        *,
+        edge_types: Optional[Sequence[str]] = None,
+        max_components: int = DEFAULT_COMPONENTS_MAX_COMPONENTS,
+        max_nodes_per_component: int = DEFAULT_COMPONENTS_MAX_NODES_PER_COMPONENT,
+    ) -> Dict[str, Any]:
+        """Weakly connected components over persisted structural relationships.
+
+        Direction is ignored only for membership. Caps truncate returned
+        material; totals stay exact for the selected snapshot and filter.
+        This is a topology summary, not community detection.
+        """
+        return compute_weakly_connected_components(
+            self.ents,
+            self.rels,
+            edge_types=edge_types,
+            max_components=max_components,
+            max_nodes_per_component=max_nodes_per_component,
+        )
+
     def neighbors(self, symbol: str) -> Dict[str, List[str]]:
         title = self.resolve(symbol)
         if not title:
@@ -3264,6 +3292,196 @@ def compute_bounded_subgraph(
         "nodes_truncated": n_nodes_total > len(nodes_out),
         "edges_truncated": n_edges_total > len(edges_out),
     }
+
+
+def compute_weakly_connected_components(
+    ents: Optional[pd.DataFrame],
+    rels: Optional[pd.DataFrame],
+    *,
+    edge_types: Optional[Sequence[str]] = None,
+    max_components: int = DEFAULT_COMPONENTS_MAX_COMPONENTS,
+    max_nodes_per_component: int = DEFAULT_COMPONENTS_MAX_NODES_PER_COMPONENT,
+) -> Dict[str, Any]:
+    """Pure weakly-connected-components summary over stored relationship rows.
+
+    Stored edge direction is ignored only when grouping nodes. Persisted
+    rows are not rewritten. Caps truncate returned lists; every total is
+    exact for the selected type filter. Isolated entity titles remain
+    one-node components. Endpoint-only titles come only from selected
+    relationship rows.
+    """
+    max_components = _require_limit_int(
+        "max_components",
+        max_components,
+        minimum=1,
+        maximum=HARD_MAX_COMPONENTS,
+    )
+    max_nodes_per_component = _require_limit_int(
+        "max_nodes_per_component",
+        max_nodes_per_component,
+        minimum=1,
+        maximum=HARD_MAX_COMPONENT_NODES,
+    )
+    normalized_types = _normalize_edge_types(edge_types)
+    entity_titles = _component_entity_titles(ents)
+    selected = _component_selected_relationships(rels, normalized_types)
+
+    nodes: set[str] = set(entity_titles)
+    for _rid, src, tgt in selected:
+        nodes.add(src)
+        nodes.add(tgt)
+
+    parent = {title: title for title in nodes}
+
+    def find(title: str) -> str:
+        root = title
+        while parent[root] != root:
+            root = parent[root]
+        while parent[title] != root:
+            nxt = parent[title]
+            parent[title] = root
+            title = nxt
+        return root
+
+    def union(left: str, right: str) -> None:
+        root_left = find(left)
+        root_right = find(right)
+        if root_left == root_right:
+            return
+        if _utf8_key(root_left) <= _utf8_key(root_right):
+            parent[root_right] = root_left
+        else:
+            parent[root_left] = root_right
+
+    for _rid, src, tgt in selected:
+        union(src, tgt)
+
+    members_by_root: Dict[str, List[str]] = defaultdict(list)
+    for title in sorted(nodes, key=_utf8_key):
+        members_by_root[find(title)].append(title)
+
+    edge_counts: Dict[str, int] = defaultdict(int)
+    for _rid, src, _tgt in selected:
+        edge_counts[find(src)] += 1
+
+    records: List[Dict[str, Any]] = []
+    for root, members in members_by_root.items():
+        titles = list(members)
+        representative = titles[0]
+        n_nodes = len(titles)
+        n_entity = sum(1 for title in titles if title in entity_titles)
+        returned_nodes = titles[:max_nodes_per_component]
+        records.append(
+            {
+                "representative": representative,
+                "nodes": returned_nodes,
+                "n_nodes_total": n_nodes,
+                "n_edges_total": int(edge_counts.get(root, 0)),
+                "n_nodes_returned": len(returned_nodes),
+                "n_entity_nodes": n_entity,
+                "n_endpoint_only_nodes": n_nodes - n_entity,
+                "nodes_truncated": n_nodes > len(returned_nodes),
+            }
+        )
+    records.sort(
+        key=lambda rec: (
+            -int(rec["n_nodes_total"]),
+            -int(rec["n_edges_total"]),
+            _utf8_key(str(rec["representative"])),
+        )
+    )
+    returned = records[:max_components]
+    n_nodes_total = len(nodes)
+    n_edges_total = len(selected)
+    if sum(int(rec["n_nodes_total"]) for rec in records) != n_nodes_total:
+        raise ValueError("component node totals do not cover the node universe")
+    if sum(int(rec["n_edges_total"]) for rec in records) != n_edges_total:
+        raise ValueError("component edge totals do not cover selected relationships")
+    return {
+        "edge_types": normalized_types,
+        "max_components": max_components,
+        "max_nodes_per_component": max_nodes_per_component,
+        "components": returned,
+        "n_components_total": len(records),
+        "n_components_returned": len(returned),
+        "n_nodes_total": n_nodes_total,
+        "n_edges_total": n_edges_total,
+        "n_entity_nodes_total": len(entity_titles),
+        "n_endpoint_only_nodes_total": n_nodes_total - len(entity_titles),
+        "components_truncated": len(records) > len(returned),
+        "nodes_truncated": any(bool(rec["nodes_truncated"]) for rec in returned),
+    }
+
+
+def _component_entity_titles(ents: Optional[pd.DataFrame]) -> set[str]:
+    if ents is None:
+        return set()
+    if not isinstance(ents, pd.DataFrame):
+        raise ValueError("entities must be a dataframe or null")
+    if len(ents) == 0:
+        return set()
+    missing = sorted(set(_COMPONENTS_ENT_REQUIRED) - set(ents.columns))
+    if missing:
+        raise ValueError(f"entity table is missing required columns {missing!r}")
+    titles: set[str] = set()
+    for row_index, row in ents.iterrows():
+        title = _require_component_str(row.get("title"), "title", row_index, kind="entity")
+        if title in titles:
+            raise ValueError(f"duplicate entity title {title!r}")
+        titles.add(title)
+    return titles
+
+
+def _component_selected_relationships(
+    rels: Optional[pd.DataFrame],
+    allow: Optional[List[str]],
+) -> List[Tuple[str, str, str]]:
+    if rels is None:
+        return []
+    if not isinstance(rels, pd.DataFrame):
+        raise ValueError("relationships must be a dataframe or null")
+    if len(rels) == 0:
+        return []
+    missing = sorted(set(_SUBGRAPH_REL_REQUIRED) - set(rels.columns))
+    if missing:
+        raise ValueError(
+            "relationship table is missing required columns " f"{missing!r}"
+        )
+    allow_set = None if allow is None else set(allow)
+    seen_ids: set[str] = set()
+    selected: List[Tuple[str, str, str]] = []
+    for row_index, row in rels.iterrows():
+        values: Dict[str, str] = {}
+        for field in _SUBGRAPH_REL_REQUIRED:
+            values[field] = _require_component_str(
+                row.get(field), field, row_index, kind="relationship"
+            )
+        rid = values["id"]
+        if rid in seen_ids:
+            raise ValueError(f"duplicate relationship id {rid!r}")
+        seen_ids.add(rid)
+        if allow_set is not None and values["type"] not in allow_set:
+            continue
+        selected.append((rid, values["source"], values["target"]))
+    return selected
+
+
+def _require_component_str(raw: Any, field: str, loc: Any, *, kind: str) -> str:
+    is_null = raw is None
+    if not is_null:
+        try:
+            is_null = bool(pd.isna(raw))
+        except (TypeError, ValueError):
+            is_null = False
+    if is_null or not isinstance(raw, str) or not raw:
+        raise ValueError(f"{kind} at row {loc!r} has invalid {field}={raw!r}")
+    try:
+        raw.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError(
+            f"{kind} at row {loc!r} has invalid {field}={raw!r}"
+        ) from exc
+    return raw
 
 
 def load_graph(graph_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:

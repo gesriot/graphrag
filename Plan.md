@@ -119,7 +119,7 @@ definitions are all present; 113 re-exports are reported separately rather
 than inflated into duplicate graph entities. The `sqlparse.split` target named
 by the Rust port is therefore an actual graph entity, not merely a module API
 outside the graph. See `examples/sqlparse/PROVENANCE.md` for the census and
-call-oracle effect. The current full-suite expectation is **2020 passed, 2 xfailed**;
+call-oracle effect. The current full-suite expectation is **2031 passed, 2 xfailed**;
 this 2026-08-14 persisted-integrity doctor update supersedes the earlier 721-passed /
 2026-07-26 gate snapshot. The product CLI is the installable ``graphrag-code``
 console command (`python -m graphrag_code`); source-checkout ``scripts/*.py``
@@ -541,7 +541,7 @@ Output: Rust crate(s) mirroring (or improving) original structure + updated grap
   - schema validation and provenance audits.
   - graph traversals: callers/callees, direct/transitive dependencies, modules, import graph, affected symbols.
   - deterministic context packs for porting/review: entity + neighbors + source snippets + test/golden contract + confidence/provenance.
-  - simple local community/grouping heuristics (module/package grouping, connected components, centrality) before any LLM summarization.
+  - simple local community/grouping heuristics (module/package grouping, connected components, centrality) before any LLM summarization. Weakly connected `components` is **implemented** as a bounded topology summary (`--edge-type`, `--max-components`, `--max-nodes-per-component`): not semantic community detection, Leiden, clustering, centrality, architecture inference, GraphRAG, or natural-language analysis. MCP does not expose it.
 - Optional track: prefer a thin wrapper over microsoft/graphrag before forking. Use the official BYOG path for deterministic graph ingestion when an API key or local OpenAI-compatible endpoint is available:
   - `entities.parquet` for files/modules/symbols.
   - `relationships.parquet` for structural edges.
@@ -565,6 +565,7 @@ Output: Rust crate(s) mirroring (or improving) original structure + updated grap
   - `query-global <question>`
   - `query-symbol <symbol>`
   - `subgraph <symbol-or-module>` – **implemented** as a bounded cycle-safe BFS induced subgraph over stored relationships (`--direction outgoing|incoming|both`, `--max-depth` / `--max-nodes` / `--max-edges`, exact `--edge-type` allow-list). Caps truncate returned material; totals within depth/filter stay exact. Direction does not rewrite stored edge orientation. `--dot` is a deterministic Graphviz DOT interchange over that same producer result (stdout only; Graphviz is not invoked or required; not an image renderer or interactive UI). `--json` and `--dot` are mutually exclusive. This is deterministic structural exploration only: not natural-language search, semantic inference, GraphRAG, community detection, architecture understanding, completeness beyond stored relationships, or a semantic/community visualization. MCP stays exactly 12 read-only tools, does not expose DOT, and registers `subgraph` immediately after `neighbors`.
+  - `components` – **implemented** as a deterministic weakly-connected-components summary over persisted entity titles and selected relationship rows (`--edge-type`, `--max-components`, `--max-nodes-per-component`). Weak connectivity ignores direction only for membership. Caps truncate returned lists; totals stay exact. Representative is the smallest UTF-8 title, not a leader. Not semantic community detection, Leiden, clustering, centrality, hierarchy, architecture, GraphRAG, or natural-language meaning. CLI/JSON/human only; no DOT in this milestone. MCP stays exactly 12 tools and does not expose `components`.
   - `context-pack <symbol-or-module> --purpose port-to-rust`
 - CLI / simple TUI or Streamlit/Gradio web UI for:
   - "Index this repo".

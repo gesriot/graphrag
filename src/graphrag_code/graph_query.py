@@ -9,6 +9,7 @@ Provides:
 - type_users(symbol)      # incoming uses_type sources
 - type_closure(symbol)    # bounded cycle-safe transitive uses_type
 - subgraph(symbol)        # bounded cycle-safe multi-hop induced subgraph
+- components()            # weakly connected components (structural grouping)
 - neighbors(symbol)
 - dependency_order()
 - impact(symbol)
@@ -23,6 +24,7 @@ Example:
     uv run python scripts/graph_query.py type-closure ini:ini_parse --direction dependencies --max-depth 2
     uv run python scripts/graph_query.py subgraph sim:run_simulation --graph byog_mini_game --direction both
     uv run python scripts/graph_query.py subgraph sim:run_simulation --graph byog_mini_game --dot
+    uv run python scripts/graph_query.py components --graph byog_mini_game
     uv run python scripts/graph_query.py observations sim:run_simulation --graph byog_mini_game
 """
 
@@ -38,18 +40,23 @@ import sys
 import typer
 
 from graphrag_code.byog_graph import (  # re-export for backward compat
+    DEFAULT_COMPONENTS_MAX_COMPONENTS,
+    DEFAULT_COMPONENTS_MAX_NODES_PER_COMPONENT,
     DEFAULT_SUBGRAPH_MAX_DEPTH,
     DEFAULT_SUBGRAPH_MAX_EDGES,
     DEFAULT_SUBGRAPH_MAX_NODES,
     DEFAULT_TYPE_CLOSURE_MAX_DEPTH,
     DEFAULT_TYPE_CLOSURE_MAX_EDGES,
     DEFAULT_TYPE_CLOSURE_MAX_NODES,
+    HARD_MAX_COMPONENTS,
+    HARD_MAX_COMPONENT_NODES,
     HARD_MAX_SUBGRAPH_DEPTH,
     HARD_MAX_SUBGRAPH_EDGES,
     HARD_MAX_SUBGRAPH_NODES,
     ByogGraph,
     compute_bounded_subgraph,
     compute_uses_type_closure,
+    compute_weakly_connected_components,
     load_graph,
 )
 from graphrag_code.snapshot_read import (
@@ -234,6 +241,24 @@ def subgraph(
     )
 
 
+def components(
+    ents: pd.DataFrame,
+    rels: pd.DataFrame,
+    *,
+    edge_types: Optional[Sequence[str]] = None,
+    max_components: int = DEFAULT_COMPONENTS_MAX_COMPONENTS,
+    max_nodes_per_component: int = DEFAULT_COMPONENTS_MAX_NODES_PER_COMPONENT,
+) -> Dict[str, Any]:
+    """Weakly connected components over stored relationships (delegates to pure helper)."""
+    return compute_weakly_connected_components(
+        ents,
+        rels,
+        edge_types=edge_types,
+        max_components=max_components,
+        max_nodes_per_component=max_nodes_per_component,
+    )
+
+
 def dumps_subgraph_json(result: Dict[str, Any]) -> str:
     """Deterministic JSON for subgraph results (sort_keys, allow_nan=False)."""
     return json.dumps(
@@ -277,6 +302,61 @@ def format_subgraph_human(result: Dict[str, Any]) -> str:
             f"  {edge.get('depth')}\t{edge.get('source')} -> {edge.get('target')}\t"
             f"{edge.get('type')}\t{edge.get('id')}"
         )
+    return "\n".join(lines)
+
+
+def dumps_components_json(result: Dict[str, Any]) -> str:
+    """Deterministic JSON for weakly-connected-components summaries."""
+    return json.dumps(
+        result,
+        indent=2,
+        ensure_ascii=False,
+        sort_keys=True,
+        allow_nan=False,
+    )
+
+
+def format_components_human(result: Dict[str, Any]) -> str:
+    """Stable human-readable components report (shared by graph_query wrappers)."""
+    lines: List[str] = []
+    edge_types = result.get("edge_types")
+    if edge_types:
+        lines.append("edge_types: " + ",".join(str(item) for item in edge_types))
+    else:
+        lines.append("edge_types: all")
+    lines.append(f"max_components: {result.get('max_components')}")
+    lines.append(
+        f"max_nodes_per_component: {result.get('max_nodes_per_component')}"
+    )
+    n_ret = int(result.get("n_components_returned") or 0)
+    n_tot = int(result.get("n_components_total") or 0)
+    trunc_c = " truncated" if result.get("components_truncated") else ""
+    lines.append(f"components ({n_ret}/{n_tot}){trunc_c}:")
+    lines.append(f"n_nodes_total: {int(result.get('n_nodes_total') or 0)}")
+    lines.append(f"n_edges_total: {int(result.get('n_edges_total') or 0)}")
+    lines.append(
+        f"n_entity_nodes_total: {int(result.get('n_entity_nodes_total') or 0)}"
+    )
+    lines.append(
+        "n_endpoint_only_nodes_total: "
+        f"{int(result.get('n_endpoint_only_nodes_total') or 0)}"
+    )
+    lines.append(
+        "nodes_truncated: "
+        f"{'true' if result.get('nodes_truncated') else 'false'}"
+    )
+    for comp in result.get("components") or []:
+        nt = " truncated" if comp.get("nodes_truncated") else ""
+        lines.append(
+            f"  {comp.get('representative')} "
+            f"nodes ({int(comp.get('n_nodes_returned') or 0)}/"
+            f"{int(comp.get('n_nodes_total') or 0)}){nt} "
+            f"edges {int(comp.get('n_edges_total') or 0)} "
+            f"entity {int(comp.get('n_entity_nodes') or 0)} "
+            f"endpoint-only {int(comp.get('n_endpoint_only_nodes') or 0)}"
+        )
+        for title in comp.get("nodes") or []:
+            lines.append(f"    {title}")
     return "\n".join(lines)
 
 
@@ -533,6 +613,51 @@ def cli_subgraph(
                 sys.stdout.flush()
             else:
                 print(format_subgraph_human(result), flush=True)
+    except ValueError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from e
+
+
+@app.command("components")
+def cli_components(
+    graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
+    max_components: int = typer.Option(
+        DEFAULT_COMPONENTS_MAX_COMPONENTS,
+        "--max-components",
+        help=f"Max components returned (1..{HARD_MAX_COMPONENTS}); totals stay exact",
+    ),
+    max_nodes_per_component: int = typer.Option(
+        DEFAULT_COMPONENTS_MAX_NODES_PER_COMPONENT,
+        "--max-nodes-per-component",
+        help=(
+            f"Max node titles per returned component "
+            f"(1..{HARD_MAX_COMPONENT_NODES}); totals stay exact"
+        ),
+    ),
+    edge_type: List[str] = typer.Option(
+        [],
+        "--edge-type",
+        help="Exact relationship-type allow-list (repeatable). Omit for all types.",
+    ),
+    json_output: bool = typer.Option(False, "--json"),
+):
+    """Weakly connected components over persisted relationships (topology only).
+
+    Structural grouping summary: not semantic community detection, Leiden,
+    centrality, architecture inference, GraphRAG, or natural-language analysis.
+    """
+    try:
+        with _scoped_graph(graph, snapshot) as g:
+            result = g.components(
+                edge_types=edge_type or None,
+                max_components=max_components,
+                max_nodes_per_component=max_nodes_per_component,
+            )
+            if json_output:
+                print(dumps_components_json(result), flush=True)
+            else:
+                print(format_components_human(result), flush=True)
     except ValueError as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from e
