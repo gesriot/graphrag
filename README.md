@@ -42,7 +42,7 @@ graphs, `examples/`, or experimental evidence.
 These generic installed commands operate on user-supplied directories:
 
 - `graphrag-code doctor`
-- `graphrag-code query-symbol` / `callers` / `callees` / `neighbors` / `subgraph` / `components` / `degree-ranking`
+- `graphrag-code query-symbol` / `callers` / `callees` / `neighbors` / `subgraph` / `components` / `degree-ranking` / `dependency-order`
 - `graphrag-code context-pack`
 - `graphrag-code index-python` / `index-c`
 - `graphrag-code adopt-publication-lock --graph <root> --indexer auto --offline-confirmed`
@@ -84,8 +84,8 @@ stderr.
 
 The server exposes a fixed read-only tool set: `graph_status`,
 `graph_doctor`, `query_symbol`, `callers`, `callees`, `neighbors`,
-`subgraph`, `components`, `impact`, `type_closure`, `context_pack`,
-`snapshot_history`, and `snapshot_diff`. There is no `snapshot_activate`, `snapshot_pin`,
+`subgraph`, `components`, `degree_ranking`, `impact`, `type_closure`,
+`context_pack`, `snapshot_history`, and `snapshot_diff`. There is no `snapshot_activate`, `snapshot_pin`,
 `snapshot_unpin`, `snapshot_retention_plan`, `snapshot_prune`,
 `snapshot_staging`, `snapshot_staging_cleanup_plan`,
 `snapshot_staging_cleanup`, `snapshot_maintenance_plan`,
@@ -233,6 +233,25 @@ score, semantic importance, leadership, architecture, communities,
 hierarchy, GraphRAG, or natural-language analysis. The MCP tool
 set remains exactly 14 read-only tools. This milestone has no DOT
 or visualization.
+
+`graphrag-code dependency-order` (also `python -m graphrag_code.graph_query dependency-order`
+and `scripts/graph_query.py dependency-order`) is a deterministic read-only
+structural containment order over one retained BYOG snapshot. It uses only
+persisted rows whose type is exactly `contains`, with stored orientation
+`source contains target`. Every cross-component source appears before its
+target. Strongly connected components stay contiguous; UTF-8 title bytes
+order members inside a cycle as presentation only. The node universe is
+every persisted entity title plus every selected contains endpoint.
+Isolated entities remain. Endpoint-only contains titles remain. Endpoints
+that appear only on filtered non-contains rows are excluded unless they
+are entities. Parallel contains rows are validated and then ignored for
+topology. Self-loops do not duplicate a node. The result is the complete
+title list: this is an unbounded full-list legacy surface, not a bounded
+query. `--json` emits that list. This is not a build order, import order,
+call order, semantic dependency order, architecture hierarchy, ownership
+proof, porting plan, GraphRAG, or natural-language analysis. There is no
+DOT. MCP remains exactly 14 read-only tools and does not expose
+`dependency_order` or `dependency-order`.
 
 `adopt-publication-lock` is an explicit migration, never an automatic
 MCP or doctor side effect. `--offline-confirmed` is required to create
@@ -748,6 +767,7 @@ uv run python scripts/graph_query.py subgraph <symbol-or-module> --graph <root>
 uv run python scripts/graph_query.py subgraph <symbol-or-module> --graph <root> --dot
 uv run python scripts/graph_query.py components --graph <root>
 uv run python scripts/graph_query.py degree-ranking --graph <root>
+uv run python scripts/graph_query.py dependency-order --graph <root>
 uv run python scripts/context_pack.py <title> --graph <root>
 uv run python scripts/port_eval.py --all-gates --full
 ```

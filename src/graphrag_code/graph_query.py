@@ -12,7 +12,7 @@ Provides:
 - components()            # weakly connected components (structural grouping)
 - degree_ranking()        # raw directed relationship-row degree ranking
 - neighbors(symbol)
-- dependency_order()
+- dependency_order()      # deterministic containment order over contains rows
 - impact(symbol)
 - symbol(query)
 - observations(symbol_or_module)   # weak/ambiguous/container resolver diagnostics
@@ -27,6 +27,7 @@ Example:
     uv run python scripts/graph_query.py subgraph sim:run_simulation --graph byog_mini_game --dot
     uv run python scripts/graph_query.py components --graph byog_mini_game
     uv run python scripts/graph_query.py degree-ranking --graph byog_mini_game
+    uv run python scripts/graph_query.py dependency-order --graph byog_mini_game
     uv run python scripts/graph_query.py observations sim:run_simulation --graph byog_mini_game
 """
 
@@ -59,6 +60,7 @@ from graphrag_code.byog_graph import (  # re-export for backward compat
     HARD_MAX_SUBGRAPH_NODES,
     ByogGraph,
     compute_bounded_subgraph,
+    compute_containment_dependency_order,
     compute_structural_degree_ranking,
     compute_uses_type_closure,
     compute_weakly_connected_components,
@@ -438,35 +440,28 @@ def neighbors(ents: pd.DataFrame, rels: pd.DataFrame, symbol: str) -> Dict[str, 
     return {"incoming": sorted(inc), "outgoing": sorted(out)}
 
 
-def dependency_order(ents: pd.DataFrame, rels: pd.DataFrame) -> List[str]:
-    """Very simple topological order based on 'contains' edges (modules/files first)."""
-    contains = rels[rels["type"].astype(str) == "contains"][["source", "target"]].astype(str)
-    # Build graph of containment (source contains target)
-    from collections import defaultdict, deque
+def dependency_order(
+    ents: Optional[pd.DataFrame],
+    rels: Optional[pd.DataFrame],
+) -> List[str]:
+    """Deterministic containment order over persisted ``contains`` rows."""
+    return compute_containment_dependency_order(ents, rels)
 
-    graph: Dict[str, List[str]] = defaultdict(list)
-    indeg: Dict[str, int] = defaultdict(int)
 
-    all_nodes = set(ents["title"].astype(str))
-    for _, row in contains.iterrows():
-        src, tgt = row["source"], row["target"]
-        graph[src].append(tgt)
-        indeg[tgt] += 1
-        all_nodes.add(src)
-        all_nodes.add(tgt)
+def dumps_dependency_order_json(result: List[str]) -> str:
+    """Deterministic JSON for the containment-order title list."""
+    return json.dumps(
+        result,
+        indent=2,
+        ensure_ascii=False,
+        sort_keys=True,
+        allow_nan=False,
+    )
 
-    q = deque([n for n in all_nodes if indeg[n] == 0])
-    order = []
-    while q:
-        n = q.popleft()
-        order.append(n)
-        for nei in graph[n]:
-            indeg[nei] -= 1
-            if indeg[nei] == 0:
-                q.append(nei)
-    # If cycle or disconnected, just return what we have + remaining
-    remaining = sorted(all_nodes - set(order))
-    return order + remaining
+
+def format_dependency_order_human(result: List[str]) -> str:
+    """One title per line in producer order. Empty graphs yield empty text."""
+    return "\n".join(result)
 
 
 def impact(ents: pd.DataFrame, rels: pd.DataFrame, symbol: str) -> List[str]:
@@ -793,10 +788,26 @@ def cli_neighbors(
 def cli_dep_order(
     graph: Path = _graph_opt(),
     snapshot: Optional[str] = _snapshot_opt(),
+    json_output: bool = typer.Option(False, "--json"),
 ):
-    with _scoped_graph(graph, snapshot) as g:
-        for t in g.dependency_order():
-            print(t)
+    """Deterministic structural containment order over persisted contains rows.
+
+    Source appears before target across strongly connected components.
+    Not a build, import, call, or semantic dependency order. Unbounded
+    full list; no DOT and not an MCP tool.
+    """
+    try:
+        with _scoped_graph(graph, snapshot) as g:
+            result = g.dependency_order()
+            if json_output:
+                print(dumps_dependency_order_json(result), flush=True)
+            else:
+                human = format_dependency_order_human(result)
+                if human:
+                    print(human, flush=True)
+    except ValueError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from e
 
 
 @app.command("impact")

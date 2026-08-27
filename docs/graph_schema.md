@@ -280,8 +280,8 @@ Query, context-pack, doctor, and status tools accept an optional selector:
   `observations`, and `context-pack`.
 - MCP: optional last argument `snapshot: str = "current"` on
   `graph_status`, `graph_doctor`, `query_symbol`, `callers`, `callees`,
-  `neighbors`, `subgraph`, `components`, `impact`, `type_closure`, and
-  `context_pack`.
+  `neighbors`, `subgraph`, `components`, `degree_ranking`, `impact`,
+  `type_closure`, and `context_pack`.
 
 Historical reads do not require `snapshot-activate` and never change
 `current`. Omitting CLI `--snapshot` preserves the existing default
@@ -424,6 +424,39 @@ graphrag-code degree-ranking \
 | MCP | Fourteenth read-only tool, registered immediately after `components`. Envelope `data` is the exact `ByogGraph.degree_ranking` result. `truncated` is `nodes_truncated`. Envelope `total` is `n_nodes_total`; `returned` is `n_nodes_returned`. Relationship-row counts remain exact scalars in `data` and are not added to those envelope counters. Limits include the validated `rank_by`, `max_nodes`, `edge_types`, and `max_envelope_bytes`. The producer is the only truncation source. The 1 MiB envelope limit fails closed. MCP always uses `allow_unlocked_managed=False`. MCP does not expose DOT, a graph path, a symbol, a direction, a format, a metric, a normalized score, or an ordinal rank. This is raw directed relationship-row degree accounting only: not PageRank, betweenness, closeness, eigenvector centrality, a normalized score, semantic importance, leadership, architecture, communities, hierarchy, GraphRAG, or natural-language analysis. The fixed surface remains exactly 14 tools |
 | Malformed args | Bad rank_by, limits, filters, duplicate titles/ids, missing columns, or invalid scalars: exit 2, empty stdout |
 | Non-claims | Not PageRank, betweenness, closeness, eigenvector centrality, normalized centrality, importance, leadership, architecture, community detection, hierarchy, GraphRAG, natural-language analysis, indexer, renderer, or UI |
+
+### Directed structural containment order
+
+`graphrag-code dependency-order`, `python -m graphrag_code.graph_query dependency-order`,
+and `scripts/graph_query.py dependency-order` expose one retained-snapshot
+read of a deterministic containment order.
+`ByogGraph.dependency_order()` and `compute_containment_dependency_order(...)`
+are the same contract and return `List[str]`. Only persisted rows whose type
+is exactly `contains` participate; stored orientation is `source contains
+target`. This is an unbounded full-list legacy surface. This milestone has
+no DOT output. MCP does not expose `dependency_order`. The fixed MCP
+surface remains exactly 14 tools.
+
+```text
+graphrag-code dependency-order \
+  --graph <root> \
+  [--snapshot <id|current>] \
+  [--json]
+```
+
+| Property | Contract |
+| --- | --- |
+| Node universe | Every unique non-empty persisted entity title, plus every unique source or target from a **selected** `contains` row. Isolated entities remain. Endpoint-only contains titles remain. Endpoints that appear only on filtered non-contains rows are excluded unless they are entities |
+| Edge filter | Type must be exactly `contains`. Every relationship row is validated before the type filter, so malformed non-contains rows cannot hide. Parallel `contains` rows between the same pair are validated and then ignored for topology. Self-loops do not duplicate a node |
+| Ordering | Compute exact SCCs; sort members by UTF-8 title bytes; representative is the smallest member. Deduplicated SCC condensation is a DAG. Kahn’s algorithm with a UTF-8-representative priority queue; newly unlocked SCCs re-enter that queue. Flatten SCCs in that order, members contiguous |
+| Cross-SCC | Every contains edge whose endpoints are in different SCCs has source before target |
+| Cycles | Members of a directed cycle remain contiguous. UTF-8 order inside an SCC is presentation only and is not a topological claim |
+| Result | Complete title list; each node exactly once. Empty graph is `[]`. No max-nodes, edge-type, cycle, format, or DOT parameter |
+| JSON / human | JSON is the list (`indent=2`, `sort_keys=True`, `allow_nan=False`, `ensure_ascii=False`) plus one trailing newline. Human is one title per line. Empty human stdout is empty; empty JSON is `[]` plus one newline |
+| Snapshot / lease | Same retained-snapshot read scope as other queries. Lease held through load, computation, serialization, stdout write, and flush. No nested public query. No `.publish.lock` creation |
+| MCP | Not exposed. The read-only tool set remains exactly 14 |
+| Malformed args | Duplicate titles/ids, missing columns, or invalid scalars: exit 2, empty stdout |
+| Non-claims | Not a build order, import order, call order, semantic dependency order, architecture hierarchy, ownership proof, porting plan, GraphRAG, natural-language analysis, indexer, renderer, or UI. Not bounded |
 
 ### Operator-managed snapshot retention pins
 

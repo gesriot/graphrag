@@ -10,6 +10,7 @@ All deterministic, no external API.
 
 from __future__ import annotations
 
+import heapq
 import json
 import math
 import os
@@ -2648,32 +2649,13 @@ class ByogGraph:
         return sorted(seen)
 
     def dependency_order(self) -> List[str]:
-        """Topological-ish order based on contains (modules/files first)."""
-        contains = self.rels[self.rels["type"].astype(str) == "contains"][["source", "target"]].astype(str)
-        from collections import defaultdict, deque
+        """Deterministic structural containment order over ``contains`` rows.
 
-        graph: Dict[str, List[str]] = defaultdict(list)
-        indeg: Dict[str, int] = defaultdict(int)
-        all_nodes = set(self.ents["title"].astype(str))
-
-        for _, row in contains.iterrows():
-            src, tgt = row["source"], row["target"]
-            graph[src].append(tgt)
-            indeg[tgt] += 1
-            all_nodes.add(src)
-            all_nodes.add(tgt)
-
-        q = deque([n for n in all_nodes if indeg.get(n, 0) == 0])
-        order: List[str] = []
-        while q:
-            n = q.popleft()
-            order.append(n)
-            for nei in graph[n]:
-                indeg[nei] -= 1
-                if indeg[nei] == 0:
-                    q.append(nei)
-        remaining = sorted(all_nodes - set(order))
-        return order + remaining
+        Cross-component sources appear before their targets. UTF-8 order
+        inside a cyclic component is presentation only. This is not a
+        build, import, call, or semantic dependency order.
+        """
+        return compute_containment_dependency_order(self.ents, self.rels)
 
     def symbol(self, query: str) -> Optional[Dict[str, Any]]:
         title = self.resolve(query)
@@ -3530,6 +3512,113 @@ def compute_structural_degree_ranking(
         "sum_total_degree": sum_total_degree,
         "nodes_truncated": n_nodes_total > len(returned),
     }
+
+
+def compute_containment_dependency_order(
+    ents: Optional[pd.DataFrame],
+    rels: Optional[pd.DataFrame],
+) -> List[str]:
+    """Deterministic containment order over persisted ``contains`` rows.
+
+    Stored orientation is ``source contains target``. Every cross-SCC
+    source appears before its target. Members of a directed cycle stay
+    contiguous in UTF-8 title order. This is structural containment
+    only, not a build, import, call, or semantic dependency order.
+    """
+    _normalized, _entity_titles, selected, nodes = _topology_universe(
+        ents, rels, edge_types=["contains"]
+    )
+    if not nodes:
+        return []
+    pairs = {(src, tgt) for _rid, src, tgt in selected}
+    return _containment_scc_order(nodes, pairs)
+
+
+def _containment_scc_order(
+    nodes: set[str],
+    pairs: set[Tuple[str, str]],
+) -> List[str]:
+    node_list = sorted(nodes, key=_utf8_key)
+    adj: Dict[str, List[str]] = {title: [] for title in node_list}
+    radj: Dict[str, List[str]] = {title: [] for title in node_list}
+    for src, tgt in pairs:
+        adj[src].append(tgt)
+        radj[tgt].append(src)
+    for title in node_list:
+        adj[title].sort(key=_utf8_key)
+        radj[title].sort(key=_utf8_key)
+
+    visited: set[str] = set()
+    finish: List[str] = []
+    for start in node_list:
+        if start in visited:
+            continue
+        stack: List[Tuple[str, bool]] = [(start, False)]
+        while stack:
+            node, processed = stack.pop()
+            if processed:
+                finish.append(node)
+                continue
+            if node in visited:
+                continue
+            visited.add(node)
+            stack.append((node, True))
+            neighbors = adj[node]
+            for nei in reversed(neighbors):
+                if nei not in visited:
+                    stack.append((nei, False))
+
+    assigned: set[str] = set()
+    sccs: List[List[str]] = []
+    for start in reversed(finish):
+        if start in assigned:
+            continue
+        members: List[str] = []
+        stack_rev = [start]
+        assigned.add(start)
+        while stack_rev:
+            node = stack_rev.pop()
+            members.append(node)
+            for nei in radj[node]:
+                if nei not in assigned:
+                    assigned.add(nei)
+                    stack_rev.append(nei)
+        members.sort(key=_utf8_key)
+        sccs.append(members)
+
+    title_to_scc = {
+        title: index for index, members in enumerate(sccs) for title in members
+    }
+    cond_adj: Dict[int, set[int]] = {index: set() for index in range(len(sccs))}
+    cond_indeg = [0] * len(sccs)
+    for src, tgt in pairs:
+        src_scc = title_to_scc[src]
+        tgt_scc = title_to_scc[tgt]
+        if src_scc == tgt_scc or tgt_scc in cond_adj[src_scc]:
+            continue
+        cond_adj[src_scc].add(tgt_scc)
+        cond_indeg[tgt_scc] += 1
+
+    heap: List[Tuple[bytes, int]] = []
+    for index, members in enumerate(sccs):
+        if cond_indeg[index] == 0:
+            heapq.heappush(heap, (_utf8_key(members[0]), index))
+    ordered: List[int] = []
+    while heap:
+        _key, index = heapq.heappop(heap)
+        ordered.append(index)
+        for nxt in cond_adj[index]:
+            cond_indeg[nxt] -= 1
+            if cond_indeg[nxt] == 0:
+                heapq.heappush(heap, (_utf8_key(sccs[nxt][0]), nxt))
+    if len(ordered) != len(sccs):
+        raise ValueError("containment condensation is not a DAG")
+    result: List[str] = []
+    for index in ordered:
+        result.extend(sccs[index])
+    if len(result) != len(nodes) or len(set(result)) != len(result):
+        raise ValueError("containment order does not cover each node exactly once")
+    return result
 
 
 def _topology_universe(
