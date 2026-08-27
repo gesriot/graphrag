@@ -276,8 +276,8 @@ Query, context-pack, doctor, and status tools accept an optional selector:
 
 - CLI: `--snapshot <published-id|current>` on `query-symbol`, `callers`,
   `callees`, `types-used-by`, `type-users`, `type-closure`, `neighbors`,
-  `subgraph`, `components`, `dependency-order`, `impact`, `observations`, and
-  `context-pack`.
+  `subgraph`, `components`, `degree-ranking`, `dependency-order`, `impact`,
+  `observations`, and `context-pack`.
 - MCP: optional last argument `snapshot: str = "current"` on
   `graph_status`, `graph_doctor`, `query_symbol`, `callers`, `callees`,
   `neighbors`, `subgraph`, `components`, `impact`, `type_closure`, and
@@ -386,6 +386,43 @@ graphrag-code components \
 | MCP | Thirteenth read-only tool, registered immediately after `subgraph`. Envelope `data` is the exact `ByogGraph.components` result. `truncated` is `components_truncated or nodes_truncated`. Envelope `total` is `n_components_total + n_nodes_total`; `returned` is `n_components_returned` plus the sum of each returned component's `n_nodes_returned`. Relationship rows remain exact scalar counts in `data` and are not added to those envelope counters. Limits include the validated `max_components`, `max_nodes_per_component`, `edge_types`, and `max_envelope_bytes`. The producer is the only truncation source. The 1 MiB envelope limit fails closed. MCP always uses `allow_unlocked_managed=False`. MCP does not expose DOT or a format parameter. Representatives remain smallest UTF-8 titles, not leaders. Component size remains topology, not importance. The fixed surface remains exactly 13 tools |
 | Malformed args | Bad limits, filters, duplicate titles/ids, missing columns, or invalid scalars: exit 2, empty stdout |
 | Non-claims | Not a semantic community, Leiden clustering, centrality, hierarchy, architecture, importance ranking, GraphRAG, natural-language analysis, indexer, renderer, or UI. Weak connectivity is not directed reachability or dependency order |
+
+### Directed structural degree ranking
+
+`graphrag-code degree-ranking`, `python -m graphrag_code.graph_query degree-ranking`,
+and `scripts/graph_query.py degree-ranking` expose one retained-snapshot
+read of a raw directed relationship-row degree ranking.
+`ByogGraph.degree_ranking(...)` and `compute_structural_degree_ranking(...)`
+are the same contract. Direction is preserved for accounting. Persisted
+rows are not rewritten, inferred, or returned. This milestone has no DOT
+output. MCP does not expose `degree-ranking`. The fixed MCP surface remains
+exactly 13 tools.
+
+```text
+graphrag-code degree-ranking \
+  --graph <root> \
+  [--snapshot <id|current>] \
+  [--rank-by total|incoming|outgoing] \
+  [--edge-type TYPE ...] \
+  [--max-nodes N] \
+  [--json]
+```
+
+| Property | Contract |
+| --- | --- |
+| Node universe | Same topology contract as `components`: every unique non-empty persisted entity title, plus every unique source or target from a **selected** relationship row. Isolated entities remain zero-degree. Endpoint-only titles lack an entity record and are not reconstructed entities |
+| Degree accounting | Each selected persisted relationship row adds `out_degree[source] += 1` and `in_degree[target] += 1`. `total_degree = in_degree + out_degree`. A self-loop contributes incoming 1, outgoing 1, total 2. Parallel rows each count. Stored direction is not rewritten |
+| Edge-type filter | Omitted / empty `--edge-type` means all types. Repeated values are an exact allow-list (UTF-8-byte sorted, unique). A scalar string is invalid for the Python API. Empty, whitespace-padded, NUL, or non-string filters are rejected. Filtering happens after fail-closed validation of every relationship row, so malformed rows cannot hide behind the filter. Filtered-out endpoints are not invented; unreached entity titles remain zero-degree |
+| Caps | Default 20 returned nodes, hard maximum 100, minimum 1. Caps truncate **returned** rows; all totals and degree sums stay exact for the snapshot and filter |
+| Ranking | `total`: total descending, then in, then out, then title UTF-8 bytes. `incoming`: in, then total, then out, then title. `outgoing`: out, then total, then in, then title. No ordinal `rank` field; array order is authoritative. Ties do not imply semantic equivalence |
+| Totals | `n_nodes_total` is the exact topology-node universe. `n_edges_total` is the exact selected relationship-row count. `n_entity_nodes_total` / `n_endpoint_only_nodes_total` partition that universe. `sum_in_degree == sum_out_degree == n_edges_total` and `sum_total_degree == 2 * n_edges_total` over the complete ranking before the output cap |
+| Truncation | `nodes_truncated` iff `n_nodes_returned < n_nodes_total` |
+| Records | Bounded topology summary only: title, in/out/total degree, `is_entity`. No descriptions, snippets, ids, spans, weights, confidence, relationship payloads, extra dataframe columns, normalized score, or component data |
+| JSON / human | Deterministic JSON (`sort_keys=True`, `allow_nan=False`, `ensure_ascii=False`). Human output is derived from the same mapping. One trailing newline on stdout |
+| Snapshot / lease | Same retained-snapshot read scope as other queries. Lease held through load, computation, serialization, stdout write, and flush. No nested public query. No `.publish.lock` creation |
+| MCP | Not exposed. The read-only tool set remains exactly 13 |
+| Malformed args | Bad rank_by, limits, filters, duplicate titles/ids, missing columns, or invalid scalars: exit 2, empty stdout |
+| Non-claims | Not PageRank, betweenness, closeness, eigenvector centrality, normalized centrality, importance, leadership, architecture, community detection, hierarchy, GraphRAG, natural-language analysis, indexer, renderer, or UI |
 
 ### Operator-managed snapshot retention pins
 

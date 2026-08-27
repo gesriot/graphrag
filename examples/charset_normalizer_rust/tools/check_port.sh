@@ -96,7 +96,7 @@ Expected xfail policy (these are documented and stable; not regressions):
   The default seeded live differential run adds 79 Python-oracle cases;
   use --differential-full for its 530-input every-byte/mutation/long sweep.
   Recent targeted run: 77 passed, 2 xfailed.
-  Full examples run: 2035 passed, 2 xfailed.
+  Full examples run: 2047 passed, 2 xfailed.
 POLICY
 
 echo

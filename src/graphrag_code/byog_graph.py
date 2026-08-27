@@ -49,6 +49,11 @@ DEFAULT_COMPONENTS_MAX_COMPONENTS = 20
 DEFAULT_COMPONENTS_MAX_NODES_PER_COMPONENT = 20
 HARD_MAX_COMPONENTS = 100
 HARD_MAX_COMPONENT_NODES = 100
+
+# Raw directed multigraph degree ranking (not centrality or importance).
+DEGREE_RANKING_MODES = ("total", "incoming", "outgoing")
+DEFAULT_DEGREE_RANKING_MAX_NODES = 20
+HARD_MAX_DEGREE_RANKING_NODES = 100
 _COMPONENTS_ENT_REQUIRED = ("title",)
 SUBGRAPH_NODE_FIELDS = (
     "title",
@@ -2588,6 +2593,27 @@ class ByogGraph:
             max_nodes_per_component=max_nodes_per_component,
         )
 
+    def degree_ranking(
+        self,
+        *,
+        rank_by: str = "total",
+        edge_types: Optional[Sequence[str]] = None,
+        max_nodes: int = DEFAULT_DEGREE_RANKING_MAX_NODES,
+    ) -> Dict[str, Any]:
+        """Raw directed relationship-row degree ranking.
+
+        Structural accounting only. Caps truncate returned rows; totals and
+        degree sums stay exact. This is not PageRank, betweenness, closeness,
+        eigenvector centrality, or semantic importance.
+        """
+        return compute_structural_degree_ranking(
+            self.ents,
+            self.rels,
+            rank_by=rank_by,
+            edge_types=edge_types,
+            max_nodes=max_nodes,
+        )
+
     def neighbors(self, symbol: str) -> Dict[str, List[str]]:
         title = self.resolve(symbol)
         if not title:
@@ -3322,14 +3348,9 @@ def compute_weakly_connected_components(
         minimum=1,
         maximum=HARD_MAX_COMPONENT_NODES,
     )
-    normalized_types = _normalize_edge_types(edge_types)
-    entity_titles = _component_entity_titles(ents)
-    selected = _component_selected_relationships(rels, normalized_types)
-
-    nodes: set[str] = set(entity_titles)
-    for _rid, src, tgt in selected:
-        nodes.add(src)
-        nodes.add(tgt)
+    normalized_types, entity_titles, selected, nodes = _topology_universe(
+        ents, rels, edge_types=edge_types
+    )
 
     parent = {title: title for title in nodes}
 
@@ -3411,6 +3432,121 @@ def compute_weakly_connected_components(
         "components_truncated": len(records) > len(returned),
         "nodes_truncated": any(bool(rec["nodes_truncated"]) for rec in returned),
     }
+
+
+def compute_structural_degree_ranking(
+    ents: Optional[pd.DataFrame],
+    rels: Optional[pd.DataFrame],
+    *,
+    rank_by: str = "total",
+    edge_types: Optional[Sequence[str]] = None,
+    max_nodes: int = DEFAULT_DEGREE_RANKING_MAX_NODES,
+) -> Dict[str, Any]:
+    """Pure directed multigraph degree ranking over stored relationship rows.
+
+    Each selected row adds one outgoing count at ``source`` and one incoming
+    count at ``target``. Self-loops contribute 1/1/2. Parallel rows each
+    count. Caps truncate returned rows; every total and degree sum stays
+    exact. This is not centrality or importance.
+    """
+    if not isinstance(rank_by, str) or rank_by not in DEGREE_RANKING_MODES:
+        raise ValueError(
+            f"rank_by must be one of {list(DEGREE_RANKING_MODES)}, got {rank_by!r}"
+        )
+    max_nodes = _require_limit_int(
+        "max_nodes",
+        max_nodes,
+        minimum=1,
+        maximum=HARD_MAX_DEGREE_RANKING_NODES,
+    )
+    normalized_types, entity_titles, selected, nodes = _topology_universe(
+        ents, rels, edge_types=edge_types
+    )
+    in_degree = {title: 0 for title in nodes}
+    out_degree = {title: 0 for title in nodes}
+    for _rid, src, tgt in selected:
+        out_degree[src] += 1
+        in_degree[tgt] += 1
+
+    records: List[Dict[str, Any]] = []
+    sum_in_degree = 0
+    sum_out_degree = 0
+    for title in nodes:
+        incoming = int(in_degree[title])
+        outgoing = int(out_degree[title])
+        total = incoming + outgoing
+        sum_in_degree += incoming
+        sum_out_degree += outgoing
+        records.append(
+            {
+                "title": title,
+                "in_degree": incoming,
+                "out_degree": outgoing,
+                "total_degree": total,
+                "is_entity": title in entity_titles,
+            }
+        )
+    n_edges_total = len(selected)
+    if sum_in_degree != n_edges_total:
+        raise ValueError("in-degree sum does not equal selected relationship count")
+    if sum_out_degree != n_edges_total:
+        raise ValueError("out-degree sum does not equal selected relationship count")
+    sum_total_degree = sum_in_degree + sum_out_degree
+    if sum_total_degree != 2 * n_edges_total:
+        raise ValueError(
+            "total-degree sum does not equal twice the selected relationship count"
+        )
+    n_nodes_total = len(nodes)
+    n_entity_nodes_total = len(entity_titles)
+    n_endpoint_only_nodes_total = n_nodes_total - n_entity_nodes_total
+    if n_entity_nodes_total + n_endpoint_only_nodes_total != n_nodes_total:
+        raise ValueError("entity and endpoint-only counts do not cover the node universe")
+
+    def sort_key(rec: Dict[str, Any]) -> Tuple[int, int, int, bytes]:
+        title_key = _utf8_key(str(rec["title"]))
+        incoming = -int(rec["in_degree"])
+        outgoing = -int(rec["out_degree"])
+        total = -int(rec["total_degree"])
+        if rank_by == "incoming":
+            return (incoming, total, outgoing, title_key)
+        if rank_by == "outgoing":
+            return (outgoing, total, incoming, title_key)
+        return (total, incoming, outgoing, title_key)
+
+    records.sort(key=sort_key)
+    returned = records[:max_nodes]
+    return {
+        "rank_by": rank_by,
+        "edge_types": normalized_types,
+        "max_nodes": max_nodes,
+        "nodes": returned,
+        "n_nodes_total": n_nodes_total,
+        "n_nodes_returned": len(returned),
+        "n_edges_total": n_edges_total,
+        "n_entity_nodes_total": n_entity_nodes_total,
+        "n_endpoint_only_nodes_total": n_endpoint_only_nodes_total,
+        "sum_in_degree": sum_in_degree,
+        "sum_out_degree": sum_out_degree,
+        "sum_total_degree": sum_total_degree,
+        "nodes_truncated": n_nodes_total > len(returned),
+    }
+
+
+def _topology_universe(
+    ents: Optional[pd.DataFrame],
+    rels: Optional[pd.DataFrame],
+    *,
+    edge_types: Optional[Sequence[str]],
+) -> Tuple[Optional[List[str]], set[str], List[Tuple[str, str, str]], set[str]]:
+    """Shared topology node universe for components and degree ranking."""
+    normalized_types = _normalize_edge_types(edge_types)
+    entity_titles = _component_entity_titles(ents)
+    selected = _component_selected_relationships(rels, normalized_types)
+    nodes: set[str] = set(entity_titles)
+    for _rid, src, tgt in selected:
+        nodes.add(src)
+        nodes.add(tgt)
+    return normalized_types, entity_titles, selected, nodes
 
 
 def _component_entity_titles(ents: Optional[pd.DataFrame]) -> set[str]:

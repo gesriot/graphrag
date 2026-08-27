@@ -90,6 +90,7 @@ def test_python_module_help():
     assert "doctor" in proc.stdout
     assert "query-symbol" in proc.stdout
     assert "components" in proc.stdout
+    assert "degree-ranking" in proc.stdout
     assert "index-python" in proc.stdout
     assert "mcp" in proc.stdout
     assert "adopt-publication-lock" in proc.stdout
@@ -138,6 +139,7 @@ def test_source_script_and_package_expose_same_commands():
         "callers",
         "callees",
         "components",
+        "degree-ranking",
         "context-pack",
         "index-python",
         "index-c",

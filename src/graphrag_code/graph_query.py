@@ -10,6 +10,7 @@ Provides:
 - type_closure(symbol)    # bounded cycle-safe transitive uses_type
 - subgraph(symbol)        # bounded cycle-safe multi-hop induced subgraph
 - components()            # weakly connected components (structural grouping)
+- degree_ranking()        # raw directed relationship-row degree ranking
 - neighbors(symbol)
 - dependency_order()
 - impact(symbol)
@@ -25,6 +26,7 @@ Example:
     uv run python scripts/graph_query.py subgraph sim:run_simulation --graph byog_mini_game --direction both
     uv run python scripts/graph_query.py subgraph sim:run_simulation --graph byog_mini_game --dot
     uv run python scripts/graph_query.py components --graph byog_mini_game
+    uv run python scripts/graph_query.py degree-ranking --graph byog_mini_game
     uv run python scripts/graph_query.py observations sim:run_simulation --graph byog_mini_game
 """
 
@@ -42,6 +44,7 @@ import typer
 from graphrag_code.byog_graph import (  # re-export for backward compat
     DEFAULT_COMPONENTS_MAX_COMPONENTS,
     DEFAULT_COMPONENTS_MAX_NODES_PER_COMPONENT,
+    DEFAULT_DEGREE_RANKING_MAX_NODES,
     DEFAULT_SUBGRAPH_MAX_DEPTH,
     DEFAULT_SUBGRAPH_MAX_EDGES,
     DEFAULT_SUBGRAPH_MAX_NODES,
@@ -50,11 +53,13 @@ from graphrag_code.byog_graph import (  # re-export for backward compat
     DEFAULT_TYPE_CLOSURE_MAX_NODES,
     HARD_MAX_COMPONENTS,
     HARD_MAX_COMPONENT_NODES,
+    HARD_MAX_DEGREE_RANKING_NODES,
     HARD_MAX_SUBGRAPH_DEPTH,
     HARD_MAX_SUBGRAPH_EDGES,
     HARD_MAX_SUBGRAPH_NODES,
     ByogGraph,
     compute_bounded_subgraph,
+    compute_structural_degree_ranking,
     compute_uses_type_closure,
     compute_weakly_connected_components,
     load_graph,
@@ -259,6 +264,24 @@ def components(
     )
 
 
+def degree_ranking(
+    ents: pd.DataFrame,
+    rels: pd.DataFrame,
+    *,
+    rank_by: str = "total",
+    edge_types: Optional[Sequence[str]] = None,
+    max_nodes: int = DEFAULT_DEGREE_RANKING_MAX_NODES,
+) -> Dict[str, Any]:
+    """Raw directed relationship-row degree ranking (delegates to pure helper)."""
+    return compute_structural_degree_ranking(
+        ents,
+        rels,
+        rank_by=rank_by,
+        edge_types=edge_types,
+        max_nodes=max_nodes,
+    )
+
+
 def dumps_subgraph_json(result: Dict[str, Any]) -> str:
     """Deterministic JSON for subgraph results (sort_keys, allow_nan=False)."""
     return json.dumps(
@@ -357,6 +380,52 @@ def format_components_human(result: Dict[str, Any]) -> str:
         )
         for title in comp.get("nodes") or []:
             lines.append(f"    {title}")
+    return "\n".join(lines)
+
+
+def dumps_degree_ranking_json(result: Dict[str, Any]) -> str:
+    """Deterministic JSON for directed degree-ranking summaries."""
+    return json.dumps(
+        result,
+        indent=2,
+        ensure_ascii=False,
+        sort_keys=True,
+        allow_nan=False,
+    )
+
+
+def format_degree_ranking_human(result: Dict[str, Any]) -> str:
+    """Stable human-readable degree-ranking report."""
+    lines: List[str] = []
+    lines.append(f"rank_by: {result.get('rank_by')}")
+    edge_types = result.get("edge_types")
+    if edge_types:
+        lines.append("edge_types: " + ",".join(str(item) for item in edge_types))
+    else:
+        lines.append("edge_types: all")
+    lines.append(f"max_nodes: {result.get('max_nodes')}")
+    n_ret = int(result.get("n_nodes_returned") or 0)
+    n_tot = int(result.get("n_nodes_total") or 0)
+    trunc = " truncated" if result.get("nodes_truncated") else ""
+    lines.append(f"nodes ({n_ret}/{n_tot}){trunc}:")
+    lines.append(f"n_edges_total: {int(result.get('n_edges_total') or 0)}")
+    lines.append(
+        f"n_entity_nodes_total: {int(result.get('n_entity_nodes_total') or 0)}"
+    )
+    lines.append(
+        "n_endpoint_only_nodes_total: "
+        f"{int(result.get('n_endpoint_only_nodes_total') or 0)}"
+    )
+    lines.append(f"sum_in_degree: {int(result.get('sum_in_degree') or 0)}")
+    lines.append(f"sum_out_degree: {int(result.get('sum_out_degree') or 0)}")
+    lines.append(f"sum_total_degree: {int(result.get('sum_total_degree') or 0)}")
+    for node in result.get("nodes") or []:
+        kind = "entity" if node.get("is_entity") else "endpoint-only"
+        lines.append(
+            f"  {node.get('title')}  incoming {int(node.get('in_degree') or 0)}  "
+            f"outgoing {int(node.get('out_degree') or 0)}  "
+            f"total {int(node.get('total_degree') or 0)}  {kind}"
+        )
     return "\n".join(lines)
 
 
@@ -658,6 +727,51 @@ def cli_components(
                 print(dumps_components_json(result), flush=True)
             else:
                 print(format_components_human(result), flush=True)
+    except ValueError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from e
+
+
+@app.command("degree-ranking")
+def cli_degree_ranking(
+    graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
+    rank_by: str = typer.Option(
+        "total",
+        "--rank-by",
+        help="Rank by total, incoming, or outgoing degree",
+    ),
+    max_nodes: int = typer.Option(
+        DEFAULT_DEGREE_RANKING_MAX_NODES,
+        "--max-nodes",
+        help=(
+            f"Max node rows returned (1..{HARD_MAX_DEGREE_RANKING_NODES}); "
+            "totals stay exact"
+        ),
+    ),
+    edge_type: List[str] = typer.Option(
+        [],
+        "--edge-type",
+        help="Exact relationship-type allow-list (repeatable). Omit for all types.",
+    ),
+    json_output: bool = typer.Option(False, "--json"),
+):
+    """Raw directed relationship-row degree ranking (structural accounting only).
+
+    Not PageRank, betweenness, closeness, eigenvector centrality, semantic
+    importance, architecture inference, community detection, or GraphRAG.
+    """
+    try:
+        with _scoped_graph(graph, snapshot) as g:
+            result = g.degree_ranking(
+                rank_by=rank_by,
+                edge_types=edge_type or None,
+                max_nodes=max_nodes,
+            )
+            if json_output:
+                print(dumps_degree_ranking_json(result), flush=True)
+            else:
+                print(format_degree_ranking_human(result), flush=True)
     except ValueError as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from e

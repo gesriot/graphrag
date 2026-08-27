@@ -42,7 +42,7 @@ graphs, `examples/`, or experimental evidence.
 These generic installed commands operate on user-supplied directories:
 
 - `graphrag-code doctor`
-- `graphrag-code query-symbol` / `callers` / `callees` / `neighbors` / `subgraph` / `components`
+- `graphrag-code query-symbol` / `callers` / `callees` / `neighbors` / `subgraph` / `components` / `degree-ranking`
 - `graphrag-code context-pack`
 - `graphrag-code index-python` / `index-c`
 - `graphrag-code adopt-publication-lock --graph <root> --indexer auto --offline-confirmed`
@@ -203,6 +203,28 @@ the thirteenth read-only tool, immediately after `subgraph`. It does not
 expose DOT or output-format selection. Representatives remain smallest
 UTF-8 titles, not leaders. Component size remains topology, not
 importance. The MCP tool set remains exactly 13 read-only tools.
+
+`graphrag-code degree-ranking` (also `python -m graphrag_code.graph_query degree-ranking`
+and `scripts/graph_query.py degree-ranking`) is a deterministic read-only
+directed relationship-row degree ranking over one retained BYOG snapshot.
+Each selected persisted row adds one outgoing count at `source` and one
+incoming count at `target`. A self-loop contributes incoming 1, outgoing 1,
+and total 2. Parallel rows each count. Direction is preserved. The node
+universe is the same topology contract as `components`: every persisted
+entity title plus every selected relationship endpoint. Isolated entities
+remain as zero-degree nodes. Endpoint-only titles are structural endpoints
+without an entity record. `--edge-type` is an exact allow-list (omit for
+all types). `--rank-by total|incoming|outgoing` selects the canonical
+sort; ties break on the remaining degree fields, then UTF-8 title bytes.
+Caps (`--max-nodes` default 20, hard 100, minimum 1) truncate **returned**
+rows while totals and degree-sum invariants stay exact:
+`sum(in_degree) == sum(out_degree) == n_edges_total` and
+`sum(total_degree) == 2 * n_edges_total`. This is raw directed multigraph
+degree accounting, not PageRank, betweenness, closeness, eigenvector
+centrality, normalized score, semantic importance, architecture inference,
+community detection, hierarchy, GraphRAG, or natural-language analysis.
+MCP remains exactly 13 read-only tools and does not expose
+`degree-ranking`. This milestone has no DOT or visualization.
 
 `adopt-publication-lock` is an explicit migration, never an automatic
 MCP or doctor side effect. `--offline-confirmed` is required to create
@@ -717,6 +739,7 @@ uv run python scripts/graph_query.py symbol <title> --graph <root>
 uv run python scripts/graph_query.py subgraph <symbol-or-module> --graph <root>
 uv run python scripts/graph_query.py subgraph <symbol-or-module> --graph <root> --dot
 uv run python scripts/graph_query.py components --graph <root>
+uv run python scripts/graph_query.py degree-ranking --graph <root>
 uv run python scripts/context_pack.py <title> --graph <root>
 uv run python scripts/port_eval.py --all-gates --full
 ```

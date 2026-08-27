@@ -39,6 +39,7 @@ import typer
 from graphrag_code.byog_graph import (
     DEFAULT_COMPONENTS_MAX_COMPONENTS,
     DEFAULT_COMPONENTS_MAX_NODES_PER_COMPONENT,
+    DEFAULT_DEGREE_RANKING_MAX_NODES,
     DEFAULT_SUBGRAPH_MAX_DEPTH,
     DEFAULT_SUBGRAPH_MAX_EDGES,
     DEFAULT_SUBGRAPH_MAX_NODES,
@@ -529,6 +530,40 @@ def components(
             str(max_nodes_per_component),
         ]
     )
+    for rel_type in edge_type:
+        args.extend(["--edge-type", rel_type])
+    if json_out:
+        args.append("--json")
+    _delegate("graph_query.py", args)
+
+
+@app.command("degree-ranking")
+def degree_ranking(
+    graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
+    rank_by: str = typer.Option(
+        "total",
+        "--rank-by",
+        help="Rank by total, incoming, or outgoing degree",
+    ),
+    max_nodes: int = typer.Option(
+        DEFAULT_DEGREE_RANKING_MAX_NODES, "--max-nodes"
+    ),
+    edge_type: list[str] = typer.Option(
+        [],
+        "--edge-type",
+        help="Exact relationship-type allow-list (repeatable). Omit for all types.",
+    ),
+    json_out: bool = typer.Option(False, "--json"),
+):
+    """Raw directed relationship-row degree ranking (graph_query.py degree-ranking).
+
+    Structural accounting only. Not PageRank, betweenness, closeness,
+    eigenvector centrality, semantic importance, architecture inference,
+    community detection, GraphRAG, or a UI.
+    """
+    args = _append_snapshot(["degree-ranking", "--graph", str(graph)], snapshot)
+    args.extend(["--rank-by", rank_by, "--max-nodes", str(max_nodes)])
     for rel_type in edge_type:
         args.extend(["--edge-type", rel_type])
     if json_out:
