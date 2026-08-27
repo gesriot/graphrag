@@ -15,7 +15,7 @@ shared existing-lock graph lease. It never creates, truncates,
 rewrites, chmods, or replaces ``.publish.lock``. It never creates or
 changes ``.snapshot-pins.json``, ``current``, published snapshots,
 staging directories, payload files, or writer-lock bytes/metadata.
-It does not take a nested graph-root lease. MCP stays exactly 13
+It does not take a nested graph-root lease. MCP stays exactly 14
 read-only tools; this command is CLI-only.
 
 Cleanup-plan schema 1 was read-only/pre-apply

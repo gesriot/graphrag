@@ -52,9 +52,10 @@ precise call structure. The intended path is:
    Graphviz, render an image, or provide an interactive UI. `components` is
    a weakly-connected-components topology summary over persisted titles and
    selected relationship rows, not semantic community detection, Leiden,
-   centrality, or architecture inference. MCP remains exactly 13 read-only
+   centrality, or architecture inference. MCP remains exactly 14 read-only
    tools, does not expose DOT, includes `subgraph` immediately after
-   `neighbors`, and includes `components` immediately after `subgraph`.
+   `neighbors`, includes `components` immediately after `subgraph`, and
+   includes `degree_ranking` immediately after `components`.
    `components` is the existing bounded structural topology producer, not
    semantic community detection, Leiden, clustering, centrality, hierarchy,
    architecture inference, importance ranking, GraphRAG, or
@@ -65,9 +66,13 @@ precise call structure. The intended path is:
    closeness, eigenvector centrality, importance, architecture, community
    detection, GraphRAG, or natural-language analysis. Self-loops contribute
    in=1 / out=1 / total=2; parallel rows each count; isolates remain;
-   endpoint-only nodes are marked non-entities. MCP remains exactly 13
-   read-only tools and does not expose `degree-ranking`. This milestone has
-   no DOT.
+   endpoint-only nodes are marked non-entities. MCP exposes that existing
+   producer as `degree_ranking` immediately after `components` and does
+   not expose DOT. This is raw directed relationship-row degree accounting
+   only: not PageRank, betweenness, closeness, eigenvector centrality, a
+   normalized score, semantic importance, leadership, architecture,
+   communities, hierarchy, GraphRAG, or natural-language analysis. MCP
+   remains exactly 14 read-only tools. This milestone has no DOT.
 6. **Golden-first porting gate** – before Rust: license/provenance, a golden
    contract the **reference language** already passes, then a clean graph audit,
    then porting. Recorded in [Plan.md](Plan.md) (“Porting gate”).
@@ -182,7 +187,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`2047 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`2051 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
@@ -213,7 +218,7 @@ unleased until an operator adopts a disposable or operational copy.
 `scripts/snapshot_compare.py`) expose bounded local snapshot history and
 structural persisted-row diffs. They hold one shared `.publish.lock`
 lease, resolve `current` once, and never create the lock. MCP adds
-`snapshot_history` and `snapshot_diff` to the fixed 13-tool set and stays
+`snapshot_history` and `snapshot_diff` to the fixed 14-tool set and stays
 strict. `--allow-unlocked-legacy` is CLI-only compatibility for
 immutable pre-lock evidence and reports that there is no retention
 guarantee. Row modification means canonical persisted fields differ;
@@ -226,17 +231,17 @@ graphrag_code.snapshot_activate` and `scripts/snapshot_activate.py`) is
 the explicit mutating CLI that retargets only `current` onto a retained
 published snapshot. `--activate-confirmed` and `--expected-current` are
 mandatory. It holds one exclusive existing-lock lease, never creates
-`.publish.lock`, and is intentionally absent from the fixed 13-tool MCP
+`.publish.lock`, and is intentionally absent from the fixed 14-tool MCP
 set. It does not delete, retain, publish, repair, or reindex. Advisory
 locks do not protect against non-cooperating programs.
 Query, context-pack, `graph_status`, and `graph_doctor` accept an
 optional retained-snapshot selector (`--snapshot <id|current>` in the
-CLI; MCP `snapshot="current"` on the existing eleven selectable tools).
+CLI; MCP `snapshot="current"` on the existing twelve selectable tools).
 Historical reads do not require `snapshot-activate` and do not change
 `current`. One shared `.publish.lock` lease pins the selected snapshot
 against cooperating keep-last retention until the complete response is
 built. `current` is resolved exactly once when selected and is not read
-for an explicit published id. The MCP tool set remains exactly 13.
+for an explicit published id. The MCP tool set remains exactly 14.
 Explicit query/context CLI selectors require the existing regular
 publication lock and never create it. Their omitted `--snapshot` path
 keeps the existing default current/legacy-flat pre-lock compatibility
@@ -249,7 +254,7 @@ activation, backup, or replication. Listing never creates the file.
 Unpin does not delete immediately. Cooperating keep-last protects
 ``current``, existing doc-claim pins, and operator pins. A malformed
 registry aborts publication before ``current`` or snapshot deletion.
-MCP remains exactly 13 read-only tools. ``graphrag-code
+MCP remains exactly 14 read-only tools. ``graphrag-code
 snapshot-retention-plan`` (also ``python -m
 graphrag_code.snapshot_retention`` and
 ``scripts/snapshot_retention.py``) is a read-only report of the shared

@@ -26,7 +26,7 @@ captured staging consistency tokens. Internal execution order is
 command's conservative apply order, not a recommendation on the
 read-only plan. Recursive deletion is not transactionally atomic.
 A partial result is always emitted and always requires a fresh plan.
-MCP stays exactly 13 read-only tools; this command is CLI-only.
+MCP stays exactly 14 read-only tools; this command is CLI-only.
 
 Usage:
     graphrag-code snapshot-maintenance-apply --graph <root> --keep-last <N> \\
@@ -157,7 +157,7 @@ _COMMAND_NOTICES: Tuple[Dict[str, str], ...] = (
         "kind": "notice",
         "message": (
             "snapshot-maintenance-apply is CLI-only and intentionally "
-            "absent from the fixed 13-tool MCP set."
+            "absent from the fixed 14-tool MCP set."
         ),
     },
 )

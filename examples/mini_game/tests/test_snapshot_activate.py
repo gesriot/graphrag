@@ -875,7 +875,7 @@ def test_mcp_has_no_activation_tool(tmp_path: Path):
     graph = tmp_path / "g"
     _publish(graph, "a")
     assert "snapshot_activate" not in TOOL_NAMES
-    assert len(TOOL_NAMES) == 13
+    assert len(TOOL_NAMES) == 14
     session = build_session(graph, "python")
     server = build_mcp_server(session)
 
@@ -886,7 +886,7 @@ def test_mcp_has_no_activation_tool(tmp_path: Path):
             names = {tool.name for tool in (await client.list_tools()).tools}
             assert names == set(TOOL_NAMES)
             assert "snapshot_activate" not in names
-            assert len(names) == 13
+            assert len(names) == 14
 
     anyio_run(_body)
 

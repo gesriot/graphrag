@@ -33,7 +33,7 @@ descriptor-relative, no-follow, bounded two-scan contract internally.
 It does not invoke a public CLI. The parent descriptor plus retained
 recognized staging and lock descriptors stay open through result
 construction, serialization, stdout write, and flush. MCP stays
-exactly 13 read-only tools; this command is CLI-only.
+exactly 14 read-only tools; this command is CLI-only.
 
 Usage:
     graphrag-code snapshot-export-staging-cleanup-reconcile \\
@@ -284,7 +284,7 @@ _COMMAND_NOTICES: Tuple[Dict[str, str], ...] = (
         "kind": "notice",
         "message": (
             "snapshot-export-staging-cleanup-reconcile is CLI-only and "
-            "intentionally absent from the fixed 13-tool MCP set."
+            "intentionally absent from the fixed 14-tool MCP set."
         ),
     },
 )

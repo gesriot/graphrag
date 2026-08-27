@@ -32,15 +32,19 @@ from graphrag_code import index_python as pkg_index_python  # type: ignore
 from graphrag_code.byog_graph import (  # type: ignore
     DEFAULT_COMPONENTS_MAX_COMPONENTS,
     DEFAULT_COMPONENTS_MAX_NODES_PER_COMPONENT,
+    DEFAULT_DEGREE_RANKING_MAX_NODES,
     DEFAULT_SUBGRAPH_MAX_DEPTH,
     DEFAULT_SUBGRAPH_MAX_EDGES,
     DEFAULT_SUBGRAPH_MAX_NODES,
+    DEGREE_RANKING_MODES,
     HARD_MAX_COMPONENT_NODES,
     HARD_MAX_COMPONENTS,
+    HARD_MAX_DEGREE_RANKING_NODES,
     HARD_MAX_SUBGRAPH_DEPTH,
     HARD_MAX_SUBGRAPH_EDGES,
     HARD_MAX_SUBGRAPH_NODES,
     ByogGraph,
+    compute_structural_degree_ranking,
     compute_weakly_connected_components,
     publish_byog_snapshot,
 )
@@ -242,9 +246,12 @@ def test_tools_list_is_exactly_documented(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == len(set(names)) == len(TOOL_NAMES) == 13
+            assert len(names) == len(set(names)) == len(TOOL_NAMES) == 14
             assert names[names.index("neighbors") + 1] == "subgraph"
             assert names[names.index("subgraph") + 1] == "components"
+            assert names[names.index("components") + 1] == "degree_ranking"
+            assert names[names.index("degree_ranking") + 1] == "impact"
+            assert "degree-ranking" not in names
             assert "snapshot_activate" not in names
             for tool in tools:
                 assert tool.input_schema["additionalProperties"] is False
@@ -271,6 +278,7 @@ def test_every_required_tool_via_sdk_client(tmp_path: Path):
                     "graph_doctor",
                     "snapshot_history",
                     "components",
+                    "degree_ranking",
                 }:
                     result = await client.call_tool(name)
                 elif name == "snapshot_diff":
@@ -327,6 +335,9 @@ def test_query_and_graph_walks_match_byog_graph(tmp_path: Path):
     )
     assert session.components()["data"] == json.loads(
         json.dumps(view.components(), allow_nan=False, default=str)
+    )
+    assert session.degree_ranking()["data"] == json.loads(
+        json.dumps(view.degree_ranking(), allow_nan=False, default=str)
     )
     assert session.impact(symbol)["data"] == view.impact(symbol)
 
@@ -638,6 +649,7 @@ def test_mcp_calls_do_not_mutate_graph(
     session.neighbors(symbol)
     session.subgraph(symbol)
     session.components()
+    session.degree_ranking()
     session.impact(symbol)
     session.type_closure(symbol)
     session.context_pack(symbol)
@@ -1828,6 +1840,549 @@ def test_components_mcp_publisher_wait_and_no_nested_query(
     q = ctx.Queue()
     reader = ctx.Process(
         target=_mcp_paused_components, args=(str(graph), pinned, resume, q)
+    )
+    from test_reader_lease import _cleanup_processes, _publisher
+
+    pub = ctx.Process(target=_publisher, args=(str(graph), "next", 1, about, got, q))
+    try:
+        reader.start()
+        assert pinned.wait(timeout=20)
+        pub.start()
+        assert about.wait(timeout=20)
+        assert not got.is_set()
+        assert _current(graph) == first
+        assert (first_dir / "entities.parquet").is_file()
+        resume.set()
+        reader.join(timeout=20)
+        pub.join(timeout=20)
+        assert not reader.is_alive() and not pub.is_alive()
+        assert got.is_set()
+    finally:
+        _cleanup_processes(pub, reader, release=resume)
+
+
+def _assert_degree_ranking_envelope(payload: dict, data: dict) -> None:
+    ready = json.loads(json.dumps(data, allow_nan=False, default=str))
+    assert payload["tool"] == "degree_ranking"
+    assert payload["ok"] is True
+    assert payload["schema_version"] == 1
+    assert payload["data"] == ready
+    assert payload["total"] == ready["n_nodes_total"]
+    assert payload["returned"] == ready["n_nodes_returned"]
+    assert payload["truncated"] is bool(ready["nodes_truncated"])
+    assert payload["limits"]["rank_by"] == ready["rank_by"]
+    assert payload["limits"]["max_nodes"] == ready["max_nodes"]
+    assert payload["limits"]["edge_types"] == ready["edge_types"]
+    assert payload["limits"]["max_envelope_bytes"] == HARD_MAX_ENVELOPE_BYTES
+
+
+def test_degree_ranking_mcp_schema_defaults_and_unknown_args(tmp_path: Path):
+    graph = _publish_components(
+        tmp_path,
+        [_component_entity("A"), _component_entity("B")],
+        [_component_rel("A", "B", "calls")],
+    )
+    session = _session(graph, "python")
+    sig = inspect.signature(GraphMcpSession.degree_ranking)
+    assert list(sig.parameters) == [
+        "self",
+        "rank_by",
+        "max_nodes",
+        "edge_types",
+        "snapshot",
+    ]
+    assert sig.parameters["rank_by"].default == "total"
+    assert sig.parameters["max_nodes"].default == DEFAULT_DEGREE_RANKING_MAX_NODES
+    assert sig.parameters["edge_types"].default is None
+    assert sig.parameters["snapshot"].default == "current"
+    assert "graph" not in sig.parameters
+    assert "format" not in sig.parameters
+    assert "dot" not in sig.parameters
+    assert "symbol" not in sig.parameters
+    assert "direction" not in sig.parameters
+    assert "metric" not in sig.parameters
+    assert "rank" not in sig.parameters
+
+    defaulted = session.degree_ranking()
+    view = ByogGraph(graph).degree_ranking()
+    _assert_degree_ranking_envelope(defaulted, view)
+    assert defaulted["limits"]["rank_by"] == "total"
+    assert defaulted["limits"]["max_nodes"] == DEFAULT_DEGREE_RANKING_MAX_NODES
+    assert defaulted["limits"]["edge_types"] is None
+
+    server = build_mcp_server(session)
+
+    async def _body():
+        async with Client(server) as client:
+            tools = (await client.list_tools()).tools
+            names = [tool.name for tool in tools]
+            assert names == list(TOOL_NAMES)
+            assert len(names) == len(set(names)) == 14
+            assert names[names.index("components") + 1] == "degree_ranking"
+            assert names[names.index("degree_ranking") + 1] == "impact"
+            assert "degree-ranking" not in names
+            tool = next(item for item in tools if item.name == "degree_ranking")
+            assert tool.annotations.read_only_hint is True
+            assert tool.annotations.destructive_hint is False
+            assert tool.annotations.idempotent_hint is True
+            assert tool.annotations.open_world_hint is False
+            assert tool.input_schema["additionalProperties"] is False
+            props = tool.input_schema["properties"]
+            assert list(props) == ["rank_by", "max_nodes", "edge_types", "snapshot"]
+            assert props["rank_by"]["type"] == "string"
+            assert props["rank_by"]["default"] == "total"
+            assert props["max_nodes"]["type"] == "integer"
+            assert props["max_nodes"]["default"] == DEFAULT_DEGREE_RANKING_MAX_NODES
+            assert props["snapshot"]["default"] == "current"
+            assert "graph" not in props
+            assert "symbol" not in props
+            assert "direction" not in props
+            assert "format" not in props
+            assert "dot" not in props
+            assert "metric" not in props
+            assert "rank" not in props
+            extra = await client.call_tool("degree_ranking", {"graph": str(tmp_path / "other")})
+            assert extra.is_error is True
+            unknown = await client.call_tool("degree_ranking", {"format": "json"})
+            assert unknown.is_error is True
+            dot = await client.call_tool("degree_ranking", {"dot": True})
+            assert dot.is_error is True
+            symbol = await client.call_tool("degree_ranking", {"symbol": "A"})
+            assert symbol.is_error is True
+            direction = await client.call_tool("degree_ranking", {"direction": "both"})
+            assert direction.is_error is True
+            metric = await client.call_tool("degree_ranking", {"metric": "pagerank"})
+            assert metric.is_error is True
+            rank = await client.call_tool("degree_ranking", {"rank": 1})
+            assert rank.is_error is True
+            scalar = await client.call_tool("degree_ranking", {"edge_types": "calls"})
+            assert scalar.is_error is True
+            for invalid_args in (
+                {"rank_by": "pagerank"},
+                {"rank_by": "Total"},
+                {"rank_by": " total"},
+                {"rank_by": ""},
+                {"rank_by": True},
+                {"max_nodes": True},
+                {"max_nodes": 1.0},
+                {"max_nodes": False},
+                {"max_nodes": 1.5},
+                {"edge_types": ["calls", None]},
+                {"edge_types": ["calls", 1]},
+            ):
+                invalid = await client.call_tool("degree_ranking", invalid_args)
+                assert invalid.is_error is True, invalid_args
+
+    _run(_body)
+
+
+def test_degree_ranking_mcp_semantics_parity_snapshots_and_filters(tmp_path: Path):
+    graph = tmp_path / "g"
+    older = publish_byog_snapshot(
+        pd.DataFrame([_component_entity("demo:old", source_file="old.py")]),
+        pd.DataFrame([_component_rel("demo:old", "demo:old", "calls", rid="rel:old")]),
+        pd.DataFrame(
+            [
+                {
+                    "id": "tu:old",
+                    "title": "old.py",
+                    "source_file": "old.py",
+                    "entity_id": "ent:demo:old",
+                }
+            ]
+        ),
+        graph,
+        settings_text="mcp: old\n",
+        keep_last=5,
+    )
+    newer_ents = [
+        _component_entity("Z"),
+        _component_entity("A"),
+        _component_entity("é"),
+        _component_entity("M"),
+        _component_entity("Isolated"),
+    ]
+    newer_rels = [
+        _component_rel("A", "Z", "calls", rid="rel:az"),
+        _component_rel("A", "Z", "calls", rid="rel:az-2"),
+        _component_rel("é", "M", "calls", rid="rel:em"),
+        _component_rel("A", "A", "calls", rid="rel:self"),
+        _component_rel("A", "ghost", "calls", rid="rel:endpoint"),
+        _component_rel("M", "Isolated", "contains", rid="rel:contains"),
+    ]
+    current = publish_byog_snapshot(
+        pd.DataFrame(newer_ents),
+        pd.DataFrame(newer_rels),
+        pd.DataFrame(
+            [
+                {
+                    "id": f"tu:{row['title']}",
+                    "title": "a.py",
+                    "source_file": "a.py",
+                    "entity_id": row["id"],
+                }
+                for row in newer_ents
+            ]
+        ),
+        graph,
+        settings_text="mcp: new\n",
+        keep_last=5,
+    )
+    assert _current(graph) == current.name
+    before = _payload_hashes(graph)
+    session = _session(graph, "python")
+    view = ByogGraph(graph)
+
+    none = session.degree_ranking()
+    empty = session.degree_ranking(edge_types=[])
+    explicit_current = session.degree_ranking(snapshot="current")
+    _assert_degree_ranking_envelope(none, view.degree_ranking())
+    assert empty["data"] == none["data"]
+    assert empty["limits"]["edge_types"] is None
+    assert explicit_current["data"] == none["data"]
+    assert explicit_current["snapshot"] == current.name
+    assert none["data"]["n_nodes_total"] == 6
+    assert none["data"]["n_endpoint_only_nodes_total"] == 1
+    by_title = {node["title"]: node for node in none["data"]["nodes"]}
+    assert by_title["A"]["in_degree"] == 1
+    assert by_title["A"]["out_degree"] == 4
+    assert by_title["A"]["total_degree"] == 5
+    assert by_title["A"]["is_entity"] is True
+    assert by_title["ghost"] == {
+        "title": "ghost",
+        "in_degree": 1,
+        "out_degree": 0,
+        "total_degree": 1,
+        "is_entity": False,
+    }
+    assert by_title["Isolated"]["is_entity"] is True
+    assert DEGREE_RANKING_MODES == ("total", "incoming", "outgoing")
+
+    total = session.degree_ranking(rank_by="total")
+    incoming = session.degree_ranking(rank_by="incoming")
+    outgoing = session.degree_ranking(rank_by="outgoing")
+    assert [node["title"] for node in total["data"]["nodes"]] == [
+        node["title"] for node in view.degree_ranking(rank_by="total")["nodes"]
+    ]
+    assert [node["title"] for node in incoming["data"]["nodes"]] == [
+        node["title"] for node in view.degree_ranking(rank_by="incoming")["nodes"]
+    ]
+    assert [node["title"] for node in outgoing["data"]["nodes"]] == [
+        node["title"] for node in view.degree_ranking(rank_by="outgoing")["nodes"]
+    ]
+    assert incoming["limits"]["rank_by"] == "incoming"
+    assert outgoing["limits"]["rank_by"] == "outgoing"
+
+    filtered = session.degree_ranking(edge_types=["uses_type", "calls", "calls"])
+    expected_filtered = view.degree_ranking(edge_types=["uses_type", "calls", "calls"])
+    assert filtered["limits"]["edge_types"] == ["calls", "uses_type"]
+    assert filtered["data"] == json.loads(
+        json.dumps(expected_filtered, allow_nan=False, default=str)
+    )
+    assert filtered["data"]["edge_types"] == ["calls", "uses_type"]
+
+    capped = session.degree_ranking(max_nodes=2)
+    expected_capped = view.degree_ranking(max_nodes=2)
+    _assert_degree_ranking_envelope(capped, expected_capped)
+    assert capped["truncated"] is True
+    assert capped["data"]["nodes_truncated"] is True
+    assert capped["data"]["n_nodes_returned"] == 2
+    assert capped["data"]["n_nodes_total"] == 6
+    assert capped["returned"] == 2
+    assert capped["total"] == 6
+
+    historical = session.degree_ranking(snapshot=older.name)
+    old_ents = pd.read_parquet(graph / "snapshots" / older.name / "entities.parquet")
+    old_rels = pd.read_parquet(
+        graph / "snapshots" / older.name / "relationships.parquet"
+    )
+    old_expected = compute_structural_degree_ranking(old_ents, old_rels)
+    assert historical["snapshot"] == older.name
+    assert historical["data"] == json.loads(
+        json.dumps(old_expected, allow_nan=False, default=str)
+    )
+    assert historical["data"]["n_nodes_total"] == 1
+    assert "demo:new" not in json.dumps(historical)
+    assert "ghost" not in json.dumps(historical["data"])
+    assert _current(graph) == current.name
+    assert _payload_hashes(graph) == before
+
+    server = build_mcp_server(session)
+
+    async def _body():
+        async with Client(server) as client:
+            payload = _payload(
+                await client.call_tool(
+                    "degree_ranking",
+                    {"rank_by": "outgoing", "snapshot": older.name},
+                )
+            )
+            assert payload["tool"] == "degree_ranking"
+            assert payload["snapshot"] == older.name
+            assert payload["limits"]["rank_by"] == "outgoing"
+            assert payload["data"] == session.degree_ranking(
+                rank_by="outgoing", snapshot=older.name
+            )["data"]
+            defaulted = _payload(await client.call_tool("degree_ranking", {}))
+            assert defaulted["data"] == none["data"]
+            empty_filter = _payload(
+                await client.call_tool("degree_ranking", {"edge_types": []})
+            )
+            assert empty_filter["data"] == none["data"]
+            assert empty_filter["limits"]["edge_types"] is None
+
+    _run(_body)
+    assert _current(graph) == current.name
+    assert _payload_hashes(graph) == before
+
+
+def test_degree_ranking_mcp_validation_malformed_empty_and_envelope(tmp_path: Path):
+    graph = _publish_components(
+        tmp_path,
+        [_component_entity("A"), _component_entity("B")],
+        [_component_rel("A", "B", "calls")],
+    )
+    session = _session(graph, "python")
+    with pytest.raises(GraphMcpError, match="rank_by"):
+        session.degree_ranking(rank_by="pagerank")
+    with pytest.raises(GraphMcpError, match="rank_by"):
+        session.degree_ranking(rank_by="Total")
+    with pytest.raises(GraphMcpError, match="rank_by"):
+        session.degree_ranking(rank_by=" total")
+    with pytest.raises(GraphMcpError, match="rank_by"):
+        session.degree_ranking(rank_by="")
+    with pytest.raises(GraphMcpError, match="rank_by"):
+        session.degree_ranking(rank_by=True)
+    with pytest.raises(GraphMcpError, match="rank_by"):
+        session.degree_ranking(rank_by=1)
+    with pytest.raises(GraphMcpError, match="rank_by"):
+        session.degree_ranking(rank_by="pagerank", snapshot="..")
+    with pytest.raises(GraphMcpError, match="max_nodes"):
+        session.degree_ranking(max_nodes=True)
+    with pytest.raises(GraphMcpError, match="max_nodes"):
+        session.degree_ranking(max_nodes=1.5)
+    with pytest.raises(GraphMcpError, match="max_nodes"):
+        session.degree_ranking(max_nodes=float("nan"))
+    with pytest.raises(GraphMcpError, match="max_nodes"):
+        session.degree_ranking(max_nodes=math.inf)
+    with pytest.raises(GraphMcpError, match="max_nodes"):
+        session.degree_ranking(max_nodes=0)
+    with pytest.raises(GraphMcpError, match="max_nodes"):
+        session.degree_ranking(max_nodes=-1)
+    with pytest.raises(GraphMcpError, match="max_nodes"):
+        session.degree_ranking(max_nodes=HARD_MAX_DEGREE_RANKING_NODES + 1)
+    with pytest.raises(GraphMcpError, match="array of strings"):
+        session.degree_ranking(edge_types="calls")
+    with pytest.raises(GraphMcpError, match="invalid edge-type filter"):
+        session.degree_ranking(edge_types=[""])
+    with pytest.raises(GraphMcpError, match="invalid edge-type filter"):
+        session.degree_ranking(edge_types=[" calls"])
+    with pytest.raises(GraphMcpError, match="invalid edge-type filter"):
+        session.degree_ranking(edge_types=["ca\x00lls"])
+    with pytest.raises(GraphMcpError, match="invalid edge-type filter"):
+        session.degree_ranking(edge_types=["calls", 1])
+    with pytest.raises(GraphMcpError, match="snapshot"):
+        session.degree_ranking(snapshot="..")
+
+    empty_ok = session.degree_ranking(edge_types=[])
+    assert empty_ok["limits"]["edge_types"] is None
+    none_ok = session.degree_ranking(edge_types=None)
+    assert none_ok["data"] == empty_ok["data"]
+
+    empty_graph = tmp_path / "empty"
+    publish_byog_snapshot(
+        pd.DataFrame(columns=["id", "title", "type", "source_file", "extractor"]),
+        pd.DataFrame(columns=["id", "source", "target", "type", "extractor"]),
+        pd.DataFrame(columns=["id", "title", "source_file"]),
+        empty_graph,
+        settings_text="mcp: empty\n",
+        keep_last=1,
+    )
+    empty_session = GraphMcpSession(
+        empty_graph,
+        configured_indexer="python",
+        resolved_indexer="python",
+        preflight={"indexer": "python", "indexer_resolution": {}},
+    )
+    empty_payload = empty_session.degree_ranking()
+    expected_empty = json.loads(
+        json.dumps(ByogGraph(empty_graph).degree_ranking(), allow_nan=False, default=str)
+    )
+    _assert_degree_ranking_envelope(empty_payload, expected_empty)
+    assert empty_payload["data"]["nodes"] == []
+    assert empty_payload["data"]["n_nodes_total"] == 0
+    assert empty_payload["truncated"] is False
+    assert empty_payload["total"] == 0
+    assert empty_payload["returned"] == 0
+
+    bad = tmp_path / "bad"
+    publish_byog_snapshot(
+        pd.DataFrame([_component_entity("A")]),
+        pd.DataFrame(
+            [
+                {
+                    "id": "rel:ok",
+                    "source": "A",
+                    "target": "A",
+                    "type": "calls",
+                    "extractor": "tree-sitter-python",
+                },
+                {
+                    "id": "rel:bad",
+                    "source": "A",
+                    "target": None,
+                    "type": "contains",
+                    "extractor": "tree-sitter-python",
+                },
+            ]
+        ),
+        pd.DataFrame(
+            [{"id": "tu:a", "title": "a.py", "source_file": "a.py", "entity_id": "ent:A"}]
+        ),
+        bad,
+        settings_text="mcp: bad\n",
+        keep_last=1,
+    )
+    bad_session = GraphMcpSession(
+        bad,
+        configured_indexer="python",
+        resolved_indexer="python",
+        preflight={"indexer": "python", "indexer_resolution": {}},
+    )
+    with pytest.raises(GraphMcpError, match="invalid target"):
+        bad_session.degree_ranking()
+    with pytest.raises(GraphMcpError, match="invalid target"):
+        bad_session.degree_ranking(edge_types=["calls"])
+
+    huge = tmp_path / "huge"
+    title = "T" + ("x" * (HARD_MAX_ENVELOPE_BYTES + 1))
+    publish_byog_snapshot(
+        pd.DataFrame([_component_entity(title, id="ent:huge", source_file="m.py")]),
+        pd.DataFrame(columns=["id", "source", "target", "type"]),
+        pd.DataFrame(
+            [{"id": "tu:1", "title": "m.py", "source_file": "m.py", "entity_id": "ent:huge"}]
+        ),
+        huge,
+        settings_text="mcp: huge\n",
+        keep_last=1,
+    )
+    with pytest.raises(GraphMcpError, match="response envelope exceeds hard limit"):
+        GraphMcpSession(
+            huge,
+            configured_indexer="python",
+            resolved_indexer="python",
+            preflight={"indexer": "python", "indexer_resolution": {}},
+        ).degree_ranking(max_nodes=1)
+
+    server = build_mcp_server(session)
+
+    async def _body():
+        async with Client(server) as client:
+            for invalid_args in (
+                {"rank_by": "pagerank"},
+                {"rank_by": "Total"},
+                {"rank_by": " total"},
+                {"max_nodes": True},
+                {"max_nodes": 0},
+                {"max_nodes": HARD_MAX_DEGREE_RANKING_NODES + 1},
+                {"edge_types": "calls"},
+                {"edge_types": [""]},
+                {"edge_types": [" calls"]},
+                {"snapshot": ".."},
+            ):
+                invalid = await client.call_tool("degree_ranking", invalid_args)
+                assert invalid.is_error is True, invalid_args
+                assert not getattr(invalid, "structured_content", None) or (
+                    isinstance(invalid.structured_content, dict)
+                    and invalid.structured_content.get("ok") is not True
+                )
+
+    _run(_body)
+
+
+def _mcp_paused_degree_ranking(graph: str, pinned, resume, q) -> None:
+    sys.path.insert(0, str(Path(__file__).parents[3] / "src"))
+    import graphrag_code.mcp_server as mcp_mod
+
+    orig_envelope = mcp_mod._envelope
+
+    def wrapped_envelope(**kwargs):
+        payload = orig_envelope(**kwargs)
+        pinned.set()
+        if not resume.wait(timeout=20):
+            q.put("timeout")
+        return payload
+
+    mcp_mod._envelope = wrapped_envelope
+    session = mcp_mod.GraphMcpSession(
+        Path(graph),
+        configured_indexer="python",
+        resolved_indexer="python",
+        preflight={"indexer": "python", "indexer_resolution": {}},
+    )
+    payload = session.degree_ranking()
+    q.put(payload["snapshot"])
+
+
+def test_degree_ranking_mcp_publisher_wait_and_no_nested_query(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import multiprocessing
+
+    graph = _publish_components(
+        tmp_path,
+        [_component_entity("A"), _component_entity("B")],
+        [_component_rel("A", "B", "calls")],
+    )
+    first = _current(graph)
+    first_dir = graph / "snapshots" / first
+    before = _payload_hashes(graph)
+    session = _session(graph, "python")
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError(
+            "nested public query or CLI invoked from MCP degree_ranking"
+        )
+
+    producer_calls = 0
+    producer = ByogGraph.degree_ranking
+
+    def counted_producer(self, *args, **kwargs):
+        nonlocal producer_calls
+        producer_calls += 1
+        return producer(self, *args, **kwargs)
+
+    monkeypatch.setattr("graphrag_code.graph_query.degree_ranking", boom)
+    monkeypatch.setattr("graphrag_code.graph_query.cli_degree_ranking", boom)
+    monkeypatch.setattr("graphrag_code.cli.degree_ranking", boom)
+    monkeypatch.setattr("graphrag_code.graph_query.components", boom)
+    monkeypatch.setattr("graphrag_code.graph_query.subgraph", boom)
+    monkeypatch.setattr(ByogGraph, "components", boom)
+    monkeypatch.setattr(ByogGraph, "subgraph", boom)
+    monkeypatch.setattr(ByogGraph, "degree_ranking", counted_producer)
+    payload = session.degree_ranking()
+    assert payload["ok"] is True
+    assert producer_calls == 1
+    assert _payload_hashes(graph) == before
+    assert not list(graph.glob(".staging-*"))
+    assert not list(tmp_path.glob("*.dot"))
+    assert (graph / ".publish.lock").is_file()
+    src = inspect.getsource(GraphMcpSession.degree_ranking)
+    assert "networkx" not in src
+    assert "subprocess" not in src
+    assert "graph_query.degree_ranking" not in src
+    assert "cli_degree_ranking" not in src
+    assert ".components(" not in src
+    assert ".subgraph(" not in src
+
+    ctx = multiprocessing.get_context("spawn")
+    pinned = ctx.Event()
+    resume = ctx.Event()
+    about = ctx.Event()
+    got = ctx.Event()
+    q = ctx.Queue()
+    reader = ctx.Process(
+        target=_mcp_paused_degree_ranking, args=(str(graph), pinned, resume, q)
     )
     from test_reader_lease import _cleanup_processes, _publisher
 

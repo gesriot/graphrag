@@ -9,7 +9,7 @@ a graph lease, or mutate the export directory or any graph. It does
 not create, copy, rename, repair, quarantine, import, restore, or
 delete anything. It does not claim that the export is a backup,
 authentic, recoverable, complete source evidence, or authorization to
-delete anything. MCP stays exactly 13 read-only tools; this command is
+delete anything. MCP stays exactly 14 read-only tools; this command is
 CLI-only.
 
 ``--export-dir`` and ``--expected-export-revision`` are required. The
@@ -101,7 +101,7 @@ _COMMAND_NOTICES: Tuple[Dict[str, str], ...] = (
         "kind": "notice",
         "message": (
             "snapshot-export-verify is CLI-only and intentionally absent "
-            "from the fixed 13-tool MCP set."
+            "from the fixed 14-tool MCP set."
         ),
     },
 )

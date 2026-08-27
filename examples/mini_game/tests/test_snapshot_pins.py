@@ -1021,12 +1021,12 @@ def test_cli_module_script_and_wheel_parity(tmp_path: Path, built_wheel_and_sdis
     assert body["pinned_snapshot"] == older.name
 
 
-def test_mcp_tool_set_remains_exactly_thirteen(tmp_path: Path):
+def test_mcp_tool_set_remains_exactly_fourteen(tmp_path: Path):
     from anyio import run as anyio_run
 
     graph = tmp_path / "g"
     _publish(graph, "a")
-    assert len(TOOL_NAMES) == 13
+    assert len(TOOL_NAMES) == 14
     assert "snapshot_pin" not in TOOL_NAMES
     assert "snapshot_unpin" not in TOOL_NAMES
     assert "snapshot_pins" not in TOOL_NAMES
@@ -1039,7 +1039,7 @@ def test_mcp_tool_set_remains_exactly_thirteen(tmp_path: Path):
         async with Client(server) as client:
             names = {tool.name for tool in (await client.list_tools()).tools}
             assert names == set(TOOL_NAMES)
-            assert len(names) == 13
+            assert len(names) == 14
             assert "snapshot_pin" not in names
 
     anyio_run(_body)

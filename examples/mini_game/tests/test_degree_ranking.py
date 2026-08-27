@@ -1,6 +1,7 @@
 """Raw directed relationship-row degree ranking.
 
-Structural accounting only. Does not add MCP, DOT, NetworkX, or Graphviz.
+Structural accounting only. MCP exposes the existing producer. No DOT,
+NetworkX, or Graphviz.
 """
 from __future__ import annotations
 
@@ -783,7 +784,7 @@ def test_no_nested_query_networkx_and_existing_surfaces_unchanged(
     assert other.components() == comps
 
 
-def test_mcp_remains_thirteen_tools_without_degree_ranking(tmp_path: Path):
+def test_mcp_exposes_degree_ranking_as_fourteenth_tool(tmp_path: Path):
     from anyio import run as anyio_run
     from mcp import Client
 
@@ -792,26 +793,62 @@ def test_mcp_remains_thirteen_tools_without_degree_ranking(tmp_path: Path):
     graph = _publish(tmp_path, [_entity("A"), _entity("B")], [_calls("A", "B")])
     session = build_session(graph, "python")
     server = build_mcp_server(session)
-    assert not hasattr(session, "degree_ranking")
-    assert "degree_ranking" not in TOOL_NAMES
+    params = list(inspect.signature(GraphMcpSession.degree_ranking).parameters)
+    assert params == ["self", "rank_by", "max_nodes", "edge_types", "snapshot"]
+    assert "graph" not in params
+    assert "format" not in params
+    assert "dot" not in params
+    assert "symbol" not in params
+    assert "direction" not in params
+    assert "metric" not in params
+    assert "rank" not in params
     assert "degree-ranking" not in TOOL_NAMES
-    params = list(inspect.signature(GraphMcpSession.components).parameters)
-    assert "degree_ranking" not in params
-    assert "rank_by" not in params
+
+    expected = ByogGraph(graph).degree_ranking()
+    payload = session.degree_ranking()
+    assert payload["tool"] == "degree_ranking"
+    assert payload["ok"] is True
+    assert payload["data"] == json.loads(json.dumps(expected, allow_nan=False, default=str))
+    assert payload["truncated"] is bool(payload["data"]["nodes_truncated"])
+    assert payload["total"] == payload["data"]["n_nodes_total"]
+    assert payload["returned"] == payload["data"]["n_nodes_returned"]
+    comps = session.components()
+    assert comps["tool"] == "components"
+    sub = session.subgraph("A", direction="outgoing", max_depth=1)
+    assert sub["tool"] == "subgraph"
+    assert sub["data"]["root"] == "A"
 
     async def _body():
         async with Client(server) as client:
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == 13
-            assert "degree_ranking" not in names
+            assert len(names) == len(set(names)) == 14
             assert "degree-ranking" not in names
             assert names[names.index("subgraph") + 1] == "components"
-            for tool in tools:
-                props = tool.input_schema.get("properties") or {}
-                assert "degree_ranking" not in props
-                assert "rank_by" not in props or tool.name != "components"
+            assert names[names.index("components") + 1] == "degree_ranking"
+            assert names[names.index("degree_ranking") + 1] == "impact"
+            tool = next(item for item in tools if item.name == "degree_ranking")
+            assert tool.annotations.read_only_hint is True
+            assert tool.annotations.destructive_hint is False
+            assert tool.annotations.idempotent_hint is True
+            assert tool.annotations.open_world_hint is False
+            assert tool.input_schema["additionalProperties"] is False
+            props = tool.input_schema.get("properties") or {}
+            assert list(props) == ["rank_by", "max_nodes", "edge_types", "snapshot"]
+            assert "dot" not in props
+            assert "format" not in props
+            assert "graph" not in props
+            assert "symbol" not in props
+            assert "direction" not in props
+            assert "metric" not in props
+            assert "rank" not in props
+            body = await client.call_tool("degree_ranking", {})
+            data = body.structured_content
+            if isinstance(data, dict) and set(data) == {"result"}:
+                data = data["result"]
+            assert data["tool"] == "degree_ranking"
+            assert data["data"] == payload["data"]
 
     anyio_run(_body)
 

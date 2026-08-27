@@ -992,12 +992,12 @@ def test_lock_replacement_while_plan_waits_fails_closed(tmp_path: Path):
         _cleanup_processes(holder, waiter, release=resume)
 
 
-def test_mcp_tool_set_remains_exactly_thirteen(tmp_path: Path):
+def test_mcp_tool_set_remains_exactly_fourteen(tmp_path: Path):
     from anyio import run as anyio_run
 
     graph = tmp_path / "g"
     _publish(graph, "a")
-    assert len(TOOL_NAMES) == 13
+    assert len(TOOL_NAMES) == 14
     assert "snapshot_retention_plan" not in TOOL_NAMES
     assert "snapshot_retention" not in TOOL_NAMES
     session = build_session(graph, "python")
@@ -1009,7 +1009,7 @@ def test_mcp_tool_set_remains_exactly_thirteen(tmp_path: Path):
         async with Client(server) as client:
             names = {tool.name for tool in (await client.list_tools()).tools}
             assert names == set(TOOL_NAMES)
-            assert len(names) == 13
+            assert len(names) == 14
             assert "snapshot_retention_plan" not in names
 
     anyio_run(_body)

@@ -28,14 +28,17 @@ from pydantic import ConfigDict, StrictInt
 from graphrag_code.byog_graph import (
     DEFAULT_COMPONENTS_MAX_COMPONENTS,
     DEFAULT_COMPONENTS_MAX_NODES_PER_COMPONENT,
+    DEFAULT_DEGREE_RANKING_MAX_NODES,
     DEFAULT_SUBGRAPH_MAX_DEPTH,
     DEFAULT_SUBGRAPH_MAX_EDGES,
     DEFAULT_SUBGRAPH_MAX_NODES,
     DEFAULT_TYPE_CLOSURE_MAX_DEPTH,
     DEFAULT_TYPE_CLOSURE_MAX_EDGES,
     DEFAULT_TYPE_CLOSURE_MAX_NODES,
+    DEGREE_RANKING_MODES,
     HARD_MAX_COMPONENTS,
     HARD_MAX_COMPONENT_NODES,
+    HARD_MAX_DEGREE_RANKING_NODES,
     HARD_MAX_SUBGRAPH_DEPTH,
     HARD_MAX_SUBGRAPH_EDGES,
     HARD_MAX_SUBGRAPH_NODES,
@@ -99,6 +102,7 @@ TOOL_NAMES = (
     "neighbors",
     "subgraph",
     "components",
+    "degree_ranking",
     "impact",
     "type_closure",
     "context_pack",
@@ -597,6 +601,56 @@ class GraphMcpSession:
         except (ByogReaderLockError, SnapshotReadError) as exc:
             raise GraphMcpError(str(exc)) from exc
 
+    def degree_ranking(
+        self,
+        rank_by: Any = "total",
+        max_nodes: Any = DEFAULT_DEGREE_RANKING_MAX_NODES,
+        edge_types: Any = None,
+        snapshot: Any = CURRENT_REF,
+    ) -> Dict[str, Any]:
+        if not isinstance(rank_by, str) or rank_by not in DEGREE_RANKING_MODES:
+            raise GraphMcpError(
+                f"rank_by must be one of {list(DEGREE_RANKING_MODES)}, got {rank_by!r}"
+            )
+        _reject_non_finite("max_nodes", max_nodes)
+        nodes = _require_int(
+            "max_nodes",
+            max_nodes,
+            minimum=1,
+            maximum=HARD_MAX_DEGREE_RANKING_NODES,
+        )
+        types = _require_edge_types(edge_types)
+        try:
+            with self._scope(snapshot) as scope:
+                if scope.snap_id is None:
+                    raise GraphMcpError(
+                        f"graph has no published snapshot for {snapshot!r}"
+                    )
+                try:
+                    result = scope.load_graph().degree_ranking(
+                        rank_by=rank_by,
+                        edge_types=types,
+                        max_nodes=nodes,
+                    )
+                except ValueError as exc:
+                    raise GraphMcpError(str(exc)) from exc
+                return _envelope(
+                    tool="degree_ranking",
+                    graph=self.graph_root,
+                    snapshot=scope.snap_id,
+                    data=result,
+                    limits={
+                        "rank_by": rank_by,
+                        "max_nodes": nodes,
+                        "edge_types": types,
+                    },
+                    truncated=bool(result.get("nodes_truncated")),
+                    total=int(result.get("n_nodes_total") or 0),
+                    returned=int(result.get("n_nodes_returned") or 0),
+                )
+        except (ByogReaderLockError, SnapshotReadError) as exc:
+            raise GraphMcpError(str(exc)) from exc
+
     def type_closure(
         self,
         symbol: Any,
@@ -944,6 +998,27 @@ def build_mcp_server(session: GraphMcpSession) -> MCPServer:
         return session.components(
             max_components,
             max_nodes_per_component,
+            edge_types,
+            snapshot,
+        )
+
+    @mcp.tool(
+        name="degree_ranking",
+        description=(
+            "Bounded directed relationship-row degree ranking. "
+            "Raw structural accounting only."
+        ),
+        annotations=READ_ONLY_TOOL,
+    )
+    def degree_ranking(
+        rank_by: str = "total",
+        max_nodes: StrictInt = DEFAULT_DEGREE_RANKING_MAX_NODES,
+        edge_types: Optional[List[str]] = None,
+        snapshot: str = CURRENT_REF,
+    ) -> Dict[str, Any]:
+        return session.degree_ranking(
+            rank_by,
+            max_nodes,
             edge_types,
             snapshot,
         )

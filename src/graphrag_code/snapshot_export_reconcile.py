@@ -28,7 +28,7 @@ graph lease. Destination observation reuses the snapshot-export
 verification hashing/listing contract through the same plan helpers
 without invoking a public CLI or creating a nested observation window.
 A fresh export plan is still required before any later apply. MCP stays
-exactly 13 read-only tools; this command is CLI-only.
+exactly 14 read-only tools; this command is CLI-only.
 
 Usage:
     graphrag-code snapshot-export-reconcile --plan-file <saved-plan.json> \\
@@ -153,7 +153,7 @@ _COMMAND_NOTICES: Tuple[Dict[str, str], ...] = (
         "kind": "notice",
         "message": (
             "snapshot-export-reconcile is CLI-only and intentionally "
-            "absent from the fixed 13-tool MCP set."
+            "absent from the fixed 14-tool MCP set."
         ),
     },
 )

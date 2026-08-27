@@ -23,7 +23,7 @@ Advisory locks protect only cooperating processes. No writer death,
 ownership, age, PID, process, host, boot-id, or timeout is inferred.
 Recursive deletion is not transactionally atomic. A partial result
 always requires a fresh plan. There is no rollback, trash, quarantine,
-or recovery. MCP stays exactly 13 read-only tools; this command is
+or recovery. MCP stays exactly 14 read-only tools; this command is
 CLI-only.
 
 Usage:
@@ -136,7 +136,7 @@ _COMMAND_NOTICES: Tuple[Dict[str, str], ...] = (
         "kind": "notice",
         "message": (
             "snapshot-staging-cleanup is CLI-only and intentionally "
-            "absent from the fixed 13-tool MCP set."
+            "absent from the fixed 14-tool MCP set."
         ),
     },
 )

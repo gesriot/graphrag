@@ -741,7 +741,7 @@ def test_no_nested_public_queries_and_mcp_subgraph_precedes_components(
         async with Client(server) as client:
             names = [tool.name for tool in (await client.list_tools()).tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == 13
+            assert len(names) == 14
             assert names[names.index("neighbors") + 1] == "subgraph"
             assert names[names.index("subgraph") + 1] == "components"
             assert "subgraph" in names

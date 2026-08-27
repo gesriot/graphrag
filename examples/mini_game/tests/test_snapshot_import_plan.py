@@ -1273,7 +1273,7 @@ def test_no_mutation_no_lock_creation_no_producer_no_mcp(
     assert "language-independent" in lowered
     from anyio import run as anyio_run
 
-    assert len(TOOL_NAMES) == 13
+    assert len(TOOL_NAMES) == 14
     assert "snapshot_import_plan" not in TOOL_NAMES
     session = build_session(target, "python")
     server = build_mcp_server(session)
@@ -1284,7 +1284,7 @@ def test_no_mutation_no_lock_creation_no_producer_no_mcp(
         async with Client(server) as client:
             names = {tool.name for tool in (await client.list_tools()).tools}
             assert names == set(TOOL_NAMES)
-            assert len(names) == 13
+            assert len(names) == 14
             assert "snapshot_import_plan" not in names
 
     anyio_run(_body)
