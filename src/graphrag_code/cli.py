@@ -40,6 +40,8 @@ from graphrag_code.byog_graph import (
     DEFAULT_COMPONENTS_MAX_COMPONENTS,
     DEFAULT_COMPONENTS_MAX_NODES_PER_COMPONENT,
     DEFAULT_DEGREE_RANKING_MAX_NODES,
+    DEFAULT_STRONG_COMPONENTS_MAX_COMPONENTS,
+    DEFAULT_STRONG_COMPONENTS_MAX_NODES_PER_COMPONENT,
     DEFAULT_SUBGRAPH_MAX_DEPTH,
     DEFAULT_SUBGRAPH_MAX_EDGES,
     DEFAULT_SUBGRAPH_MAX_NODES,
@@ -522,6 +524,46 @@ def components(
     Leiden, centrality, architecture inference, GraphRAG, or a UI.
     """
     args = _append_snapshot(["components", "--graph", str(graph)], snapshot)
+    args.extend(
+        [
+            "--max-components",
+            str(max_components),
+            "--max-nodes-per-component",
+            str(max_nodes_per_component),
+        ]
+    )
+    for rel_type in edge_type:
+        args.extend(["--edge-type", rel_type])
+    if json_out:
+        args.append("--json")
+    _delegate("graph_query.py", args)
+
+
+@app.command("strong-components")
+def strong_components(
+    graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
+    max_components: int = typer.Option(
+        DEFAULT_STRONG_COMPONENTS_MAX_COMPONENTS, "--max-components"
+    ),
+    max_nodes_per_component: int = typer.Option(
+        DEFAULT_STRONG_COMPONENTS_MAX_NODES_PER_COMPONENT,
+        "--max-nodes-per-component",
+    ),
+    edge_type: list[str] = typer.Option(
+        [],
+        "--edge-type",
+        help="Exact relationship-type allow-list (repeatable). Omit for all types.",
+    ),
+    json_out: bool = typer.Option(False, "--json"),
+):
+    """Directed strongly connected components (graph_query.py strong-components).
+
+    Exact mutual-reachability grouping only. Not weak components, semantic
+    community detection, Leiden, architecture inference, GraphRAG, a
+    runtime recursion/deadlock proof, or a UI.
+    """
+    args = _append_snapshot(["strong-components", "--graph", str(graph)], snapshot)
     args.extend(
         [
             "--max-components",

@@ -42,7 +42,7 @@ graphs, `examples/`, or experimental evidence.
 These generic installed commands operate on user-supplied directories:
 
 - `graphrag-code doctor`
-- `graphrag-code query-symbol` / `callers` / `callees` / `neighbors` / `subgraph` / `components` / `degree-ranking` / `dependency-order`
+- `graphrag-code query-symbol` / `callers` / `callees` / `neighbors` / `subgraph` / `components` / `strong-components` / `degree-ranking` / `dependency-order`
 - `graphrag-code context-pack`
 - `graphrag-code index-python` / `index-c`
 - `graphrag-code adopt-publication-lock --graph <root> --indexer auto --offline-confirmed`
@@ -195,10 +195,12 @@ record, not reconstructed entities. `--edge-type` is an exact allow-list
 descending exact node count, then descending exact selected relationship-row
 count, then representative UTF-8 bytes. A representative is only the
 smallest UTF-8 title in that component, not a leader or architectural root.
-Component size is not importance. This is structural topology only: not
-semantic community detection, Leiden, clustering, centrality, hierarchy,
-architecture inference, GraphRAG, natural-language analysis, an indexer, a
-renderer, or a UI. MCP exposes this existing bounded topology producer as
+Component size is not importance. Directed mutual-reachability grouping is
+`strong-components`, not this weak-connectivity summary. This is
+structural topology only: not semantic community detection, Leiden,
+clustering, centrality, hierarchy, architecture inference, GraphRAG,
+natural-language analysis, an indexer, a renderer, or a UI. MCP exposes
+this existing bounded topology producer as
 the thirteenth read-only tool, immediately after `subgraph`. It does not
 expose DOT or output-format selection. Representatives remain smallest
 UTF-8 titles, not leaders. Component size remains topology, not
@@ -233,6 +235,28 @@ score, semantic importance, leadership, architecture, communities,
 hierarchy, GraphRAG, or natural-language analysis. The MCP tool
 set remains exactly 14 read-only tools. This milestone has no DOT
 or visualization.
+
+`graphrag-code strong-components` (also `python -m graphrag_code.graph_query strong-components`
+and `scripts/graph_query.py strong-components`) is a deterministic read-only
+directed strongly-connected-components summary over one retained BYOG
+snapshot. Membership is exact mutual reachability on selected persisted
+relationship rows with stored direction preserved. Isolated entities remain
+singleton SCCs. Endpoint-only selected titles remain and are marked
+non-entities. `--edge-type` is an exact allow-list (omit for all types).
+Caps (`--max-components` default 20, hard 100; `--max-nodes-per-component`
+default 20, hard 100; both minimum 1) truncate **returned** material while
+totals stay exact. Components are ordered by descending exact node count,
+then descending exact internal selected-row count, then representative
+UTF-8 bytes. A representative is only the smallest UTF-8 title in that
+SCC, not a leader. `is_cyclic` is true when the SCC has more than one
+node or at least one self-loop row; that proves mutual directed
+reachability only, not a runtime loop, recursive execution, or an
+architectural defect. This is directed structural grouping: not weak
+components, semantic communities, Leiden, clustering, architecture,
+hierarchy, importance, dependency/build order, GraphRAG, or
+natural-language analysis. There is no DOT. MCP remains exactly 14
+read-only tools and does not expose `strong_components` or
+`strong-components`.
 
 `graphrag-code dependency-order` (also `python -m graphrag_code.graph_query dependency-order`
 and `scripts/graph_query.py dependency-order`) is a deterministic read-only
@@ -766,6 +790,7 @@ uv run python scripts/graph_query.py symbol <title> --graph <root>
 uv run python scripts/graph_query.py subgraph <symbol-or-module> --graph <root>
 uv run python scripts/graph_query.py subgraph <symbol-or-module> --graph <root> --dot
 uv run python scripts/graph_query.py components --graph <root>
+uv run python scripts/graph_query.py strong-components --graph <root>
 uv run python scripts/graph_query.py degree-ranking --graph <root>
 uv run python scripts/graph_query.py dependency-order --graph <root>
 uv run python scripts/context_pack.py <title> --graph <root>

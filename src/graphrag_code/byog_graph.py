@@ -51,6 +51,12 @@ DEFAULT_COMPONENTS_MAX_NODES_PER_COMPONENT = 20
 HARD_MAX_COMPONENTS = 100
 HARD_MAX_COMPONENT_NODES = 100
 
+# Strongly connected components (directed mutual-reachability grouping only).
+DEFAULT_STRONG_COMPONENTS_MAX_COMPONENTS = 20
+DEFAULT_STRONG_COMPONENTS_MAX_NODES_PER_COMPONENT = 20
+HARD_MAX_STRONG_COMPONENTS = 100
+HARD_MAX_STRONG_COMPONENT_NODES = 100
+
 # Raw directed multigraph degree ranking (not centrality or importance).
 DEGREE_RANKING_MODES = ("total", "incoming", "outgoing")
 DEFAULT_DEGREE_RANKING_MAX_NODES = 20
@@ -2594,6 +2600,28 @@ class ByogGraph:
             max_nodes_per_component=max_nodes_per_component,
         )
 
+    def strong_components(
+        self,
+        *,
+        edge_types: Optional[Sequence[str]] = None,
+        max_components: int = DEFAULT_STRONG_COMPONENTS_MAX_COMPONENTS,
+        max_nodes_per_component: int = DEFAULT_STRONG_COMPONENTS_MAX_NODES_PER_COMPONENT,
+    ) -> Dict[str, Any]:
+        """Directed strongly connected components over persisted relationships.
+
+        Membership is exact mutual reachability on the selected directed
+        topology. Caps truncate returned material; totals stay exact for
+        the selected snapshot and filter. This is not weak connectivity,
+        community detection, or a runtime-cycle proof.
+        """
+        return compute_strongly_connected_components(
+            self.ents,
+            self.rels,
+            edge_types=edge_types,
+            max_components=max_components,
+            max_nodes_per_component=max_nodes_per_component,
+        )
+
     def degree_ranking(
         self,
         *,
@@ -3534,14 +3562,191 @@ def compute_containment_dependency_order(
     return _containment_scc_order(nodes, pairs)
 
 
-def _containment_scc_order(
+def compute_strongly_connected_components(
+    ents: Optional[pd.DataFrame],
+    rels: Optional[pd.DataFrame],
+    *,
+    edge_types: Optional[Sequence[str]] = None,
+    max_components: int = DEFAULT_STRONG_COMPONENTS_MAX_COMPONENTS,
+    max_nodes_per_component: int = DEFAULT_STRONG_COMPONENTS_MAX_NODES_PER_COMPONENT,
+) -> Dict[str, Any]:
+    """Pure directed SCC summary over stored relationship rows.
+
+    Membership is exact mutual reachability on the selected directed
+    topology. Caps truncate returned lists; every total is exact for the
+    selected type filter. Isolated entity titles remain singleton SCCs.
+    Endpoint-only titles come only from selected relationship rows.
+    """
+    max_components = _require_limit_int(
+        "max_components",
+        max_components,
+        minimum=1,
+        maximum=HARD_MAX_STRONG_COMPONENTS,
+    )
+    max_nodes_per_component = _require_limit_int(
+        "max_nodes_per_component",
+        max_nodes_per_component,
+        minimum=1,
+        maximum=HARD_MAX_STRONG_COMPONENT_NODES,
+    )
+    normalized_types, entity_titles, selected, nodes = _topology_universe(
+        ents, rels, edge_types=edge_types
+    )
+    n_nodes_total = len(nodes)
+    n_edges_total = len(selected)
+    n_entity_nodes_total = len(entity_titles)
+    n_endpoint_only_nodes_total = n_nodes_total - n_entity_nodes_total
+    if n_entity_nodes_total + n_endpoint_only_nodes_total != n_nodes_total:
+        raise ValueError("entity and endpoint-only counts do not cover the node universe")
+
+    empty = {
+        "edge_types": normalized_types,
+        "max_components": max_components,
+        "max_nodes_per_component": max_nodes_per_component,
+        "components": [],
+        "n_components_total": 0,
+        "n_components_returned": 0,
+        "n_nodes_total": 0,
+        "n_edges_total": 0,
+        "n_internal_edges_total": 0,
+        "n_cross_component_edges_total": 0,
+        "n_self_loop_edges_total": 0,
+        "n_cyclic_components_total": 0,
+        "n_entity_nodes_total": 0,
+        "n_endpoint_only_nodes_total": 0,
+        "components_truncated": False,
+        "nodes_truncated": False,
+    }
+    if not nodes:
+        if n_edges_total != 0:
+            raise ValueError("selected relationships exist without a node universe")
+        return empty
+
+    pairs = {(src, tgt) for _rid, src, tgt in selected}
+    sccs = _iterative_sccs(nodes, pairs)
+    title_to_scc = {
+        title: index for index, members in enumerate(sccs) for title in members
+    }
+    if len(title_to_scc) != n_nodes_total or set(title_to_scc) != nodes:
+        raise ValueError("SCC membership does not cover each node exactly once")
+
+    n_sccs = len(sccs)
+    internal_counts = [0] * n_sccs
+    self_loop_counts = [0] * n_sccs
+    n_cross = 0
+    n_self_total = 0
+    classified = 0
+    for _rid, src, tgt in selected:
+        src_scc = title_to_scc[src]
+        tgt_scc = title_to_scc[tgt]
+        classified += 1
+        if src_scc == tgt_scc:
+            internal_counts[src_scc] += 1
+            if src == tgt:
+                self_loop_counts[src_scc] += 1
+                n_self_total += 1
+        else:
+            n_cross += 1
+    if classified != n_edges_total:
+        raise ValueError("selected relationship rows were not classified exactly once")
+
+    records: List[Dict[str, Any]] = []
+    n_cyclic = 0
+    for index, members in enumerate(sccs):
+        titles = list(members)
+        n_nodes = len(titles)
+        n_internal = int(internal_counts[index])
+        n_self = int(self_loop_counts[index])
+        n_entity = sum(1 for title in titles if title in entity_titles)
+        is_cyclic = n_nodes > 1 or n_self > 0
+        if is_cyclic:
+            n_cyclic += 1
+        if titles[0] != min(titles, key=_utf8_key):
+            raise ValueError("SCC representative is not the minimum UTF-8 member")
+        records.append(
+            {
+                "representative": titles[0],
+                "nodes": titles,
+                "n_nodes_total": n_nodes,
+                "n_internal_edges_total": n_internal,
+                "n_self_loop_edges_total": n_self,
+                "n_entity_nodes": n_entity,
+                "n_endpoint_only_nodes": n_nodes - n_entity,
+                "is_cyclic": is_cyclic,
+            }
+        )
+    records.sort(
+        key=lambda rec: (
+            -int(rec["n_nodes_total"]),
+            -int(rec["n_internal_edges_total"]),
+            _utf8_key(str(rec["representative"])),
+        )
+    )
+    n_internal_total = sum(int(rec["n_internal_edges_total"]) for rec in records)
+    n_self_sum = sum(int(rec["n_self_loop_edges_total"]) for rec in records)
+    if sum(int(rec["n_nodes_total"]) for rec in records) != n_nodes_total:
+        raise ValueError("component node totals do not cover the node universe")
+    if n_internal_total + n_cross != n_edges_total:
+        raise ValueError("internal and cross-component edges do not cover selected rows")
+    if n_self_sum != n_self_total:
+        raise ValueError("self-loop totals do not cover selected self-loop rows")
+
+    returned: List[Dict[str, Any]] = []
+    for rec in records[:max_components]:
+        titles = list(rec["nodes"])
+        shown = titles[:max_nodes_per_component]
+        returned.append(
+            {
+                "representative": rec["representative"],
+                "nodes": shown,
+                "n_nodes_total": int(rec["n_nodes_total"]),
+                "n_nodes_returned": len(shown),
+                "n_internal_edges_total": int(rec["n_internal_edges_total"]),
+                "n_self_loop_edges_total": int(rec["n_self_loop_edges_total"]),
+                "n_entity_nodes": int(rec["n_entity_nodes"]),
+                "n_endpoint_only_nodes": int(rec["n_endpoint_only_nodes"]),
+                "is_cyclic": bool(rec["is_cyclic"]),
+                "nodes_truncated": int(rec["n_nodes_total"]) > len(shown),
+            }
+        )
+    return {
+        "edge_types": normalized_types,
+        "max_components": max_components,
+        "max_nodes_per_component": max_nodes_per_component,
+        "components": returned,
+        "n_components_total": len(records),
+        "n_components_returned": len(returned),
+        "n_nodes_total": n_nodes_total,
+        "n_edges_total": n_edges_total,
+        "n_internal_edges_total": n_internal_total,
+        "n_cross_component_edges_total": n_cross,
+        "n_self_loop_edges_total": n_self_total,
+        "n_cyclic_components_total": n_cyclic,
+        "n_entity_nodes_total": n_entity_nodes_total,
+        "n_endpoint_only_nodes_total": n_endpoint_only_nodes_total,
+        "components_truncated": len(records) > len(returned),
+        "nodes_truncated": any(bool(rec["nodes_truncated"]) for rec in returned),
+    }
+
+
+def _iterative_sccs(
     nodes: set[str],
     pairs: set[Tuple[str, str]],
-) -> List[str]:
+) -> List[List[str]]:
+    """Exact directed SCCs via iterative Kosaraju.
+
+    Each component's members are sorted by UTF-8 title bytes. Discovery
+    order is reverse-finish order, not ranking. Isolated nodes remain
+    singleton components. Self-loops do not duplicate a node.
+    """
+    if not nodes:
+        return []
     node_list = sorted(nodes, key=_utf8_key)
     adj: Dict[str, List[str]] = {title: [] for title in node_list}
     radj: Dict[str, List[str]] = {title: [] for title in node_list}
     for src, tgt in pairs:
+        if src not in adj or tgt not in adj:
+            raise ValueError("SCC edge endpoint is outside the node universe")
         adj[src].append(tgt)
         radj[tgt].append(src)
     for title in node_list:
@@ -3586,6 +3791,17 @@ def _containment_scc_order(
         members.sort(key=_utf8_key)
         sccs.append(members)
 
+    covered = [title for members in sccs for title in members]
+    if len(covered) != len(nodes) or set(covered) != nodes:
+        raise ValueError("SCC membership does not cover each node exactly once")
+    return sccs
+
+
+def _containment_scc_order(
+    nodes: set[str],
+    pairs: set[Tuple[str, str]],
+) -> List[str]:
+    sccs = _iterative_sccs(nodes, pairs)
     title_to_scc = {
         title: index for index, members in enumerate(sccs) for title in members
     }
@@ -3627,7 +3843,7 @@ def _topology_universe(
     *,
     edge_types: Optional[Sequence[str]],
 ) -> Tuple[Optional[List[str]], set[str], List[Tuple[str, str, str]], set[str]]:
-    """Shared topology node universe for components and degree ranking."""
+    """Shared topology node universe for grouping, ranking, and SCC queries."""
     normalized_types = _normalize_edge_types(edge_types)
     entity_titles = _component_entity_titles(ents)
     selected = _component_selected_relationships(rels, normalized_types)
