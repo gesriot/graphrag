@@ -11,6 +11,7 @@ Provides:
 - subgraph(symbol)        # bounded cycle-safe multi-hop induced subgraph
 - components()            # weakly connected components (structural grouping)
 - strong_components()     # directed strongly connected components
+- condensation()          # directed SCC condensation DAG
 - degree_ranking()        # raw directed relationship-row degree ranking
 - neighbors(symbol)
 - dependency_order()      # deterministic containment order over contains rows
@@ -28,6 +29,7 @@ Example:
     uv run python scripts/graph_query.py subgraph sim:run_simulation --graph byog_mini_game --dot
     uv run python scripts/graph_query.py components --graph byog_mini_game
     uv run python scripts/graph_query.py strong-components --graph byog_mini_game
+    uv run python scripts/graph_query.py condensation --graph byog_mini_game
     uv run python scripts/graph_query.py degree-ranking --graph byog_mini_game
     uv run python scripts/graph_query.py dependency-order --graph byog_mini_game
     uv run python scripts/graph_query.py observations sim:run_simulation --graph byog_mini_game
@@ -47,6 +49,9 @@ import typer
 from graphrag_code.byog_graph import (  # re-export for backward compat
     DEFAULT_COMPONENTS_MAX_COMPONENTS,
     DEFAULT_COMPONENTS_MAX_NODES_PER_COMPONENT,
+    DEFAULT_CONDENSATION_MAX_COMPONENTS,
+    DEFAULT_CONDENSATION_MAX_EDGES,
+    DEFAULT_CONDENSATION_MAX_NODES_PER_COMPONENT,
     DEFAULT_DEGREE_RANKING_MAX_NODES,
     DEFAULT_STRONG_COMPONENTS_MAX_COMPONENTS,
     DEFAULT_STRONG_COMPONENTS_MAX_NODES_PER_COMPONENT,
@@ -58,6 +63,9 @@ from graphrag_code.byog_graph import (  # re-export for backward compat
     DEFAULT_TYPE_CLOSURE_MAX_NODES,
     HARD_MAX_COMPONENTS,
     HARD_MAX_COMPONENT_NODES,
+    HARD_MAX_CONDENSATION_COMPONENT_NODES,
+    HARD_MAX_CONDENSATION_COMPONENTS,
+    HARD_MAX_CONDENSATION_EDGES,
     HARD_MAX_DEGREE_RANKING_NODES,
     HARD_MAX_STRONG_COMPONENTS,
     HARD_MAX_STRONG_COMPONENT_NODES,
@@ -66,6 +74,7 @@ from graphrag_code.byog_graph import (  # re-export for backward compat
     HARD_MAX_SUBGRAPH_NODES,
     ByogGraph,
     compute_bounded_subgraph,
+    compute_condensation_graph,
     compute_containment_dependency_order,
     compute_structural_degree_ranking,
     compute_strongly_connected_components,
@@ -291,6 +300,26 @@ def strong_components(
     )
 
 
+def condensation(
+    ents: Optional[pd.DataFrame],
+    rels: Optional[pd.DataFrame],
+    *,
+    edge_types: Optional[Sequence[str]] = None,
+    max_components: int = DEFAULT_CONDENSATION_MAX_COMPONENTS,
+    max_nodes_per_component: int = DEFAULT_CONDENSATION_MAX_NODES_PER_COMPONENT,
+    max_edges: int = DEFAULT_CONDENSATION_MAX_EDGES,
+) -> Dict[str, Any]:
+    """Directed SCC condensation DAG (delegates to pure helper)."""
+    return compute_condensation_graph(
+        ents,
+        rels,
+        edge_types=edge_types,
+        max_components=max_components,
+        max_nodes_per_component=max_nodes_per_component,
+        max_edges=max_edges,
+    )
+
+
 def degree_ranking(
     ents: pd.DataFrame,
     rels: pd.DataFrame,
@@ -478,6 +507,103 @@ def format_strong_components_human(result: Dict[str, Any]) -> str:
         )
         for title in comp.get("nodes") or []:
             lines.append(f"    {title}")
+    return "\n".join(lines)
+
+
+def dumps_condensation_json(result: Dict[str, Any]) -> str:
+    """Deterministic JSON for directed SCC condensation-DAG summaries."""
+    return json.dumps(
+        result,
+        indent=2,
+        ensure_ascii=False,
+        sort_keys=True,
+        allow_nan=False,
+    )
+
+
+def format_condensation_human(result: Dict[str, Any]) -> str:
+    """Stable human-readable condensation-DAG report."""
+    lines: List[str] = []
+    edge_types = result.get("edge_types")
+    if edge_types:
+        lines.append("edge_types: " + ",".join(str(item) for item in edge_types))
+    else:
+        lines.append("edge_types: all")
+    lines.append(f"max_components: {result.get('max_components')}")
+    lines.append(
+        f"max_nodes_per_component: {result.get('max_nodes_per_component')}"
+    )
+    lines.append(f"max_edges: {result.get('max_edges')}")
+    n_ret = int(result.get("n_components_returned") or 0)
+    n_tot = int(result.get("n_components_total") or 0)
+    trunc_c = " truncated" if result.get("components_truncated") else ""
+    lines.append(f"components ({n_ret}/{n_tot}){trunc_c}:")
+    lines.append(f"n_nodes_total: {int(result.get('n_nodes_total') or 0)}")
+    lines.append(f"n_edges_total: {int(result.get('n_edges_total') or 0)}")
+    lines.append(
+        f"n_internal_edges_total: {int(result.get('n_internal_edges_total') or 0)}"
+    )
+    lines.append(
+        "n_cross_component_edges_total: "
+        f"{int(result.get('n_cross_component_edges_total') or 0)}"
+    )
+    lines.append(
+        f"n_self_loop_edges_total: {int(result.get('n_self_loop_edges_total') or 0)}"
+    )
+    lines.append(
+        "n_cyclic_components_total: "
+        f"{int(result.get('n_cyclic_components_total') or 0)}"
+    )
+    lines.append(
+        f"n_entity_nodes_total: {int(result.get('n_entity_nodes_total') or 0)}"
+    )
+    lines.append(
+        "n_endpoint_only_nodes_total: "
+        f"{int(result.get('n_endpoint_only_nodes_total') or 0)}"
+    )
+    lines.append(
+        "n_condensation_edges_total: "
+        f"{int(result.get('n_condensation_edges_total') or 0)}"
+    )
+    lines.append(
+        "n_condensation_edges_eligible_total: "
+        f"{int(result.get('n_condensation_edges_eligible_total') or 0)}"
+    )
+    lines.append(
+        "n_condensation_edges_returned: "
+        f"{int(result.get('n_condensation_edges_returned') or 0)}"
+    )
+    lines.append(
+        "nodes_truncated: "
+        f"{'true' if result.get('nodes_truncated') else 'false'}"
+    )
+    lines.append(
+        "edges_truncated: "
+        f"{'true' if result.get('edges_truncated') else 'false'}"
+    )
+    for comp in result.get("components") or []:
+        nt = " truncated" if comp.get("nodes_truncated") else ""
+        cyclic = "cyclic" if comp.get("is_cyclic") else "acyclic"
+        lines.append(
+            f"  {comp.get('representative')} {cyclic} "
+            f"nodes ({int(comp.get('n_nodes_returned') or 0)}/"
+            f"{int(comp.get('n_nodes_total') or 0)}){nt} "
+            f"internal {int(comp.get('n_internal_edges_total') or 0)} "
+            f"self-loops {int(comp.get('n_self_loop_edges_total') or 0)} "
+            f"entity {int(comp.get('n_entity_nodes') or 0)} "
+            f"endpoint-only {int(comp.get('n_endpoint_only_nodes') or 0)}"
+        )
+        for title in comp.get("nodes") or []:
+            lines.append(f"    {title}")
+    e_ret = int(result.get("n_condensation_edges_returned") or 0)
+    e_tot = int(result.get("n_condensation_edges_total") or 0)
+    trunc_e = " truncated" if result.get("edges_truncated") else ""
+    lines.append(f"edges ({e_ret}/{e_tot}){trunc_e}:")
+    for edge in result.get("edges") or []:
+        lines.append(
+            f"  {edge.get('source')} -> {edge.get('target')} "
+            f"rows {int(edge.get('n_relationship_rows_total') or 0)}"
+        )
     return "\n".join(lines)
 
 
@@ -867,6 +993,65 @@ def cli_strong_components(
                 print(dumps_strong_components_json(result), flush=True)
             else:
                 print(format_strong_components_human(result), flush=True)
+    except ValueError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from e
+
+
+@app.command("condensation")
+def cli_condensation(
+    graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
+    max_components: int = typer.Option(
+        DEFAULT_CONDENSATION_MAX_COMPONENTS,
+        "--max-components",
+        help=(
+            f"Max components returned (1..{HARD_MAX_CONDENSATION_COMPONENTS}); "
+            "totals stay exact"
+        ),
+    ),
+    max_nodes_per_component: int = typer.Option(
+        DEFAULT_CONDENSATION_MAX_NODES_PER_COMPONENT,
+        "--max-nodes-per-component",
+        help=(
+            f"Max node titles per returned component "
+            f"(1..{HARD_MAX_CONDENSATION_COMPONENT_NODES}); totals stay exact"
+        ),
+    ),
+    max_edges: int = typer.Option(
+        DEFAULT_CONDENSATION_MAX_EDGES,
+        "--max-edges",
+        help=(
+            f"Max condensation edges returned "
+            f"(0..{HARD_MAX_CONDENSATION_EDGES}); totals stay exact"
+        ),
+    ),
+    edge_type: List[str] = typer.Option(
+        [],
+        "--edge-type",
+        help="Exact relationship-type allow-list (repeatable). Omit for all types.",
+    ),
+    json_output: bool = typer.Option(False, "--json"),
+):
+    """Directed SCC condensation DAG over persisted relationships.
+
+    Exact mutual-reachability SCCs plus one deterministic topological
+    presentation of the acyclic condensation: not weak components, cycle
+    enumeration, a unique rank, semantic communities, Leiden, architecture
+    inference, GraphRAG, or a runtime recursion/deadlock proof.
+    """
+    try:
+        with _scoped_graph(graph, snapshot) as g:
+            result = g.condensation(
+                edge_types=edge_type or None,
+                max_components=max_components,
+                max_nodes_per_component=max_nodes_per_component,
+                max_edges=max_edges,
+            )
+            if json_output:
+                print(dumps_condensation_json(result), flush=True)
+            else:
+                print(format_condensation_human(result), flush=True)
     except ValueError as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from e

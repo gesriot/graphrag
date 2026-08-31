@@ -91,6 +91,7 @@ def test_python_module_help():
     assert "query-symbol" in proc.stdout
     assert "components" in proc.stdout
     assert "strong-components" in proc.stdout
+    assert "condensation" in proc.stdout
     assert "degree-ranking" in proc.stdout
     assert "dependency-order" in proc.stdout
     assert "index-python" in proc.stdout
@@ -142,6 +143,7 @@ def test_source_script_and_package_expose_same_commands():
         "callees",
         "components",
         "strong-components",
+        "condensation",
         "degree-ranking",
         "dependency-order",
         "context-pack",

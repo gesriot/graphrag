@@ -276,8 +276,8 @@ Query, context-pack, doctor, and status tools accept an optional selector:
 
 - CLI: `--snapshot <published-id|current>` on `query-symbol`, `callers`,
   `callees`, `types-used-by`, `type-users`, `type-closure`, `neighbors`,
-  `subgraph`, `components`, `strong-components`, `degree-ranking`,
-  `dependency-order`, `impact`,
+  `subgraph`, `components`, `strong-components`, `condensation`,
+  `degree-ranking`, `dependency-order`, `impact`,
   `observations`, and `context-pack`.
 - MCP: optional last argument `snapshot: str = "current"` on
   `graph_status`, `graph_doctor`, `query_symbol`, `callers`, `callees`,
@@ -467,7 +467,8 @@ read of a directed strongly-connected-components grouping summary.
 `ByogGraph.strong_components(...)` and `compute_strongly_connected_components(...)`
 are the same contract. Stored edge direction is preserved. Persisted rows
 are not rewritten and are not returned. This query shares the iterative
-SCC engine with `dependency-order` but does not change that list contract.
+SCC engine with `dependency-order` and `condensation` but does not change
+those contracts. Strong-components keeps size/internal-edge ordering.
 This milestone has no DOT output. MCP exposes the same bounded producer as
 `strong_components`, registered immediately after `components`. The fixed
 MCP surface remains exactly 15 tools.
@@ -501,6 +502,52 @@ graphrag-code strong-components \
 | MCP | Fifteenth read-only tool, registered immediately after `components`. Envelope `data` is the exact `ByogGraph.strong_components` result. `truncated` is `components_truncated or nodes_truncated`. Envelope `total` is `n_components_total + n_nodes_total`; `returned` is `n_components_returned` plus the sum of each returned component's `n_nodes_returned`. Internal, cross-component, self-loop, and total relationship-row counts remain exact scalars in `data` and are not added to those envelope counters. Limits include the validated `max_components`, `max_nodes_per_component`, `edge_types`, and `max_envelope_bytes`. The producer is the only truncation source. The 1 MiB envelope limit fails closed. MCP always uses `allow_unlocked_managed=False`. MCP does not expose DOT, a graph path, a symbol, a direction, a rank, an algorithm, or a format. Representatives remain smallest UTF-8 titles, not leaders. `is_cyclic` is mutual directed reachability only. The fixed surface remains exactly 15 tools |
 | Malformed args | Bad limits, filters, duplicate titles/ids, missing columns, or invalid scalars: exit 2, empty stdout |
 | Non-claims | Not weak components, semantic communities, Leiden clustering, architecture, hierarchy, importance, centrality, dependency/build order, proof of runtime recursion or deadlock, ownership or module boundaries, GraphRAG, natural-language analysis, indexer, renderer, or UI. A cyclic SCC proves only mutual directed reachability in the selected persisted relation topology |
+
+### Directed SCC condensation DAG
+
+`graphrag-code condensation`, `python -m graphrag_code.graph_query condensation`,
+and `scripts/graph_query.py condensation` expose one retained-snapshot
+read of a directed SCC condensation DAG.
+`ByogGraph.condensation(...)` and `compute_condensation_graph(...)`
+are the same contract. Stored edge direction is preserved. Persisted rows
+are not rewritten and are not returned. This query shares the iterative
+SCC engine with `strong-components` and `dependency-order`, and shares
+the condensation-DAG helper with `dependency-order`, but does not change
+those contracts. Strong-components keeps size/internal-edge ordering.
+This milestone has no DOT output. MCP does not expose `condensation` or
+`condensation_graph`. The fixed MCP surface remains exactly 15 tools.
+
+Distinguish: `components` is weakly connected grouping; `strong-components`
+is directed mutual-reachability SCC grouping sorted by size; `dependency-order`
+is containment-only SCC-condensation flattened to `List[str]`; `condensation`
+is the bounded condensation DAG over selected relationship types.
+
+```text
+graphrag-code condensation \
+  --graph <root> \
+  [--snapshot <id|current>] \
+  [--edge-type TYPE ...] \
+  [--max-components N] \
+  [--max-nodes-per-component N] \
+  [--max-edges N] \
+  [--json]
+```
+
+| Property | Contract |
+| --- | --- |
+| Node universe | Every unique non-empty persisted entity title, plus every unique source or target from a **selected** relationship row. Isolated entities are singleton SCCs. Endpoint-only titles lack an entity record and are not reconstructed entities |
+| Connectivity | Directed. Identical `(source, target)` pairs are deduplicated for reachability, membership, and condensation topology; every selected persisted row is counted in totals and in condensation-edge aggregates. Self-loops do not duplicate a node, count as one selected row / internal edge / self-loop edge, and make a singleton SCC cyclic. Parallel rows each count and do not create extra condensation edges |
+| Edge-type filter | Omitted / empty `--edge-type` means all types. Repeated values are an exact allow-list (UTF-8-byte sorted, unique). A scalar string is invalid for the Python API. Empty, whitespace-padded, NUL, or non-string filters are rejected. Filtering happens after fail-closed validation of every relationship row, so malformed rows cannot hide behind the filter. Filtered-out endpoints are not invented; unreached entity titles remain isolated singleton SCCs |
+| Caps | Dedicated defaults: 20 components, 20 node titles per returned component, 100 condensation edges. Hard maxima 100 / 100 / 500. Component/node minima 1; `max_edges` minimum 0. Caps truncate **returned** lists; all totals stay exact for the snapshot and filter. `max_components` keeps the first components in canonical topological order. `max_nodes_per_component` is applied per returned component after UTF-8 member order is known. Only condensation edges whose source and target are both in the returned component prefix are eligible; `max_edges` then truncates that eligible list |
+| Ordering | Within an SCC, titles by UTF-8 bytes; representative is the first/smallest title and is only an identifier. Components by deterministic Kahn order of the acyclic condensation, heap-keyed by representative UTF-8 bytes; newly unlocked SCCs re-enter that heap. This is one deterministic topological presentation, not a claim that the DAG has a unique order. Condensation edges by source component topological position, then target position. Independent of parquet row order, hash iteration, locale, and pandas incidental order |
+| Totals | Global `n_nodes_total` is the exact topology-node universe. `n_edges_total` is the exact selected relationship-row count. `n_internal_edges_total` + `n_cross_component_edges_total` equals that count. `n_self_loop_edges_total` counts selected `source == target` rows. `n_cyclic_components_total` counts SCCs with more than one node or at least one self-loop row, before output caps. `n_entity_nodes_total` / `n_endpoint_only_nodes_total` partition the node universe. `n_condensation_edges_total` is the number of distinct cross-SCC ordered pairs. `n_condensation_edges_eligible_total` is the complete count whose endpoints are both among returned components, before `max_edges`. `n_condensation_edges_returned` is `len(edges)` |
+| Truncation | `components_truncated` iff returned components are fewer than total. Top-level `nodes_truncated` iff any **returned** component's node list is truncated. `edges_truncated` iff returned condensation edges are fewer than `n_condensation_edges_total`, including edges omitted because an endpoint component was omitted |
+| Records | Bounded topology summary only: no descriptions, snippets, spans, weights, confidence, ids, ordinal ranks, or original relationship rows. Condensation edges store `source`, `target`, and `n_relationship_rows_total` only |
+| JSON / human | Deterministic JSON (`sort_keys=True`, `allow_nan=False`, `ensure_ascii=False`). Human output is derived from the same mapping, including a complete zero-count report for an empty graph. One trailing newline on stdout |
+| Snapshot / lease | Same retained-snapshot read scope as other queries. Lease held through load, computation, serialization, stdout write, and flush. No nested public query. No `.publish.lock` creation |
+| MCP | Not exposed. The read-only tool set remains exactly 15 |
+| Malformed args | Bad limits, filters, duplicate titles/ids, missing columns, or invalid scalars: exit 2, empty stdout |
+| Non-claims | Not weak components, cycle enumeration, transitive closure or reduction, path enumeration, build/import/call/execution/semantic dependency order, architecture, hierarchy, ownership, leadership, importance, Leiden or semantic communities, centrality, GraphRAG, natural-language analysis, proof of runtime recursion or deadlock, indexer, renderer, or UI. A representative is not a leader. A topological position is not an ordinal rank or semantic layer. An aggregated condensation edge is not an original relationship record |
 
 ### Operator-managed snapshot retention pins
 

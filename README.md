@@ -42,7 +42,7 @@ graphs, `examples/`, or experimental evidence.
 These generic installed commands operate on user-supplied directories:
 
 - `graphrag-code doctor`
-- `graphrag-code query-symbol` / `callers` / `callees` / `neighbors` / `subgraph` / `components` / `strong-components` / `degree-ranking` / `dependency-order`
+- `graphrag-code query-symbol` / `callers` / `callees` / `neighbors` / `subgraph` / `components` / `strong-components` / `condensation` / `degree-ranking` / `dependency-order`
 - `graphrag-code context-pack`
 - `graphrag-code index-python` / `index-c`
 - `graphrag-code adopt-publication-lock --graph <root> --indexer auto --offline-confirmed`
@@ -284,6 +284,31 @@ call order, semantic dependency order, architecture hierarchy, ownership
 proof, porting plan, GraphRAG, or natural-language analysis. There is no
 DOT. MCP remains exactly 15 read-only tools and does not expose
 `dependency_order` or `dependency-order`.
+
+`graphrag-code condensation` (also `python -m graphrag_code.graph_query condensation`
+and `scripts/graph_query.py condensation`) is a deterministic read-only directed
+SCC condensation DAG over one retained BYOG snapshot. Components are the same
+exact mutual-reachability SCCs as `strong-components`; returned order is one
+deterministic Kahn presentation of that acyclic condensation, heap-keyed by
+each representative's UTF-8 bytes. Isolated entities remain singleton SCCs.
+Endpoint-only selected titles remain and are marked non-entities. `--edge-type`
+is an exact allow-list (omit for all types). Caps (`--max-components` default
+20, hard 100; `--max-nodes-per-component` default 20, hard 100; both minimum 1;
+`--max-edges` default 100, hard 500, minimum 0) truncate **returned** material
+while totals stay exact. Each condensation edge is one distinct ordered SCC
+pair and stores the exact selected relationship-row count aggregated into that
+pair; it is not an original relationship record and does not preserve row-level
+provenance. A representative is only the smallest UTF-8 title in that SCC, not
+a leader. A topological position is not an ordinal rank or semantic layer.
+`is_cyclic` is true when the SCC has more than one node or at least one
+self-loop row; that proves mutual directed reachability only, not a runtime
+loop, recursive execution, or an architectural defect. This is a structural
+condensation DAG: not weak components, cycle enumeration, transitive closure
+or reduction, path enumeration, build/import/call/execution/semantic
+dependency order, architecture, hierarchy, ownership, leadership, importance,
+Leiden or semantic communities, centrality, GraphRAG, or natural-language
+analysis. There is no DOT. MCP remains exactly 15 read-only tools and does not
+expose `condensation` or `condensation_graph`.
 
 `adopt-publication-lock` is an explicit migration, never an automatic
 MCP or doctor side effect. `--offline-confirmed` is required to create
@@ -799,6 +824,7 @@ uv run python scripts/graph_query.py subgraph <symbol-or-module> --graph <root>
 uv run python scripts/graph_query.py subgraph <symbol-or-module> --graph <root> --dot
 uv run python scripts/graph_query.py components --graph <root>
 uv run python scripts/graph_query.py strong-components --graph <root>
+uv run python scripts/graph_query.py condensation --graph <root>
 uv run python scripts/graph_query.py degree-ranking --graph <root>
 uv run python scripts/graph_query.py dependency-order --graph <root>
 uv run python scripts/context_pack.py <title> --graph <root>

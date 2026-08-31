@@ -801,7 +801,10 @@ def test_no_nested_query_mcp_unchanged_and_existing_surfaces(
             helper = ast.get_source_segment(src, node)
         if isinstance(node, ast.FunctionDef) and node.name == "_containment_scc_order":
             helper = (helper or "") + ast.get_source_segment(src, node)
+        if isinstance(node, ast.FunctionDef) and node.name == "_scc_condensation_dag":
+            helper = (helper or "") + ast.get_source_segment(src, node)
     assert helper is not None
+    assert "_iterative_sccs" in helper
     assert "networkx" not in helper
     assert "graphviz" not in helper
     assert "subprocess" not in helper

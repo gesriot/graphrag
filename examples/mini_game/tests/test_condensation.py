@@ -1,6 +1,6 @@
-"""Directed strongly connected components over persisted relationship rows.
+"""Directed SCC condensation DAG over persisted relationship rows.
 
-Topology summary only. MCP exposes the existing producer. No DOT,
+CLI/Python topology summary only. MCP does not expose this producer. No DOT,
 NetworkX, or Graphviz.
 """
 from __future__ import annotations
@@ -26,12 +26,15 @@ sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT))
 
 from scripts.byog_graph import (  # type: ignore
-    DEFAULT_STRONG_COMPONENTS_MAX_COMPONENTS,
-    DEFAULT_STRONG_COMPONENTS_MAX_NODES_PER_COMPONENT,
-    HARD_MAX_STRONG_COMPONENT_NODES,
-    HARD_MAX_STRONG_COMPONENTS,
+    DEFAULT_CONDENSATION_MAX_COMPONENTS,
+    DEFAULT_CONDENSATION_MAX_EDGES,
+    DEFAULT_CONDENSATION_MAX_NODES_PER_COMPONENT,
+    HARD_MAX_CONDENSATION_COMPONENT_NODES,
+    HARD_MAX_CONDENSATION_COMPONENTS,
+    HARD_MAX_CONDENSATION_EDGES,
     ByogGraph,
     compute_bounded_subgraph,
+    compute_condensation_graph,
     compute_containment_dependency_order,
     compute_structural_degree_ranking,
     compute_strongly_connected_components,
@@ -39,13 +42,13 @@ from scripts.byog_graph import (  # type: ignore
     publish_byog_snapshot,
 )
 from scripts.graph_query import (  # type: ignore
+    condensation as free_condensation,
     dumps_components_json,
+    dumps_condensation_json,
     dumps_degree_ranking_json,
-    dumps_strong_components_json,
     dumps_subgraph_json,
-    format_strong_components_human,
+    format_condensation_human,
     format_subgraph_human,
-    strong_components as free_strong_components,
 )
 from graphrag_code.mcp_server import TOOL_NAMES  # type: ignore
 from graphrag_code.subgraph_dot import dumps_subgraph_dot  # type: ignore
@@ -60,7 +63,9 @@ TOP_KEYS = {
     "edge_types",
     "max_components",
     "max_nodes_per_component",
+    "max_edges",
     "components",
+    "edges",
     "n_components_total",
     "n_components_returned",
     "n_nodes_total",
@@ -71,8 +76,12 @@ TOP_KEYS = {
     "n_cyclic_components_total",
     "n_entity_nodes_total",
     "n_endpoint_only_nodes_total",
+    "n_condensation_edges_total",
+    "n_condensation_edges_eligible_total",
+    "n_condensation_edges_returned",
     "components_truncated",
     "nodes_truncated",
+    "edges_truncated",
 }
 COMP_KEYS = {
     "representative",
@@ -86,6 +95,7 @@ COMP_KEYS = {
     "is_cyclic",
     "nodes_truncated",
 }
+EDGE_KEYS = {"source", "target", "n_relationship_rows_total"}
 
 
 def _entity(title: str, etype: str = "function", **extra) -> dict:
@@ -146,7 +156,7 @@ def _contains(source: str, target: str, hid: int = 1, **extra) -> dict:
 
 
 def _publish(tmp_path: Path, entities: list, relationships: list) -> Path:
-    graph = tmp_path / "byog_strong"
+    graph = tmp_path / "byog_cond"
     texts = [
         {
             "id": f"tu:{e['title']}",
@@ -213,80 +223,167 @@ def _payload_stats(graph: Path) -> dict[str, tuple[int, int, int]]:
     return out
 
 
-def _utf8(title: str) -> bytes:
-    return title.encode("utf-8")
-
-
 def _assert_schema(result: dict) -> None:
     assert set(result) == TOP_KEYS
     assert "rank" not in result
+    assert "ordinal" not in result
     for comp in result["components"]:
         assert set(comp) == COMP_KEYS
         assert "rank" not in comp
-        assert "ordinal" not in comp
+        assert "id" not in comp
+    for edge in result["edges"]:
+        assert set(edge) == EDGE_KEYS
+        assert "weight" not in edge
+        assert "id" not in edge
 
 
-def _oracle_membership(nodes: set[str], pairs: set[tuple[str, str]]) -> list[list[str]]:
-    """Independent recursive Tarjan SCCs for small well-formed graphs."""
-    adj = {title: [] for title in nodes}
-    for src, tgt in pairs:
-        adj[src].append(tgt)
-    index = 0
-    stack: list[str] = []
-    indices: dict[str, int] = {}
-    low: dict[str, int] = {}
-    onstack: set[str] = set()
-    sccs: list[list[str]] = []
+def _assert_full_invariants(result: dict) -> None:
+    _assert_schema(result)
+    comps = result["components"]
+    edges = result["edges"]
+    if result["components_truncated"] is False:
+        assert result["n_components_returned"] == result["n_components_total"]
+        titles = [title for comp in comps for title in comp["nodes"]]
+        if result["nodes_truncated"] is False:
+            assert len(titles) == result["n_nodes_total"]
+            assert len(set(titles)) == result["n_nodes_total"]
+        assert sum(int(c["n_nodes_total"]) for c in comps) == result["n_nodes_total"]
+        assert (
+            sum(int(c["n_internal_edges_total"]) for c in comps)
+            == result["n_internal_edges_total"]
+        )
+        assert (
+            sum(int(c["n_self_loop_edges_total"]) for c in comps)
+            == result["n_self_loop_edges_total"]
+        )
+        reps = [c["representative"] for c in comps]
+        pos = {rep: i for i, rep in enumerate(reps)}
+        for edge in edges:
+            assert pos[edge["source"]] < pos[edge["target"]]
+    assert (
+        result["n_entity_nodes_total"] + result["n_endpoint_only_nodes_total"]
+        == result["n_nodes_total"]
+    )
+    assert (
+        result["n_internal_edges_total"] + result["n_cross_component_edges_total"]
+        == result["n_edges_total"]
+    )
+    if result["edges_truncated"] is False:
+        assert (
+            result["n_condensation_edges_returned"]
+            == result["n_condensation_edges_total"]
+        )
+        assert (
+            sum(int(e["n_relationship_rows_total"]) for e in edges)
+            == result["n_cross_component_edges_total"]
+        )
+    assert (
+        result["n_condensation_edges_returned"]
+        == len(edges)
+        <= result["n_condensation_edges_eligible_total"]
+        <= result["n_condensation_edges_total"]
+    )
+    assert result["n_components_returned"] == len(comps)
+    assert result["components_truncated"] is (
+        result["n_components_returned"] < result["n_components_total"]
+    )
+    assert result["edges_truncated"] is (
+        result["n_condensation_edges_returned"] < result["n_condensation_edges_total"]
+    )
+    if comps:
+        assert result["nodes_truncated"] is any(c["nodes_truncated"] for c in comps)
+    else:
+        assert result["nodes_truncated"] is False
 
-    def strongconnect(title: str) -> None:
-        nonlocal index
-        indices[title] = index
-        low[title] = index
-        index += 1
-        stack.append(title)
-        onstack.add(title)
-        for nei in adj[title]:
-            if nei not in indices:
-                strongconnect(nei)
-                low[title] = min(low[title], low[nei])
-            elif nei in onstack:
-                low[title] = min(low[title], indices[nei])
-        if low[title] == indices[title]:
-            members: list[str] = []
-            while True:
-                item = stack.pop()
-                onstack.remove(item)
-                members.append(item)
-                if item == title:
-                    break
-            sccs.append(sorted(members, key=_utf8))
 
-    for title in sorted(nodes, key=_utf8):
-        if title not in indices:
-            strongconnect(title)
-    return sccs
+def _reachable(adj: dict[str, list[str]], start: str) -> set[str]:
+    seen: set[str] = set()
+    stack = [start]
+    while stack:
+        node = stack.pop()
+        if node in seen:
+            continue
+        seen.add(node)
+        stack.extend(adj.get(node, ()))
+    return seen
 
 
-def _oracle_containment(ents: pd.DataFrame, rels: pd.DataFrame) -> list[str]:
-    import heapq
-
-    entity_titles = set(ents["title"].astype(str)) if len(ents) else set()
-    selected = []
+def _oracle_condensation(
+    ents: pd.DataFrame,
+    rels: pd.DataFrame,
+    *,
+    edge_types=None,
+    max_components: int = DEFAULT_CONDENSATION_MAX_COMPONENTS,
+    max_nodes_per_component: int = DEFAULT_CONDENSATION_MAX_NODES_PER_COMPONENT,
+    max_edges: int = DEFAULT_CONDENSATION_MAX_EDGES,
+) -> dict:
+    """Independent BFS mutual-reachability + heap-Kahn condensation oracle."""
+    if edge_types is None or len(list(edge_types)) == 0:
+        allow = None
+    else:
+        seen: set[str] = set()
+        allow_list: list[str] = []
+        for item in edge_types:
+            if item not in seen:
+                seen.add(item)
+                allow_list.append(item)
+        allow_list.sort(key=lambda item: item.encode("utf-8"))
+        allow = allow_list
+    entity_titles: set[str] = set()
+    if len(ents):
+        for title in ents["title"].astype(str).tolist():
+            if title in entity_titles:
+                raise ValueError(f"duplicate entity title {title!r}")
+            entity_titles.add(title)
+    selected: list[tuple[str, str]] = []
+    seen_ids: set[str] = set()
     if len(rels):
+        allow_set = None if allow is None else set(allow)
         for _, row in rels.iterrows():
-            if str(row["type"]) == "contains":
-                selected.append((str(row["source"]), str(row["target"])))
+            rid = str(row["id"])
+            if rid in seen_ids:
+                raise ValueError(f"duplicate relationship id {rid!r}")
+            seen_ids.add(rid)
+            if allow_set is not None and str(row["type"]) not in allow_set:
+                continue
+            selected.append((str(row["source"]), str(row["target"])))
     nodes = set(entity_titles)
     for src, tgt in selected:
         nodes.add(src)
         nodes.add(tgt)
     if not nodes:
-        return []
+        return compute_condensation_graph(
+            ents,
+            rels,
+            edge_types=edge_types,
+            max_components=max_components,
+            max_nodes_per_component=max_nodes_per_component,
+            max_edges=max_edges,
+        )
+    adj: dict[str, list[str]] = {title: [] for title in nodes}
     pairs = set(selected)
-    sccs = _oracle_membership(nodes, pairs)
-    title_to_scc = {title: i for i, members in enumerate(sccs) for title in members}
+    for src, tgt in pairs:
+        adj[src].append(tgt)
+    assigned: set[str] = set()
+    sccs: list[list[str]] = []
+    for title in sorted(nodes, key=lambda item: item.encode("utf-8")):
+        if title in assigned:
+            continue
+        reach = _reachable(adj, title)
+        members = [
+            other
+            for other in reach
+            if other not in assigned and title in _reachable(adj, other)
+        ]
+        members.sort(key=lambda item: item.encode("utf-8"))
+        assigned.update(members)
+        sccs.append(members)
+    title_to_scc = {
+        title: index for index, members in enumerate(sccs) for title in members
+    }
     cond_adj: dict[int, set[int]] = {i: set() for i in range(len(sccs))}
     indeg = [0] * len(sccs)
+    cond_pairs: set[tuple[int, int]] = set()
     for src, tgt in pairs:
         a = title_to_scc[src]
         b = title_to_scc[tgt]
@@ -294,105 +391,58 @@ def _oracle_containment(ents: pd.DataFrame, rels: pd.DataFrame) -> list[str]:
             continue
         cond_adj[a].add(b)
         indeg[b] += 1
-    heap = [(_utf8(sccs[i][0]), i) for i, deg in enumerate(indeg) if deg == 0]
+        cond_pairs.add((a, b))
+    import heapq
+
+    heap = [
+        (sccs[i][0].encode("utf-8"), i) for i, deg in enumerate(indeg) if deg == 0
+    ]
     heapq.heapify(heap)
-    ordered: list[str] = []
+    order: list[int] = []
     while heap:
         _key, i = heapq.heappop(heap)
-        ordered.extend(sccs[i])
+        order.append(i)
         for nxt in cond_adj[i]:
             indeg[nxt] -= 1
             if indeg[nxt] == 0:
-                heapq.heappush(heap, (_utf8(sccs[nxt][0]), nxt))
-    return ordered
-
-
-def _oracle_strong(
-    ents: pd.DataFrame,
-    rels: pd.DataFrame,
-    *,
-    edge_types=None,
-    max_components: int = DEFAULT_STRONG_COMPONENTS_MAX_COMPONENTS,
-    max_nodes_per_component: int = DEFAULT_STRONG_COMPONENTS_MAX_NODES_PER_COMPONENT,
-) -> dict:
-    entity_titles = set(ents["title"].astype(str)) if len(ents) else set()
-    allow = None
-    if edge_types is not None and list(edge_types):
-        allow = sorted(set(edge_types), key=_utf8)
-    selected: list[tuple[str, str, str]] = []
-    if len(rels):
-        for _, row in rels.iterrows():
-            rel_type = str(row["type"])
-            if allow is not None and rel_type not in set(allow):
-                continue
-            selected.append((str(row["id"]), str(row["source"]), str(row["target"])))
-    nodes = set(entity_titles)
-    for _rid, src, tgt in selected:
-        nodes.add(src)
-        nodes.add(tgt)
-    n_nodes = len(nodes)
-    n_edges = len(selected)
-    if not nodes:
-        return {
-            "edge_types": allow,
-            "max_components": max_components,
-            "max_nodes_per_component": max_nodes_per_component,
-            "components": [],
-            "n_components_total": 0,
-            "n_components_returned": 0,
-            "n_nodes_total": 0,
-            "n_edges_total": 0,
-            "n_internal_edges_total": 0,
-            "n_cross_component_edges_total": 0,
-            "n_self_loop_edges_total": 0,
-            "n_cyclic_components_total": 0,
-            "n_entity_nodes_total": 0,
-            "n_endpoint_only_nodes_total": 0,
-            "components_truncated": False,
-            "nodes_truncated": False,
-        }
-    pairs = {(src, tgt) for _rid, src, tgt in selected}
-    sccs = _oracle_membership(nodes, pairs)
-    title_to_scc = {title: i for i, members in enumerate(sccs) for title in members}
+                heapq.heappush(heap, (sccs[nxt][0].encode("utf-8"), nxt))
     internal = [0] * len(sccs)
     self_loops = [0] * len(sccs)
+    cross_counts: dict[tuple[int, int], int] = {}
     n_cross = 0
-    for _rid, src, tgt in selected:
+    n_self = 0
+    for src, tgt in selected:
         a = title_to_scc[src]
         b = title_to_scc[tgt]
         if a == b:
             internal[a] += 1
             if src == tgt:
                 self_loops[a] += 1
+                n_self += 1
         else:
             n_cross += 1
+            cross_counts[(a, b)] = cross_counts.get((a, b), 0) + 1
     records = []
     n_cyclic = 0
-    for i, members in enumerate(sccs):
-        n_self = self_loops[i]
-        is_cyclic = len(members) > 1 or n_self > 0
+    for index in order:
+        titles = list(sccs[index])
+        n_nodes = len(titles)
+        n_entity = sum(1 for title in titles if title in entity_titles)
+        is_cyclic = n_nodes > 1 or self_loops[index] > 0
         if is_cyclic:
             n_cyclic += 1
-        n_entity = sum(1 for title in members if title in entity_titles)
         records.append(
             {
-                "representative": members[0],
-                "nodes": members,
-                "n_nodes_total": len(members),
-                "n_internal_edges_total": internal[i],
-                "n_self_loop_edges_total": n_self,
+                "representative": titles[0],
+                "nodes": titles,
+                "n_nodes_total": n_nodes,
+                "n_internal_edges_total": internal[index],
+                "n_self_loop_edges_total": self_loops[index],
                 "n_entity_nodes": n_entity,
-                "n_endpoint_only_nodes": len(members) - n_entity,
+                "n_endpoint_only_nodes": n_nodes - n_entity,
                 "is_cyclic": is_cyclic,
             }
         )
-    records.sort(
-        key=lambda rec: (
-            -rec["n_nodes_total"],
-            -rec["n_internal_edges_total"],
-            _utf8(rec["representative"]),
-        )
-    )
     returned = []
     for rec in records[:max_components]:
         shown = rec["nodes"][:max_nodes_per_component]
@@ -410,24 +460,55 @@ def _oracle_strong(
                 "nodes_truncated": rec["n_nodes_total"] > len(shown),
             }
         )
-    n_entity_total = len(entity_titles)
+    returned_set = set(order[:max_components])
+    topo_pos = {index: pos for pos, index in enumerate(order)}
+    eligible = []
+    for src_scc, tgt_scc in cond_pairs:
+        if src_scc in returned_set and tgt_scc in returned_set:
+            eligible.append(
+                (
+                    topo_pos[src_scc],
+                    topo_pos[tgt_scc],
+                    src_scc,
+                    tgt_scc,
+                    cross_counts[(src_scc, tgt_scc)],
+                )
+            )
+    eligible.sort()
+    shown_edges = eligible[:max_edges]
+    edges = [
+        {
+            "source": sccs[src_scc][0],
+            "target": sccs[tgt_scc][0],
+            "n_relationship_rows_total": count,
+        }
+        for _sp, _tp, src_scc, tgt_scc, count in shown_edges
+    ]
+    n_nodes = len(nodes)
+    n_entity = len(entity_titles)
     return {
         "edge_types": allow,
         "max_components": max_components,
         "max_nodes_per_component": max_nodes_per_component,
+        "max_edges": max_edges,
         "components": returned,
+        "edges": edges,
         "n_components_total": len(records),
         "n_components_returned": len(returned),
         "n_nodes_total": n_nodes,
-        "n_edges_total": n_edges,
+        "n_edges_total": len(selected),
         "n_internal_edges_total": sum(internal),
         "n_cross_component_edges_total": n_cross,
-        "n_self_loop_edges_total": sum(self_loops),
+        "n_self_loop_edges_total": n_self,
         "n_cyclic_components_total": n_cyclic,
-        "n_entity_nodes_total": n_entity_total,
-        "n_endpoint_only_nodes_total": n_nodes - n_entity_total,
+        "n_entity_nodes_total": n_entity,
+        "n_endpoint_only_nodes_total": n_nodes - n_entity,
+        "n_condensation_edges_total": len(cond_pairs),
+        "n_condensation_edges_eligible_total": len(eligible),
+        "n_condensation_edges_returned": len(edges),
         "components_truncated": len(records) > len(returned),
         "nodes_truncated": any(c["nodes_truncated"] for c in returned),
+        "edges_truncated": len(edges) < len(cond_pairs),
     }
 
 
@@ -440,41 +521,58 @@ def _fn_source(tree: ast.AST, src: str, name: str) -> str:
     raise AssertionError(f"missing function {name}")
 
 
-def test_shared_iterative_engine_and_public_parity():
+def test_shared_helper_schema_empty_and_public_parity():
     src = SRC_BYOG.read_text(encoding="utf-8")
     tree = ast.parse(src)
     engine = _fn_source(tree, src, "_iterative_sccs")
+    helper = _fn_source(tree, src, "_scc_condensation_dag")
+    cond_order = _fn_source(tree, src, "_containment_scc_order")
+    producer = _fn_source(tree, src, "compute_condensation_graph")
+    method = _fn_source(tree, src, "condensation")
     dep = _fn_source(tree, src, "compute_containment_dependency_order")
-    cond = _fn_source(tree, src, "_containment_scc_order")
-    dag = _fn_source(tree, src, "_scc_condensation_dag")
     strong = _fn_source(tree, src, "compute_strongly_connected_components")
-    method = _fn_source(tree, src, "strong_components")
-    assert "_iterative_sccs" in strong
-    assert "_iterative_sccs" in dag
-    assert "_scc_condensation_dag" in cond
+    assert "_iterative_sccs" in helper
+    assert helper.count("_iterative_sccs(") == 1
+    assert "_scc_condensation_dag" in producer
+    assert "_scc_condensation_dag" in cond_order
     assert "_containment_scc_order" in dep
-    assert "compute_strongly_connected_components" in method
+    assert "compute_condensation_graph" in method
+    assert "_scc_condensation_dag" not in strong
     assert src.count("def _iterative_sccs") == 1
     assert src.count("def _scc_condensation_dag") == 1
+    assert "DEFAULT_CONDENSATION_MAX_COMPONENTS = 20" in src
+    assert "DEFAULT_CONDENSATION_MAX_NODES_PER_COMPONENT = 20" in src
+    assert "DEFAULT_CONDENSATION_MAX_EDGES = 100" in src
+    assert "HARD_MAX_CONDENSATION_COMPONENTS = 100" in src
+    assert "HARD_MAX_CONDENSATION_COMPONENT_NODES = 100" in src
+    assert "HARD_MAX_CONDENSATION_EDGES = 500" in src
+    producer_src = producer
+    assert "DEFAULT_STRONG_COMPONENTS_MAX_COMPONENTS" not in producer_src
+    assert "DEFAULT_COMPONENTS_MAX_COMPONENTS" not in producer_src
+    assert "DEFAULT_SUBGRAPH_MAX_EDGES" not in producer_src
+    assert "HARD_MAX_STRONG_COMPONENTS" not in producer_src
+    assert "HARD_MAX_COMPONENTS" not in producer_src
+    assert "HARD_MAX_SUBGRAPH_EDGES" not in producer_src
     assert "stack_rev" in engine
-    assert "while stack_rev:" in engine
     assert "def strongconnect" not in engine
-    assert "networkx" not in engine
-    assert "graphviz" not in engine
-    assert "subprocess" not in engine
-    assert "tempfile" not in engine
+    assert "def strongconnect" not in helper
+    assert "tarjan" not in helper.lower()
     for banned in (
         "compute_weakly_connected_components(",
+        "compute_strongly_connected_components(",
+        "compute_containment_dependency_order(",
         ".components(",
-        ".subgraph(",
-        ".degree_ranking(",
+        ".strong_components(",
         ".dependency_order(",
+        ".subgraph(",
         "networkx",
         "subprocess",
+        "graphviz",
+        "tempfile",
     ):
+        assert banned not in helper
+        assert banned not in producer
         assert banned not in engine
-        assert banned not in strong
-        assert banned not in dag
 
     ents = pd.DataFrame(
         [
@@ -489,19 +587,20 @@ def test_shared_iterative_engine_and_public_parity():
             _calls("B", "A", rid="rel:ba", description="LEAK_REL"),
         ]
     )
-    produced = compute_strongly_connected_components(ents, rels)
-    _assert_schema(produced)
+    produced = compute_condensation_graph(ents, rels)
+    _assert_full_invariants(produced)
     g = ByogGraph.__new__(ByogGraph)
     g.ents, g.rels = ents, rels
-    assert list(inspect.signature(ByogGraph.strong_components).parameters) == [
+    assert list(inspect.signature(ByogGraph.condensation).parameters) == [
         "self",
         "edge_types",
         "max_components",
         "max_nodes_per_component",
+        "max_edges",
     ]
-    assert g.strong_components() == produced
-    assert free_strong_components(ents, rels) == produced
-    dumped = dumps_strong_components_json(produced)
+    assert g.condensation() == produced
+    assert free_condensation(ents, rels) == produced
+    dumped = dumps_condensation_json(produced)
     for leak in (
         '"description"',
         '"snippet"',
@@ -513,67 +612,176 @@ def test_shared_iterative_engine_and_public_parity():
         "LEAK_REL",
     ):
         assert leak not in dumped
-        assert leak not in format_strong_components_human(produced)
+        assert leak not in format_condensation_human(produced)
+
+    empty = compute_condensation_graph(pd.DataFrame(), pd.DataFrame())
+    _assert_full_invariants(empty)
+    assert empty["components"] == []
+    assert empty["edges"] == []
+    assert empty["edge_types"] is None
+    assert empty["n_components_total"] == 0
+    assert empty["n_nodes_total"] == 0
+    assert empty["n_edges_total"] == 0
+    assert empty["n_internal_edges_total"] == 0
+    assert empty["n_cross_component_edges_total"] == 0
+    assert empty["n_self_loop_edges_total"] == 0
+    assert empty["n_cyclic_components_total"] == 0
+    assert empty["n_condensation_edges_total"] == 0
+    assert empty["n_condensation_edges_eligible_total"] == 0
+    assert empty["n_condensation_edges_returned"] == 0
+    assert empty["components_truncated"] is False
+    assert empty["nodes_truncated"] is False
+    assert empty["edges_truncated"] is False
+    assert compute_condensation_graph(None, None)["n_nodes_total"] == 0
+    human_empty = format_condensation_human(empty)
+    assert "n_nodes_total: 0" in human_empty
+    assert "components (0/0):" in human_empty
+    assert "edges (0/0):" in human_empty
+    assert "n_condensation_edges_total: 0" in human_empty
 
 
-def test_directed_membership_distinct_from_weak_and_cycles():
-    ents = pd.DataFrame(
-        [_entity("A"), _entity("B"), _entity("C"), _entity("Isolated")]
-    )
-    rels = pd.DataFrame(
-        [
-            _calls("A", "B", hid=1),
-            _calls("B", "C", hid=2),
-            _calls("C", "A", hid=3),
-            _calls("A", "ghost", hid=4, rid="rel:ghost"),
-            _calls("X", "X", hid=5, rid="rel:selfx"),
-            _calls("A", "B", hid=6, rid="rel:parallel"),
-        ]
-    )
-    strong = compute_strongly_connected_components(ents, rels)
-    weak = compute_weakly_connected_components(ents, rels)
-    _assert_schema(strong)
-    assert strong["n_nodes_total"] == 6
-    assert strong["n_edges_total"] == 6
-    assert strong["n_entity_nodes_total"] == 4
-    assert strong["n_endpoint_only_nodes_total"] == 2
-    assert strong["n_internal_edges_total"] + strong["n_cross_component_edges_total"] == 6
-    assert strong["n_self_loop_edges_total"] == 1
-    assert strong["n_cyclic_components_total"] == 2
-    reps = [c["representative"] for c in strong["components"]]
-    cycle = next(c for c in strong["components"] if c["representative"] == "A")
-    assert cycle["nodes"] == ["A", "B", "C"]
-    assert cycle["is_cyclic"] is True
-    assert cycle["n_internal_edges_total"] == 4
-    assert cycle["n_self_loop_edges_total"] == 0
-    assert cycle["n_entity_nodes"] == 3
-    assert cycle["n_endpoint_only_nodes"] == 0
-    self_loop = next(c for c in strong["components"] if c["representative"] == "X")
-    assert self_loop["nodes"] == ["X"]
-    assert self_loop["is_cyclic"] is True
-    assert self_loop["n_internal_edges_total"] == 1
-    assert self_loop["n_self_loop_edges_total"] == 1
-    assert self_loop["n_entity_nodes"] == 0
-    ghost = next(c for c in strong["components"] if c["representative"] == "ghost")
-    assert ghost["is_cyclic"] is False
-    assert ghost["n_internal_edges_total"] == 0
-    iso = next(c for c in strong["components"] if c["representative"] == "Isolated")
-    assert iso["nodes"] == ["Isolated"]
-    assert iso["is_cyclic"] is False
-    assert iso["n_entity_nodes"] == 1
-    assert strong["n_cross_component_edges_total"] == 1
-    assert weak["n_components_total"] < strong["n_components_total"]
-    assert reps[0] == "A"
-    dag = compute_strongly_connected_components(
+def test_topologies_aggregation_and_distinct_from_other_queries():
+    chain = compute_condensation_graph(
         pd.DataFrame([_entity("A"), _entity("B"), _entity("C")]),
         pd.DataFrame([_calls("A", "B"), _calls("B", "C")]),
     )
-    assert dag["n_components_total"] == 3
-    assert dag["n_cyclic_components_total"] == 0
-    assert dag["n_cross_component_edges_total"] == 2
-    assert dag["n_internal_edges_total"] == 0
-    assert [c["representative"] for c in dag["components"]] == ["A", "B", "C"]
-    assert all(c["is_cyclic"] is False for c in dag["components"])
+    _assert_full_invariants(chain)
+    assert [c["representative"] for c in chain["components"]] == ["A", "B", "C"]
+    assert [(e["source"], e["target"], e["n_relationship_rows_total"]) for e in chain["edges"]] == [
+        ("A", "B", 1),
+        ("B", "C", 1),
+    ]
+    assert chain["n_cyclic_components_total"] == 0
+    assert all(c["is_cyclic"] is False for c in chain["components"])
+
+    diamond = compute_condensation_graph(
+        pd.DataFrame([_entity("A"), _entity("B"), _entity("C"), _entity("D")]),
+        pd.DataFrame(
+            [
+                _calls("A", "B", hid=1),
+                _calls("A", "C", hid=2),
+                _calls("B", "D", hid=3),
+                _calls("C", "D", hid=4),
+            ]
+        ),
+    )
+    _assert_full_invariants(diamond)
+    assert [c["representative"] for c in diamond["components"]] == ["A", "B", "C", "D"]
+    assert [(e["source"], e["target"]) for e in diamond["edges"]] == [
+        ("A", "B"),
+        ("A", "C"),
+        ("B", "D"),
+        ("C", "D"),
+    ]
+
+    disconnected = compute_condensation_graph(
+        pd.DataFrame([_entity("P"), _entity("X"), _entity("Isolated")]),
+        pd.DataFrame([_calls("P", "Q", hid=1), _calls("X", "Y", hid=2)]),
+    )
+    _assert_full_invariants(disconnected)
+    assert [c["representative"] for c in disconnected["components"]] == [
+        "Isolated",
+        "P",
+        "Q",
+        "X",
+        "Y",
+    ]
+    assert disconnected["n_entity_nodes_total"] == 3
+    assert disconnected["n_endpoint_only_nodes_total"] == 2
+
+    cyclic = compute_condensation_graph(
+        pd.DataFrame([_entity("A"), _entity("B"), _entity("C"), _entity("X")]),
+        pd.DataFrame(
+            [
+                _calls("A", "B", hid=1),
+                _calls("B", "C", hid=2),
+                _calls("C", "A", hid=3),
+                _calls("X", "A", hid=4),
+                _calls("A", "B", hid=5, rid="rel:parallel"),
+            ]
+        ),
+    )
+    _assert_full_invariants(cyclic)
+    assert [c["representative"] for c in cyclic["components"]] == ["X", "A"]
+    cycle = cyclic["components"][1]
+    assert cycle["nodes"] == ["A", "B", "C"]
+    assert cycle["is_cyclic"] is True
+    assert cycle["n_internal_edges_total"] == 4
+    assert cyclic["edges"] == [
+        {"source": "X", "target": "A", "n_relationship_rows_total": 1}
+    ]
+    assert cyclic["n_cross_component_edges_total"] == 1
+    assert cyclic["n_condensation_edges_total"] == 1
+
+    self_loop = compute_condensation_graph(
+        pd.DataFrame([_entity("X")]),
+        pd.DataFrame([_calls("X", "X")]),
+    )
+    _assert_full_invariants(self_loop)
+    assert self_loop["components"][0]["is_cyclic"] is True
+    assert self_loop["n_self_loop_edges_total"] == 1
+    assert self_loop["n_internal_edges_total"] == 1
+    assert self_loop["n_condensation_edges_total"] == 0
+    assert self_loop["edges"] == []
+
+    isolates = compute_condensation_graph(
+        pd.DataFrame([_entity("Z"), _entity("A")]),
+        pd.DataFrame(),
+    )
+    _assert_full_invariants(isolates)
+    assert [c["representative"] for c in isolates["components"]] == ["A", "Z"]
+    assert all(c["is_cyclic"] is False for c in isolates["components"])
+
+    reverse_chain = compute_condensation_graph(
+        pd.DataFrame([_entity("Z"), _entity("Y"), _entity("X")]),
+        pd.DataFrame([_calls("Z", "Y"), _calls("Y", "X")]),
+    )
+    strong = compute_strongly_connected_components(
+        pd.DataFrame([_entity("Z"), _entity("Y"), _entity("X")]),
+        pd.DataFrame([_calls("Z", "Y"), _calls("Y", "X")]),
+    )
+    _assert_full_invariants(reverse_chain)
+    assert [c["representative"] for c in reverse_chain["components"]] == ["Z", "Y", "X"]
+    assert [c["representative"] for c in strong["components"]] == ["X", "Y", "Z"]
+    assert reverse_chain["n_condensation_edges_total"] == 2
+
+    size_vs_topo = compute_condensation_graph(
+        pd.DataFrame([_entity("A"), _entity("Y"), _entity("Z")]),
+        pd.DataFrame([_calls("Y", "Z"), _calls("Z", "Y")]),
+    )
+    strong_size = compute_strongly_connected_components(
+        pd.DataFrame([_entity("A"), _entity("Y"), _entity("Z")]),
+        pd.DataFrame([_calls("Y", "Z"), _calls("Z", "Y")]),
+    )
+    assert [c["representative"] for c in size_vs_topo["components"]] == ["A", "Y"]
+    assert [c["representative"] for c in strong_size["components"]] == ["Y", "A"]
+    assert size_vs_topo["components"][1]["is_cyclic"] is True
+    assert size_vs_topo["n_condensation_edges_total"] == 0
+
+    weak = compute_weakly_connected_components(
+        pd.DataFrame([_entity("A"), _entity("B")]),
+        pd.DataFrame([_calls("A", "B")]),
+    )
+    directed = compute_condensation_graph(
+        pd.DataFrame([_entity("A"), _entity("B")]),
+        pd.DataFrame([_calls("A", "B")]),
+    )
+    assert weak["n_components_total"] == 1
+    assert directed["n_components_total"] == 2
+
+    dep = compute_containment_dependency_order(
+        pd.DataFrame([_entity("B"), _entity("A"), _entity("Z")]),
+        pd.DataFrame([_contains("B", "A")]),
+    )
+    assert dep == ["B", "A", "Z"]
+    cond_contains = compute_condensation_graph(
+        pd.DataFrame([_entity("B"), _entity("A"), _entity("Z")]),
+        pd.DataFrame([_contains("B", "A")]),
+        edge_types=["contains"],
+    )
+    assert [c["representative"] for c in cond_contains["components"]] == ["B", "A", "Z"]
+    flattened = [title for c in cond_contains["components"] for title in c["nodes"]]
+    assert flattened == dep
 
 
 def test_filters_duplicates_malformed_and_limits():
@@ -585,41 +793,38 @@ def test_filters_duplicates_malformed_and_limits():
             _rel("C", "C", "uses_type", hid=3, rid="rel:self-c"),
         ]
     )
-    all_types = compute_strongly_connected_components(ents, rels, edge_types=None)
-    empty_filter = compute_strongly_connected_components(ents, rels, edge_types=[])
+    all_types = compute_condensation_graph(ents, rels, edge_types=None)
+    empty_filter = compute_condensation_graph(ents, rels, edge_types=[])
     assert all_types == empty_filter
     assert all_types["edge_types"] is None
-    calls_only = compute_strongly_connected_components(
-        ents, rels, edge_types=["calls", "calls"]
-    )
+    calls_only = compute_condensation_graph(ents, rels, edge_types=["calls", "calls"])
     assert calls_only["edge_types"] == ["calls"]
     assert "ghost" not in {
         title for comp in calls_only["components"] for title in comp["nodes"]
     }
-    mixed = compute_strongly_connected_components(
-        ents, rels, edge_types=["uses_type", "calls"]
-    )
+    mixed = compute_condensation_graph(ents, rels, edge_types=["uses_type", "calls"])
     assert mixed["edge_types"] == ["calls", "uses_type"]
-    none = compute_strongly_connected_components(ents, rels, edge_types=["imports"])
+    none = compute_condensation_graph(ents, rels, edge_types=["imports"])
     assert none["n_nodes_total"] == 3
     assert none["n_edges_total"] == 0
+    assert none["n_condensation_edges_total"] == 0
     with pytest.raises(ValueError, match="not a single string"):
-        compute_strongly_connected_components(ents, rels, edge_types="calls")  # type: ignore[arg-type]
+        compute_condensation_graph(ents, rels, edge_types="calls")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="invalid edge-type filter"):
-        compute_strongly_connected_components(ents, rels, edge_types=[""])
+        compute_condensation_graph(ents, rels, edge_types=[""])
     with pytest.raises(ValueError, match="invalid edge-type filter"):
-        compute_strongly_connected_components(ents, rels, edge_types=[" calls"])
+        compute_condensation_graph(ents, rels, edge_types=[" calls"])
     with pytest.raises(ValueError, match="invalid edge-type filter"):
-        compute_strongly_connected_components(ents, rels, edge_types=["ca\x00lls"])
+        compute_condensation_graph(ents, rels, edge_types=["ca\x00lls"])
     with pytest.raises(ValueError, match="invalid edge-type filter"):
-        compute_strongly_connected_components(ents, rels, edge_types=["calls", 1])  # type: ignore[list-item]
+        compute_condensation_graph(ents, rels, edge_types=["calls", 1])  # type: ignore[list-item]
     with pytest.raises(ValueError, match="duplicate entity title"):
-        compute_strongly_connected_components(
+        compute_condensation_graph(
             pd.DataFrame([_entity("A"), _entity("A", id="ent:other")]),
             pd.DataFrame(),
         )
     with pytest.raises(ValueError, match="duplicate relationship id"):
-        compute_strongly_connected_components(
+        compute_condensation_graph(
             pd.DataFrame([_entity("A")]),
             pd.DataFrame(
                 [_calls("A", "A", rid="rel:dup"), _calls("A", "A", rid="rel:dup")]
@@ -632,36 +837,42 @@ def test_filters_duplicates_malformed_and_limits():
         ]
     )
     with pytest.raises(ValueError, match="invalid target"):
-        compute_strongly_connected_components(
+        compute_condensation_graph(
             pd.DataFrame([_entity("A")]), hidden, edge_types=["calls"]
         )
     with pytest.raises(ValueError, match="missing required columns"):
-        compute_strongly_connected_components(pd.DataFrame([{"id": "x"}]), pd.DataFrame())
+        compute_condensation_graph(pd.DataFrame([{"id": "x"}]), pd.DataFrame())
     with pytest.raises(ValueError, match="max_components"):
-        compute_strongly_connected_components(ents, rels, max_components=True)
+        compute_condensation_graph(ents, rels, max_components=True)
     with pytest.raises(ValueError, match="max_nodes_per_component"):
-        compute_strongly_connected_components(ents, rels, max_nodes_per_component=1.5)
+        compute_condensation_graph(ents, rels, max_nodes_per_component=1.5)
+    with pytest.raises(ValueError, match="max_edges"):
+        compute_condensation_graph(ents, rels, max_edges="1")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="max_components"):
-        compute_strongly_connected_components(ents, rels, max_components=0)
+        compute_condensation_graph(ents, rels, max_components=0)
     with pytest.raises(ValueError, match="max_nodes_per_component"):
-        compute_strongly_connected_components(ents, rels, max_nodes_per_component=-1)
+        compute_condensation_graph(ents, rels, max_nodes_per_component=-1)
+    with pytest.raises(ValueError, match="max_edges"):
+        compute_condensation_graph(ents, rels, max_edges=-1)
     with pytest.raises(ValueError, match="max_components"):
-        compute_strongly_connected_components(ents, rels, max_components=float("nan"))
-    with pytest.raises(ValueError, match="max_nodes_per_component"):
-        compute_strongly_connected_components(
-            ents, rels, max_nodes_per_component=math.inf
+        compute_condensation_graph(ents, rels, max_components=float("nan"))
+    with pytest.raises(ValueError, match="max_edges"):
+        compute_condensation_graph(ents, rels, max_edges=math.inf)
+    with pytest.raises(ValueError, match="max_components"):
+        compute_condensation_graph(
+            ents, rels, max_components=HARD_MAX_CONDENSATION_COMPONENTS + 1
         )
-    with pytest.raises(ValueError, match="max_components"):
-        compute_strongly_connected_components(
-            ents, rels, max_components=HARD_MAX_STRONG_COMPONENTS + 1
-        )
     with pytest.raises(ValueError, match="max_nodes_per_component"):
-        compute_strongly_connected_components(
-            ents, rels, max_nodes_per_component=HARD_MAX_STRONG_COMPONENT_NODES + 1
+        compute_condensation_graph(
+            ents, rels, max_nodes_per_component=HARD_MAX_CONDENSATION_COMPONENT_NODES + 1
+        )
+    with pytest.raises(ValueError, match="max_edges"):
+        compute_condensation_graph(
+            ents, rels, max_edges=HARD_MAX_CONDENSATION_EDGES + 1
         )
 
 
-def test_canonical_order_truncation_empty_and_shuffle():
+def test_canonical_order_truncation_shuffle_and_eligible_edges():
     ents = pd.DataFrame(
         [_entity("Z"), _entity("A"), _entity("M"), _entity("B"), _entity("é")]
     )
@@ -672,84 +883,130 @@ def test_canonical_order_truncation_empty_and_shuffle():
             _calls("B", "é", hid=3),
         ]
     )
-    r1 = compute_strongly_connected_components(ents, rels)
-    r2 = compute_strongly_connected_components(
+    r1 = compute_condensation_graph(ents, rels)
+    r2 = compute_condensation_graph(
         ents.sample(frac=1, random_state=7).reset_index(drop=True),
         rels.sample(frac=1, random_state=11),
     )
     r2_idx = rels.sample(frac=1, random_state=3)
     r2_idx.index = list(range(50, 50 + len(r2_idx)))
-    r3 = compute_strongly_connected_components(ents, r2_idx)
+    r3 = compute_condensation_graph(ents, r2_idx)
     assert r1 == r2 == r3
-    assert r1["components"][0]["representative"] == "A"
-    assert r1["components"][0]["nodes"] == ["A", "Z"]
-    assert r1["max_components"] == DEFAULT_STRONG_COMPONENTS_MAX_COMPONENTS
+    _assert_full_invariants(r1)
+    assert [c["representative"] for c in r1["components"]] == ["A", "B", "M", "é"]
+    cycle = next(c for c in r1["components"] if c["representative"] == "A")
+    assert cycle["nodes"] == ["A", "Z"]
+    assert cycle["is_cyclic"] is True
+    assert r1["max_components"] == DEFAULT_CONDENSATION_MAX_COMPONENTS
     assert (
-        r1["max_nodes_per_component"]
-        == DEFAULT_STRONG_COMPONENTS_MAX_NODES_PER_COMPONENT
+        r1["max_nodes_per_component"] == DEFAULT_CONDENSATION_MAX_NODES_PER_COMPONENT
     )
-    utf = compute_strongly_connected_components(
+    assert r1["max_edges"] == DEFAULT_CONDENSATION_MAX_EDGES
+    assert r1["edges"] == [
+        {"source": "B", "target": "é", "n_relationship_rows_total": 1}
+    ]
+
+    utf = compute_condensation_graph(
         pd.DataFrame([_entity("é"), _entity("Ω"), _entity("A")]),
         pd.DataFrame(),
     )
     assert [c["representative"] for c in utf["components"]] == ["A", "é", "Ω"]
     assert "é".encode("utf-8") < "Ω".encode("utf-8")
 
-    big_ents = pd.DataFrame([_entity(t) for t in ("A", "B", "C", "D", "E", "F")])
+    # Adversarial discovery vs topological order: dataframe reverse of UTF-8.
+    adv_ents = pd.DataFrame([_entity("Z"), _entity("Y"), _entity("X")])
+    adv_rels = pd.DataFrame(
+        [_calls("Z", "Y", hid=1), _calls("Y", "X", hid=2), _calls("Z", "X", hid=3)]
+    )
+    adv = compute_condensation_graph(
+        adv_ents.sample(frac=1, random_state=99).reset_index(drop=True),
+        adv_rels.sample(frac=1, random_state=123).reset_index(drop=True),
+    )
+    assert [c["representative"] for c in adv["components"]] == ["Z", "Y", "X"]
+    assert [(e["source"], e["target"]) for e in adv["edges"]] == [
+        ("Z", "Y"),
+        ("Z", "X"),
+        ("Y", "X"),
+    ]
+
+    big_ents = pd.DataFrame([_entity(t) for t in ("A", "B", "C", "D")])
     big_rels = pd.DataFrame(
         [
             _calls("A", "B", hid=1),
             _calls("B", "C", hid=2),
-            _calls("C", "A", hid=3),
-            _calls("D", "E", hid=4),
+            _calls("C", "D", hid=3),
+            _calls("A", "B", hid=4, rid="rel:parallel"),
         ]
     )
-    capped_comp = compute_strongly_connected_components(
-        big_ents, big_rels, max_components=1, max_nodes_per_component=20
+    full = compute_condensation_graph(big_ents, big_rels)
+    _assert_full_invariants(full)
+    assert full["n_components_total"] == 4
+    assert full["n_condensation_edges_total"] == 3
+    assert full["edges"][0]["n_relationship_rows_total"] == 2
+
+    cap_comp = compute_condensation_graph(
+        big_ents, big_rels, max_components=2, max_nodes_per_component=20, max_edges=100
     )
-    assert capped_comp["n_components_total"] == 4
-    assert capped_comp["n_components_returned"] == 1
-    assert capped_comp["components_truncated"] is True
-    assert capped_comp["nodes_truncated"] is False
-    assert capped_comp["components"][0]["representative"] == "A"
-    assert sum(c["n_nodes_total"] for c in capped_comp["components"]) != capped_comp[
-        "n_nodes_total"
+    assert cap_comp["n_components_total"] == 4
+    assert cap_comp["n_components_returned"] == 2
+    assert cap_comp["components_truncated"] is True
+    assert [c["representative"] for c in cap_comp["components"]] == ["A", "B"]
+    assert cap_comp["n_condensation_edges_total"] == 3
+    assert cap_comp["n_condensation_edges_eligible_total"] == 1
+    assert cap_comp["n_condensation_edges_returned"] == 1
+    assert cap_comp["edges"] == [
+        {"source": "A", "target": "B", "n_relationship_rows_total": 2}
     ]
-    capped_nodes = compute_strongly_connected_components(
-        big_ents, big_rels, max_components=20, max_nodes_per_component=1
+    assert cap_comp["edges_truncated"] is True
+    assert cap_comp["nodes_truncated"] is False
+
+    cap_nodes = compute_condensation_graph(
+        pd.DataFrame([_entity("A"), _entity("B"), _entity("C")]),
+        pd.DataFrame([_calls("A", "B"), _calls("B", "A"), _calls("B", "C")]),
+        max_components=20,
+        max_nodes_per_component=1,
+        max_edges=100,
     )
-    assert capped_nodes["components_truncated"] is False
-    assert capped_nodes["nodes_truncated"] is True
-    cycle = next(c for c in capped_nodes["components"] if c["representative"] == "A")
+    assert cap_nodes["components_truncated"] is False
+    assert cap_nodes["nodes_truncated"] is True
+    cycle = next(c for c in cap_nodes["components"] if c["representative"] == "A")
     assert cycle["nodes"] == ["A"]
-    assert cycle["n_nodes_total"] == 3
+    assert cycle["n_nodes_total"] == 2
     assert cycle["n_nodes_returned"] == 1
-    omitted = compute_strongly_connected_components(
-        big_ents, big_rels, max_components=1, max_nodes_per_component=20
+    assert cap_nodes["n_condensation_edges_returned"] == 1
+
+    cap_edges = compute_condensation_graph(
+        big_ents, big_rels, max_components=20, max_nodes_per_component=20, max_edges=1
     )
-    assert omitted["nodes_truncated"] is False
+    assert cap_edges["n_condensation_edges_eligible_total"] == 3
+    assert cap_edges["n_condensation_edges_returned"] == 1
+    assert cap_edges["edges_truncated"] is True
+    assert cap_edges["edges"][0]["source"] == "A"
+    assert cap_edges["edges"][0]["target"] == "B"
 
-    empty = compute_strongly_connected_components(pd.DataFrame(), pd.DataFrame())
-    _assert_schema(empty)
-    assert empty["components"] == []
-    assert empty["edge_types"] is None
-    assert empty["n_components_total"] == 0
-    assert empty["n_nodes_total"] == 0
-    assert empty["n_edges_total"] == 0
-    assert empty["n_internal_edges_total"] == 0
-    assert empty["n_cross_component_edges_total"] == 0
-    assert empty["n_self_loop_edges_total"] == 0
-    assert empty["n_cyclic_components_total"] == 0
-    assert empty["components_truncated"] is False
-    assert empty["nodes_truncated"] is False
-    assert compute_strongly_connected_components(None, None)["n_nodes_total"] == 0
-    human_empty = format_strong_components_human(empty)
-    assert "n_nodes_total: 0" in human_empty
-    assert "components (0/0):" in human_empty
+    zero_edges = compute_condensation_graph(
+        big_ents, big_rels, max_components=20, max_nodes_per_component=20, max_edges=0
+    )
+    assert zero_edges["edges"] == []
+    assert zero_edges["n_condensation_edges_eligible_total"] == 3
+    assert zero_edges["n_condensation_edges_returned"] == 0
+    assert zero_edges["edges_truncated"] is True
+    assert zero_edges["max_edges"] == 0
+
+    combined = compute_condensation_graph(
+        big_ents, big_rels, max_components=1, max_nodes_per_component=1, max_edges=0
+    )
+    assert combined["n_components_returned"] == 1
+    assert combined["components"][0]["nodes"] == ["A"]
+    assert combined["n_condensation_edges_eligible_total"] == 0
+    assert combined["n_condensation_edges_returned"] == 0
+    assert combined["components_truncated"] is True
+    assert combined["nodes_truncated"] is False
+    assert combined["edges_truncated"] is True
 
 
-def test_randomized_oracle_and_dependency_order_unchanged():
-    rng = random.Random(20260827)
+def test_randomized_oracle_and_existing_producers_unchanged():
+    rng = random.Random(20260831)
     titles = ["A", "B", "C", "M", "Z", "é", "Ω"]
     for _ in range(12):
         n_ent = rng.randint(1, 6)
@@ -776,11 +1033,14 @@ def test_randomized_oracle_and_dependency_order_unchanged():
             if len(rels)
             else rels
         )
-        produced = compute_strongly_connected_components(shuffled_ents, shuffled_rels)
-        assert produced == _oracle_strong(ents, rels)
+        produced = compute_condensation_graph(shuffled_ents, shuffled_rels)
+        assert produced == _oracle_condensation(ents, rels)
         assert compute_containment_dependency_order(
             shuffled_ents, shuffled_rels
-        ) == _oracle_containment(ents, rels)
+        ) == compute_containment_dependency_order(ents, rels)
+        assert compute_strongly_connected_components(
+            shuffled_ents, shuffled_rels
+        ) == compute_strongly_connected_components(ents, rels)
 
     assert compute_containment_dependency_order(
         pd.DataFrame([_entity("B"), _entity("A"), _entity("Z")]),
@@ -800,12 +1060,11 @@ def test_randomized_oracle_and_dependency_order_unchanged():
             ]
         ),
     ) == ["X", "A", "B", "C", "Y"]
-    assert compute_containment_dependency_order(
-        pd.DataFrame([_entity("P"), _entity("X"), _entity("Isolated")]),
-        pd.DataFrame(
-            [_contains("P", "Q", rid="rel:pq"), _contains("X", "Y", rid="rel:xy")]
-        ),
-    ) == ["Isolated", "P", "Q", "X", "Y"]
+    strong_order = compute_strongly_connected_components(
+        pd.DataFrame([_entity("A"), _entity("Y"), _entity("Z")]),
+        pd.DataFrame([_calls("Y", "Z"), _calls("Z", "Y")]),
+    )
+    assert [c["representative"] for c in strong_order["components"]] == ["Y", "A"]
 
 
 def test_long_chain_and_large_scc_without_recursion():
@@ -828,16 +1087,34 @@ def test_long_chain_and_large_scc_without_recursion():
     old = sys.getrecursionlimit()
     sys.setrecursionlimit(50)
     try:
-        chain = compute_strongly_connected_components(chain_ents, chain_rels)
-        cycle = compute_strongly_connected_components(cycle_ents, cycle_rels)
+        chain = compute_condensation_graph(
+            chain_ents,
+            chain_rels,
+            max_components=100,
+            max_nodes_per_component=100,
+            max_edges=500,
+        )
+        cycle = compute_condensation_graph(
+            cycle_ents,
+            cycle_rels,
+            max_components=100,
+            max_nodes_per_component=100,
+            max_edges=500,
+        )
         order = compute_containment_dependency_order(dep_ents, dep_rels)
+        strong = compute_strongly_connected_components(cycle_ents, cycle_rels)
     finally:
         sys.setrecursionlimit(old)
     assert chain["n_components_total"] == n
+    assert chain["n_condensation_edges_total"] == n - 1
     assert chain["n_cyclic_components_total"] == 0
+    assert chain["components"][0]["representative"] == "n000"
+    assert chain["components"][-1]["representative"] == f"n{n-1:03d}"
     assert cycle["n_components_total"] == 1
     assert cycle["components"][0]["n_nodes_total"] == n
     assert cycle["components"][0]["is_cyclic"] is True
+    assert cycle["n_condensation_edges_total"] == 0
+    assert strong["n_components_total"] == 1
     assert len(order) == n
     assert order[0] == "d000"
     assert order[-1] == f"d{n-1:03d}"
@@ -850,15 +1127,16 @@ def test_human_json_cli_parity_and_malformed_exit(tmp_path: Path):
         [_calls("A", "B"), _calls("B", "A"), _rel("C", "ghost", "contains")],
     )
     g = ByogGraph(graph)
-    payload = g.strong_components(edge_types=["calls", "contains"], max_components=10)
-    dumped = dumps_strong_components_json(payload)
-    assert dumped == dumps_strong_components_json(json.loads(dumped))
-    human = format_strong_components_human(payload)
+    payload = g.condensation(edge_types=["calls", "contains"], max_components=10)
+    dumped = dumps_condensation_json(payload)
+    assert dumped == dumps_condensation_json(json.loads(dumped))
+    human = format_condensation_human(payload)
     assert "edge_types: calls,contains" in human
     assert "cyclic" in human
     assert "ghost" in human
+    assert "rows " in human
     common = [
-        "strong-components",
+        "condensation",
         "--graph",
         str(graph),
         "--edge-type",
@@ -869,17 +1147,19 @@ def test_human_json_cli_parity_and_malformed_exit(tmp_path: Path):
         "10",
         "--max-nodes-per-component",
         "20",
+        "--max-edges",
+        "100",
     ]
     gq_h = _run(sys.executable, str(QUERY), *common)
     gc_h = _run(sys.executable, str(CLI), *common)
     mod_h = _run(sys.executable, "-m", "graphrag_code.graph_query", *common)
     assert gq_h.stdout == gc_h.stdout == mod_h.stdout
-    assert format_strong_components_human(payload).strip() == gq_h.stdout.strip()
+    assert format_condensation_human(payload).strip() == gq_h.stdout.strip()
     gq_j = _run(sys.executable, str(QUERY), *common, "--json")
     gc_j = _run(sys.executable, str(CLI), *common, "--json")
     mod_j = _run(sys.executable, "-m", "graphrag_code.graph_query", *common, "--json")
     assert gq_j.stdout == gc_j.stdout == mod_j.stdout
-    assert dumps_strong_components_json(json.loads(gq_j.stdout)) + "\n" == gq_j.stdout
+    assert dumps_condensation_json(json.loads(gq_j.stdout)) + "\n" == gq_j.stdout
     empty_graph = tmp_path / "empty"
     publish_byog_snapshot(
         pd.DataFrame(columns=["id", "title", "type", "source_file", "extractor"]),
@@ -889,24 +1169,25 @@ def test_human_json_cli_parity_and_malformed_exit(tmp_path: Path):
         keep_last=1,
     )
     empty_h = _run(
-        sys.executable, str(QUERY), "strong-components", "--graph", str(empty_graph)
+        sys.executable, str(QUERY), "condensation", "--graph", str(empty_graph)
     )
     empty_j = _run(
         sys.executable,
         str(QUERY),
-        "strong-components",
+        "condensation",
         "--graph",
         str(empty_graph),
         "--json",
     )
     assert "n_nodes_total: 0" in empty_h.stdout
+    assert "n_condensation_edges_total: 0" in empty_h.stdout
     assert empty_h.stdout.endswith("\n")
     assert json.loads(empty_j.stdout)["n_nodes_total"] == 0
-    assert dumps_strong_components_json(json.loads(empty_j.stdout)) + "\n" == empty_j.stdout
+    assert dumps_condensation_json(json.loads(empty_j.stdout)) + "\n" == empty_j.stdout
     bad = _run(
         sys.executable,
         str(QUERY),
-        "strong-components",
+        "condensation",
         "--graph",
         str(graph),
         "--max-components",
@@ -919,7 +1200,7 @@ def test_human_json_cli_parity_and_malformed_exit(tmp_path: Path):
     snap_bad = _run(
         sys.executable,
         str(QUERY),
-        "strong-components",
+        "condensation",
         "--graph",
         str(graph),
         "--snapshot",
@@ -928,11 +1209,12 @@ def test_human_json_cli_parity_and_malformed_exit(tmp_path: Path):
     )
     assert snap_bad.returncode == 2
     assert snap_bad.stdout == ""
-    help_out = _run(sys.executable, str(QUERY), "strong-components", "--help")
+    help_out = _run(sys.executable, str(QUERY), "condensation", "--help")
     assert "--json" in help_out.stdout
     assert "--dot" not in help_out.stdout
     assert "--edge-type" in help_out.stdout
-    assert "community" in help_out.stdout.lower() or "mutual" in help_out.stdout.lower()
+    assert "--max-edges" in help_out.stdout
+    assert "community" in help_out.stdout.lower() or "condensation" in help_out.stdout.lower()
 
 
 def test_installed_wheel_parity_and_snapshots_do_not_mutate(
@@ -979,7 +1261,7 @@ def test_installed_wheel_parity_and_snapshots_do_not_mutate(
     )
     before = _payload_hashes(graph)
     stats = _payload_stats(graph)
-    args = ["strong-components", "--graph", str(graph), "--json"]
+    args = ["condensation", "--graph", str(graph), "--json"]
     script = _run(sys.executable, str(QUERY), *args)
     module = _run(sys.executable, "-m", "graphrag_code.graph_query", *args)
     product = _run(sys.executable, str(CLI), *args)
@@ -1003,7 +1285,7 @@ def test_installed_wheel_parity_and_snapshots_do_not_mutate(
     cur = _run(
         sys.executable,
         str(QUERY),
-        "strong-components",
+        "condensation",
         "--graph",
         str(graph),
         "--snapshot",
@@ -1014,7 +1296,7 @@ def test_installed_wheel_parity_and_snapshots_do_not_mutate(
     hist = _run(
         sys.executable,
         str(CLI),
-        "strong-components",
+        "condensation",
         "--graph",
         str(graph),
         "--snapshot",
@@ -1047,12 +1329,12 @@ def _cleanup_processes(*processes, release=None) -> None:
             process.join(timeout=5)
 
 
-def _strong_json_hold(graph: str, held, resume, q) -> None:
+def _cond_json_hold(graph: str, held, resume, q) -> None:
     sys.path.insert(0, str(ROOT / "src"))
     from graphrag_code import graph_query
     from typer.testing import CliRunner
 
-    orig = graph_query.dumps_strong_components_json
+    orig = graph_query.dumps_condensation_json
 
     def wrap_dumps(result):
         payload = orig(result)
@@ -1061,11 +1343,11 @@ def _strong_json_hold(graph: str, held, resume, q) -> None:
             q.put("timeout")
         return payload
 
-    graph_query.dumps_strong_components_json = wrap_dumps
+    graph_query.dumps_condensation_json = wrap_dumps
     runner = CliRunner()
     result = runner.invoke(
         graph_query.app,
-        ["strong-components", "--graph", graph, "--json"],
+        ["condensation", "--graph", graph, "--json"],
     )
     q.put(f"exit:{result.exit_code}")
 
@@ -1101,14 +1383,14 @@ def _publisher(graph: str, marker: str, keep_last: int, about, got, q) -> None:
     q.put(snap.name)
 
 
-def test_publisher_waits_through_strong_components_serialization(tmp_path: Path):
+def test_publisher_waits_through_condensation_serialization(tmp_path: Path):
     graph = _publish(tmp_path, [_entity("A"), _entity("B")], [_calls("A", "B")])
     held = CTX.Event()
     resume = CTX.Event()
     about = CTX.Event()
     got = CTX.Event()
     q = CTX.Queue()
-    reader = CTX.Process(target=_strong_json_hold, args=(str(graph), held, resume, q))
+    reader = CTX.Process(target=_cond_json_hold, args=(str(graph), held, resume, q))
     pub = CTX.Process(target=_publisher, args=(str(graph), "new", 1, about, got, q))
     try:
         reader.start()
@@ -1140,24 +1422,37 @@ def test_no_nested_query_mcp_unchanged_and_existing_surfaces(
         return _inner
 
     monkeypatch.setattr(g, "components", track("components"))
+    monkeypatch.setattr(g, "strong_components", track("strong_components"))
     monkeypatch.setattr(g, "subgraph", track("subgraph"))
     monkeypatch.setattr(g, "degree_ranking", track("degree_ranking"))
     monkeypatch.setattr(g, "dependency_order", track("dependency_order"))
     monkeypatch.setattr(g, "impact", track("impact"))
     producer_calls = 0
-    orig = compute_strongly_connected_components
+    scc_calls = 0
+    orig = compute_condensation_graph
+    orig_sccs = getattr(
+        __import__("graphrag_code.byog_graph", fromlist=["_iterative_sccs"]),
+        "_iterative_sccs",
+    )
 
     def counted(ents, rels, **kwargs):
         nonlocal producer_calls
         producer_calls += 1
         return orig(ents, rels, **kwargs)
 
+    def counted_sccs(*args, **kwargs):
+        nonlocal scc_calls
+        scc_calls += 1
+        return orig_sccs(*args, **kwargs)
+
     monkeypatch.setattr(
-        "graphrag_code.byog_graph.compute_strongly_connected_components", counted
+        "graphrag_code.byog_graph.compute_condensation_graph", counted
     )
-    result = g.strong_components()
+    monkeypatch.setattr("graphrag_code.byog_graph._iterative_sccs", counted_sccs)
+    result = g.condensation()
     assert result["n_nodes_total"] == 2
     assert producer_calls == 1
+    assert scc_calls == 1
     assert called == []
 
     other = ByogGraph(graph)
@@ -1174,13 +1469,16 @@ def test_no_nested_query_mcp_unchanged_and_existing_surfaces(
     ranked = compute_structural_degree_ranking(other.ents, other.rels)
     assert dumps_degree_ranking_json(ranked)
     assert other.degree_ranking() == ranked
+    assert other.strong_components() == compute_strongly_connected_components(
+        other.ents, other.rels
+    )
     assert other.dependency_order() == compute_containment_dependency_order(
         other.ents, other.rels
     )
     assert isinstance(other.impact("B"), list)
 
 
-def test_mcp_exposes_strong_components_as_fifteenth_tool(tmp_path: Path):
+def test_mcp_remains_fifteen_tools_without_condensation(tmp_path: Path):
     from anyio import run as anyio_run
     from mcp import Client
 
@@ -1189,19 +1487,11 @@ def test_mcp_exposes_strong_components_as_fifteenth_tool(tmp_path: Path):
     graph = _publish(tmp_path, [_entity("A"), _entity("B")], [_calls("A", "B")])
     session = build_session(graph, "python")
     server = build_mcp_server(session)
-    params = list(inspect.signature(GraphMcpSession.strong_components).parameters)
-    assert params == [
-        "self",
-        "max_components",
-        "max_nodes_per_component",
-        "edge_types",
-        "snapshot",
-    ]
-    assert "graph" not in params
-    assert "format" not in params
-    assert "dot" not in params
-    assert "symbol" not in params
-    assert "strong-components" not in TOOL_NAMES
+    assert not hasattr(session, "condensation")
+    assert not hasattr(session, "condensation_graph")
+    assert not hasattr(GraphMcpSession, "condensation")
+    assert "condensation" not in TOOL_NAMES
+    assert "condensation_graph" not in TOOL_NAMES
     assert list(TOOL_NAMES) == [
         "graph_status",
         "graph_doctor",
@@ -1221,54 +1511,22 @@ def test_mcp_exposes_strong_components_as_fifteenth_tool(tmp_path: Path):
     ]
     assert len(TOOL_NAMES) == len(set(TOOL_NAMES)) == 15
 
-    expected = ByogGraph(graph).strong_components()
-    payload = session.strong_components()
-    assert payload["tool"] == "strong_components"
-    assert payload["ok"] is True
-    assert payload["data"] == json.loads(json.dumps(expected, allow_nan=False, default=str))
-    returned_nodes = sum(int(c["n_nodes_returned"]) for c in payload["data"]["components"])
-    assert payload["total"] == (
-        payload["data"]["n_components_total"] + payload["data"]["n_nodes_total"]
-    )
-    assert payload["returned"] == (
-        payload["data"]["n_components_returned"] + returned_nodes
-    )
-    comps = session.components()
-    assert comps["tool"] == "components"
-    ranked = session.degree_ranking()
-    assert ranked["tool"] == "degree_ranking"
-
     async def _body():
         async with Client(server) as client:
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert "strong-components" not in names
-            assert names[names.index("components") + 1] == "strong_components"
-            assert names[names.index("strong_components") + 1] == "degree_ranking"
-            tool = next(item for item in tools if item.name == "strong_components")
-            assert tool.annotations.read_only_hint is True
-            assert tool.annotations.destructive_hint is False
-            assert tool.annotations.idempotent_hint is True
-            assert tool.annotations.open_world_hint is False
-            assert tool.input_schema["additionalProperties"] is False
-            props = tool.input_schema.get("properties") or {}
-            assert list(props) == [
-                "max_components",
-                "max_nodes_per_component",
-                "edge_types",
-                "snapshot",
-            ]
-            body = await client.call_tool("strong_components", {})
-            data = body.structured_content
-            if isinstance(data, dict) and set(data) == {"result"}:
-                data = data["result"]
-            assert data["tool"] == "strong_components"
-            assert data["data"] == payload["data"]
+            assert "condensation" not in names
+            assert "condensation_graph" not in names
+            for tool in tools:
+                props = tool.input_schema.get("properties") or {}
+                assert "condensation" not in props
             ranked = await client.call_tool("degree_ranking", {})
             assert ranked.is_error is False
             comps = await client.call_tool("components", {})
             assert comps.is_error is False
+            strong = await client.call_tool("strong_components", {})
+            assert strong.is_error is False
 
     anyio_run(_body)
 
@@ -1276,7 +1534,7 @@ def test_mcp_exposes_strong_components_as_fifteenth_tool(tmp_path: Path):
 def test_hash_seed_invariance(tmp_path: Path):
     code = r"""
 import pandas as pd
-from graphrag_code.byog_graph import compute_strongly_connected_components
+from graphrag_code.byog_graph import compute_condensation_graph
 ents = pd.DataFrame([
     {"id": "e1", "title": "Z", "type": "function", "source_file": "a.py", "extractor": "x"},
     {"id": "e2", "title": "A", "type": "function", "source_file": "a.py", "extractor": "x"},
@@ -1288,7 +1546,7 @@ rels = pd.DataFrame([
     {"id": "r3", "source": "M", "target": "ghost", "type": "contains", "extractor": "x"},
 ])
 import json
-print(json.dumps(compute_strongly_connected_components(ents, rels), sort_keys=True))
+print(json.dumps(compute_condensation_graph(ents, rels), sort_keys=True))
 """
     payloads = []
     for seed in ("0", "1", "random"):

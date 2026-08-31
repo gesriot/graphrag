@@ -57,6 +57,14 @@ DEFAULT_STRONG_COMPONENTS_MAX_NODES_PER_COMPONENT = 20
 HARD_MAX_STRONG_COMPONENTS = 100
 HARD_MAX_STRONG_COMPONENT_NODES = 100
 
+# Directed SCC condensation DAG (structural presentation only).
+DEFAULT_CONDENSATION_MAX_COMPONENTS = 20
+DEFAULT_CONDENSATION_MAX_NODES_PER_COMPONENT = 20
+DEFAULT_CONDENSATION_MAX_EDGES = 100
+HARD_MAX_CONDENSATION_COMPONENTS = 100
+HARD_MAX_CONDENSATION_COMPONENT_NODES = 100
+HARD_MAX_CONDENSATION_EDGES = 500
+
 # Raw directed multigraph degree ranking (not centrality or importance).
 DEGREE_RANKING_MODES = ("total", "incoming", "outgoing")
 DEFAULT_DEGREE_RANKING_MAX_NODES = 20
@@ -2622,6 +2630,31 @@ class ByogGraph:
             max_nodes_per_component=max_nodes_per_component,
         )
 
+    def condensation(
+        self,
+        *,
+        edge_types: Optional[Sequence[str]] = None,
+        max_components: int = DEFAULT_CONDENSATION_MAX_COMPONENTS,
+        max_nodes_per_component: int = DEFAULT_CONDENSATION_MAX_NODES_PER_COMPONENT,
+        max_edges: int = DEFAULT_CONDENSATION_MAX_EDGES,
+    ) -> Dict[str, Any]:
+        """Directed SCC condensation DAG over persisted relationships.
+
+        Components are exact mutual-reachability SCCs. Condensation edges
+        are the distinct ordered SCC pairs induced by selected rows.
+        Caps truncate returned material; totals stay exact. This is not
+        weak connectivity, cycle enumeration, a unique topological rank,
+        or a runtime-cycle proof.
+        """
+        return compute_condensation_graph(
+            self.ents,
+            self.rels,
+            edge_types=edge_types,
+            max_components=max_components,
+            max_nodes_per_component=max_nodes_per_component,
+            max_edges=max_edges,
+        )
+
     def degree_ranking(
         self,
         *,
@@ -3729,6 +3762,227 @@ def compute_strongly_connected_components(
     }
 
 
+def compute_condensation_graph(
+    ents: Optional[pd.DataFrame],
+    rels: Optional[pd.DataFrame],
+    *,
+    edge_types: Optional[Sequence[str]] = None,
+    max_components: int = DEFAULT_CONDENSATION_MAX_COMPONENTS,
+    max_nodes_per_component: int = DEFAULT_CONDENSATION_MAX_NODES_PER_COMPONENT,
+    max_edges: int = DEFAULT_CONDENSATION_MAX_EDGES,
+) -> Dict[str, Any]:
+    """Directed SCC condensation DAG over stored relationship rows.
+
+    Membership is exact mutual reachability on the selected directed
+    topology. Condensation edges are the distinct ordered SCC pairs
+    induced by selected rows; each stores the exact selected-row count
+    for that pair. Caps truncate returned lists; every total is exact
+    for the selected type filter. Isolated entity titles remain
+    singleton SCCs. Endpoint-only titles come only from selected rows.
+    """
+    max_components = _require_limit_int(
+        "max_components",
+        max_components,
+        minimum=1,
+        maximum=HARD_MAX_CONDENSATION_COMPONENTS,
+    )
+    max_nodes_per_component = _require_limit_int(
+        "max_nodes_per_component",
+        max_nodes_per_component,
+        minimum=1,
+        maximum=HARD_MAX_CONDENSATION_COMPONENT_NODES,
+    )
+    max_edges = _require_limit_int(
+        "max_edges",
+        max_edges,
+        minimum=0,
+        maximum=HARD_MAX_CONDENSATION_EDGES,
+    )
+    normalized_types, entity_titles, selected, nodes = _topology_universe(
+        ents, rels, edge_types=edge_types
+    )
+    n_nodes_total = len(nodes)
+    n_edges_total = len(selected)
+    n_entity_nodes_total = len(entity_titles)
+    n_endpoint_only_nodes_total = n_nodes_total - n_entity_nodes_total
+    if n_entity_nodes_total + n_endpoint_only_nodes_total != n_nodes_total:
+        raise ValueError("entity and endpoint-only counts do not cover the node universe")
+
+    empty = {
+        "edge_types": normalized_types,
+        "max_components": max_components,
+        "max_nodes_per_component": max_nodes_per_component,
+        "max_edges": max_edges,
+        "components": [],
+        "edges": [],
+        "n_components_total": 0,
+        "n_components_returned": 0,
+        "n_nodes_total": 0,
+        "n_edges_total": 0,
+        "n_internal_edges_total": 0,
+        "n_cross_component_edges_total": 0,
+        "n_self_loop_edges_total": 0,
+        "n_cyclic_components_total": 0,
+        "n_entity_nodes_total": 0,
+        "n_endpoint_only_nodes_total": 0,
+        "n_condensation_edges_total": 0,
+        "n_condensation_edges_eligible_total": 0,
+        "n_condensation_edges_returned": 0,
+        "components_truncated": False,
+        "nodes_truncated": False,
+        "edges_truncated": False,
+    }
+    if not nodes:
+        if n_edges_total != 0:
+            raise ValueError("selected relationships exist without a node universe")
+        return empty
+
+    pairs = {(src, tgt) for _rid, src, tgt in selected}
+    sccs, order, title_to_scc, cond_pairs = _scc_condensation_dag(nodes, pairs)
+    n_sccs = len(sccs)
+    if n_sccs != len(order):
+        raise ValueError("SCC condensation is not a DAG")
+    if len(title_to_scc) != n_nodes_total or set(title_to_scc) != nodes:
+        raise ValueError("SCC membership does not cover each node exactly once")
+
+    internal_counts = [0] * n_sccs
+    self_loop_counts = [0] * n_sccs
+    cross_counts: Dict[Tuple[int, int], int] = {}
+    n_cross = 0
+    n_self_total = 0
+    classified = 0
+    for _rid, src, tgt in selected:
+        src_scc = title_to_scc[src]
+        tgt_scc = title_to_scc[tgt]
+        classified += 1
+        if src_scc == tgt_scc:
+            internal_counts[src_scc] += 1
+            if src == tgt:
+                self_loop_counts[src_scc] += 1
+                n_self_total += 1
+        else:
+            n_cross += 1
+            key = (src_scc, tgt_scc)
+            cross_counts[key] = cross_counts.get(key, 0) + 1
+    if classified != n_edges_total:
+        raise ValueError("selected relationship rows were not classified exactly once")
+    if set(cross_counts) != cond_pairs:
+        raise ValueError("condensation edges do not match cross-SCC topology")
+    if sum(cross_counts.values()) != n_cross:
+        raise ValueError("condensation-edge row counts do not cover cross-component rows")
+
+    records: List[Dict[str, Any]] = []
+    n_cyclic = 0
+    covered_titles: List[str] = []
+    for index in order:
+        titles = list(sccs[index])
+        n_nodes = len(titles)
+        n_internal = int(internal_counts[index])
+        n_self = int(self_loop_counts[index])
+        n_entity = sum(1 for title in titles if title in entity_titles)
+        is_cyclic = n_nodes > 1 or n_self > 0
+        if is_cyclic:
+            n_cyclic += 1
+        if titles[0] != min(titles, key=_utf8_key):
+            raise ValueError("SCC representative is not the minimum UTF-8 member")
+        covered_titles.extend(titles)
+        records.append(
+            {
+                "representative": titles[0],
+                "nodes": titles,
+                "n_nodes_total": n_nodes,
+                "n_internal_edges_total": n_internal,
+                "n_self_loop_edges_total": n_self,
+                "n_entity_nodes": n_entity,
+                "n_endpoint_only_nodes": n_nodes - n_entity,
+                "is_cyclic": is_cyclic,
+            }
+        )
+    if len(covered_titles) != n_nodes_total or set(covered_titles) != nodes:
+        raise ValueError("component membership does not cover each node exactly once")
+    n_internal_total = sum(int(rec["n_internal_edges_total"]) for rec in records)
+    n_self_sum = sum(int(rec["n_self_loop_edges_total"]) for rec in records)
+    if n_internal_total + n_cross != n_edges_total:
+        raise ValueError("internal and cross-component edges do not cover selected rows")
+    if n_self_sum != n_self_total:
+        raise ValueError("self-loop totals do not cover selected self-loop rows")
+
+    returned: List[Dict[str, Any]] = []
+    for rec in records[:max_components]:
+        titles = list(rec["nodes"])
+        shown = titles[:max_nodes_per_component]
+        returned.append(
+            {
+                "representative": rec["representative"],
+                "nodes": shown,
+                "n_nodes_total": int(rec["n_nodes_total"]),
+                "n_nodes_returned": len(shown),
+                "n_internal_edges_total": int(rec["n_internal_edges_total"]),
+                "n_self_loop_edges_total": int(rec["n_self_loop_edges_total"]),
+                "n_entity_nodes": int(rec["n_entity_nodes"]),
+                "n_endpoint_only_nodes": int(rec["n_endpoint_only_nodes"]),
+                "is_cyclic": bool(rec["is_cyclic"]),
+                "nodes_truncated": int(rec["n_nodes_total"]) > len(shown),
+            }
+        )
+
+    returned_indices = order[:max_components]
+    returned_set = set(returned_indices)
+    topo_pos = {index: pos for pos, index in enumerate(order)}
+    eligible_rows: List[Tuple[int, int, int, int, int]] = []
+    for src_scc, tgt_scc in cond_pairs:
+        src_pos = topo_pos[src_scc]
+        tgt_pos = topo_pos[tgt_scc]
+        if src_pos >= tgt_pos:
+            raise ValueError("condensation edge is not forward in topological order")
+        if src_scc in returned_set and tgt_scc in returned_set:
+            eligible_rows.append(
+                (
+                    src_pos,
+                    tgt_pos,
+                    src_scc,
+                    tgt_scc,
+                    int(cross_counts[(src_scc, tgt_scc)]),
+                )
+            )
+    eligible_rows.sort()
+    n_cond_total = len(cond_pairs)
+    n_eligible = len(eligible_rows)
+    shown_edges = eligible_rows[:max_edges]
+    edges = [
+        {
+            "source": sccs[src_scc][0],
+            "target": sccs[tgt_scc][0],
+            "n_relationship_rows_total": count,
+        }
+        for _src_pos, _tgt_pos, src_scc, tgt_scc, count in shown_edges
+    ]
+    return {
+        "edge_types": normalized_types,
+        "max_components": max_components,
+        "max_nodes_per_component": max_nodes_per_component,
+        "max_edges": max_edges,
+        "components": returned,
+        "edges": edges,
+        "n_components_total": len(records),
+        "n_components_returned": len(returned),
+        "n_nodes_total": n_nodes_total,
+        "n_edges_total": n_edges_total,
+        "n_internal_edges_total": n_internal_total,
+        "n_cross_component_edges_total": n_cross,
+        "n_self_loop_edges_total": n_self_total,
+        "n_cyclic_components_total": n_cyclic,
+        "n_entity_nodes_total": n_entity_nodes_total,
+        "n_endpoint_only_nodes_total": n_endpoint_only_nodes_total,
+        "n_condensation_edges_total": n_cond_total,
+        "n_condensation_edges_eligible_total": n_eligible,
+        "n_condensation_edges_returned": len(edges),
+        "components_truncated": len(records) > len(returned),
+        "nodes_truncated": any(bool(rec["nodes_truncated"]) for rec in returned),
+        "edges_truncated": len(edges) < n_cond_total,
+    }
+
+
 def _iterative_sccs(
     nodes: set[str],
     pairs: set[Tuple[str, str]],
@@ -3797,16 +4051,24 @@ def _iterative_sccs(
     return sccs
 
 
-def _containment_scc_order(
+def _scc_condensation_dag(
     nodes: set[str],
     pairs: set[Tuple[str, str]],
-) -> List[str]:
+) -> Tuple[List[List[str]], List[int], Dict[str, int], set[Tuple[int, int]]]:
+    """One SCC pass plus one deterministic condensation DAG.
+
+    Shared by containment dependency-order and the condensation producer.
+    Calls ``_iterative_sccs`` exactly once. Kahn order uses a heap keyed
+    by each SCC representative's UTF-8 bytes; newly unlocked SCCs re-enter
+    that same heap. Fails closed unless every SCC is emitted exactly once.
+    """
     sccs = _iterative_sccs(nodes, pairs)
     title_to_scc = {
         title: index for index, members in enumerate(sccs) for title in members
     }
     cond_adj: Dict[int, set[int]] = {index: set() for index in range(len(sccs))}
     cond_indeg = [0] * len(sccs)
+    cond_pairs: set[Tuple[int, int]] = set()
     for src, tgt in pairs:
         src_scc = title_to_scc[src]
         tgt_scc = title_to_scc[tgt]
@@ -3814,6 +4076,7 @@ def _containment_scc_order(
             continue
         cond_adj[src_scc].add(tgt_scc)
         cond_indeg[tgt_scc] += 1
+        cond_pairs.add((src_scc, tgt_scc))
 
     heap: List[Tuple[bytes, int]] = []
     for index, members in enumerate(sccs):
@@ -3827,8 +4090,16 @@ def _containment_scc_order(
             cond_indeg[nxt] -= 1
             if cond_indeg[nxt] == 0:
                 heapq.heappush(heap, (_utf8_key(sccs[nxt][0]), nxt))
-    if len(ordered) != len(sccs):
-        raise ValueError("containment condensation is not a DAG")
+    if len(ordered) != len(sccs) or len(set(ordered)) != len(sccs):
+        raise ValueError("SCC condensation is not a DAG")
+    return sccs, ordered, title_to_scc, cond_pairs
+
+
+def _containment_scc_order(
+    nodes: set[str],
+    pairs: set[Tuple[str, str]],
+) -> List[str]:
+    sccs, ordered, _title_to_scc, _cond_pairs = _scc_condensation_dag(nodes, pairs)
     result: List[str] = []
     for index in ordered:
         result.extend(sccs[index])

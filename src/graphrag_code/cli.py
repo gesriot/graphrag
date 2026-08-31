@@ -39,6 +39,9 @@ import typer
 from graphrag_code.byog_graph import (
     DEFAULT_COMPONENTS_MAX_COMPONENTS,
     DEFAULT_COMPONENTS_MAX_NODES_PER_COMPONENT,
+    DEFAULT_CONDENSATION_MAX_COMPONENTS,
+    DEFAULT_CONDENSATION_MAX_EDGES,
+    DEFAULT_CONDENSATION_MAX_NODES_PER_COMPONENT,
     DEFAULT_DEGREE_RANKING_MAX_NODES,
     DEFAULT_STRONG_COMPONENTS_MAX_COMPONENTS,
     DEFAULT_STRONG_COMPONENTS_MAX_NODES_PER_COMPONENT,
@@ -570,6 +573,53 @@ def strong_components(
             str(max_components),
             "--max-nodes-per-component",
             str(max_nodes_per_component),
+        ]
+    )
+    for rel_type in edge_type:
+        args.extend(["--edge-type", rel_type])
+    if json_out:
+        args.append("--json")
+    _delegate("graph_query.py", args)
+
+
+@app.command("condensation")
+def condensation(
+    graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
+    max_components: int = typer.Option(
+        DEFAULT_CONDENSATION_MAX_COMPONENTS, "--max-components"
+    ),
+    max_nodes_per_component: int = typer.Option(
+        DEFAULT_CONDENSATION_MAX_NODES_PER_COMPONENT,
+        "--max-nodes-per-component",
+    ),
+    max_edges: int = typer.Option(
+        DEFAULT_CONDENSATION_MAX_EDGES, "--max-edges"
+    ),
+    edge_type: list[str] = typer.Option(
+        [],
+        "--edge-type",
+        help="Exact relationship-type allow-list (repeatable). Omit for all types.",
+    ),
+    json_out: bool = typer.Option(False, "--json"),
+):
+    """Directed SCC condensation DAG (graph_query.py condensation).
+
+    Exact mutual-reachability SCCs plus one deterministic topological
+    presentation of the acyclic condensation. Not weak components, cycle
+    enumeration, a unique rank, semantic community detection, Leiden,
+    architecture inference, GraphRAG, a runtime recursion/deadlock proof,
+    or a UI.
+    """
+    args = _append_snapshot(["condensation", "--graph", str(graph)], snapshot)
+    args.extend(
+        [
+            "--max-components",
+            str(max_components),
+            "--max-nodes-per-component",
+            str(max_nodes_per_component),
+            "--max-edges",
+            str(max_edges),
         ]
     )
     for rel_type in edge_type:
