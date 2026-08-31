@@ -29,6 +29,8 @@ from graphrag_code.byog_graph import (
     DEFAULT_COMPONENTS_MAX_COMPONENTS,
     DEFAULT_COMPONENTS_MAX_NODES_PER_COMPONENT,
     DEFAULT_DEGREE_RANKING_MAX_NODES,
+    DEFAULT_STRONG_COMPONENTS_MAX_COMPONENTS,
+    DEFAULT_STRONG_COMPONENTS_MAX_NODES_PER_COMPONENT,
     DEFAULT_SUBGRAPH_MAX_DEPTH,
     DEFAULT_SUBGRAPH_MAX_EDGES,
     DEFAULT_SUBGRAPH_MAX_NODES,
@@ -39,6 +41,8 @@ from graphrag_code.byog_graph import (
     HARD_MAX_COMPONENTS,
     HARD_MAX_COMPONENT_NODES,
     HARD_MAX_DEGREE_RANKING_NODES,
+    HARD_MAX_STRONG_COMPONENTS,
+    HARD_MAX_STRONG_COMPONENT_NODES,
     HARD_MAX_SUBGRAPH_DEPTH,
     HARD_MAX_SUBGRAPH_EDGES,
     HARD_MAX_SUBGRAPH_NODES,
@@ -102,6 +106,7 @@ TOOL_NAMES = (
     "neighbors",
     "subgraph",
     "components",
+    "strong_components",
     "degree_ranking",
     "impact",
     "type_closure",
@@ -601,6 +606,71 @@ class GraphMcpSession:
         except (ByogReaderLockError, SnapshotReadError) as exc:
             raise GraphMcpError(str(exc)) from exc
 
+    def strong_components(
+        self,
+        max_components: Any = DEFAULT_STRONG_COMPONENTS_MAX_COMPONENTS,
+        max_nodes_per_component: Any = DEFAULT_STRONG_COMPONENTS_MAX_NODES_PER_COMPONENT,
+        edge_types: Any = None,
+        snapshot: Any = CURRENT_REF,
+    ) -> Dict[str, Any]:
+        for name, value in (
+            ("max_components", max_components),
+            ("max_nodes_per_component", max_nodes_per_component),
+        ):
+            _reject_non_finite(name, value)
+        n_components = _require_int(
+            "max_components",
+            max_components,
+            minimum=1,
+            maximum=HARD_MAX_STRONG_COMPONENTS,
+        )
+        n_nodes = _require_int(
+            "max_nodes_per_component",
+            max_nodes_per_component,
+            minimum=1,
+            maximum=HARD_MAX_STRONG_COMPONENT_NODES,
+        )
+        types = _require_edge_types(edge_types)
+        try:
+            with self._scope(snapshot) as scope:
+                if scope.snap_id is None:
+                    raise GraphMcpError(
+                        f"graph has no published snapshot for {snapshot!r}"
+                    )
+                try:
+                    result = scope.load_graph().strong_components(
+                        edge_types=types,
+                        max_components=n_components,
+                        max_nodes_per_component=n_nodes,
+                    )
+                except ValueError as exc:
+                    raise GraphMcpError(str(exc)) from exc
+                truncated = bool(
+                    result.get("components_truncated") or result.get("nodes_truncated")
+                )
+                returned_nodes = sum(
+                    int(component.get("n_nodes_returned") or 0)
+                    for component in (result.get("components") or [])
+                )
+                return _envelope(
+                    tool="strong_components",
+                    graph=self.graph_root,
+                    snapshot=scope.snap_id,
+                    data=result,
+                    limits={
+                        "max_components": n_components,
+                        "max_nodes_per_component": n_nodes,
+                        "edge_types": types,
+                    },
+                    truncated=truncated,
+                    total=int(result.get("n_components_total") or 0)
+                    + int(result.get("n_nodes_total") or 0),
+                    returned=int(result.get("n_components_returned") or 0)
+                    + returned_nodes,
+                )
+        except (ByogReaderLockError, SnapshotReadError) as exc:
+            raise GraphMcpError(str(exc)) from exc
+
     def degree_ranking(
         self,
         rank_by: Any = "total",
@@ -996,6 +1066,27 @@ def build_mcp_server(session: GraphMcpSession) -> MCPServer:
         snapshot: str = CURRENT_REF,
     ) -> Dict[str, Any]:
         return session.components(
+            max_components,
+            max_nodes_per_component,
+            edge_types,
+            snapshot,
+        )
+
+    @mcp.tool(
+        name="strong_components",
+        description=(
+            "Bounded directed strongly-connected-components topology summary. "
+            "Deterministic mutual-reachability grouping only."
+        ),
+        annotations=READ_ONLY_TOOL,
+    )
+    def strong_components(
+        max_components: StrictInt = DEFAULT_STRONG_COMPONENTS_MAX_COMPONENTS,
+        max_nodes_per_component: StrictInt = DEFAULT_STRONG_COMPONENTS_MAX_NODES_PER_COMPONENT,
+        edge_types: Optional[List[str]] = None,
+        snapshot: str = CURRENT_REF,
+    ) -> Dict[str, Any]:
+        return session.strong_components(
             max_components,
             max_nodes_per_component,
             edge_types,

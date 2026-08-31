@@ -14,7 +14,7 @@ covers validation, plan recomputation, CAS, deletion, result
 construction, serialization, stdout write, and stdout flush. It does
 not take a nested shared lease and does not call the unguarded public
 cleanup helper. Advisory locks protect only cooperating
-processes. MCP stays exactly 14 read-only tools; this command is
+processes. MCP stays exactly 15 read-only tools; this command is
 CLI-only.
 
 Recursive deletion of several directories is not transactionally

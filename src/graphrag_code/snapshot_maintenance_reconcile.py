@@ -33,7 +33,7 @@ Writer-lock observation reuses the read-only staging inventory probe.
 It never claims or creates writer locks and does not infer writer
 death, ownership, age, PID, host, or safety to delete. A new
 maintenance plan is still required before any later mutation. MCP stays
-exactly 14 read-only tools; this command is CLI-only.
+exactly 15 read-only tools; this command is CLI-only.
 
 Usage:
     graphrag-code snapshot-maintenance-reconcile --graph <root> \\

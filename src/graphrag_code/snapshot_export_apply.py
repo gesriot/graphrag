@@ -10,7 +10,7 @@ not overwrite, merge with, delete, or rename a pre-existing destination
 entry. It does not create an archive. It does not preserve or claim to
 preserve ownership, timestamps, xattrs, ACLs, hardlinks, or provenance.
 The copy is not a backup, authentic, recoverable, or authorization to
-delete anything. MCP stays exactly 14 read-only tools; this command is
+delete anything. MCP stays exactly 15 read-only tools; this command is
 CLI-only.
 
 ``--snapshot``, ``--destination``, ``--expected-export-revision``, and

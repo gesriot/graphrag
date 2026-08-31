@@ -426,6 +426,7 @@ def test_mcp_query_tools_return_historical_snapshot(tmp_path: Path):
         "neighbors",
         "subgraph",
         "components",
+        "strong_components",
         "degree_ranking",
         "impact",
         "type_closure",
@@ -438,9 +439,15 @@ def test_mcp_query_tools_return_historical_snapshot(tmp_path: Path):
         async with Client(server) as client:
             tools = {tool.name for tool in (await client.list_tools()).tools}
             assert tools == set(TOOL_NAMES)
-            assert len(tools) == 14
+            assert len(tools) == 15
             for name in selectable:
-                if name in {"graph_status", "graph_doctor", "components", "degree_ranking"}:
+                if name in {
+                    "graph_status",
+                    "graph_doctor",
+                    "components",
+                    "strong_components",
+                    "degree_ranking",
+                }:
                     result = await client.call_tool(name, {"snapshot": older.name})
                 elif name == "type_closure":
                     result = await client.call_tool(

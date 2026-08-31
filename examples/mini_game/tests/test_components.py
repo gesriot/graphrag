@@ -739,10 +739,11 @@ def test_mcp_exposes_components_as_thirteenth_tool(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == len(set(names)) == 14
+            assert len(names) == len(set(names)) == 15
             assert names[names.index("neighbors") + 1] == "subgraph"
             assert names[names.index("subgraph") + 1] == "components"
-            assert names[names.index("components") + 1] == "degree_ranking"
+            assert names[names.index("components") + 1] == "strong_components"
+            assert names[names.index("strong_components") + 1] == "degree_ranking"
             assert names[names.index("degree_ranking") + 1] == "impact"
             tool = next(item for item in tools if item.name == "components")
             assert tool.annotations.read_only_hint is True

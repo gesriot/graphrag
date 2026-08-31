@@ -13,7 +13,7 @@ replaces that lock. Missing lock exits 2 and points at
 ``adopt-publication-lock``. Advisory locks protect only cooperating
 processes. Common lock-ignoring changes to the decision inputs during
 discovery are detected by a second read and exit 1. MCP stays exactly
-14 read-only tools; this command is CLI-only.
+15 read-only tools; this command is CLI-only.
 
 Usage:
     graphrag-code snapshot-retention-plan --graph <root> --keep-last <N> [--json]

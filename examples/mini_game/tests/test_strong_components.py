@@ -1,6 +1,6 @@
 """Directed strongly connected components over persisted relationship rows.
 
-Topology summary only. MCP does not expose this producer. No DOT,
+Topology summary only. MCP exposes the existing producer. No DOT,
 NetworkX, or Graphviz.
 """
 from __future__ import annotations
@@ -1176,17 +1176,27 @@ def test_no_nested_query_mcp_unchanged_and_existing_surfaces(
     assert isinstance(other.impact("B"), list)
 
 
-def test_mcp_remains_fourteen_tools_without_strong_components(tmp_path: Path):
+def test_mcp_exposes_strong_components_as_fifteenth_tool(tmp_path: Path):
     from anyio import run as anyio_run
     from mcp import Client
 
-    from graphrag_code.mcp_server import build_mcp_server, build_session
+    from graphrag_code.mcp_server import GraphMcpSession, build_mcp_server, build_session
 
     graph = _publish(tmp_path, [_entity("A"), _entity("B")], [_calls("A", "B")])
     session = build_session(graph, "python")
     server = build_mcp_server(session)
-    assert not hasattr(session, "strong_components")
-    assert "strong_components" not in TOOL_NAMES
+    params = list(inspect.signature(GraphMcpSession.strong_components).parameters)
+    assert params == [
+        "self",
+        "max_components",
+        "max_nodes_per_component",
+        "edge_types",
+        "snapshot",
+    ]
+    assert "graph" not in params
+    assert "format" not in params
+    assert "dot" not in params
+    assert "symbol" not in params
     assert "strong-components" not in TOOL_NAMES
     assert list(TOOL_NAMES) == [
         "graph_status",
@@ -1197,6 +1207,7 @@ def test_mcp_remains_fourteen_tools_without_strong_components(tmp_path: Path):
         "neighbors",
         "subgraph",
         "components",
+        "strong_components",
         "degree_ranking",
         "impact",
         "type_closure",
@@ -1204,27 +1215,56 @@ def test_mcp_remains_fourteen_tools_without_strong_components(tmp_path: Path):
         "snapshot_history",
         "snapshot_diff",
     ]
-    assert len(TOOL_NAMES) == len(set(TOOL_NAMES)) == 14
+    assert len(TOOL_NAMES) == len(set(TOOL_NAMES)) == 15
+
+    expected = ByogGraph(graph).strong_components()
+    payload = session.strong_components()
+    assert payload["tool"] == "strong_components"
+    assert payload["ok"] is True
+    assert payload["data"] == json.loads(json.dumps(expected, allow_nan=False, default=str))
+    returned_nodes = sum(int(c["n_nodes_returned"]) for c in payload["data"]["components"])
+    assert payload["total"] == (
+        payload["data"]["n_components_total"] + payload["data"]["n_nodes_total"]
+    )
+    assert payload["returned"] == (
+        payload["data"]["n_components_returned"] + returned_nodes
+    )
+    comps = session.components()
+    assert comps["tool"] == "components"
+    ranked = session.degree_ranking()
+    assert ranked["tool"] == "degree_ranking"
 
     async def _body():
         async with Client(server) as client:
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert "strong_components" not in names
             assert "strong-components" not in names
-            for tool in tools:
-                props = tool.input_schema.get("properties") or {}
-                assert "strong_components" not in props
-                assert "scc" not in props
+            assert names[names.index("components") + 1] == "strong_components"
+            assert names[names.index("strong_components") + 1] == "degree_ranking"
+            tool = next(item for item in tools if item.name == "strong_components")
+            assert tool.annotations.read_only_hint is True
+            assert tool.annotations.destructive_hint is False
+            assert tool.annotations.idempotent_hint is True
+            assert tool.annotations.open_world_hint is False
+            assert tool.input_schema["additionalProperties"] is False
+            props = tool.input_schema.get("properties") or {}
+            assert list(props) == [
+                "max_components",
+                "max_nodes_per_component",
+                "edge_types",
+                "snapshot",
+            ]
+            body = await client.call_tool("strong_components", {})
+            data = body.structured_content
+            if isinstance(data, dict) and set(data) == {"result"}:
+                data = data["result"]
+            assert data["tool"] == "strong_components"
+            assert data["data"] == payload["data"]
             ranked = await client.call_tool("degree_ranking", {})
             assert ranked.is_error is False
             comps = await client.call_tool("components", {})
             assert comps.is_error is False
-            sub = await client.call_tool(
-                "subgraph", {"symbol": "A", "direction": "outgoing", "max_depth": 1}
-            )
-            assert sub.is_error is False
 
     anyio_run(_body)
 

@@ -84,7 +84,7 @@ stderr.
 
 The server exposes a fixed read-only tool set: `graph_status`,
 `graph_doctor`, `query_symbol`, `callers`, `callees`, `neighbors`,
-`subgraph`, `components`, `degree_ranking`, `impact`, `type_closure`,
+`subgraph`, `components`, `strong_components`, `degree_ranking`, `impact`, `type_closure`,
 `context_pack`, `snapshot_history`, and `snapshot_diff`. There is no `snapshot_activate`, `snapshot_pin`,
 `snapshot_unpin`, `snapshot_retention_plan`, `snapshot_prune`,
 `snapshot_staging`, `snapshot_staging_cleanup_plan`,
@@ -140,7 +140,7 @@ rest of the call, and reports that canonical id in the response
 envelope. `current` is resolved exactly once when it is selected; an
 explicit id does not read `current`. Cooperating publishers and
 keep-last retention wait until the call releases the lock. The MCP tool
-set remains exactly 14 read-only tools. `snapshot_history` and
+set remains exactly 15 read-only tools. `snapshot_history` and
 `snapshot_diff` keep their own reference contracts. A managed graph without that regular lock file is rejected during
 MCP startup. MCP never creates the lock, and neither does the doctor or
 `ByogGraph`. To add the protocol to an existing pre-lock managed graph
@@ -177,7 +177,7 @@ no partial stdout. DOT is capped at 1,000,000 UTF-8 bytes and fails closed
 before writing. This is deterministic structural graph exploration only:
 not natural-language search, semantic inference, GraphRAG, community
 detection, architecture understanding, completeness beyond stored
-relationships, or a semantic/community visualization. MCP stays exactly 14
+relationships, or a semantic/community visualization. MCP stays exactly 15
 read-only tools and does not expose DOT; `subgraph` is immediately after
 `neighbors`.
 
@@ -204,7 +204,7 @@ this existing bounded topology producer as
 the thirteenth read-only tool, immediately after `subgraph`. It does not
 expose DOT or output-format selection. Representatives remain smallest
 UTF-8 titles, not leaders. Component size remains topology, not
-importance. The MCP tool set remains exactly 14 read-only tools.
+importance. The MCP tool set remains exactly 15 read-only tools.
 
 `graphrag-code degree-ranking` (also `python -m graphrag_code.graph_query degree-ranking`
 and `scripts/graph_query.py degree-ranking`) is a deterministic read-only
@@ -226,14 +226,14 @@ degree accounting, not PageRank, betweenness, closeness, eigenvector
 centrality, normalized score, semantic importance, architecture inference,
 community detection, hierarchy, GraphRAG, or natural-language analysis.
 MCP exposes this existing producer as the fourteenth read-only
-tool, immediately after `components`. It does not expose DOT,
+tool, immediately after `strong_components`. It does not expose DOT,
 output-format selection, a graph path, a symbol, a direction, a
 metric, a normalized score, or an ordinal rank. This is raw
 directed relationship-row degree accounting only: not PageRank,
 betweenness, closeness, eigenvector centrality, a normalized
 score, semantic importance, leadership, architecture, communities,
 hierarchy, GraphRAG, or natural-language analysis. The MCP tool
-set remains exactly 14 read-only tools. This milestone has no DOT
+set remains exactly 15 read-only tools. This milestone has no DOT
 or visualization.
 
 `graphrag-code strong-components` (also `python -m graphrag_code.graph_query strong-components`
@@ -254,9 +254,17 @@ reachability only, not a runtime loop, recursive execution, or an
 architectural defect. This is directed structural grouping: not weak
 components, semantic communities, Leiden, clustering, architecture,
 hierarchy, importance, dependency/build order, GraphRAG, or
-natural-language analysis. There is no DOT. MCP remains exactly 14
-read-only tools and does not expose `strong_components` or
-`strong-components`.
+natural-language analysis. There is no DOT. MCP exposes this existing
+bounded structural producer as `strong_components`, registered
+immediately after `components`. It does not expose DOT, output-format
+selection, a graph path, a symbol, a direction, a rank, or an algorithm.
+This is directed mutual-reachability grouping only: not weak components,
+Leiden or semantic community detection, architecture, hierarchy,
+leadership, ownership, importance, dependency/build/import/call order,
+proof of runtime recursion or deadlock, GraphRAG, or natural-language
+analysis. This is the fifteenth read-only MCP tool. MCP remains read-only and does not index, mutate, activate,
+retain, repair, or clean up. The MCP tool set remains exactly 15
+read-only tools.
 
 `graphrag-code dependency-order` (also `python -m graphrag_code.graph_query dependency-order`
 and `scripts/graph_query.py dependency-order`) is a deterministic read-only
@@ -274,7 +282,7 @@ title list: this is an unbounded full-list legacy surface, not a bounded
 query. `--json` emits that list. This is not a build order, import order,
 call order, semantic dependency order, architecture hierarchy, ownership
 proof, porting plan, GraphRAG, or natural-language analysis. There is no
-DOT. MCP remains exactly 14 read-only tools and does not expose
+DOT. MCP remains exactly 15 read-only tools and does not expose
 `dependency_order` or `dependency-order`.
 
 `adopt-publication-lock` is an explicit migration, never an automatic
@@ -360,7 +368,7 @@ regular `.publish.lock` and never create that file. Listing holds one
 shared lease; pin and unpin hold one exclusive lease. Advisory locks
 protect only cooperating processes. Manual or lock-ignoring deletion can
 still remove a pinned snapshot. These commands are intentionally absent
-from MCP. The MCP tool set remains exactly 14 read-only tools.
+from MCP. The MCP tool set remains exactly 15 read-only tools.
 
 `snapshot-retention-plan --graph <root> --keep-last <N>` is a read-only
 report of what cooperating keep-last cleanup would retain and delete. It
@@ -728,7 +736,7 @@ export-staging-cleanup-reconcile, import-plan, import-apply,
 import-reconcile, transfer-plan, transfer-apply, and
 transfer-reconcile commands are
 intentionally absent from MCP. The MCP tool set remains exactly
-14 read-only tools.
+15 read-only tools.
 
 Query and context-pack commands accept optional
 `--snapshot <id|current>`. Omitting it preserves the existing default

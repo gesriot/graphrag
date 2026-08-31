@@ -41,7 +41,7 @@ missing retained snapshots are all normal completed observations.
 ``ok=true`` means this read-only
 reconciliation succeeded; it does not mean import apply succeeded.
 A fresh import plan is still required before any later apply. MCP
-stays exactly 14 read-only tools; this command is CLI-only.
+stays exactly 15 read-only tools; this command is CLI-only.
 
 Usage:
     graphrag-code snapshot-import-reconcile --graph <managed-root> \\

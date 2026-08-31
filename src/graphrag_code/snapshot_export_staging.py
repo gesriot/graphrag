@@ -23,7 +23,7 @@ open the directory descriptor-relative and inspect or nonblocking-probe
 the fixed ``.export-writer.lock`` protocol entry. It does not create,
 write, truncate, chmod, replace, unlink, or rename that file, and it
 does not open or read export payload contents. Observed lease
-contention does not change ``writer_activity``. MCP stays exactly 14
+contention does not change ``writer_activity``. MCP stays exactly 15
 read-only tools; this command is CLI-only.
 
 Usage:

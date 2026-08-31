@@ -50,7 +50,7 @@ no-follow directory descriptors and identity checks. The command does
 not invoke public export or import CLIs and does not create a detached
 observation window.
 
-MCP stays exactly 14 read-only tools; this command is CLI-only.
+MCP stays exactly 15 read-only tools; this command is CLI-only.
 
 Usage:
     graphrag-code snapshot-transfer-plan --source-graph <managed-root> --snapshot <id|current> --target-graph <managed-root> [--json]

@@ -995,10 +995,10 @@ def test_implementation_does_not_invoke_mutations_or_producers():
         assert word not in lowered
 
 
-def test_mcp_remains_exactly_fourteen(tmp_path: Path):
+def test_mcp_remains_exactly_fifteen(tmp_path: Path):
     from anyio import run as anyio_run
 
-    assert len(TOOL_NAMES) == 14
+    assert len(TOOL_NAMES) == 15
     assert "snapshot_maintenance_plan" not in TOOL_NAMES
     assert "snapshot_maintenance_plan" not in " ".join(TOOL_NAMES)
     graph = tmp_path / "g"
@@ -1012,7 +1012,7 @@ def test_mcp_remains_exactly_fourteen(tmp_path: Path):
         async with Client(server) as client:
             names = {tool.name for tool in (await client.list_tools()).tools}
             assert names == set(TOOL_NAMES)
-            assert len(names) == 14
+            assert len(names) == 15
             assert "snapshot_maintenance_plan" not in names
 
     anyio_run(_body)

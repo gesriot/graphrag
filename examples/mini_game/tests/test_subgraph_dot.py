@@ -1030,7 +1030,7 @@ def test_no_nested_traversal_graphviz_network_or_tempfiles_and_single_producer_c
     assert 0 <= with_at < write_at < flush_at
 
 
-def test_mcp_remains_fourteen_tools_without_dot(tmp_path: Path):
+def test_mcp_remains_fifteen_tools_without_dot(tmp_path: Path):
     from anyio import run as anyio_run
     from mcp import Client
 
@@ -1062,7 +1062,7 @@ def test_mcp_remains_fourteen_tools_without_dot(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == 14
+            assert len(names) == 15
             sub = next(tool for tool in tools if tool.name == "subgraph")
             props = (sub.input_schema.get("properties") or {})
             assert "dot" not in props

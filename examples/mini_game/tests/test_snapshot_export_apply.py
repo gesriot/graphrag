@@ -1123,12 +1123,12 @@ def test_implementation_streams_and_does_not_mutate_or_invoke_producers():
         assert word not in lowered
 
 
-def test_mcp_remains_exactly_fourteen_and_byog_roots_unchanged(tmp_path: Path):
+def test_mcp_remains_exactly_fifteen_and_byog_roots_unchanged(tmp_path: Path):
     from anyio import run as anyio_run
 
     before = {path.name: _root_fingerprint(path) for path in BYOG_ROOTS}
     assert len(before) == 15
-    assert len(TOOL_NAMES) == 14
+    assert len(TOOL_NAMES) == 15
     assert "snapshot_export_apply" not in TOOL_NAMES
     assert "snapshot_export_plan" not in TOOL_NAMES
     graph = tmp_path / "g"
@@ -1142,7 +1142,7 @@ def test_mcp_remains_exactly_fourteen_and_byog_roots_unchanged(tmp_path: Path):
         async with Client(server) as client:
             names = {tool.name for tool in (await client.list_tools()).tools}
             assert names == set(TOOL_NAMES)
-            assert len(names) == 14
+            assert len(names) == 15
             assert "snapshot_export_apply" not in names
 
     anyio_run(_body)

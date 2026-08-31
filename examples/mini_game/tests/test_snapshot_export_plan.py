@@ -686,10 +686,10 @@ def test_implementation_streams_and_does_not_mutate_or_invoke_producers():
     assert "export_performed=false" in source or "export_performed" in source
 
 
-def test_mcp_remains_exactly_fourteen(tmp_path: Path):
+def test_mcp_remains_exactly_fifteen(tmp_path: Path):
     from anyio import run as anyio_run
 
-    assert len(TOOL_NAMES) == 14
+    assert len(TOOL_NAMES) == 15
     assert "snapshot_export_plan" not in TOOL_NAMES
     graph = tmp_path / "g"
     _publish(graph, "a")
@@ -702,7 +702,7 @@ def test_mcp_remains_exactly_fourteen(tmp_path: Path):
         async with Client(server) as client:
             names = {tool.name for tool in (await client.list_tools()).tools}
             assert names == set(TOOL_NAMES)
-            assert len(names) == 14
+            assert len(names) == 15
             assert "snapshot_export_plan" not in names
 
     anyio_run(_body)
