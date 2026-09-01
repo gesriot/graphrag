@@ -52,11 +52,12 @@ precise call structure. The intended path is:
    Graphviz, render an image, or provide an interactive UI. `components` is
    a weakly-connected-components topology summary over persisted titles and
    selected relationship rows, not semantic community detection, Leiden,
-   centrality, or architecture inference. MCP remains exactly 15 read-only
+   centrality, or architecture inference. MCP remains exactly 16 read-only
    tools, does not expose DOT, includes `subgraph` immediately after
    `neighbors`, includes `components` immediately after `subgraph`, and
-   includes `strong_components` immediately after `components`, and
-   includes `degree_ranking` immediately after `strong_components`.
+   includes `strong_components` immediately after `components`,
+   includes `condensation` immediately after `strong_components`, and
+   includes `degree_ranking` immediately after `condensation`.
    `components` is the existing bounded structural topology producer, not
    semantic community detection, Leiden, clustering, centrality, hierarchy,
    architecture inference, importance ranking, GraphRAG, or
@@ -68,12 +69,12 @@ precise call structure. The intended path is:
    detection, GraphRAG, or natural-language analysis. Self-loops contribute
    in=1 / out=1 / total=2; parallel rows each count; isolates remain;
    endpoint-only nodes are marked non-entities. MCP exposes that existing
-   producer as `degree_ranking` immediately after `strong_components` and does
+   producer as `degree_ranking` immediately after `condensation` and does
    not expose DOT. This is raw directed relationship-row degree accounting
    only: not PageRank, betweenness, closeness, eigenvector centrality, a
    normalized score, semantic importance, leadership, architecture,
    communities, hierarchy, GraphRAG, or natural-language analysis. MCP
-   remains exactly 15 read-only tools. This milestone has no DOT.
+   remains exactly 16 read-only tools. This milestone has no DOT.
    `dependency-order` is a deterministic structural containment order over
    persisted `contains` rows: source before target across strongly connected
    components, UTF-8 presentation inside a cycle, full unbounded title list.
@@ -86,15 +87,17 @@ precise call structure. The intended path is:
    architecture, hierarchy, importance, or a runtime recursion/deadlock
    proof. There is no DOT. MCP exposes that existing bounded structural
    producer as `strong_components` immediately after `components`. MCP
-   remains exactly 15 read-only tools. `condensation` is a bounded directed
+   remains exactly 16 read-only tools. `condensation` is a bounded directed
    SCC condensation DAG over selected persisted rows (`--edge-type`,
    `--max-components`, `--max-nodes-per-component`, `--max-edges`). It is
    not weak `components`, not cycle enumeration, not transitive closure,
    not a unique rank, not a containment `dependency-order` list, not
    semantic communities, Leiden, architecture, hierarchy, importance, or a
-   runtime recursion/deadlock proof. There is no DOT. MCP does not expose
-   `condensation` or `condensation_graph`. MCP remains exactly 15 read-only
-   tools.
+   runtime recursion/deadlock proof. There is no DOT. MCP exposes that
+   existing bounded structural producer as `condensation`, the sixteenth
+   read-only tool added, immediately after `strong_components` and
+   immediately before `degree_ranking`. There is no `condensation_graph`
+   alias. MCP remains exactly 16 read-only tools.
 6. **Golden-first porting gate** – before Rust: license/provenance, a golden
    contract the **reference language** already passes, then a clean graph audit,
    then porting. Recorded in [Plan.md](Plan.md) (“Porting gate”).
@@ -209,7 +212,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`2094 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`2098 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
@@ -263,7 +266,7 @@ Historical reads do not require `snapshot-activate` and do not change
 `current`. One shared `.publish.lock` lease pins the selected snapshot
 against cooperating keep-last retention until the complete response is
 built. `current` is resolved exactly once when selected and is not read
-for an explicit published id. The MCP tool set remains exactly 15.
+for an explicit published id. The MCP tool set remains exactly 16.
 Explicit query/context CLI selectors require the existing regular
 publication lock and never create it. Their omitted `--snapshot` path
 keeps the existing default current/legacy-flat pre-lock compatibility
@@ -276,7 +279,7 @@ activation, backup, or replication. Listing never creates the file.
 Unpin does not delete immediately. Cooperating keep-last protects
 ``current``, existing doc-claim pins, and operator pins. A malformed
 registry aborts publication before ``current`` or snapshot deletion.
-MCP remains exactly 15 read-only tools. ``graphrag-code
+MCP remains exactly 16 read-only tools. ``graphrag-code
 snapshot-retention-plan`` (also ``python -m
 graphrag_code.snapshot_retention`` and
 ``scripts/snapshot_retention.py``) is a read-only report of the shared

@@ -1784,7 +1784,7 @@ def test_descriptor_lifetime_through_serialization_write_flush(
     assert state["flushes"] == 2
 
 
-def test_no_mutation_no_producer_invocation_and_mcp_remains_fifteen(
+def test_no_mutation_no_producer_invocation_and_mcp_remains_sixteen(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     import graphrag_code.snapshot_transfer_apply as apply_mod
@@ -1853,7 +1853,7 @@ def test_no_mutation_no_producer_invocation_and_mcp_remains_fifteen(
 
     before = {path.name: _root_fingerprint(path) for path in BYOG_ROOTS}
     assert len(before) == 15
-    assert len(TOOL_NAMES) == 15
+    assert len(TOOL_NAMES) == 16
     assert "snapshot_transfer_reconcile" not in TOOL_NAMES
     assert "snapshot_transfer_plan" not in TOOL_NAMES
     assert "snapshot_transfer_apply" not in TOOL_NAMES
@@ -1866,7 +1866,7 @@ def test_no_mutation_no_producer_invocation_and_mcp_remains_fifteen(
         async with Client(server) as client:
             names = {tool.name for tool in (await client.list_tools()).tools}
             assert names == set(TOOL_NAMES)
-            assert len(names) == 15
+            assert len(names) == 16
             assert "snapshot_transfer_reconcile" not in names
 
     anyio_run(_body)

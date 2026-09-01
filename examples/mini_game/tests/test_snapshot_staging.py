@@ -1110,12 +1110,12 @@ def test_successful_inventory_leaves_graph_unchanged(tmp_path: Path):
     assert "Traceback" not in missing.stderr
 
 
-def test_mcp_tool_set_remains_exactly_fifteen(tmp_path: Path):
+def test_mcp_tool_set_remains_exactly_sixteen(tmp_path: Path):
     from anyio import run as anyio_run
 
     graph = tmp_path / "g"
     _publish(graph, "a")
-    assert len(TOOL_NAMES) == 15
+    assert len(TOOL_NAMES) == 16
     assert "snapshot_staging" not in TOOL_NAMES
     session = build_session(graph, "python")
     server = build_mcp_server(session)
@@ -1126,7 +1126,7 @@ def test_mcp_tool_set_remains_exactly_fifteen(tmp_path: Path):
         async with Client(server) as client:
             names = {tool.name for tool in (await client.list_tools()).tools}
             assert names == set(TOOL_NAMES)
-            assert len(names) == 15
+            assert len(names) == 16
             assert "snapshot_staging" not in names
 
     anyio_run(_body)

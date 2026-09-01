@@ -1348,12 +1348,12 @@ def test_relative_cwd_module_script_product_and_wheel_parity(
     assert newer.is_dir()
 
 
-def test_mcp_tool_set_remains_exactly_fifteen(tmp_path: Path):
+def test_mcp_tool_set_remains_exactly_sixteen(tmp_path: Path):
     from anyio import run as anyio_run
 
     graph = tmp_path / "g"
     _publish(graph, "a")
-    assert len(TOOL_NAMES) == 15
+    assert len(TOOL_NAMES) == 16
     assert "snapshot_prune" not in TOOL_NAMES
     assert "snapshot_retention_plan" not in TOOL_NAMES
     session = build_session(graph, "python")
@@ -1365,7 +1365,7 @@ def test_mcp_tool_set_remains_exactly_fifteen(tmp_path: Path):
         async with Client(server) as client:
             names = {tool.name for tool in (await client.list_tools()).tools}
             assert names == set(TOOL_NAMES)
-            assert len(names) == 15
+            assert len(names) == 16
             assert "snapshot_prune" not in names
 
     anyio_run(_body)

@@ -823,11 +823,12 @@ def test_mcp_exposes_degree_ranking_as_fifteenth_tool(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == len(set(names)) == 15
+            assert len(names) == len(set(names)) == 16
             assert "degree-ranking" not in names
             assert names[names.index("subgraph") + 1] == "components"
             assert names[names.index("components") + 1] == "strong_components"
-            assert names[names.index("strong_components") + 1] == "degree_ranking"
+            assert names[names.index("strong_components") + 1] == "condensation"
+            assert names[names.index("condensation") + 1] == "degree_ranking"
             assert names[names.index("degree_ranking") + 1] == "impact"
             tool = next(item for item in tools if item.name == "degree_ranking")
             assert tool.annotations.read_only_hint is True

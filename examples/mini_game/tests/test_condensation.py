@@ -1478,7 +1478,7 @@ def test_no_nested_query_mcp_unchanged_and_existing_surfaces(
     assert isinstance(other.impact("B"), list)
 
 
-def test_mcp_remains_fifteen_tools_without_condensation(tmp_path: Path):
+def test_mcp_exposes_condensation_as_sixteenth_tool(tmp_path: Path):
     from anyio import run as anyio_run
     from mcp import Client
 
@@ -1487,11 +1487,22 @@ def test_mcp_remains_fifteen_tools_without_condensation(tmp_path: Path):
     graph = _publish(tmp_path, [_entity("A"), _entity("B")], [_calls("A", "B")])
     session = build_session(graph, "python")
     server = build_mcp_server(session)
-    assert not hasattr(session, "condensation")
-    assert not hasattr(session, "condensation_graph")
-    assert not hasattr(GraphMcpSession, "condensation")
-    assert "condensation" not in TOOL_NAMES
+    params = list(inspect.signature(GraphMcpSession.condensation).parameters)
+    assert params == [
+        "self",
+        "max_components",
+        "max_nodes_per_component",
+        "max_edges",
+        "edge_types",
+        "snapshot",
+    ]
+    assert "graph" not in params
+    assert "format" not in params
+    assert "dot" not in params
+    assert "symbol" not in params
+    assert "condensation-graph" not in TOOL_NAMES
     assert "condensation_graph" not in TOOL_NAMES
+    assert not hasattr(session, "condensation_graph")
     assert list(TOOL_NAMES) == [
         "graph_status",
         "graph_doctor",
@@ -1502,6 +1513,7 @@ def test_mcp_remains_fifteen_tools_without_condensation(tmp_path: Path):
         "subgraph",
         "components",
         "strong_components",
+        "condensation",
         "degree_ranking",
         "impact",
         "type_closure",
@@ -1509,24 +1521,72 @@ def test_mcp_remains_fifteen_tools_without_condensation(tmp_path: Path):
         "snapshot_history",
         "snapshot_diff",
     ]
-    assert len(TOOL_NAMES) == len(set(TOOL_NAMES)) == 15
+    assert len(TOOL_NAMES) == len(set(TOOL_NAMES)) == 16
+
+    expected = ByogGraph(graph).condensation()
+    payload = session.condensation()
+    assert payload["tool"] == "condensation"
+    assert payload["ok"] is True
+    assert payload["data"] == json.loads(json.dumps(expected, allow_nan=False, default=str))
+    returned_nodes = sum(int(c["n_nodes_returned"]) for c in payload["data"]["components"])
+    assert payload["total"] == (
+        payload["data"]["n_components_total"]
+        + payload["data"]["n_nodes_total"]
+        + payload["data"]["n_condensation_edges_total"]
+    )
+    assert payload["returned"] == (
+        payload["data"]["n_components_returned"]
+        + returned_nodes
+        + payload["data"]["n_condensation_edges_returned"]
+    )
+    assert payload["truncated"] is bool(
+        payload["data"]["components_truncated"]
+        or payload["data"]["nodes_truncated"]
+        or payload["data"]["edges_truncated"]
+    )
+    strong = session.strong_components()
+    assert strong["tool"] == "strong_components"
+    ranked = session.degree_ranking()
+    assert ranked["tool"] == "degree_ranking"
+    comps = session.components()
+    assert comps["tool"] == "components"
+    assert compute_condensation_graph(ByogGraph(graph).ents, ByogGraph(graph).rels) == expected
 
     async def _body():
         async with Client(server) as client:
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert "condensation" not in names
+            assert "condensation-graph" not in names
             assert "condensation_graph" not in names
-            for tool in tools:
-                props = tool.input_schema.get("properties") or {}
-                assert "condensation" not in props
+            assert names[names.index("strong_components") + 1] == "condensation"
+            assert names[names.index("condensation") + 1] == "degree_ranking"
+            tool = next(item for item in tools if item.name == "condensation")
+            assert tool.annotations.read_only_hint is True
+            assert tool.annotations.destructive_hint is False
+            assert tool.annotations.idempotent_hint is True
+            assert tool.annotations.open_world_hint is False
+            assert tool.input_schema["additionalProperties"] is False
+            props = tool.input_schema.get("properties") or {}
+            assert list(props) == [
+                "max_components",
+                "max_nodes_per_component",
+                "max_edges",
+                "edge_types",
+                "snapshot",
+            ]
+            body = await client.call_tool("condensation", {})
+            data = body.structured_content
+            if isinstance(data, dict) and set(data) == {"result"}:
+                data = data["result"]
+            assert data["tool"] == "condensation"
+            assert data["data"] == payload["data"]
             ranked = await client.call_tool("degree_ranking", {})
             assert ranked.is_error is False
             comps = await client.call_tool("components", {})
             assert comps.is_error is False
-            strong = await client.call_tool("strong_components", {})
-            assert strong.is_error is False
+            strong_tool = await client.call_tool("strong_components", {})
+            assert strong_tool.is_error is False
 
     anyio_run(_body)
 

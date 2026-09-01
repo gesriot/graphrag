@@ -21,7 +21,7 @@ and stdout flush. The command does not call a public scope that takes
 a nested graph lease. The selected directory stays anchored by a
 no-follow descriptor, and payload files are opened relative to it and
 hashed twice by bounded-memory streaming. A platform missing those safe
-descriptor primitives is rejected. MCP stays exactly 15 read-only
+descriptor primitives is rejected. MCP stays exactly 16 read-only
 tools; this command is CLI-only.
 
 ``export_revision`` is a self-consistency token for this exact observed

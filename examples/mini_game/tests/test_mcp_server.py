@@ -32,6 +32,9 @@ from graphrag_code import index_python as pkg_index_python  # type: ignore
 from graphrag_code.byog_graph import (  # type: ignore
     DEFAULT_COMPONENTS_MAX_COMPONENTS,
     DEFAULT_COMPONENTS_MAX_NODES_PER_COMPONENT,
+    DEFAULT_CONDENSATION_MAX_COMPONENTS,
+    DEFAULT_CONDENSATION_MAX_EDGES,
+    DEFAULT_CONDENSATION_MAX_NODES_PER_COMPONENT,
     DEFAULT_DEGREE_RANKING_MAX_NODES,
     DEFAULT_STRONG_COMPONENTS_MAX_COMPONENTS,
     DEFAULT_STRONG_COMPONENTS_MAX_NODES_PER_COMPONENT,
@@ -41,6 +44,9 @@ from graphrag_code.byog_graph import (  # type: ignore
     DEGREE_RANKING_MODES,
     HARD_MAX_COMPONENT_NODES,
     HARD_MAX_COMPONENTS,
+    HARD_MAX_CONDENSATION_COMPONENT_NODES,
+    HARD_MAX_CONDENSATION_COMPONENTS,
+    HARD_MAX_CONDENSATION_EDGES,
     HARD_MAX_DEGREE_RANKING_NODES,
     HARD_MAX_STRONG_COMPONENT_NODES,
     HARD_MAX_STRONG_COMPONENTS,
@@ -48,6 +54,7 @@ from graphrag_code.byog_graph import (  # type: ignore
     HARD_MAX_SUBGRAPH_EDGES,
     HARD_MAX_SUBGRAPH_NODES,
     ByogGraph,
+    compute_condensation_graph,
     compute_structural_degree_ranking,
     compute_strongly_connected_components,
     compute_weakly_connected_components,
@@ -251,14 +258,17 @@ def test_tools_list_is_exactly_documented(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == len(set(names)) == len(TOOL_NAMES) == 15
+            assert len(names) == len(set(names)) == len(TOOL_NAMES) == 16
             assert names[names.index("neighbors") + 1] == "subgraph"
             assert names[names.index("subgraph") + 1] == "components"
             assert names[names.index("components") + 1] == "strong_components"
-            assert names[names.index("strong_components") + 1] == "degree_ranking"
+            assert names[names.index("strong_components") + 1] == "condensation"
+            assert names[names.index("condensation") + 1] == "degree_ranking"
             assert names[names.index("degree_ranking") + 1] == "impact"
             assert "degree-ranking" not in names
             assert "strong-components" not in names
+            assert "condensation-graph" not in names
+            assert "condensation_graph" not in names
             assert "snapshot_activate" not in names
             for tool in tools:
                 assert tool.input_schema["additionalProperties"] is False
@@ -286,6 +296,7 @@ def test_every_required_tool_via_sdk_client(tmp_path: Path):
                     "snapshot_history",
                     "components",
                     "strong_components",
+                    "condensation",
                     "degree_ranking",
                 }:
                     result = await client.call_tool(name)
@@ -1925,9 +1936,10 @@ def test_degree_ranking_mcp_schema_defaults_and_unknown_args(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == len(set(names)) == 15
+            assert len(names) == len(set(names)) == 16
             assert names[names.index("components") + 1] == "strong_components"
-            assert names[names.index("strong_components") + 1] == "degree_ranking"
+            assert names[names.index("strong_components") + 1] == "condensation"
+            assert names[names.index("condensation") + 1] == "degree_ranking"
             assert names[names.index("degree_ranking") + 1] == "impact"
             assert "degree-ranking" not in names
             tool = next(item for item in tools if item.name == "degree_ranking")
@@ -2488,9 +2500,10 @@ def test_strong_components_mcp_schema_defaults_and_unknown_args(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == len(set(names)) == 15
+            assert len(names) == len(set(names)) == 16
             assert names[names.index("components") + 1] == "strong_components"
-            assert names[names.index("strong_components") + 1] == "degree_ranking"
+            assert names[names.index("strong_components") + 1] == "condensation"
+            assert names[names.index("condensation") + 1] == "degree_ranking"
             assert "strong-components" not in names
             tool = next(item for item in tools if item.name == "strong_components")
             assert tool.annotations.read_only_hint is True
@@ -2949,6 +2962,633 @@ def test_strong_components_mcp_publisher_wait_and_no_nested_query(
     q = ctx.Queue()
     reader = ctx.Process(
         target=_mcp_paused_strong_components, args=(str(graph), pinned, resume, q)
+    )
+    from test_reader_lease import _cleanup_processes, _publisher
+
+    pub = ctx.Process(target=_publisher, args=(str(graph), "next", 1, about, got, q))
+    try:
+        reader.start()
+        assert pinned.wait(timeout=20)
+        pub.start()
+        assert about.wait(timeout=20)
+        assert not got.is_set()
+        assert _current(graph) == first
+        assert (first_dir / "entities.parquet").is_file()
+        resume.set()
+        reader.join(timeout=20)
+        pub.join(timeout=20)
+        assert not reader.is_alive() and not pub.is_alive()
+        assert got.is_set()
+    finally:
+        _cleanup_processes(pub, reader, release=resume)
+
+
+def _assert_condensation_envelope(payload: dict, data: dict) -> None:
+    ready = json.loads(json.dumps(data, allow_nan=False, default=str))
+    returned_nodes = sum(int(item["n_nodes_returned"]) for item in ready["components"])
+    assert payload["tool"] == "condensation"
+    assert payload["ok"] is True
+    assert payload["schema_version"] == 1
+    assert payload["data"] == ready
+    assert payload["total"] == (
+        ready["n_components_total"]
+        + ready["n_nodes_total"]
+        + ready["n_condensation_edges_total"]
+    )
+    assert payload["returned"] == (
+        ready["n_components_returned"]
+        + returned_nodes
+        + ready["n_condensation_edges_returned"]
+    )
+    assert payload["truncated"] is bool(
+        ready["components_truncated"]
+        or ready["nodes_truncated"]
+        or ready["edges_truncated"]
+    )
+    assert payload["limits"]["max_envelope_bytes"] == HARD_MAX_ENVELOPE_BYTES
+    for key in (
+        "n_internal_edges_total",
+        "n_cross_component_edges_total",
+        "n_self_loop_edges_total",
+        "n_cyclic_components_total",
+        "n_entity_nodes_total",
+        "n_endpoint_only_nodes_total",
+        "n_edges_total",
+        "n_condensation_edges_total",
+        "n_condensation_edges_eligible_total",
+        "n_condensation_edges_returned",
+        "components_truncated",
+        "nodes_truncated",
+        "edges_truncated",
+    ):
+        assert key in payload["data"]
+
+
+def test_condensation_mcp_schema_defaults_and_unknown_args(tmp_path: Path):
+    graph = _publish_components(
+        tmp_path,
+        [_component_entity("A"), _component_entity("B")],
+        [_component_rel("A", "B", "calls")],
+    )
+    session = _session(graph, "python")
+    sig = inspect.signature(GraphMcpSession.condensation)
+    assert list(sig.parameters) == [
+        "self",
+        "max_components",
+        "max_nodes_per_component",
+        "max_edges",
+        "edge_types",
+        "snapshot",
+    ]
+    assert sig.parameters["max_components"].default == DEFAULT_CONDENSATION_MAX_COMPONENTS
+    assert (
+        sig.parameters["max_nodes_per_component"].default
+        == DEFAULT_CONDENSATION_MAX_NODES_PER_COMPONENT
+    )
+    assert sig.parameters["max_edges"].default == DEFAULT_CONDENSATION_MAX_EDGES
+    assert sig.parameters["edge_types"].default is None
+    assert sig.parameters["snapshot"].default == "current"
+    for forbidden in (
+        "graph",
+        "format",
+        "json",
+        "dot",
+        "symbol",
+        "direction",
+        "rank",
+        "algorithm",
+        "path",
+        "source",
+        "target",
+    ):
+        assert forbidden not in sig.parameters
+
+    defaulted = session.condensation()
+    view = ByogGraph(graph).condensation()
+    _assert_condensation_envelope(defaulted, view)
+    assert defaulted["limits"]["max_components"] == DEFAULT_CONDENSATION_MAX_COMPONENTS
+    assert (
+        defaulted["limits"]["max_nodes_per_component"]
+        == DEFAULT_CONDENSATION_MAX_NODES_PER_COMPONENT
+    )
+    assert defaulted["limits"]["max_edges"] == DEFAULT_CONDENSATION_MAX_EDGES
+    assert defaulted["limits"]["edge_types"] is None
+
+    server = build_mcp_server(session)
+
+    async def _body():
+        async with Client(server) as client:
+            tools = (await client.list_tools()).tools
+            names = [tool.name for tool in tools]
+            assert names == list(TOOL_NAMES)
+            assert len(names) == len(set(names)) == 16
+            assert names[names.index("strong_components") + 1] == "condensation"
+            assert names[names.index("condensation") + 1] == "degree_ranking"
+            assert "condensation-graph" not in names
+            assert "condensation_graph" not in names
+            tool = next(item for item in tools if item.name == "condensation")
+            assert tool.annotations.read_only_hint is True
+            assert tool.annotations.destructive_hint is False
+            assert tool.annotations.idempotent_hint is True
+            assert tool.annotations.open_world_hint is False
+            assert tool.input_schema["additionalProperties"] is False
+            props = tool.input_schema["properties"]
+            assert list(props) == [
+                "max_components",
+                "max_nodes_per_component",
+                "max_edges",
+                "edge_types",
+                "snapshot",
+            ]
+            assert props["max_components"]["type"] == "integer"
+            assert props["max_nodes_per_component"]["type"] == "integer"
+            assert props["max_edges"]["type"] == "integer"
+            assert props["max_components"]["default"] == DEFAULT_CONDENSATION_MAX_COMPONENTS
+            assert (
+                props["max_nodes_per_component"]["default"]
+                == DEFAULT_CONDENSATION_MAX_NODES_PER_COMPONENT
+            )
+            assert props["max_edges"]["default"] == DEFAULT_CONDENSATION_MAX_EDGES
+            assert props["snapshot"]["default"] == "current"
+            for extra_args in (
+                {"graph": str(tmp_path / "other")},
+                {"format": "json"},
+                {"json": True},
+                {"dot": True},
+                {"symbol": "A"},
+                {"direction": "both"},
+                {"rank": 1},
+                {"algorithm": "tarjan"},
+                {"path": "A"},
+                {"source": "A"},
+                {"target": "B"},
+            ):
+                extra = await client.call_tool("condensation", extra_args)
+                assert extra.is_error is True, extra_args
+            scalar = await client.call_tool("condensation", {"edge_types": "calls"})
+            assert scalar.is_error is True
+            for invalid_args in (
+                {"max_components": True},
+                {"max_components": 1.0},
+                {"max_nodes_per_component": False},
+                {"max_nodes_per_component": 1.5},
+                {"max_edges": True},
+                {"max_edges": 1.0},
+                {"edge_types": ["calls", None]},
+                {"edge_types": ["calls", 1]},
+            ):
+                invalid = await client.call_tool("condensation", invalid_args)
+                assert invalid.is_error is True, invalid_args
+
+    _run(_body)
+
+
+def test_condensation_mcp_semantics_parity_snapshots_and_filters(tmp_path: Path):
+    graph = tmp_path / "g"
+    older = publish_byog_snapshot(
+        pd.DataFrame([_component_entity("demo:old", source_file="old.py")]),
+        pd.DataFrame([_component_rel("demo:old", "demo:old", "calls", rid="rel:old")]),
+        pd.DataFrame(
+            [
+                {
+                    "id": "tu:old",
+                    "title": "old.py",
+                    "source_file": "old.py",
+                    "entity_id": "ent:demo:old",
+                }
+            ]
+        ),
+        graph,
+        settings_text="mcp: old\n",
+        keep_last=5,
+    )
+    newer_ents = [
+        _component_entity("A"),
+        _component_entity("B"),
+        _component_entity("C"),
+        _component_entity("Isolated"),
+        _component_entity("Zsmall"),
+    ]
+    newer_rels = [
+        _component_rel("A", "B", "calls", rid="rel:ab"),
+        _component_rel("B", "A", "calls", rid="rel:ba"),
+        _component_rel("A", "B", "calls", rid="rel:parallel"),
+        _component_rel("C", "C", "calls", rid="rel:self"),
+        _component_rel("A", "ghost", "calls", rid="rel:endpoint"),
+        _component_rel("Zsmall", "Isolated", "contains", rid="rel:contains"),
+    ]
+    current = publish_byog_snapshot(
+        pd.DataFrame(newer_ents),
+        pd.DataFrame(newer_rels),
+        pd.DataFrame(
+            [
+                {
+                    "id": f"tu:{row['title']}",
+                    "title": "a.py",
+                    "source_file": "a.py",
+                    "entity_id": row["id"],
+                }
+                for row in newer_ents
+            ]
+        ),
+        graph,
+        settings_text="mcp: new\n",
+        keep_last=5,
+    )
+    assert _current(graph) == current.name
+    before = _payload_hashes(graph)
+    session = _session(graph, "python")
+    view = ByogGraph(graph)
+
+    none = session.condensation()
+    empty = session.condensation(edge_types=[])
+    explicit_current = session.condensation(snapshot="current")
+    _assert_condensation_envelope(none, view.condensation())
+    assert empty["data"] == none["data"]
+    assert empty["limits"]["edge_types"] is None
+    assert explicit_current["data"] == none["data"]
+    assert explicit_current["snapshot"] == current.name
+    assert none["data"]["n_endpoint_only_nodes_total"] == 1
+    assert none["data"]["n_self_loop_edges_total"] >= 1
+    assert none["data"]["n_cyclic_components_total"] >= 2
+    assert none["data"]["n_condensation_edges_total"] >= 1
+    weak = session.components()
+    assert weak["data"]["n_components_total"] < none["data"]["n_components_total"]
+    strong = session.strong_components()
+    assert {c["representative"] for c in strong["data"]["components"]} == {
+        c["representative"] for c in none["data"]["components"]
+    }
+    assert [c["representative"] for c in strong["data"]["components"]] != [
+        c["representative"] for c in none["data"]["components"]
+    ]
+    cycle = next(c for c in none["data"]["components"] if c["representative"] == "A")
+    assert cycle["is_cyclic"] is True
+    self_loop = next(c for c in none["data"]["components"] if c["representative"] == "C")
+    assert self_loop["is_cyclic"] is True
+    iso = next(
+        c for c in none["data"]["components"] if c["representative"] == "Isolated"
+    )
+    assert iso["is_cyclic"] is False
+    ghost = next(
+        c
+        for c in none["data"]["components"]
+        if c["representative"] == "ghost" or "ghost" in c["nodes"]
+    )
+    assert ghost["n_entity_nodes"] == 0
+
+    filtered = session.condensation(edge_types=["uses_type", "calls", "calls"])
+    expected_filtered = view.condensation(edge_types=["uses_type", "calls", "calls"])
+    _assert_condensation_envelope(filtered, expected_filtered)
+    assert filtered["limits"]["edge_types"] == ["calls", "uses_type"]
+
+    capped = session.condensation(
+        max_components=1, max_nodes_per_component=1, max_edges=0
+    )
+    expected_capped = view.condensation(
+        max_components=1, max_nodes_per_component=1, max_edges=0
+    )
+    _assert_condensation_envelope(capped, expected_capped)
+    assert capped["data"]["components_truncated"] is True
+    assert capped["data"]["edges_truncated"] is True
+    assert capped["truncated"] is True
+    assert capped["data"]["n_condensation_edges_returned"] == 0
+    assert capped["data"]["n_condensation_edges_total"] == none["data"][
+        "n_condensation_edges_total"
+    ]
+    assert capped["data"]["n_internal_edges_total"] == none["data"]["n_internal_edges_total"]
+    assert capped["data"]["n_cross_component_edges_total"] == none["data"][
+        "n_cross_component_edges_total"
+    ]
+    assert capped["returned"] == (
+        capped["data"]["n_components_returned"]
+        + sum(int(c["n_nodes_returned"]) for c in capped["data"]["components"])
+        + capped["data"]["n_condensation_edges_returned"]
+    )
+    assert capped["total"] == (
+        capped["data"]["n_components_total"]
+        + capped["data"]["n_nodes_total"]
+        + capped["data"]["n_condensation_edges_total"]
+    )
+    assert capped["total"] != capped["data"]["n_edges_total"]
+    assert capped["data"]["n_edges_total"] != capped["data"]["n_condensation_edges_total"]
+    assert capped["returned"] == (
+        capped["data"]["n_components_returned"]
+        + sum(int(c["n_nodes_returned"]) for c in capped["data"]["components"])
+        + capped["data"]["n_condensation_edges_returned"]
+    )
+
+    historical = session.condensation(snapshot=older.name)
+    assert historical["snapshot"] == older.name
+    assert _current(graph) == current.name
+    old_ents = pd.DataFrame([_component_entity("demo:old", source_file="old.py")])
+    old_rels = pd.DataFrame(
+        [_component_rel("demo:old", "demo:old", "calls", rid="rel:old")]
+    )
+    old_expected = compute_condensation_graph(old_ents, old_rels)
+    _assert_condensation_envelope(historical, old_expected)
+    assert historical["data"]["n_nodes_total"] == 1
+    assert historical["data"]["components"][0]["is_cyclic"] is True
+    assert "demo:new" not in json.dumps(historical)
+    assert _payload_hashes(graph) == before
+    assert not (graph / ".publish.lock").is_symlink()
+    assert (graph / ".publish.lock").is_file()
+    assert not list(graph.glob(".staging-*"))
+
+    server = build_mcp_server(session)
+
+    async def _body():
+        async with Client(server) as client:
+            payload = _payload(
+                await client.call_tool(
+                    "condensation",
+                    {"edge_types": ["calls"], "snapshot": current.name},
+                )
+            )
+            assert payload["tool"] == "condensation"
+            assert payload["snapshot"] == current.name
+            assert payload["data"] == session.condensation(edge_types=["calls"])["data"]
+            defaulted = _payload(await client.call_tool("condensation", {}))
+            assert defaulted["data"] == none["data"]
+            empty_types = _payload(
+                await client.call_tool("condensation", {"edge_types": []})
+            )
+            assert empty_types["data"] == none["data"]
+            hist = _payload(
+                await client.call_tool("condensation", {"snapshot": older.name})
+            )
+            assert hist["snapshot"] == older.name
+            assert _current(graph) == current.name
+
+    _run(_body)
+    assert _payload_hashes(graph) == before
+
+
+def test_condensation_mcp_validation_malformed_empty_and_envelope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    graph = _publish_components(
+        tmp_path,
+        [_component_entity("A"), _component_entity("B")],
+        [_component_rel("A", "B", "calls")],
+    )
+    session = _session(graph, "python")
+    observed: list[str] = []
+    orig_scope = session._scope
+
+    def wrapped_scope(snapshot):
+        observed.append(str(snapshot))
+        return orig_scope(snapshot)
+
+    monkeypatch.setattr(session, "_scope", wrapped_scope)
+    with pytest.raises(GraphMcpError, match="max_components"):
+        session.condensation(max_components=True)
+    with pytest.raises(GraphMcpError, match="max_nodes_per_component"):
+        session.condensation(max_nodes_per_component=1.5)
+    with pytest.raises(GraphMcpError, match="max_edges"):
+        session.condensation(max_edges="1")
+    with pytest.raises(GraphMcpError, match="max_components"):
+        session.condensation(max_components=float("nan"))
+    with pytest.raises(GraphMcpError, match="max_edges"):
+        session.condensation(max_edges=math.inf)
+    with pytest.raises(GraphMcpError, match="max_components"):
+        session.condensation(max_components=0)
+    with pytest.raises(GraphMcpError, match="max_nodes_per_component"):
+        session.condensation(max_nodes_per_component=-1)
+    with pytest.raises(GraphMcpError, match="max_edges"):
+        session.condensation(max_edges=-1)
+    with pytest.raises(GraphMcpError, match="max_components"):
+        session.condensation(max_components=HARD_MAX_CONDENSATION_COMPONENTS + 1)
+    with pytest.raises(GraphMcpError, match="max_nodes_per_component"):
+        session.condensation(
+            max_nodes_per_component=HARD_MAX_CONDENSATION_COMPONENT_NODES + 1
+        )
+    with pytest.raises(GraphMcpError, match="max_edges"):
+        session.condensation(max_edges=HARD_MAX_CONDENSATION_EDGES + 1)
+    with pytest.raises(GraphMcpError):
+        session.condensation(edge_types="calls")
+    with pytest.raises(GraphMcpError):
+        session.condensation(edge_types=[""])
+    with pytest.raises(GraphMcpError):
+        session.condensation(edge_types=[" calls"])
+    assert observed == []
+    monkeypatch.undo()
+
+    session = _session(graph, "python")
+    with pytest.raises(GraphMcpError):
+        session.condensation(snapshot="..")
+    empty_ok = session.condensation(edge_types=[])
+    none_ok = session.condensation(edge_types=None)
+    assert none_ok["data"] == empty_ok["data"]
+    zero_edges = session.condensation(max_edges=0)
+    assert zero_edges["data"]["max_edges"] == 0
+    assert zero_edges["data"]["n_condensation_edges_returned"] == 0
+    assert zero_edges["data"]["edges_truncated"] is True
+    _assert_condensation_envelope(zero_edges, ByogGraph(graph).condensation(max_edges=0))
+
+    empty_graph = tmp_path / "empty"
+    publish_byog_snapshot(
+        pd.DataFrame(columns=["id", "title", "type", "source_file", "extractor"]),
+        pd.DataFrame(columns=["id", "source", "target", "type", "extractor"]),
+        pd.DataFrame(columns=["id", "title", "source_file"]),
+        empty_graph,
+        settings_text="mcp: empty\n",
+        keep_last=1,
+    )
+    empty_session = GraphMcpSession(
+        empty_graph,
+        configured_indexer="python",
+        resolved_indexer="python",
+        preflight={"indexer": "python", "indexer_resolution": {}},
+    )
+    empty_payload = empty_session.condensation()
+    expected_empty = json.loads(
+        json.dumps(
+            ByogGraph(empty_graph).condensation(), allow_nan=False, default=str
+        )
+    )
+    _assert_condensation_envelope(empty_payload, expected_empty)
+    assert empty_payload["data"]["components"] == []
+    assert empty_payload["data"]["edges"] == []
+    assert empty_payload["data"]["n_nodes_total"] == 0
+    assert empty_payload["truncated"] is False
+    assert empty_payload["total"] == 0
+    assert empty_payload["returned"] == 0
+
+    bad = tmp_path / "bad"
+    publish_byog_snapshot(
+        pd.DataFrame([_component_entity("A")]),
+        pd.DataFrame(
+            [
+                {
+                    "id": "rel:ok",
+                    "source": "A",
+                    "target": "A",
+                    "type": "calls",
+                    "extractor": "tree-sitter-python",
+                },
+                {
+                    "id": "rel:bad",
+                    "source": "A",
+                    "target": None,
+                    "type": "contains",
+                    "extractor": "tree-sitter-python",
+                },
+            ]
+        ),
+        pd.DataFrame(
+            [{"id": "tu:a", "title": "a.py", "source_file": "a.py", "entity_id": "ent:A"}]
+        ),
+        bad,
+        settings_text="mcp: bad\n",
+        keep_last=1,
+    )
+    bad_session = GraphMcpSession(
+        bad,
+        configured_indexer="python",
+        resolved_indexer="python",
+        preflight={"indexer": "python", "indexer_resolution": {}},
+    )
+    with pytest.raises(GraphMcpError, match="invalid target"):
+        bad_session.condensation()
+    with pytest.raises(GraphMcpError, match="invalid target"):
+        bad_session.condensation(edge_types=["calls"])
+
+    huge = tmp_path / "huge"
+    title = "T" + ("x" * (HARD_MAX_ENVELOPE_BYTES + 1))
+    publish_byog_snapshot(
+        pd.DataFrame([_component_entity(title, id="ent:huge", source_file="m.py")]),
+        pd.DataFrame(columns=["id", "source", "target", "type"]),
+        pd.DataFrame(
+            [{"id": "tu:1", "title": "m.py", "source_file": "m.py", "entity_id": "ent:huge"}]
+        ),
+        huge,
+        settings_text="mcp: huge\n",
+        keep_last=1,
+    )
+    with pytest.raises(GraphMcpError, match="response envelope exceeds hard limit"):
+        GraphMcpSession(
+            huge,
+            configured_indexer="python",
+            resolved_indexer="python",
+            preflight={"indexer": "python", "indexer_resolution": {}},
+        ).condensation(max_components=1, max_nodes_per_component=1, max_edges=0)
+
+    server = build_mcp_server(session)
+
+    async def _body():
+        async with Client(server) as client:
+            for invalid_args in (
+                {"max_components": True},
+                {"max_components": 0},
+                {"max_components": HARD_MAX_CONDENSATION_COMPONENTS + 1},
+                {"max_nodes_per_component": 1.5},
+                {"max_edges": -1},
+                {"max_edges": HARD_MAX_CONDENSATION_EDGES + 1},
+                {"edge_types": "calls"},
+                {"edge_types": [""]},
+                {"edge_types": [" calls"]},
+                {"snapshot": ".."},
+            ):
+                invalid = await client.call_tool("condensation", invalid_args)
+                assert invalid.is_error is True, invalid_args
+                assert not getattr(invalid, "structured_content", None) or (
+                    isinstance(invalid.structured_content, dict)
+                    and invalid.structured_content.get("ok") is not True
+                )
+
+    _run(_body)
+
+
+def _mcp_paused_condensation(graph: str, pinned, resume, q) -> None:
+    sys.path.insert(0, str(Path(__file__).parents[3] / "src"))
+    import graphrag_code.mcp_server as mcp_mod
+
+    orig_envelope = mcp_mod._envelope
+
+    def wrapped_envelope(**kwargs):
+        payload = orig_envelope(**kwargs)
+        pinned.set()
+        if not resume.wait(timeout=20):
+            q.put("timeout")
+        return payload
+
+    mcp_mod._envelope = wrapped_envelope
+    session = mcp_mod.GraphMcpSession(
+        Path(graph),
+        configured_indexer="python",
+        resolved_indexer="python",
+        preflight={"indexer": "python", "indexer_resolution": {}},
+    )
+    payload = session.condensation()
+    q.put(payload["snapshot"])
+
+
+def test_condensation_mcp_publisher_wait_and_no_nested_query(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import multiprocessing
+
+    graph = _publish_components(
+        tmp_path,
+        [_component_entity("A"), _component_entity("B")],
+        [_component_rel("A", "B", "calls")],
+    )
+    first = _current(graph)
+    first_dir = graph / "snapshots" / first
+    before = _payload_hashes(graph)
+    session = _session(graph, "python")
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("nested public query or CLI invoked from MCP condensation")
+
+    producer_calls = 0
+    producer = ByogGraph.condensation
+
+    def counted_producer(self, *args, **kwargs):
+        nonlocal producer_calls
+        producer_calls += 1
+        return producer(self, *args, **kwargs)
+
+    monkeypatch.setattr("graphrag_code.graph_query.condensation", boom)
+    monkeypatch.setattr("graphrag_code.graph_query.cli_condensation", boom)
+    monkeypatch.setattr("graphrag_code.cli.condensation", boom)
+    monkeypatch.setattr("graphrag_code.graph_query.strong_components", boom)
+    monkeypatch.setattr("graphrag_code.graph_query.components", boom)
+    monkeypatch.setattr("graphrag_code.graph_query.dependency_order", boom)
+    monkeypatch.setattr(ByogGraph, "strong_components", boom)
+    monkeypatch.setattr(ByogGraph, "components", boom)
+    monkeypatch.setattr(ByogGraph, "dependency_order", boom)
+    monkeypatch.setattr(ByogGraph, "subgraph", boom)
+    monkeypatch.setattr(ByogGraph, "degree_ranking", boom)
+    monkeypatch.setattr(ByogGraph, "condensation", counted_producer)
+    payload = session.condensation()
+    assert payload["ok"] is True
+    assert producer_calls == 1
+    assert _payload_hashes(graph) == before
+    assert not list(graph.glob(".staging-*"))
+    assert not list(tmp_path.glob("*.dot"))
+    assert (graph / ".publish.lock").is_file()
+    src = inspect.getsource(GraphMcpSession.condensation)
+    assert src.count("load_graph()") == 1
+    assert src.count(".condensation(") == 1
+    assert "networkx" not in src
+    assert "subprocess" not in src
+    assert "graph_query.condensation" not in src
+    assert "cli_condensation" not in src
+    assert ".strong_components(" not in src
+    assert ".components(" not in src
+    assert ".dependency_order(" not in src
+    assert ".subgraph(" not in src
+    assert ".degree_ranking(" not in src
+
+    ctx = multiprocessing.get_context("spawn")
+    pinned = ctx.Event()
+    resume = ctx.Event()
+    about = ctx.Event()
+    got = ctx.Event()
+    q = ctx.Queue()
+    reader = ctx.Process(
+        target=_mcp_paused_condensation, args=(str(graph), pinned, resume, q)
     )
     from test_reader_lease import _cleanup_processes, _publisher
 
