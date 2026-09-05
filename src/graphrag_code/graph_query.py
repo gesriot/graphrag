@@ -12,6 +12,7 @@ Provides:
 - components()            # weakly connected components (structural grouping)
 - strong_components()     # directed strongly connected components
 - condensation()          # directed SCC condensation DAG
+- shortest_path()         # directed structural shortest path
 - degree_ranking()        # raw directed relationship-row degree ranking
 - neighbors(symbol)
 - dependency_order()      # deterministic containment order over contains rows
@@ -31,6 +32,7 @@ Example:
     uv run python scripts/graph_query.py strong-components --graph byog_mini_game
     uv run python scripts/graph_query.py condensation --graph byog_mini_game
     uv run python scripts/graph_query.py condensation --graph byog_mini_game --dot
+    uv run python scripts/graph_query.py shortest-path sim:run_simulation sim:update --graph byog_mini_game
     uv run python scripts/graph_query.py degree-ranking --graph byog_mini_game
     uv run python scripts/graph_query.py dependency-order --graph byog_mini_game
     uv run python scripts/graph_query.py observations sim:run_simulation --graph byog_mini_game
@@ -54,6 +56,7 @@ from graphrag_code.byog_graph import (  # re-export for backward compat
     DEFAULT_CONDENSATION_MAX_EDGES,
     DEFAULT_CONDENSATION_MAX_NODES_PER_COMPONENT,
     DEFAULT_DEGREE_RANKING_MAX_NODES,
+    DEFAULT_SHORTEST_PATH_MAX_DEPTH,
     DEFAULT_STRONG_COMPONENTS_MAX_COMPONENTS,
     DEFAULT_STRONG_COMPONENTS_MAX_NODES_PER_COMPONENT,
     DEFAULT_SUBGRAPH_MAX_DEPTH,
@@ -68,6 +71,7 @@ from graphrag_code.byog_graph import (  # re-export for backward compat
     HARD_MAX_CONDENSATION_COMPONENTS,
     HARD_MAX_CONDENSATION_EDGES,
     HARD_MAX_DEGREE_RANKING_NODES,
+    HARD_MAX_SHORTEST_PATH_DEPTH,
     HARD_MAX_STRONG_COMPONENTS,
     HARD_MAX_STRONG_COMPONENT_NODES,
     HARD_MAX_SUBGRAPH_DEPTH,
@@ -77,6 +81,7 @@ from graphrag_code.byog_graph import (  # re-export for backward compat
     compute_bounded_subgraph,
     compute_condensation_graph,
     compute_containment_dependency_order,
+    compute_shortest_path,
     compute_structural_degree_ranking,
     compute_strongly_connected_components,
     compute_uses_type_closure,
@@ -322,6 +327,26 @@ def condensation(
     )
 
 
+def shortest_path(
+    ents: Optional[pd.DataFrame],
+    rels: Optional[pd.DataFrame],
+    source_title: Optional[str],
+    target_title: Optional[str],
+    *,
+    edge_types: Optional[Sequence[str]] = None,
+    max_depth: int = DEFAULT_SHORTEST_PATH_MAX_DEPTH,
+) -> Dict[str, Any]:
+    """Directed structural shortest path (delegates to pure helper)."""
+    return compute_shortest_path(
+        ents,
+        rels,
+        source_title,
+        target_title,
+        edge_types=edge_types,
+        max_depth=max_depth,
+    )
+
+
 def degree_ranking(
     ents: pd.DataFrame,
     rels: pd.DataFrame,
@@ -521,6 +546,64 @@ def dumps_condensation_json(result: Dict[str, Any]) -> str:
         sort_keys=True,
         allow_nan=False,
     )
+
+
+def dumps_shortest_path_json(result: Dict[str, Any]) -> str:
+    """Deterministic JSON for directed structural shortest-path results."""
+    return json.dumps(
+        result,
+        indent=2,
+        ensure_ascii=False,
+        sort_keys=True,
+        allow_nan=False,
+    )
+
+
+def format_shortest_path_human(result: Dict[str, Any]) -> str:
+    """Stable human-readable shortest-path report."""
+    lines: List[str] = []
+    lines.append(f"status: {result.get('status')}")
+    source = result.get("source")
+    target = result.get("target")
+    lines.append("source: " + ("null" if source is None else str(source)))
+    lines.append("target: " + ("null" if target is None else str(target)))
+    lines.append(
+        "source_resolved: "
+        + ("true" if result.get("source_resolved") else "false")
+    )
+    lines.append(
+        "target_resolved: "
+        + ("true" if result.get("target_resolved") else "false")
+    )
+    lines.append("found: " + ("true" if result.get("found") else "false"))
+    edge_types = result.get("edge_types")
+    if edge_types:
+        lines.append("edge_types: " + ",".join(str(item) for item in edge_types))
+    else:
+        lines.append("edge_types: all")
+    lines.append(f"max_depth: {result.get('max_depth')}")
+    distance = result.get("distance")
+    lines.append(
+        "distance: " + ("null" if distance is None else str(distance))
+    )
+    lines.append(f"n_nodes_returned: {int(result.get('n_nodes_returned') or 0)}")
+    lines.append(f"n_steps_returned: {int(result.get('n_steps_returned') or 0)}")
+    lines.append(
+        "n_relationship_rows_on_path_total: "
+        f"{int(result.get('n_relationship_rows_on_path_total') or 0)}"
+    )
+    lines.append("nodes:")
+    for title in result.get("nodes") or []:
+        lines.append(f"  {title}")
+    lines.append("steps:")
+    for step in result.get("steps") or []:
+        lines.append(
+            f"  {step.get('source')} -> {step.get('target')} "
+            f"rows {int(step.get('n_relationship_rows_total') or 0)}"
+        )
+    if result.get("status") == "not_found_within_max_depth":
+        lines.append("not found within max_depth")
+    return "\n".join(lines)
 
 
 def format_condensation_human(result: Dict[str, Any]) -> str:
@@ -1076,6 +1159,48 @@ def cli_condensation(
                 sys.stdout.flush()
             else:
                 print(format_condensation_human(result), flush=True)
+    except ValueError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from e
+
+
+@app.command("shortest-path")
+def cli_shortest_path(
+    source: str = typer.Argument(..., help="Source symbol or module"),
+    target: str = typer.Argument(..., help="Target symbol or module"),
+    graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
+    max_depth: int = typer.Option(
+        DEFAULT_SHORTEST_PATH_MAX_DEPTH,
+        "--max-depth",
+        help=f"Maximum directed hops (0..{HARD_MAX_SHORTEST_PATH_DEPTH})",
+    ),
+    edge_type: List[str] = typer.Option(
+        [],
+        "--edge-type",
+        help="Exact relationship-type allow-list (repeatable). Omit for all types.",
+    ),
+    json_output: bool = typer.Option(False, "--json"),
+):
+    """Directed structural shortest path over persisted relationships.
+
+    Stored ``source -> target`` orientation only. A reverse-direction query
+    is expressed by swapping the requested endpoints. Not provenance,
+    execution evidence, semantic dependency, GraphRAG, or a UI. There is
+    no DOT in this milestone.
+    """
+    try:
+        with _scoped_graph(graph, snapshot) as g:
+            result = g.shortest_path(
+                source,
+                target,
+                edge_types=edge_type or None,
+                max_depth=max_depth,
+            )
+            if json_output:
+                print(dumps_shortest_path_json(result), flush=True)
+            else:
+                print(format_shortest_path_human(result), flush=True)
     except ValueError as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from e

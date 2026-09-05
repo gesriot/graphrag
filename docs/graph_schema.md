@@ -277,7 +277,7 @@ Query, context-pack, doctor, and status tools accept an optional selector:
 - CLI: `--snapshot <published-id|current>` on `query-symbol`, `callers`,
   `callees`, `types-used-by`, `type-users`, `type-closure`, `neighbors`,
   `subgraph`, `components`, `strong-components`, `condensation`,
-  `degree-ranking`, `dependency-order`, `impact`,
+  `shortest-path`, `degree-ranking`, `dependency-order`, `impact`,
   `observations`, and `context-pack`.
 - MCP: optional last argument `snapshot: str = "current"` on
   `graph_status`, `graph_doctor`, `query_symbol`, `callers`, `callees`,
@@ -553,6 +553,40 @@ graphrag-code condensation \
 | MCP | Sixteenth read-only tool added, registered immediately after `strong_components` and immediately before `degree_ranking`. Envelope `data` is the exact `ByogGraph.condensation` result. `truncated` is `components_truncated or nodes_truncated or edges_truncated`. Envelope `total` is `n_components_total + n_nodes_total + n_condensation_edges_total`; `returned` is `n_components_returned` plus the sum of each returned component's `n_nodes_returned` plus `n_condensation_edges_returned`. Selected-row, internal, cross-component, self-loop, cyclic, eligible-edge, and `n_edges_total` counts remain exact scalars in `data` and are not added to those envelope counters. Limits include the validated `max_components`, `max_nodes_per_component`, `max_edges`, `edge_types`, and `max_envelope_bytes`. The producer is the only truncation source. The 1 MiB envelope limit fails closed. MCP always uses `allow_unlocked_managed=False`. MCP does not expose DOT, a graph path, a symbol, a direction, a rank, an algorithm, a format, or source/target component arguments. Representatives remain smallest UTF-8 titles, not leaders. Topological position is not an ordinal rank or semantic layer. There is no `condensation_graph` alias. The fixed surface remains exactly 16 tools |
 | Malformed args | Bad limits, filters, duplicate titles/ids, missing columns, invalid scalars, or combined `--json --dot`: exit 2, empty stdout |
 | Non-claims | Not weak components, cycle enumeration, transitive closure or reduction, path enumeration, build/import/call/execution/semantic dependency order, architecture, hierarchy, ownership, leadership, importance, Leiden or semantic communities, centrality, GraphRAG, natural-language analysis, proof of runtime recursion or deadlock, indexer, renderer, or UI. `--dot` is interchange only; truncation and totals still come only from the bounded condensation producer. A representative is not a leader. A topological position is not an ordinal rank or semantic layer. An aggregated condensation edge is not an original relationship record |
+
+### Directed structural shortest path
+
+`graphrag-code shortest-path`, `python -m graphrag_code.graph_query shortest-path`,
+and `scripts/graph_query.py shortest-path` expose one retained-snapshot
+read of a directed structural shortest path.
+`ByogGraph.shortest_path(...)` and `compute_shortest_path(...)`
+are the same contract. Stored edge direction is preserved. This milestone
+has no DOT and is not an MCP tool. The fixed MCP surface remains exactly
+16 tools and does not expose `shortest_path`.
+
+```text
+graphrag-code shortest-path <source> <target> \
+  --graph <root> \
+  [--snapshot <id|current>] \
+  [--edge-type TYPE ...] \
+  [--max-depth N] \
+  [--json]
+```
+
+| Property | Contract |
+| --- | --- |
+| Endpoints | Existing `ByogGraph.resolve` exact title, unique module alias, or unique case-insensitive partial. Ambiguous or missing queries complete with `unresolved_source`, `unresolved_target`, or `unresolved_both`, empty path material, exit 0. Do not guess among matches |
+| Connectivity | Directed stored `source -> target` only. Distinct ordered pairs are hops. Parallel selected rows do not create extra hops; the chosen step reports their exact count. Self-loops do not change traversal. Reverse direction is requested by swapping endpoints; there is no `--direction` |
+| Edge-type filter | Omitted / empty `--edge-type` means all types. Repeated values are an exact allow-list (UTF-8-byte sorted, unique). A literal type named `all` remains literal. Filtering happens after fail-closed validation of every relationship row |
+| Caps | Dedicated default `max_depth` 8, hard maximum 32, minimum 0. A found path may use at most that many hops. `not_found_within_max_depth` means none was found within the bound, not that the target is globally unreachable |
+| Ordering | Among minimum-hop paths, the complete node-title sequence that is smallest under strict UTF-8 byte order. Independent of parquet row order, hash iteration, locale, and pandas incidental order |
+| Zero-hop | Source equal to target is `found` with `distance=0`, one node, empty steps, and zero path row counts |
+| Records | `nodes` are ordered titles. Each step is `source`, `target`, `n_relationship_rows_total`. No descriptions, snippets, spans, weights, confidence, original row ids, or DOT |
+| JSON / human | Deterministic JSON (`sort_keys=True`, `allow_nan=False`, `ensure_ascii=False`). Human output is derived from the same mapping, including complete unresolved and not-found reports. Not-found text says the bound; it does not say unreachable. One trailing newline on stdout |
+| Snapshot / lease | Same retained-snapshot read scope as other queries. Lease held through load, endpoint resolution, the single producer call, serialization, stdout write, and flush. No nested public query. No `.publish.lock` creation |
+| MCP | Not exposed. The read-only tool set remains exactly 16 |
+| Malformed args | Bad limits, filters, duplicate titles/ids, missing columns, or invalid scalars: exit 2, empty stdout |
+| Non-claims | Not provenance, execution evidence, call/import/build/semantic dependency meaning, architecture, hierarchy, GraphRAG, natural-language analysis, indexer, renderer, or UI. A shortest hop sequence is not importance, ownership, or a unique semantic path |
 
 ### Operator-managed snapshot retention pins
 

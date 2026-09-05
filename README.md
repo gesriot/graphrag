@@ -42,7 +42,7 @@ graphs, `examples/`, or experimental evidence.
 These generic installed commands operate on user-supplied directories:
 
 - `graphrag-code doctor`
-- `graphrag-code query-symbol` / `callers` / `callees` / `neighbors` / `subgraph` / `components` / `strong-components` / `condensation` / `degree-ranking` / `dependency-order`
+- `graphrag-code query-symbol` / `callers` / `callees` / `neighbors` / `subgraph` / `components` / `strong-components` / `condensation` / `shortest-path` / `degree-ranking` / `dependency-order`
 - `graphrag-code context-pack`
 - `graphrag-code index-python` / `index-c`
 - `graphrag-code adopt-publication-lock --graph <root> --indexer auto --offline-confirmed`
@@ -320,6 +320,25 @@ path, a symbol, a direction, a rank, an algorithm, or source/target
 component arguments. MCP remains read-only and does not index, mutate,
 activate, retain, repair, or clean up. The MCP tool set remains exactly 16
 read-only tools. There is no `condensation_graph` or hyphenated alias.
+
+`graphrag-code shortest-path` (also `python -m graphrag_code.graph_query shortest-path`
+and `scripts/graph_query.py shortest-path`) is a deterministic read-only directed
+structural shortest path over one retained BYOG snapshot. It follows selected
+relationship rows in stored `source -> target` orientation only; swap the
+requested endpoints to reverse direction. There is no direction parameter.
+`--edge-type` is an exact allow-list (omit for all types). `--max-depth`
+(default 8, hard 32, minimum 0) bounds directed hops. Among minimum-hop paths,
+the complete node-title sequence that is smallest under UTF-8 byte order is
+returned. Parallel rows do not create extra hops; they only increase the
+selected-row count on a chosen step. Self-loops do not change traversal.
+Source equal to target is a found zero-hop path. `not_found_within_max_depth`
+means no selected directed path was found within the bound; it does not claim
+global unreachability. Unresolved or ambiguous endpoints under the existing
+`resolve` contract return a complete result and exit 0. This is structural
+path search only: not provenance, execution evidence, call/import/build
+meaning, architecture, GraphRAG, or natural-language analysis. There is no
+DOT. MCP remains exactly 16 read-only tools and does not expose
+`shortest_path` or `shortest-path`.
 
 `adopt-publication-lock` is an explicit migration, never an automatic
 MCP or doctor side effect. `--offline-confirmed` is required to create
@@ -837,6 +856,7 @@ uv run python scripts/graph_query.py components --graph <root>
 uv run python scripts/graph_query.py strong-components --graph <root>
 uv run python scripts/graph_query.py condensation --graph <root>
 uv run python scripts/graph_query.py condensation --graph <root> --dot
+uv run python scripts/graph_query.py shortest-path <source> <target> --graph <root>
 uv run python scripts/graph_query.py degree-ranking --graph <root>
 uv run python scripts/graph_query.py dependency-order --graph <root>
 uv run python scripts/context_pack.py <title> --graph <root>

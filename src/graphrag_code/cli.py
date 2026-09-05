@@ -43,6 +43,7 @@ from graphrag_code.byog_graph import (
     DEFAULT_CONDENSATION_MAX_EDGES,
     DEFAULT_CONDENSATION_MAX_NODES_PER_COMPONENT,
     DEFAULT_DEGREE_RANKING_MAX_NODES,
+    DEFAULT_SHORTEST_PATH_MAX_DEPTH,
     DEFAULT_STRONG_COMPONENTS_MAX_COMPONENTS,
     DEFAULT_STRONG_COMPONENTS_MAX_NODES_PER_COMPONENT,
     DEFAULT_SUBGRAPH_MAX_DEPTH,
@@ -639,6 +640,48 @@ def condensation(
         args.append("--json")
     if dot_out:
         args.append("--dot")
+    _delegate("graph_query.py", args)
+
+
+@app.command("shortest-path")
+def shortest_path(
+    source: str = typer.Argument(..., help="Source symbol or module"),
+    target: str = typer.Argument(..., help="Target symbol or module"),
+    graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
+    max_depth: int = typer.Option(
+        DEFAULT_SHORTEST_PATH_MAX_DEPTH, "--max-depth"
+    ),
+    edge_type: list[str] = typer.Option(
+        [],
+        "--edge-type",
+        help="Exact relationship-type allow-list (repeatable). Omit for all types.",
+    ),
+    json_out: bool = typer.Option(False, "--json"),
+):
+    """Directed structural shortest path (graph_query.py shortest-path).
+
+    Stored ``source -> target`` orientation only. Swap the requested
+    endpoints to reverse direction. Not provenance, execution evidence,
+    semantic dependency, GraphRAG, or a UI. There is no DOT and this
+    milestone is not an MCP tool.
+    """
+    args = _append_snapshot(
+        [
+            "shortest-path",
+            source,
+            target,
+            "--graph",
+            str(graph),
+            "--max-depth",
+            str(max_depth),
+        ],
+        snapshot,
+    )
+    for rel_type in edge_type:
+        args.extend(["--edge-type", rel_type])
+    if json_out:
+        args.append("--json")
     _delegate("graph_query.py", args)
 
 

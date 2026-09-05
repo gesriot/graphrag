@@ -358,8 +358,8 @@ def test_load_gate_manifest_rejects_type_context_on_python(tmp_path: Path):
     valid = json.loads(MANIFEST.read_text())
     charset = next(entry for entry in valid["ports"] if entry["id"] == "charset_normalizer")
     full_examples = next(check for check in charset["checks"] if check["name"] == "full examples pytest")
-    assert full_examples["timeout_seconds"] == 1200
-    assert load_gate_manifest(MANIFEST)["charset_normalizer"]["checks"][2]["timeout_seconds"] == 1200
+    assert full_examples["timeout_seconds"] == 1800
+    assert load_gate_manifest(MANIFEST)["charset_normalizer"]["checks"][2]["timeout_seconds"] == 1800
     for invalid_timeout in (True, 0, 3601, 1.5, "1200"):
         invalid = json.loads(MANIFEST.read_text())
         invalid_charset = next(

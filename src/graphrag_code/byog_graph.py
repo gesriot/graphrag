@@ -65,6 +65,19 @@ HARD_MAX_CONDENSATION_COMPONENTS = 100
 HARD_MAX_CONDENSATION_COMPONENT_NODES = 100
 HARD_MAX_CONDENSATION_EDGES = 500
 
+# Directed structural shortest path (stored orientation only).
+DEFAULT_SHORTEST_PATH_MAX_DEPTH = 8
+HARD_MAX_SHORTEST_PATH_DEPTH = 32
+_SHORTEST_PATH_STATUSES = frozenset(
+    {
+        "found",
+        "unresolved_source",
+        "unresolved_target",
+        "unresolved_both",
+        "not_found_within_max_depth",
+    }
+)
+
 # Raw directed multigraph degree ranking (not centrality or importance).
 DEGREE_RANKING_MODES = ("total", "incoming", "outgoing")
 DEFAULT_DEGREE_RANKING_MAX_NODES = 20
@@ -2655,6 +2668,29 @@ class ByogGraph:
             max_edges=max_edges,
         )
 
+    def shortest_path(
+        self,
+        source: str,
+        target: str,
+        *,
+        edge_types: Optional[Sequence[str]] = None,
+        max_depth: int = DEFAULT_SHORTEST_PATH_MAX_DEPTH,
+    ) -> Dict[str, Any]:
+        """Directed structural shortest path over persisted relationships.
+
+        Uses stored ``source -> target`` orientation only. Caps bound the
+        search; a not-found result is not a global unreachability claim.
+        This is not provenance, execution evidence, or semantic dependency.
+        """
+        return compute_shortest_path(
+            self.ents,
+            self.rels,
+            self.resolve(source),
+            self.resolve(target),
+            edge_types=edge_types,
+            max_depth=max_depth,
+        )
+
     def degree_ranking(
         self,
         *,
@@ -3980,6 +4016,218 @@ def compute_condensation_graph(
         "components_truncated": len(records) > len(returned),
         "nodes_truncated": any(bool(rec["nodes_truncated"]) for rec in returned),
         "edges_truncated": len(edges) < n_cond_total,
+    }
+
+
+def compute_shortest_path(
+    ents: Optional[pd.DataFrame],
+    rels: Optional[pd.DataFrame],
+    source_title: Optional[str],
+    target_title: Optional[str],
+    *,
+    edge_types: Optional[Sequence[str]] = None,
+    max_depth: int = DEFAULT_SHORTEST_PATH_MAX_DEPTH,
+) -> Dict[str, Any]:
+    """Directed structural shortest path over stored relationship rows.
+
+    Topology uses distinct selected ordered pairs in stored orientation.
+    Parallel rows count on the chosen steps only. Self-loops do not
+    change traversal. Among minimum-hop paths, the complete node-title
+    sequence that is smallest under UTF-8 byte order is returned.
+    ``not_found_within_max_depth`` is not a global unreachability claim.
+    """
+    max_depth = _require_limit_int(
+        "max_depth",
+        max_depth,
+        minimum=0,
+        maximum=HARD_MAX_SHORTEST_PATH_DEPTH,
+    )
+    source_title = _optional_resolved_title(source_title, "source_title")
+    target_title = _optional_resolved_title(target_title, "target_title")
+    normalized_types, _entity_titles, selected, _nodes = _topology_universe(
+        ents, rels, edge_types=edge_types
+    )
+    source_resolved = source_title is not None
+    target_resolved = target_title is not None
+    if not source_resolved or not target_resolved:
+        if not source_resolved and not target_resolved:
+            status = "unresolved_both"
+        elif not source_resolved:
+            status = "unresolved_source"
+        else:
+            status = "unresolved_target"
+        return _shortest_path_payload(
+            source=source_title,
+            target=target_title,
+            source_resolved=source_resolved,
+            target_resolved=target_resolved,
+            status=status,
+            found=False,
+            edge_types=normalized_types,
+            max_depth=max_depth,
+            distance=None,
+            nodes=[],
+            steps=[],
+        )
+    if source_title == target_title:
+        return _shortest_path_payload(
+            source=source_title,
+            target=target_title,
+            source_resolved=True,
+            target_resolved=True,
+            status="found",
+            found=True,
+            edge_types=normalized_types,
+            max_depth=max_depth,
+            distance=0,
+            nodes=[source_title],
+            steps=[],
+        )
+
+    pair_counts: Dict[Tuple[str, str], int] = {}
+    neighbor_sets: Dict[str, set[str]] = defaultdict(set)
+    for _rid, src, tgt in selected:
+        pair_counts[(src, tgt)] = pair_counts.get((src, tgt), 0) + 1
+        if src != tgt:
+            neighbor_sets[src].add(tgt)
+    adj: Dict[str, List[str]] = {
+        src: sorted(dsts, key=_utf8_key) for src, dsts in neighbor_sets.items()
+    }
+
+    parent: Dict[str, Optional[str]] = {source_title: None}
+    queue = deque([source_title])
+    depth = {source_title: 0}
+    reached = False
+    while queue:
+        node = queue.popleft()
+        if depth[node] >= max_depth:
+            continue
+        for nxt in adj.get(node, ()):
+            if nxt in parent:
+                continue
+            parent[nxt] = node
+            depth[nxt] = depth[node] + 1
+            if nxt == target_title:
+                reached = True
+                break
+            queue.append(nxt)
+        if reached:
+            break
+    if not reached:
+        return _shortest_path_payload(
+            source=source_title,
+            target=target_title,
+            source_resolved=True,
+            target_resolved=True,
+            status="not_found_within_max_depth",
+            found=False,
+            edge_types=normalized_types,
+            max_depth=max_depth,
+            distance=None,
+            nodes=[],
+            steps=[],
+        )
+
+    nodes = [target_title]
+    while nodes[-1] != source_title:
+        prev = parent[nodes[-1]]
+        if prev is None:
+            raise ValueError("shortest-path reconstruction lost the source")
+        nodes.append(prev)
+    nodes.reverse()
+    steps: List[Dict[str, Any]] = []
+    for src, tgt in zip(nodes, nodes[1:]):
+        count = pair_counts.get((src, tgt))
+        if count is None or count < 1:
+            raise ValueError("shortest-path step is missing selected relationship rows")
+        steps.append(
+            {
+                "source": src,
+                "target": tgt,
+                "n_relationship_rows_total": int(count),
+            }
+        )
+    return _shortest_path_payload(
+        source=source_title,
+        target=target_title,
+        source_resolved=True,
+        target_resolved=True,
+        status="found",
+        found=True,
+        edge_types=normalized_types,
+        max_depth=max_depth,
+        distance=len(steps),
+        nodes=nodes,
+        steps=steps,
+    )
+
+
+def _optional_resolved_title(raw: Any, name: str) -> Optional[str]:
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not raw:
+        raise ValueError(f"{name} must be a non-empty resolved title or null")
+    try:
+        raw.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError(f"{name} is not strict UTF-8") from exc
+    return raw
+
+
+def _shortest_path_payload(
+    *,
+    source: Optional[str],
+    target: Optional[str],
+    source_resolved: bool,
+    target_resolved: bool,
+    status: str,
+    found: bool,
+    edge_types: Optional[List[str]],
+    max_depth: int,
+    distance: Optional[int],
+    nodes: List[str],
+    steps: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    if status not in _SHORTEST_PATH_STATUSES:
+        raise ValueError(f"invalid shortest-path status {status!r}")
+    if found != (status == "found"):
+        raise ValueError("shortest-path found flag disagrees with status")
+    if found:
+        if source is None or target is None:
+            raise ValueError("found shortest path is missing an endpoint")
+        if distance is None or distance != len(steps):
+            raise ValueError("found shortest-path distance must equal len(steps)")
+        if len(nodes) != distance + 1:
+            raise ValueError("found shortest path must have distance+1 nodes")
+        if nodes[0] != source or nodes[-1] != target:
+            raise ValueError("found shortest path must start at source and end at target")
+        row_total = 0
+        for index, step in enumerate(steps):
+            if step["source"] != nodes[index] or step["target"] != nodes[index + 1]:
+                raise ValueError("shortest-path step does not connect consecutive nodes")
+            count = int(step["n_relationship_rows_total"])
+            if count < 1:
+                raise ValueError("shortest-path step row count must be >= 1")
+            row_total += count
+    else:
+        if distance is not None or nodes or steps:
+            raise ValueError("non-found shortest path must have empty material")
+        row_total = 0
+    return {
+        "source": source,
+        "target": target,
+        "source_resolved": source_resolved,
+        "target_resolved": target_resolved,
+        "status": status,
+        "found": found,
+        "edge_types": edge_types,
+        "max_depth": max_depth,
+        "distance": distance,
+        "nodes": nodes,
+        "steps": steps,
+        "n_nodes_returned": len(nodes),
+        "n_steps_returned": len(steps),
+        "n_relationship_rows_on_path_total": row_total,
     }
 
 

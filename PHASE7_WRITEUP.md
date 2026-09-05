@@ -42,7 +42,7 @@ precise call structure. The intended path is:
    `calls` edges, dangling targets, semantic-suspicion heuristics (including an
    import-aware check), and a seeded precision sample.
 5. **Local queries and context packs** – `scripts/graph_query.py` (callers,
-   callees, neighbors, subgraph, components, strong-components, condensation, degree-ranking, impact, dependency order, symbol, observations)
+   callees, neighbors, subgraph, components, strong-components, condensation, shortest-path, degree-ranking, impact, dependency order, symbol, observations)
    and `scripts/context_pack.py` (entity + neighbors + text units + first-class
    `uses_data` / `data_dependencies` when present). `subgraph` is a bounded
    cycle-safe multi-hop induced subgraph over stored relationships, not an
@@ -100,7 +100,13 @@ precise call structure. The intended path is:
    `condensation`, the sixteenth read-only tool added, immediately after
    `strong_components` and immediately before `degree_ranking`. MCP does
    not expose DOT or a format parameter. There is no `condensation_graph`
-   alias. MCP remains exactly 16 read-only tools.
+   alias. MCP remains exactly 16 read-only tools. `shortest-path` is a
+   deterministic directed structural shortest path over selected persisted
+   rows (`--edge-type`, `--max-depth`). Stored orientation only; among
+   minimum-hop paths the UTF-8-smallest complete node-title sequence is
+   returned. `not_found_within_max_depth` is not global unreachability.
+   There is no DOT. MCP does not expose `shortest_path`. MCP remains
+   exactly 16 read-only tools.
 6. **Golden-first porting gate** – before Rust: license/provenance, a golden
    contract the **reference language** already passes, then a clean graph audit,
    then porting. Recorded in [Plan.md](Plan.md) (“Porting gate”).
@@ -215,7 +221,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`2113 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`2128 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
