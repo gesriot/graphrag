@@ -514,10 +514,12 @@ are not rewritten and are not returned. This query shares the iterative
 SCC engine with `strong-components` and `dependency-order`, and shares
 the condensation-DAG helper with `dependency-order`, but does not change
 those contracts. Strong-components keeps size/internal-edge ordering.
-This milestone has no DOT output. MCP exposes the same bounded producer as
-`condensation`, the sixteenth read-only tool added, registered immediately
-after `strong_components` and immediately before `degree_ranking`. There is
-no `condensation_graph` alias. The fixed MCP surface remains exactly 16 tools.
+`--dot` serializes the same producer result as deterministic Graphviz DOT
+interchange on stdout; Graphviz is not invoked. MCP exposes the same bounded
+producer as `condensation`, the sixteenth read-only tool added, registered
+immediately after `strong_components` and immediately before `degree_ranking`.
+There is no `condensation_graph` alias. MCP does not expose DOT. The fixed MCP
+surface remains exactly 16 tools.
 
 Distinguish: `components` is weakly connected grouping; `strong-components`
 is directed mutual-reachability SCC grouping sorted by size; `dependency-order`
@@ -532,7 +534,7 @@ graphrag-code condensation \
   [--max-components N] \
   [--max-nodes-per-component N] \
   [--max-edges N] \
-  [--json]
+  [--json | --dot]
 ```
 
 | Property | Contract |
@@ -545,11 +547,12 @@ graphrag-code condensation \
 | Totals | Global `n_nodes_total` is the exact topology-node universe. `n_edges_total` is the exact selected relationship-row count. `n_internal_edges_total` + `n_cross_component_edges_total` equals that count. `n_self_loop_edges_total` counts selected `source == target` rows. `n_cyclic_components_total` counts SCCs with more than one node or at least one self-loop row, before output caps. `n_entity_nodes_total` / `n_endpoint_only_nodes_total` partition the node universe. `n_condensation_edges_total` is the number of distinct cross-SCC ordered pairs. `n_condensation_edges_eligible_total` is the complete count whose endpoints are both among returned components, before `max_edges`. `n_condensation_edges_returned` is `len(edges)` |
 | Truncation | `components_truncated` iff returned components are fewer than total. Top-level `nodes_truncated` iff any **returned** component's node list is truncated. `edges_truncated` iff returned condensation edges are fewer than `n_condensation_edges_total`, including edges omitted because an endpoint component was omitted |
 | Records | Bounded topology summary only: no descriptions, snippets, spans, weights, confidence, ids, ordinal ranks, or original relationship rows. Condensation edges store `source`, `target`, and `n_relationship_rows_total` only |
-| JSON / human | Deterministic JSON (`sort_keys=True`, `allow_nan=False`, `ensure_ascii=False`). Human output is derived from the same mapping, including a complete zero-count report for an empty graph. One trailing newline on stdout |
-| Snapshot / lease | Same retained-snapshot read scope as other queries. Lease held through load, computation, serialization, stdout write, and flush. No nested public query. No `.publish.lock` creation |
+| JSON / human | Deterministic JSON (`sort_keys=True`, `allow_nan=False`, `ensure_ascii=False`). Human output is derived from the same mapping, including a complete zero-count report for an empty graph. One trailing newline on stdout. `--json` and `--dot` are mutually exclusive |
+| DOT | Deterministic Graphviz DOT interchange on stdout from the same producer result (`src/graphrag_code/condensation_dot.py`). Non-strict `digraph graphrag_condensation`. Schema version `1`. Internal ids `c0000`… in producer component order; representatives and node titles are never identifiers. Edges keep stored source→target orientation and the producer's aggregated `n_relationship_rows_total`. Graph metadata (quoted): schema version, requested caps, canonical `edge_types` as JSON text (`null` for no filter or a non-empty JSON array, preserving commas and distinguishing a literal `"all"` type), exact totals, returned counts, and all three truncation flags. Components: readable label plus representative, returned node titles as canonical JSON, n_nodes_total, n_nodes_returned, n_internal_edges_total, n_self_loop_edges_total, n_entity_nodes, n_endpoint_only_nodes, is_cyclic, nodes_truncated. Edges: readable `rows N` label plus source, target, n_relationship_rows_total. Presentation baseline only: `rankdir=LR`, box nodes. The serializer does not reconstruct, expand, sort, or truncate the producer result and does not invent edges, nodes, ranks, layers, or transitive relations. Counts, caps, truncation flags, representative uniqueness, endpoint membership, forward producer order, and empty-result invariants are checked before rendering. Hard limit 1,000,000 UTF-8 bytes including the final newline; overflow and invalid renderer input fail closed with exit 2 and empty stdout. Graphviz is not invoked or required. No output-file option |
+| Snapshot / lease | Same retained-snapshot read scope as other queries. Lease held through load, the single producer call, JSON/human/DOT serialization, stdout write, and flush. No nested public query. No `.publish.lock` creation |
 | MCP | Sixteenth read-only tool added, registered immediately after `strong_components` and immediately before `degree_ranking`. Envelope `data` is the exact `ByogGraph.condensation` result. `truncated` is `components_truncated or nodes_truncated or edges_truncated`. Envelope `total` is `n_components_total + n_nodes_total + n_condensation_edges_total`; `returned` is `n_components_returned` plus the sum of each returned component's `n_nodes_returned` plus `n_condensation_edges_returned`. Selected-row, internal, cross-component, self-loop, cyclic, eligible-edge, and `n_edges_total` counts remain exact scalars in `data` and are not added to those envelope counters. Limits include the validated `max_components`, `max_nodes_per_component`, `max_edges`, `edge_types`, and `max_envelope_bytes`. The producer is the only truncation source. The 1 MiB envelope limit fails closed. MCP always uses `allow_unlocked_managed=False`. MCP does not expose DOT, a graph path, a symbol, a direction, a rank, an algorithm, a format, or source/target component arguments. Representatives remain smallest UTF-8 titles, not leaders. Topological position is not an ordinal rank or semantic layer. There is no `condensation_graph` alias. The fixed surface remains exactly 16 tools |
-| Malformed args | Bad limits, filters, duplicate titles/ids, missing columns, or invalid scalars: exit 2, empty stdout |
-| Non-claims | Not weak components, cycle enumeration, transitive closure or reduction, path enumeration, build/import/call/execution/semantic dependency order, architecture, hierarchy, ownership, leadership, importance, Leiden or semantic communities, centrality, GraphRAG, natural-language analysis, proof of runtime recursion or deadlock, indexer, renderer, or UI. A representative is not a leader. A topological position is not an ordinal rank or semantic layer. An aggregated condensation edge is not an original relationship record |
+| Malformed args | Bad limits, filters, duplicate titles/ids, missing columns, invalid scalars, or combined `--json --dot`: exit 2, empty stdout |
+| Non-claims | Not weak components, cycle enumeration, transitive closure or reduction, path enumeration, build/import/call/execution/semantic dependency order, architecture, hierarchy, ownership, leadership, importance, Leiden or semantic communities, centrality, GraphRAG, natural-language analysis, proof of runtime recursion or deadlock, indexer, renderer, or UI. `--dot` is interchange only; truncation and totals still come only from the bounded condensation producer. A representative is not a leader. A topological position is not an ordinal rank or semantic layer. An aggregated condensation edge is not an original relationship record |
 
 ### Operator-managed snapshot retention pins
 

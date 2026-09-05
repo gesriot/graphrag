@@ -93,10 +93,13 @@ precise call structure. The intended path is:
    not weak `components`, not cycle enumeration, not transitive closure,
    not a unique rank, not a containment `dependency-order` list, not
    semantic communities, Leiden, architecture, hierarchy, importance, or a
-   runtime recursion/deadlock proof. There is no DOT. MCP exposes that
-   existing bounded structural producer as `condensation`, the sixteenth
-   read-only tool added, immediately after `strong_components` and
-   immediately before `degree_ranking`. There is no `condensation_graph`
+   runtime recursion/deadlock proof. `--dot` is a deterministic Graphviz
+   DOT interchange of that same bounded producer result on stdout;
+   Graphviz is not invoked. `--json` and `--dot` are mutually exclusive.
+   MCP exposes that existing bounded structural producer as
+   `condensation`, the sixteenth read-only tool added, immediately after
+   `strong_components` and immediately before `degree_ranking`. MCP does
+   not expose DOT or a format parameter. There is no `condensation_graph`
    alias. MCP remains exactly 16 read-only tools.
 6. **Golden-first porting gate** – before Rust: license/provenance, a golden
    contract the **reference language** already passes, then a clean graph audit,
@@ -212,7 +215,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`2098 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`2113 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`

@@ -1,7 +1,8 @@
 """Directed SCC condensation DAG over persisted relationship rows.
 
-CLI/Python topology summary only. MCP does not expose this producer. No DOT,
-NetworkX, or Graphviz.
+CLI/Python topology summary plus deterministic Graphviz DOT interchange.
+MCP exposes the structured JSON contract as the sixteenth read-only tool
+and does not expose DOT. No NetworkX or Graphviz runtime.
 """
 from __future__ import annotations
 
@@ -1211,7 +1212,7 @@ def test_human_json_cli_parity_and_malformed_exit(tmp_path: Path):
     assert snap_bad.stdout == ""
     help_out = _run(sys.executable, str(QUERY), "condensation", "--help")
     assert "--json" in help_out.stdout
-    assert "--dot" not in help_out.stdout
+    assert "--dot" in help_out.stdout
     assert "--edge-type" in help_out.stdout
     assert "--max-edges" in help_out.stdout
     assert "community" in help_out.stdout.lower() or "condensation" in help_out.stdout.lower()

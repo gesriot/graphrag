@@ -208,6 +208,7 @@ def test_wheel_and_sdist_contents(built_wheel_and_sdist):
         assert "graphrag_code/cli.py" in names
         assert "graphrag_code/graph_query.py" in names
         assert "graphrag_code/subgraph_dot.py" in names
+        assert "graphrag_code/condensation_dot.py" in names
         assert "graphrag_code/persisted_graph_doctor.py" in names
         assert "graphrag_code/index_reuse.py" in names
         assert "graphrag_code/python_inputs.py" in names

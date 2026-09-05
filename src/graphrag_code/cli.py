@@ -602,6 +602,15 @@ def condensation(
         help="Exact relationship-type allow-list (repeatable). Omit for all types.",
     ),
     json_out: bool = typer.Option(False, "--json"),
+    dot_out: bool = typer.Option(
+        False,
+        "--dot",
+        help=(
+            "Write deterministic Graphviz DOT to stdout. Interchange only; "
+            "does not invoke Graphviz or render an image. Mutually exclusive "
+            "with --json."
+        ),
+    ),
 ):
     """Directed SCC condensation DAG (graph_query.py condensation).
 
@@ -609,7 +618,9 @@ def condensation(
     presentation of the acyclic condensation. Not weak components, cycle
     enumeration, a unique rank, semantic community detection, Leiden,
     architecture inference, GraphRAG, a runtime recursion/deadlock proof,
-    or a UI.
+    or a UI. ``--dot`` is Graphviz DOT interchange on stdout: it does not
+    invoke Graphviz, render an image, or provide an interactive UI.
+    ``--json`` and ``--dot`` are mutually exclusive.
     """
     args = _append_snapshot(["condensation", "--graph", str(graph)], snapshot)
     args.extend(
@@ -626,6 +637,8 @@ def condensation(
         args.extend(["--edge-type", rel_type])
     if json_out:
         args.append("--json")
+    if dot_out:
+        args.append("--dot")
     _delegate("graph_query.py", args)
 
 

@@ -307,7 +307,12 @@ condensation DAG: not weak components, cycle enumeration, transitive closure
 or reduction, path enumeration, build/import/call/execution/semantic
 dependency order, architecture, hierarchy, ownership, leadership, importance,
 Leiden or semantic communities, centrality, GraphRAG, or natural-language
-analysis. There is no DOT. MCP exposes this existing bounded structural
+analysis. `--dot` writes a deterministic Graphviz DOT interchange for the
+same producer result (non-strict `digraph graphrag_condensation`, producer
+component/edge order, internal `c0000` identifiers). It does not invoke
+Graphviz, render an image, or provide an interactive UI. `--json` and
+`--dot` are mutually exclusive. DOT is capped at 1,000,000 UTF-8 bytes and
+fails closed before writing. MCP exposes this existing bounded structural
 producer as `condensation`, the sixteenth read-only MCP tool added,
 registered immediately after `strong_components` and immediately before
 `degree_ranking`. It does not expose DOT, output-format selection, a graph
@@ -831,6 +836,7 @@ uv run python scripts/graph_query.py subgraph <symbol-or-module> --graph <root> 
 uv run python scripts/graph_query.py components --graph <root>
 uv run python scripts/graph_query.py strong-components --graph <root>
 uv run python scripts/graph_query.py condensation --graph <root>
+uv run python scripts/graph_query.py condensation --graph <root> --dot
 uv run python scripts/graph_query.py degree-ranking --graph <root>
 uv run python scripts/graph_query.py dependency-order --graph <root>
 uv run python scripts/context_pack.py <title> --graph <root>

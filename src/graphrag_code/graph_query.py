@@ -30,6 +30,7 @@ Example:
     uv run python scripts/graph_query.py components --graph byog_mini_game
     uv run python scripts/graph_query.py strong-components --graph byog_mini_game
     uv run python scripts/graph_query.py condensation --graph byog_mini_game
+    uv run python scripts/graph_query.py condensation --graph byog_mini_game --dot
     uv run python scripts/graph_query.py degree-ranking --graph byog_mini_game
     uv run python scripts/graph_query.py dependency-order --graph byog_mini_game
     uv run python scripts/graph_query.py observations sim:run_simulation --graph byog_mini_game
@@ -86,6 +87,7 @@ from graphrag_code.snapshot_read import (
     SnapshotReadError,
     retained_snapshot_read,
 )
+from graphrag_code.condensation_dot import dumps_condensation_dot
 from graphrag_code.subgraph_dot import dumps_subgraph_dot
 
 app = typer.Typer(help="Local BYOG graph queries (callers, callees, impact, etc.)")
@@ -1032,6 +1034,15 @@ def cli_condensation(
         help="Exact relationship-type allow-list (repeatable). Omit for all types.",
     ),
     json_output: bool = typer.Option(False, "--json"),
+    dot_output: bool = typer.Option(
+        False,
+        "--dot",
+        help=(
+            "Write deterministic Graphviz DOT to stdout. Interchange only; "
+            "does not invoke Graphviz or render an image. Mutually exclusive "
+            "with --json."
+        ),
+    ),
 ):
     """Directed SCC condensation DAG over persisted relationships.
 
@@ -1039,7 +1050,17 @@ def cli_condensation(
     presentation of the acyclic condensation: not weak components, cycle
     enumeration, a unique rank, semantic communities, Leiden, architecture
     inference, GraphRAG, or a runtime recursion/deadlock proof.
+
+    ``--dot`` is Graphviz DOT interchange on stdout: Graphviz is not invoked
+    and no image is rendered. ``--json`` and ``--dot`` are mutually exclusive.
     """
+    if json_output and dot_output:
+        typer.secho(
+            "--json and --dot are mutually exclusive",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(2)
     try:
         with _scoped_graph(graph, snapshot) as g:
             result = g.condensation(
@@ -1050,6 +1071,9 @@ def cli_condensation(
             )
             if json_output:
                 print(dumps_condensation_json(result), flush=True)
+            elif dot_output:
+                sys.stdout.write(dumps_condensation_dot(result))
+                sys.stdout.flush()
             else:
                 print(format_condensation_human(result), flush=True)
     except ValueError as e:
