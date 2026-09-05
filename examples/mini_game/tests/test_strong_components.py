@@ -1213,6 +1213,7 @@ def test_mcp_exposes_strong_components_as_fifteenth_tool(tmp_path: Path):
         "components",
         "strong_components",
         "condensation",
+        "shortest_path",
         "degree_ranking",
         "impact",
         "type_closure",
@@ -1220,7 +1221,7 @@ def test_mcp_exposes_strong_components_as_fifteenth_tool(tmp_path: Path):
         "snapshot_history",
         "snapshot_diff",
     ]
-    assert len(TOOL_NAMES) == len(set(TOOL_NAMES)) == 16
+    assert len(TOOL_NAMES) == len(set(TOOL_NAMES)) == 17
 
     expected = ByogGraph(graph).strong_components()
     payload = session.strong_components()
@@ -1247,7 +1248,8 @@ def test_mcp_exposes_strong_components_as_fifteenth_tool(tmp_path: Path):
             assert "strong-components" not in names
             assert names[names.index("components") + 1] == "strong_components"
             assert names[names.index("strong_components") + 1] == "condensation"
-            assert names[names.index("condensation") + 1] == "degree_ranking"
+            assert names[names.index("condensation") + 1] == "shortest_path"
+            assert names[names.index("shortest_path") + 1] == "degree_ranking"
             tool = next(item for item in tools if item.name == "strong_components")
             assert tool.annotations.read_only_hint is True
             assert tool.annotations.destructive_hint is False

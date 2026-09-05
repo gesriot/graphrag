@@ -9,7 +9,7 @@ a graph lease, or mutate the export directory or any graph. It does
 not create, copy, rename, repair, quarantine, import, restore, or
 delete anything. It does not claim that the export is a backup,
 authentic, recoverable, complete source evidence, or authorization to
-delete anything. MCP stays exactly 16 read-only tools; this command is
+delete anything. MCP stays exactly 17 read-only tools; this command is
 CLI-only.
 
 ``--export-dir`` and ``--expected-export-revision`` are required. The

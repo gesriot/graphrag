@@ -1041,7 +1041,7 @@ def test_no_nested_query_graphviz_or_tempfiles_and_single_producer_call(
     assert 0 <= with_at < write_at < flush_at
 
 
-def test_mcp_remains_sixteen_tools_without_dot(tmp_path: Path):
+def test_mcp_remains_seventeen_tools_without_dot(tmp_path: Path):
     from anyio import run as anyio_run
     from mcp import Client
 
@@ -1072,6 +1072,7 @@ def test_mcp_remains_sixteen_tools_without_dot(tmp_path: Path):
         "components",
         "strong_components",
         "condensation",
+        "shortest_path",
         "degree_ranking",
         "impact",
         "type_closure",
@@ -1079,7 +1080,7 @@ def test_mcp_remains_sixteen_tools_without_dot(tmp_path: Path):
         "snapshot_history",
         "snapshot_diff",
     ]
-    assert len(TOOL_NAMES) == 16
+    assert len(TOOL_NAMES) == 17
     assert "condensation_graph" not in TOOL_NAMES
     assert "condensation-graph" not in TOOL_NAMES
 
@@ -1088,7 +1089,7 @@ def test_mcp_remains_sixteen_tools_without_dot(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == 16
+            assert len(names) == 17
             tool = next(item for item in tools if item.name == "condensation")
             props = tool.input_schema.get("properties") or {}
             assert "dot" not in props

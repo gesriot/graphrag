@@ -832,7 +832,7 @@ def test_no_nested_query_mcp_unchanged_and_existing_surfaces(
     assert isinstance(other.impact("B"), list)
 
 
-def test_mcp_remains_sixteen_tools_without_dependency_order(tmp_path: Path):
+def test_mcp_remains_seventeen_tools_without_dependency_order(tmp_path: Path):
     from anyio import run as anyio_run
     from mcp import Client
 
@@ -855,6 +855,7 @@ def test_mcp_remains_sixteen_tools_without_dependency_order(tmp_path: Path):
         "components",
         "strong_components",
         "condensation",
+        "shortest_path",
         "degree_ranking",
         "impact",
         "type_closure",
@@ -862,7 +863,7 @@ def test_mcp_remains_sixteen_tools_without_dependency_order(tmp_path: Path):
         "snapshot_history",
         "snapshot_diff",
     ]
-    assert len(TOOL_NAMES) == len(set(TOOL_NAMES)) == 16
+    assert len(TOOL_NAMES) == len(set(TOOL_NAMES)) == 17
 
     async def _body():
         async with Client(server) as client:

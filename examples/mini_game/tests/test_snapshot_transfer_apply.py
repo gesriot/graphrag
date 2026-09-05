@@ -1154,7 +1154,7 @@ def test_no_mcp_tool_and_implementation_constraints(tmp_path: Path):
         assert word not in lowered
     from anyio import run as anyio_run
 
-    assert len(TOOL_NAMES) == 16
+    assert len(TOOL_NAMES) == 17
     assert "snapshot_transfer_apply" not in TOOL_NAMES
     session = build_session(target, "python")
     server = build_mcp_server(session)

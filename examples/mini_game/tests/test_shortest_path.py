@@ -1,12 +1,12 @@
 """Directed structural shortest-path query over persisted relationship rows.
 
-CLI/Python only. MCP does not expose this producer. No DOT, NetworkX, or
-Graphviz.
+CLI/Python and the 17th read-only MCP tool. No DOT, NetworkX, or Graphviz.
 """
 from __future__ import annotations
 
 import ast
 import hashlib
+import inspect
 import json
 import math
 import multiprocessing
@@ -37,7 +37,7 @@ from scripts.graph_query import (  # type: ignore
     format_shortest_path_human,
     shortest_path as free_shortest_path,
 )
-from graphrag_code.mcp_server import TOOL_NAMES  # type: ignore
+from graphrag_code.mcp_server import GraphMcpSession, TOOL_NAMES  # type: ignore
 
 CTX = multiprocessing.get_context("spawn")
 TIMEOUT = 60
@@ -956,7 +956,7 @@ def test_publisher_waits_through_serialization(tmp_path: Path):
         _cleanup_processes(reader, pub, release=resume)
 
 
-def test_producer_once_no_nested_query_and_mcp_stays_sixteen(
+def test_producer_once_no_nested_query_and_mcp_exposes_shortest_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     graph = _publish(tmp_path, [_entity("A"), _entity("B")], [_calls("A", "B")])
@@ -1020,8 +1020,8 @@ def test_producer_once_no_nested_query_and_mcp_stays_sixteen(
 
     session = build_session(graph, "python")
     server = build_mcp_server(session)
-    assert not hasattr(session, "shortest_path")
-    assert "shortest_path" not in TOOL_NAMES
+    params = list(inspect.signature(GraphMcpSession.shortest_path).parameters)
+    assert params == ["self", "source", "target", "max_depth", "edge_types", "snapshot"]
     assert "shortest-path" not in TOOL_NAMES
     assert list(TOOL_NAMES) == [
         "graph_status",
@@ -1034,6 +1034,7 @@ def test_producer_once_no_nested_query_and_mcp_stays_sixteen(
         "components",
         "strong_components",
         "condensation",
+        "shortest_path",
         "degree_ranking",
         "impact",
         "type_closure",
@@ -1041,14 +1042,36 @@ def test_producer_once_no_nested_query_and_mcp_stays_sixteen(
         "snapshot_history",
         "snapshot_diff",
     ]
-    assert len(TOOL_NAMES) == 16
+    assert len(TOOL_NAMES) == len(set(TOOL_NAMES)) == 17
+    expected = ByogGraph(graph).shortest_path("A", "B")
+    payload = session.shortest_path("A", "B")
+    assert payload["tool"] == "shortest_path"
+    assert payload["ok"] is True
+    assert payload["data"] == json.loads(json.dumps(expected, allow_nan=False, default=str))
+    assert payload["truncated"] is False
+    assert payload["total"] == (
+        payload["data"]["n_nodes_returned"] + payload["data"]["n_steps_returned"]
+    )
+    assert payload["returned"] == payload["total"]
 
     async def _body():
         async with Client(server) as client:
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert "shortest_path" not in names
+            assert names[names.index("condensation") + 1] == "shortest_path"
+            assert names[names.index("shortest_path") + 1] == "degree_ranking"
             assert "shortest-path" not in names
+            tool = next(item for item in tools if item.name == "shortest_path")
+            assert tool.annotations.read_only_hint is True
+            assert tool.input_schema["additionalProperties"] is False
+            body = await client.call_tool(
+                "shortest_path", {"source": "A", "target": "B"}
+            )
+            data = body.structured_content
+            if isinstance(data, dict) and set(data) == {"result"}:
+                data = data["result"]
+            assert data["tool"] == "shortest_path"
+            assert data["data"] == payload["data"]
 
     anyio_run(_body)

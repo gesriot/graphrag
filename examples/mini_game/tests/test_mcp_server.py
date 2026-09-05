@@ -36,6 +36,7 @@ from graphrag_code.byog_graph import (  # type: ignore
     DEFAULT_CONDENSATION_MAX_EDGES,
     DEFAULT_CONDENSATION_MAX_NODES_PER_COMPONENT,
     DEFAULT_DEGREE_RANKING_MAX_NODES,
+    DEFAULT_SHORTEST_PATH_MAX_DEPTH,
     DEFAULT_STRONG_COMPONENTS_MAX_COMPONENTS,
     DEFAULT_STRONG_COMPONENTS_MAX_NODES_PER_COMPONENT,
     DEFAULT_SUBGRAPH_MAX_DEPTH,
@@ -48,6 +49,7 @@ from graphrag_code.byog_graph import (  # type: ignore
     HARD_MAX_CONDENSATION_COMPONENTS,
     HARD_MAX_CONDENSATION_EDGES,
     HARD_MAX_DEGREE_RANKING_NODES,
+    HARD_MAX_SHORTEST_PATH_DEPTH,
     HARD_MAX_STRONG_COMPONENT_NODES,
     HARD_MAX_STRONG_COMPONENTS,
     HARD_MAX_SUBGRAPH_DEPTH,
@@ -258,17 +260,19 @@ def test_tools_list_is_exactly_documented(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == len(set(names)) == len(TOOL_NAMES) == 16
+            assert len(names) == len(set(names)) == len(TOOL_NAMES) == 17
             assert names[names.index("neighbors") + 1] == "subgraph"
             assert names[names.index("subgraph") + 1] == "components"
             assert names[names.index("components") + 1] == "strong_components"
             assert names[names.index("strong_components") + 1] == "condensation"
-            assert names[names.index("condensation") + 1] == "degree_ranking"
+            assert names[names.index("condensation") + 1] == "shortest_path"
+            assert names[names.index("shortest_path") + 1] == "degree_ranking"
             assert names[names.index("degree_ranking") + 1] == "impact"
             assert "degree-ranking" not in names
             assert "strong-components" not in names
             assert "condensation-graph" not in names
             assert "condensation_graph" not in names
+            assert "shortest-path" not in names
             assert "snapshot_activate" not in names
             for tool in tools:
                 assert tool.input_schema["additionalProperties"] is False
@@ -300,6 +304,10 @@ def test_every_required_tool_via_sdk_client(tmp_path: Path):
                     "degree_ranking",
                 }:
                     result = await client.call_tool(name)
+                elif name == "shortest_path":
+                    result = await client.call_tool(
+                        name, {"source": symbol, "target": symbol}
+                    )
                 elif name == "snapshot_diff":
                     result = await client.call_tool(name, {"from_snapshot": "current"})
                 elif name == "type_closure":
@@ -357,6 +365,9 @@ def test_query_and_graph_walks_match_byog_graph(tmp_path: Path):
     )
     assert session.degree_ranking()["data"] == json.loads(
         json.dumps(view.degree_ranking(), allow_nan=False, default=str)
+    )
+    assert session.shortest_path(symbol, symbol)["data"] == json.loads(
+        json.dumps(view.shortest_path(symbol, symbol), allow_nan=False, default=str)
     )
     assert session.impact(symbol)["data"] == view.impact(symbol)
 
@@ -669,6 +680,7 @@ def test_mcp_calls_do_not_mutate_graph(
     session.subgraph(symbol)
     session.components()
     session.degree_ranking()
+    session.shortest_path(symbol, symbol)
     session.impact(symbol)
     session.type_closure(symbol)
     session.context_pack(symbol)
@@ -1936,10 +1948,11 @@ def test_degree_ranking_mcp_schema_defaults_and_unknown_args(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == len(set(names)) == 16
+            assert len(names) == len(set(names)) == 17
             assert names[names.index("components") + 1] == "strong_components"
             assert names[names.index("strong_components") + 1] == "condensation"
-            assert names[names.index("condensation") + 1] == "degree_ranking"
+            assert names[names.index("condensation") + 1] == "shortest_path"
+            assert names[names.index("shortest_path") + 1] == "degree_ranking"
             assert names[names.index("degree_ranking") + 1] == "impact"
             assert "degree-ranking" not in names
             tool = next(item for item in tools if item.name == "degree_ranking")
@@ -2500,10 +2513,11 @@ def test_strong_components_mcp_schema_defaults_and_unknown_args(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == len(set(names)) == 16
+            assert len(names) == len(set(names)) == 17
             assert names[names.index("components") + 1] == "strong_components"
             assert names[names.index("strong_components") + 1] == "condensation"
-            assert names[names.index("condensation") + 1] == "degree_ranking"
+            assert names[names.index("condensation") + 1] == "shortest_path"
+            assert names[names.index("shortest_path") + 1] == "degree_ranking"
             assert "strong-components" not in names
             tool = next(item for item in tools if item.name == "strong_components")
             assert tool.annotations.read_only_hint is True
@@ -3081,9 +3095,10 @@ def test_condensation_mcp_schema_defaults_and_unknown_args(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == len(set(names)) == 16
+            assert len(names) == len(set(names)) == 17
             assert names[names.index("strong_components") + 1] == "condensation"
-            assert names[names.index("condensation") + 1] == "degree_ranking"
+            assert names[names.index("condensation") + 1] == "shortest_path"
+            assert names[names.index("shortest_path") + 1] == "degree_ranking"
             assert "condensation-graph" not in names
             assert "condensation_graph" not in names
             tool = next(item for item in tools if item.name == "condensation")
@@ -3589,6 +3604,690 @@ def test_condensation_mcp_publisher_wait_and_no_nested_query(
     q = ctx.Queue()
     reader = ctx.Process(
         target=_mcp_paused_condensation, args=(str(graph), pinned, resume, q)
+    )
+    from test_reader_lease import _cleanup_processes, _publisher
+
+    pub = ctx.Process(target=_publisher, args=(str(graph), "next", 1, about, got, q))
+    try:
+        reader.start()
+        assert pinned.wait(timeout=20)
+        pub.start()
+        assert about.wait(timeout=20)
+        assert not got.is_set()
+        assert _current(graph) == first
+        assert (first_dir / "entities.parquet").is_file()
+        resume.set()
+        reader.join(timeout=20)
+        pub.join(timeout=20)
+        assert not reader.is_alive() and not pub.is_alive()
+        assert got.is_set()
+    finally:
+        _cleanup_processes(pub, reader, release=resume)
+
+
+def _assert_shortest_path_envelope(payload: dict, data: dict) -> None:
+    ready = json.loads(json.dumps(data, allow_nan=False, default=str))
+    expected = int(ready["n_nodes_returned"]) + int(ready["n_steps_returned"])
+    assert payload["tool"] == "shortest_path"
+    assert payload["ok"] is True
+    assert payload["schema_version"] == 1
+    assert payload["data"] == ready
+    assert payload["truncated"] is False
+    assert payload["total"] == expected
+    assert payload["returned"] == expected
+    assert payload["limits"]["max_depth"] == ready["max_depth"]
+    assert payload["limits"]["edge_types"] == ready["edge_types"]
+    assert payload["limits"]["max_envelope_bytes"] == HARD_MAX_ENVELOPE_BYTES
+    assert "n_relationship_rows_on_path_total" in payload["data"]
+
+
+def test_shortest_path_mcp_schema_defaults_and_unknown_args(tmp_path: Path):
+    graph = _publish_components(
+        tmp_path,
+        [_component_entity("A"), _component_entity("B")],
+        [_component_rel("A", "B", "calls")],
+    )
+    session = _session(graph, "python")
+    sig = inspect.signature(GraphMcpSession.shortest_path)
+    assert list(sig.parameters) == [
+        "self",
+        "source",
+        "target",
+        "max_depth",
+        "edge_types",
+        "snapshot",
+    ]
+    assert sig.parameters["max_depth"].default == DEFAULT_SHORTEST_PATH_MAX_DEPTH
+    assert sig.parameters["edge_types"].default is None
+    assert sig.parameters["snapshot"].default == "current"
+    for forbidden in (
+        "graph",
+        "direction",
+        "format",
+        "json",
+        "dot",
+        "algorithm",
+        "max_nodes",
+        "max_edges",
+        "rank",
+        "path",
+        "output_path",
+        "symbol",
+    ):
+        assert forbidden not in sig.parameters
+
+    defaulted = session.shortest_path("A", "B")
+    view = ByogGraph(graph).shortest_path("A", "B")
+    _assert_shortest_path_envelope(defaulted, view)
+    assert defaulted["limits"]["max_depth"] == DEFAULT_SHORTEST_PATH_MAX_DEPTH
+    assert defaulted["limits"]["edge_types"] is None
+    assert defaulted["data"]["found"] is True
+    assert defaulted["data"]["distance"] == 1
+    assert defaulted["total"] == 3
+    assert defaulted["returned"] == 3
+
+    server = build_mcp_server(session)
+
+    async def _body():
+        async with Client(server) as client:
+            tools = (await client.list_tools()).tools
+            names = [tool.name for tool in tools]
+            assert names == list(TOOL_NAMES)
+            assert len(names) == len(set(names)) == 17
+            assert names[names.index("condensation") + 1] == "shortest_path"
+            assert names[names.index("shortest_path") + 1] == "degree_ranking"
+            assert "shortest-path" not in names
+            tool = next(item for item in tools if item.name == "shortest_path")
+            assert tool.annotations.read_only_hint is True
+            assert tool.annotations.destructive_hint is False
+            assert tool.annotations.idempotent_hint is True
+            assert tool.annotations.open_world_hint is False
+            assert tool.input_schema["additionalProperties"] is False
+            props = tool.input_schema["properties"]
+            assert list(props) == [
+                "source",
+                "target",
+                "max_depth",
+                "edge_types",
+                "snapshot",
+            ]
+            assert props["max_depth"]["type"] == "integer"
+            assert props["max_depth"]["default"] == DEFAULT_SHORTEST_PATH_MAX_DEPTH
+            assert props["snapshot"]["default"] == "current"
+            for extra_args in (
+                {"graph": str(tmp_path / "other")},
+                {"direction": "incoming"},
+                {"format": "json"},
+                {"json": True},
+                {"dot": True},
+                {"algorithm": "dijkstra"},
+                {"max_nodes": 10},
+                {"max_edges": 10},
+                {"rank": 1},
+                {"path": "A"},
+                {"output_path": "out.json"},
+                {"symbol": "A"},
+            ):
+                extra = await client.call_tool(
+                    "shortest_path",
+                    {"source": "A", "target": "B", **extra_args},
+                )
+                assert extra.is_error is True, extra_args
+            scalar = await client.call_tool(
+                "shortest_path",
+                {"source": "A", "target": "B", "edge_types": "calls"},
+            )
+            assert scalar.is_error is True
+            for invalid_args in (
+                {"max_depth": True},
+                {"max_depth": 1.0},
+                {"max_depth": False},
+                {"edge_types": ["calls", None]},
+                {"edge_types": ["calls", 1]},
+            ):
+                invalid = await client.call_tool(
+                    "shortest_path",
+                    {"source": "A", "target": "B", **invalid_args},
+                )
+                assert invalid.is_error is True, invalid_args
+            body = _payload(
+                await client.call_tool("shortest_path", {"source": "A", "target": "B"})
+            )
+            assert body["tool"] == "shortest_path"
+            assert body["data"] == defaulted["data"]
+
+    _run(_body)
+
+
+def test_shortest_path_mcp_semantics_parity_snapshots_and_filters(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    graph = tmp_path / "g"
+    older = publish_byog_snapshot(
+        pd.DataFrame([_component_entity("demo:old", source_file="old.py")]),
+        pd.DataFrame([_component_rel("demo:old", "demo:old", "calls", rid="rel:old")]),
+        pd.DataFrame(
+            [
+                {
+                    "id": "tu:old",
+                    "title": "old.py",
+                    "source_file": "old.py",
+                    "entity_id": "ent:demo:old",
+                }
+            ]
+        ),
+        graph,
+        settings_text="mcp: old\n",
+        keep_last=5,
+    )
+    newer_ents = [
+        _component_entity("S"),
+        _component_entity("A"),
+        _component_entity("B"),
+        _component_entity("T"),
+        _component_entity("Isolated"),
+    ]
+    newer_rels = [
+        _component_rel("S", "A", "calls", rid="rel:sa"),
+        _component_rel("A", "T", "calls", rid="rel:at"),
+        _component_rel("S", "B", "calls", rid="rel:sb"),
+        _component_rel("B", "T", "calls", rid="rel:bt"),
+        _component_rel("S", "A", "calls", rid="rel:sa-parallel"),
+        _component_rel("A", "A", "calls", rid="rel:self"),
+        _component_rel("S", "ghost", "contains", rid="rel:endpoint"),
+        _component_rel("Isolated", "T", "uses_type", rid="rel:uses"),
+    ]
+    current = publish_byog_snapshot(
+        pd.DataFrame(newer_ents),
+        pd.DataFrame(newer_rels),
+        pd.DataFrame(
+            [
+                {
+                    "id": f"tu:{row['title']}",
+                    "title": "a.py",
+                    "source_file": "a.py",
+                    "entity_id": row["id"],
+                }
+                for row in newer_ents
+            ]
+        ),
+        graph,
+        settings_text="mcp: new\n",
+        keep_last=5,
+    )
+    assert _current(graph) == current.name
+    before = _payload_hashes(graph)
+    session = _session(graph, "python")
+    view = ByogGraph(graph)
+
+    found = session.shortest_path("S", "T")
+    _assert_shortest_path_envelope(found, view.shortest_path("S", "T"))
+    assert found["data"]["status"] == "found"
+    assert found["data"]["found"] is True
+    assert found["data"]["nodes"] == ["S", "A", "T"]
+    assert found["data"]["distance"] == 2
+    assert found["data"]["steps"][0]["n_relationship_rows_total"] == 2
+    assert found["total"] == 5
+    empty = session.shortest_path("S", "T", edge_types=[])
+    none = session.shortest_path("S", "T", edge_types=None)
+    assert empty["data"] == none["data"] == found["data"]
+    assert empty["limits"]["edge_types"] is None
+    explicit_current = session.shortest_path("S", "T", snapshot="current")
+    assert explicit_current["data"] == found["data"]
+    assert explicit_current["snapshot"] == current.name
+
+    zero = session.shortest_path("S", "S")
+    _assert_shortest_path_envelope(zero, view.shortest_path("S", "S"))
+    assert zero["data"]["status"] == "found"
+    assert zero["data"]["distance"] == 0
+    assert zero["data"]["nodes"] == ["S"]
+    assert zero["data"]["steps"] == []
+    assert zero["total"] == 1
+    assert zero["returned"] == 1
+
+    reverse = session.shortest_path("T", "S")
+    _assert_shortest_path_envelope(reverse, view.shortest_path("T", "S"))
+    assert reverse["data"]["status"] == "not_found_within_max_depth"
+    assert reverse["data"]["found"] is False
+    assert reverse["truncated"] is False
+    assert reverse["total"] == 0
+    assert reverse["returned"] == 0
+    assert "unreachable" not in json.dumps(reverse).lower()
+
+    filtered = session.shortest_path(
+        "S", "T", edge_types=["uses_type", "calls", "calls"]
+    )
+    expected_filtered = view.shortest_path(
+        "S", "T", edge_types=["uses_type", "calls", "calls"]
+    )
+    _assert_shortest_path_envelope(filtered, expected_filtered)
+    assert filtered["limits"]["edge_types"] == ["calls", "uses_type"]
+    contains_only = session.shortest_path("S", "T", edge_types=["contains"])
+    assert contains_only["data"]["status"] == "not_found_within_max_depth"
+    uses_only = session.shortest_path("Isolated", "T", edge_types=["uses_type"])
+    assert uses_only["data"]["found"] is True
+    assert uses_only["data"]["nodes"] == ["Isolated", "T"]
+
+    at_zero = session.shortest_path("S", "T", max_depth=0)
+    assert at_zero["data"]["status"] == "not_found_within_max_depth"
+    assert at_zero["truncated"] is False
+    at_one = session.shortest_path("S", "A", max_depth=1)
+    assert at_one["data"]["found"] is True
+    at_bound = session.shortest_path("S", "T", max_depth=2)
+    assert at_bound["data"]["found"] is True
+    too_short = session.shortest_path("S", "T", max_depth=1)
+    assert too_short["data"]["status"] == "not_found_within_max_depth"
+    hard = session.shortest_path("S", "T", max_depth=HARD_MAX_SHORTEST_PATH_DEPTH)
+    assert hard["data"]["found"] is True
+    assert hard["limits"]["max_depth"] == HARD_MAX_SHORTEST_PATH_DEPTH
+
+    missing_t = session.shortest_path("S", "nope")
+    assert missing_t["data"]["status"] == "unresolved_target"
+    assert missing_t["total"] == 0
+    missing_s = session.shortest_path("nope", "T")
+    assert missing_s["data"]["status"] == "unresolved_source"
+    both = session.shortest_path("nope", "also-nope")
+    assert both["data"]["status"] == "unresolved_both"
+
+    historical = session.shortest_path("demo:old", "demo:old", snapshot=older.name)
+    assert historical["snapshot"] == older.name
+    assert _current(graph) == current.name
+    assert historical["data"]["status"] == "found"
+    assert historical["data"]["nodes"] == ["demo:old"]
+    assert historical["data"]["distance"] == 0
+    assert "S" not in historical["data"]["nodes"]
+    assert _payload_hashes(graph) == before
+    assert not (graph / ".publish.lock").is_symlink()
+    assert (graph / ".publish.lock").is_file()
+    assert not list(graph.glob(".staging-*"))
+
+    import graphrag_code.snapshot_read as scope_mod
+
+    real = scope_mod.resolve_snapshot
+    seen: list = []
+
+    def counted_resolve(graph_root, snapshot=None):
+        seen.append(snapshot)
+        return real(graph_root, snapshot)
+
+    monkeypatch.setattr(scope_mod, "resolve_snapshot", counted_resolve)
+    hist_again = session.shortest_path("demo:old", "demo:old", snapshot=older.name)
+    assert seen == [older.name]
+    assert hist_again["snapshot"] == older.name
+    assert _current(graph) == current.name
+    seen.clear()
+    session.shortest_path("S", "T", snapshot="current")
+    assert seen == [None]
+    monkeypatch.undo()
+
+    server = build_mcp_server(session)
+
+    async def _body():
+        async with Client(server) as client:
+            payload = _payload(
+                await client.call_tool(
+                    "shortest_path",
+                    {"source": "S", "target": "T", "snapshot": current.name},
+                )
+            )
+            assert payload["tool"] == "shortest_path"
+            assert payload["snapshot"] == current.name
+            assert payload["data"] == found["data"]
+            hist = _payload(
+                await client.call_tool(
+                    "shortest_path",
+                    {
+                        "source": "demo:old",
+                        "target": "demo:old",
+                        "snapshot": older.name,
+                    },
+                )
+            )
+            assert hist["snapshot"] == older.name
+            assert _current(graph) == current.name
+            empty_types = _payload(
+                await client.call_tool(
+                    "shortest_path",
+                    {"source": "S", "target": "T", "edge_types": []},
+                )
+            )
+            assert empty_types["data"] == found["data"]
+
+    _run(_body)
+    assert _payload_hashes(graph) == before
+
+
+def test_shortest_path_mcp_validation_malformed_empty_and_envelope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    graph = _publish_components(
+        tmp_path,
+        [_component_entity("A"), _component_entity("B")],
+        [_component_rel("A", "B", "calls")],
+    )
+    session = _session(graph, "python")
+    observed: list[str] = []
+    orig_scope = session._scope
+
+    def wrapped_scope(snapshot):
+        observed.append(str(snapshot))
+        return orig_scope(snapshot)
+
+    monkeypatch.setattr(session, "_scope", wrapped_scope)
+    with pytest.raises(GraphMcpError, match="source"):
+        session.shortest_path("", "B")
+    with pytest.raises(GraphMcpError, match="target"):
+        session.shortest_path("A", "")
+    with pytest.raises(GraphMcpError, match="source"):
+        session.shortest_path(None, "B")
+    with pytest.raises(GraphMcpError, match="target"):
+        session.shortest_path("A", None)
+    with pytest.raises(GraphMcpError, match="max_depth"):
+        session.shortest_path("A", "B", max_depth=True)
+    with pytest.raises(GraphMcpError, match="max_depth"):
+        session.shortest_path("A", "B", max_depth=1.5)
+    with pytest.raises(GraphMcpError, match="max_depth"):
+        session.shortest_path("A", "B", max_depth="1")
+    with pytest.raises(GraphMcpError, match="max_depth"):
+        session.shortest_path("A", "B", max_depth=float("nan"))
+    with pytest.raises(GraphMcpError, match="max_depth"):
+        session.shortest_path("A", "B", max_depth=math.inf)
+    with pytest.raises(GraphMcpError, match="max_depth"):
+        session.shortest_path("A", "B", max_depth=-1)
+    with pytest.raises(GraphMcpError, match="max_depth"):
+        session.shortest_path("A", "B", max_depth=HARD_MAX_SHORTEST_PATH_DEPTH + 1)
+    with pytest.raises(GraphMcpError):
+        session.shortest_path("A", "B", edge_types="calls")
+    with pytest.raises(GraphMcpError):
+        session.shortest_path("A", "B", edge_types=[""])
+    with pytest.raises(GraphMcpError):
+        session.shortest_path("A", "B", edge_types=[" calls"])
+    with pytest.raises(GraphMcpError):
+        session.shortest_path("A", "B", edge_types=["ca\x00lls"])
+    assert observed == []
+    monkeypatch.undo()
+
+    session = _session(graph, "python")
+    with pytest.raises(GraphMcpError):
+        session.shortest_path("A", "B", snapshot="..")
+    empty_ok = session.shortest_path("A", "B", edge_types=[])
+    none_ok = session.shortest_path("A", "B", edge_types=None)
+    assert none_ok["data"] == empty_ok["data"]
+    _assert_shortest_path_envelope(empty_ok, ByogGraph(graph).shortest_path("A", "B"))
+
+    import graphrag_code.snapshot_read as scope_mod
+
+    real = scope_mod.resolve_snapshot
+    seen = {"n": 0}
+
+    def counted_resolve(graph_root, snapshot=None):
+        seen["n"] += 1
+        seen["last"] = snapshot
+        return real(graph_root, snapshot)
+
+    monkeypatch.setattr(scope_mod, "resolve_snapshot", counted_resolve)
+    session.shortest_path("A", "B")
+    assert seen["n"] == 1
+    assert seen["last"] is None
+    monkeypatch.undo()
+
+    empty_graph = tmp_path / "empty"
+    publish_byog_snapshot(
+        pd.DataFrame(columns=["id", "title", "type", "source_file", "extractor"]),
+        pd.DataFrame(columns=["id", "source", "target", "type", "extractor"]),
+        pd.DataFrame(columns=["id", "title", "source_file"]),
+        empty_graph,
+        settings_text="mcp: empty\n",
+        keep_last=1,
+    )
+    empty_session = GraphMcpSession(
+        empty_graph,
+        configured_indexer="python",
+        resolved_indexer="python",
+        preflight={"indexer": "python", "indexer_resolution": {}},
+    )
+    empty_payload = empty_session.shortest_path("A", "B")
+    expected_empty = json.loads(
+        json.dumps(
+            ByogGraph(empty_graph).shortest_path("A", "B"),
+            allow_nan=False,
+            default=str,
+        )
+    )
+    _assert_shortest_path_envelope(empty_payload, expected_empty)
+    assert empty_payload["data"]["status"] == "unresolved_both"
+    assert empty_payload["truncated"] is False
+    assert empty_payload["total"] == 0
+    assert empty_payload["returned"] == 0
+
+    bad = tmp_path / "bad"
+    publish_byog_snapshot(
+        pd.DataFrame([_component_entity("A")]),
+        pd.DataFrame(
+            [
+                {
+                    "id": "rel:ok",
+                    "source": "A",
+                    "target": "A",
+                    "type": "calls",
+                    "extractor": "tree-sitter-python",
+                },
+                {
+                    "id": "rel:bad",
+                    "source": "A",
+                    "target": None,
+                    "type": "contains",
+                    "extractor": "tree-sitter-python",
+                },
+            ]
+        ),
+        pd.DataFrame(
+            [{"id": "tu:a", "title": "a.py", "source_file": "a.py", "entity_id": "ent:A"}]
+        ),
+        bad,
+        settings_text="mcp: bad\n",
+        keep_last=1,
+    )
+    bad_session = GraphMcpSession(
+        bad,
+        configured_indexer="python",
+        resolved_indexer="python",
+        preflight={"indexer": "python", "indexer_resolution": {}},
+    )
+    with pytest.raises(GraphMcpError, match="invalid target"):
+        bad_session.shortest_path("A", "A")
+    with pytest.raises(GraphMcpError, match="invalid target"):
+        bad_session.shortest_path("A", "A", edge_types=["calls"])
+
+    missing = tmp_path / "missing-graph"
+    missing_session = GraphMcpSession(
+        missing,
+        configured_indexer="python",
+        resolved_indexer="python",
+        preflight={"indexer": "python", "indexer_resolution": {}},
+    )
+    with pytest.raises(GraphMcpError):
+        missing_session.shortest_path("A", "B")
+
+    unlocked = _publish_components(
+        tmp_path / "unlocked",
+        [_component_entity("A"), _component_entity("B")],
+        [_component_rel("A", "B", "calls")],
+        name="unlocked",
+    )
+    lock = unlocked / ".publish.lock"
+    lock.unlink()
+    unlocked_session = GraphMcpSession(
+        unlocked,
+        configured_indexer="python",
+        resolved_indexer="python",
+        preflight={"indexer": "python", "indexer_resolution": {}},
+    )
+    with pytest.raises(GraphMcpError, match="publication lock"):
+        unlocked_session.shortest_path("A", "B")
+    assert not lock.exists()
+
+    unsafe = _publish_components(
+        tmp_path / "unsafe",
+        [_component_entity("A"), _component_entity("B")],
+        [_component_rel("A", "B", "calls")],
+        name="unsafe",
+    )
+    real_lock = unsafe / ".publish.lock"
+    backup = unsafe / ".publish.lock.real"
+    real_lock.rename(backup)
+    real_lock.symlink_to(backup)
+    unsafe_session = GraphMcpSession(
+        unsafe,
+        configured_indexer="python",
+        resolved_indexer="python",
+        preflight={"indexer": "python", "indexer_resolution": {}},
+    )
+    with pytest.raises(GraphMcpError, match="unsafe"):
+        unsafe_session.shortest_path("A", "B")
+
+    huge = tmp_path / "huge"
+    title = "T" + ("x" * (HARD_MAX_ENVELOPE_BYTES + 1))
+    publish_byog_snapshot(
+        pd.DataFrame([_component_entity(title, id="ent:huge", source_file="m.py")]),
+        pd.DataFrame(columns=["id", "source", "target", "type"]),
+        pd.DataFrame(
+            [{"id": "tu:1", "title": "m.py", "source_file": "m.py", "entity_id": "ent:huge"}]
+        ),
+        huge,
+        settings_text="mcp: huge\n",
+        keep_last=1,
+    )
+    with pytest.raises(GraphMcpError, match="response envelope exceeds hard limit"):
+        GraphMcpSession(
+            huge,
+            configured_indexer="python",
+            resolved_indexer="python",
+            preflight={"indexer": "python", "indexer_resolution": {}},
+        ).shortest_path(title, title)
+
+    server = build_mcp_server(session)
+
+    async def _body():
+        async with Client(server) as client:
+            for invalid_args in (
+                {"max_depth": True},
+                {"max_depth": -1},
+                {"max_depth": HARD_MAX_SHORTEST_PATH_DEPTH + 1},
+                {"max_depth": 1.5},
+                {"edge_types": "calls"},
+                {"edge_types": [""]},
+                {"edge_types": [" calls"]},
+                {"snapshot": ".."},
+                {"source": ""},
+                {"target": ""},
+            ):
+                args = {"source": "A", "target": "B", **invalid_args}
+                invalid = await client.call_tool("shortest_path", args)
+                assert invalid.is_error is True, invalid_args
+                assert not getattr(invalid, "structured_content", None) or (
+                    isinstance(invalid.structured_content, dict)
+                    and invalid.structured_content.get("ok") is not True
+                )
+
+    _run(_body)
+
+
+def _mcp_paused_shortest_path(graph: str, pinned, resume, q) -> None:
+    sys.path.insert(0, str(Path(__file__).parents[3] / "src"))
+    import graphrag_code.mcp_server as mcp_mod
+
+    orig_envelope = mcp_mod._envelope
+
+    def wrapped_envelope(**kwargs):
+        payload = orig_envelope(**kwargs)
+        pinned.set()
+        if not resume.wait(timeout=20):
+            q.put("timeout")
+        return payload
+
+    mcp_mod._envelope = wrapped_envelope
+    session = mcp_mod.GraphMcpSession(
+        Path(graph),
+        configured_indexer="python",
+        resolved_indexer="python",
+        preflight={"indexer": "python", "indexer_resolution": {}},
+    )
+    payload = session.shortest_path("A", "B")
+    q.put(payload["snapshot"])
+
+
+def test_shortest_path_mcp_publisher_wait_and_no_nested_query(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import multiprocessing
+
+    graph = _publish_components(
+        tmp_path,
+        [_component_entity("A"), _component_entity("B")],
+        [_component_rel("A", "B", "calls")],
+    )
+    first = _current(graph)
+    first_dir = graph / "snapshots" / first
+    before = _payload_hashes(graph)
+    session = _session(graph, "python")
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("nested public query or CLI invoked from MCP shortest_path")
+
+    producer_calls = 0
+    producer = ByogGraph.shortest_path
+
+    def counted_producer(self, *args, **kwargs):
+        nonlocal producer_calls
+        producer_calls += 1
+        return producer(self, *args, **kwargs)
+
+    monkeypatch.setattr("graphrag_code.graph_query.shortest_path", boom)
+    monkeypatch.setattr("graphrag_code.graph_query.cli_shortest_path", boom)
+    monkeypatch.setattr("graphrag_code.cli.shortest_path", boom)
+    monkeypatch.setattr("graphrag_code.graph_query.condensation", boom)
+    monkeypatch.setattr("graphrag_code.graph_query.components", boom)
+    monkeypatch.setattr("graphrag_code.graph_query.strong_components", boom)
+    monkeypatch.setattr("graphrag_code.graph_query.subgraph", boom)
+    monkeypatch.setattr("graphrag_code.graph_query.degree_ranking", boom)
+    monkeypatch.setattr(ByogGraph, "condensation", boom)
+    monkeypatch.setattr(ByogGraph, "components", boom)
+    monkeypatch.setattr(ByogGraph, "strong_components", boom)
+    monkeypatch.setattr(ByogGraph, "subgraph", boom)
+    monkeypatch.setattr(ByogGraph, "degree_ranking", boom)
+    monkeypatch.setattr(ByogGraph, "dependency_order", boom)
+    monkeypatch.setattr(ByogGraph, "shortest_path", counted_producer)
+    payload = session.shortest_path("A", "B")
+    assert payload["ok"] is True
+    assert producer_calls == 1
+    assert _payload_hashes(graph) == before
+    assert not list(graph.glob(".staging-*"))
+    assert not list(tmp_path.glob("*.dot"))
+    assert (graph / ".publish.lock").is_file()
+    src = inspect.getsource(GraphMcpSession.shortest_path)
+    assert src.count("load_graph()") == 1
+    assert src.count(".shortest_path(") == 1
+    assert "compute_shortest_path" not in src
+    assert "networkx" not in src
+    assert "subprocess" not in src
+    assert "graph_query.shortest_path" not in src
+    assert "cli_shortest_path" not in src
+    assert ".condensation(" not in src
+    assert ".strong_components(" not in src
+    assert ".components(" not in src
+    assert ".subgraph(" not in src
+    assert ".degree_ranking(" not in src
+    assert ".dependency_order(" not in src
+
+    ctx = multiprocessing.get_context("spawn")
+    pinned = ctx.Event()
+    resume = ctx.Event()
+    about = ctx.Event()
+    got = ctx.Event()
+    q = ctx.Queue()
+    reader = ctx.Process(
+        target=_mcp_paused_shortest_path, args=(str(graph), pinned, resume, q)
     )
     from test_reader_lease import _cleanup_processes, _publisher
 

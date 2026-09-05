@@ -32,6 +32,7 @@ from graphrag_code.byog_graph import (
     DEFAULT_CONDENSATION_MAX_EDGES,
     DEFAULT_CONDENSATION_MAX_NODES_PER_COMPONENT,
     DEFAULT_DEGREE_RANKING_MAX_NODES,
+    DEFAULT_SHORTEST_PATH_MAX_DEPTH,
     DEFAULT_STRONG_COMPONENTS_MAX_COMPONENTS,
     DEFAULT_STRONG_COMPONENTS_MAX_NODES_PER_COMPONENT,
     DEFAULT_SUBGRAPH_MAX_DEPTH,
@@ -47,6 +48,7 @@ from graphrag_code.byog_graph import (
     HARD_MAX_CONDENSATION_COMPONENTS,
     HARD_MAX_CONDENSATION_EDGES,
     HARD_MAX_DEGREE_RANKING_NODES,
+    HARD_MAX_SHORTEST_PATH_DEPTH,
     HARD_MAX_STRONG_COMPONENTS,
     HARD_MAX_STRONG_COMPONENT_NODES,
     HARD_MAX_SUBGRAPH_DEPTH,
@@ -114,6 +116,7 @@ TOOL_NAMES = (
     "components",
     "strong_components",
     "condensation",
+    "shortest_path",
     "degree_ranking",
     "impact",
     "type_closure",
@@ -757,6 +760,58 @@ class GraphMcpSession:
         except (ByogReaderLockError, SnapshotReadError) as exc:
             raise GraphMcpError(str(exc)) from exc
 
+    def shortest_path(
+        self,
+        source: Any,
+        target: Any,
+        max_depth: Any = DEFAULT_SHORTEST_PATH_MAX_DEPTH,
+        edge_types: Any = None,
+        snapshot: Any = CURRENT_REF,
+    ) -> Dict[str, Any]:
+        source_title = _require_str("source", source)
+        target_title = _require_str("target", target)
+        _reject_non_finite("max_depth", max_depth)
+        depth = _require_int(
+            "max_depth",
+            max_depth,
+            minimum=0,
+            maximum=HARD_MAX_SHORTEST_PATH_DEPTH,
+        )
+        types = _require_edge_types(edge_types)
+        try:
+            with self._scope(snapshot) as scope:
+                if scope.snap_id is None:
+                    raise GraphMcpError(
+                        f"graph has no published snapshot for {snapshot!r}"
+                    )
+                try:
+                    result = scope.load_graph().shortest_path(
+                        source_title,
+                        target_title,
+                        edge_types=types,
+                        max_depth=depth,
+                    )
+                except ValueError as exc:
+                    raise GraphMcpError(str(exc)) from exc
+                returned = int(result.get("n_nodes_returned") or 0) + int(
+                    result.get("n_steps_returned") or 0
+                )
+                return _envelope(
+                    tool="shortest_path",
+                    graph=self.graph_root,
+                    snapshot=scope.snap_id,
+                    data=result,
+                    limits={
+                        "max_depth": depth,
+                        "edge_types": types,
+                    },
+                    truncated=False,
+                    total=returned,
+                    returned=returned,
+                )
+        except (ByogReaderLockError, SnapshotReadError) as exc:
+            raise GraphMcpError(str(exc)) from exc
+
     def degree_ranking(
         self,
         rank_by: Any = "total",
@@ -1198,6 +1253,29 @@ def build_mcp_server(session: GraphMcpSession) -> MCPServer:
             max_components,
             max_nodes_per_component,
             max_edges,
+            edge_types,
+            snapshot,
+        )
+
+    @mcp.tool(
+        name="shortest_path",
+        description=(
+            "Directed structural shortest path. "
+            "Deterministic hop-bounded path search only."
+        ),
+        annotations=READ_ONLY_TOOL,
+    )
+    def shortest_path(
+        source: str,
+        target: str,
+        max_depth: StrictInt = DEFAULT_SHORTEST_PATH_MAX_DEPTH,
+        edge_types: Optional[List[str]] = None,
+        snapshot: str = CURRENT_REF,
+    ) -> Dict[str, Any]:
+        return session.shortest_path(
+            source,
+            target,
+            max_depth,
             edge_types,
             snapshot,
         )
