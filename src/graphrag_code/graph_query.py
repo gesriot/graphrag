@@ -33,6 +33,7 @@ Example:
     uv run python scripts/graph_query.py condensation --graph byog_mini_game
     uv run python scripts/graph_query.py condensation --graph byog_mini_game --dot
     uv run python scripts/graph_query.py shortest-path sim:run_simulation sim:update --graph byog_mini_game
+    uv run python scripts/graph_query.py shortest-path sim:run_simulation sim:update --graph byog_mini_game --dot
     uv run python scripts/graph_query.py degree-ranking --graph byog_mini_game
     uv run python scripts/graph_query.py dependency-order --graph byog_mini_game
     uv run python scripts/graph_query.py observations sim:run_simulation --graph byog_mini_game
@@ -93,6 +94,7 @@ from graphrag_code.snapshot_read import (
     retained_snapshot_read,
 )
 from graphrag_code.condensation_dot import dumps_condensation_dot
+from graphrag_code.shortest_path_dot import dumps_shortest_path_dot
 from graphrag_code.subgraph_dot import dumps_subgraph_dot
 
 app = typer.Typer(help="Local BYOG graph queries (callers, callees, impact, etc.)")
@@ -1181,14 +1183,32 @@ def cli_shortest_path(
         help="Exact relationship-type allow-list (repeatable). Omit for all types.",
     ),
     json_output: bool = typer.Option(False, "--json"),
+    dot_output: bool = typer.Option(
+        False,
+        "--dot",
+        help=(
+            "Write deterministic Graphviz DOT to stdout. Interchange only; "
+            "does not invoke Graphviz or render an image. Mutually exclusive "
+            "with --json."
+        ),
+    ),
 ):
     """Directed structural shortest path over persisted relationships.
 
     Stored ``source -> target`` orientation only. A reverse-direction query
     is expressed by swapping the requested endpoints. Not provenance,
-    execution evidence, semantic dependency, GraphRAG, or a UI. There is
-    no DOT in this milestone.
+    execution evidence, semantic dependency, GraphRAG, or a UI.
+
+    ``--dot`` is Graphviz DOT interchange on stdout: Graphviz is not invoked
+    and no image is rendered. ``--json`` and ``--dot`` are mutually exclusive.
     """
+    if json_output and dot_output:
+        typer.secho(
+            "--json and --dot are mutually exclusive",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(2)
     try:
         with _scoped_graph(graph, snapshot) as g:
             result = g.shortest_path(
@@ -1199,6 +1219,9 @@ def cli_shortest_path(
             )
             if json_output:
                 print(dumps_shortest_path_json(result), flush=True)
+            elif dot_output:
+                sys.stdout.write(dumps_shortest_path_dot(result))
+                sys.stdout.flush()
             else:
                 print(format_shortest_path_human(result), flush=True)
     except ValueError as e:

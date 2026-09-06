@@ -211,6 +211,7 @@ def test_wheel_and_sdist_contents(built_wheel_and_sdist):
         assert "graphrag_code/graph_query.py" in names
         assert "graphrag_code/subgraph_dot.py" in names
         assert "graphrag_code/condensation_dot.py" in names
+        assert "graphrag_code/shortest_path_dot.py" in names
         assert "graphrag_code/persisted_graph_doctor.py" in names
         assert "graphrag_code/index_reuse.py" in names
         assert "graphrag_code/python_inputs.py" in names
@@ -271,6 +272,7 @@ def test_wheel_and_sdist_contents(built_wheel_and_sdist):
     assert "src/graphrag_code/cli.py" in sjoined or any(
         n.endswith("graphrag_code/cli.py") for n in snames
     )
+    assert any(n.endswith("graphrag_code/shortest_path_dot.py") for n in snames)
     assert "examples/mini_game" not in sjoined
     assert "byog_cjson" not in sjoined
     assert "__pycache__" not in sjoined

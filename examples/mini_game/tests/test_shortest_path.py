@@ -1,6 +1,7 @@
 """Directed structural shortest-path query over persisted relationship rows.
 
-CLI/Python and the 17th read-only MCP tool. No DOT, NetworkX, or Graphviz.
+CLI/Python and the 17th read-only MCP tool. DOT interchange is covered in
+test_shortest_path_dot.py. No NetworkX runtime.
 """
 from __future__ import annotations
 
@@ -664,7 +665,6 @@ def test_cli_json_human_parity_malformed_and_help(tmp_path: Path):
     assert "--json" in help_out.stdout
     assert "--max-depth" in help_out.stdout
     assert "--edge-type" in help_out.stdout
-    assert "--dot" not in help_out.stdout
     assert "--direction" not in help_out.stdout
 
 

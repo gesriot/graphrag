@@ -560,10 +560,11 @@ graphrag-code condensation \
 and `scripts/graph_query.py shortest-path` expose one retained-snapshot
 read of a directed structural shortest path.
 `ByogGraph.shortest_path(...)` and `compute_shortest_path(...)`
-are the same contract. Stored edge direction is preserved. This milestone
-has no DOT. MCP exposes the existing producer as `shortest_path`, the
+are the same contract. Stored edge direction is preserved. `--dot`
+serializes the same producer result as deterministic Graphviz DOT
+interchange on stdout; Graphviz is not invoked. MCP exposes the existing producer as `shortest_path`, the
 seventeenth read-only tool, immediately after `condensation` and
-immediately before `degree_ranking`. There is no hyphenated alias. The
+immediately before `degree_ranking`. MCP does not expose DOT. There is no hyphenated alias. The
 fixed MCP surface remains exactly 17 tools.
 
 ```text
@@ -572,7 +573,8 @@ graphrag-code shortest-path <source> <target> \
   [--snapshot <id|current>] \
   [--edge-type TYPE ...] \
   [--max-depth N] \
-  [--json]
+  [--json] \
+  [--dot]
 ```
 
 | Property | Contract |
@@ -583,12 +585,13 @@ graphrag-code shortest-path <source> <target> \
 | Caps | Dedicated default `max_depth` 8, hard maximum 32, minimum 0. A found path may use at most that many hops. `not_found_within_max_depth` means none was found within the bound, not that the target is globally unreachable |
 | Ordering | Among minimum-hop paths, the complete node-title sequence that is smallest under strict UTF-8 byte order. Independent of parquet row order, hash iteration, locale, and pandas incidental order |
 | Zero-hop | Source equal to target is `found` with `distance=0`, one node, empty steps, and zero path row counts |
-| Records | `nodes` are ordered titles. Each step is `source`, `target`, `n_relationship_rows_total`. No descriptions, snippets, spans, weights, confidence, original row ids, or DOT |
-| JSON / human | Deterministic JSON (`sort_keys=True`, `allow_nan=False`, `ensure_ascii=False`). Human output is derived from the same mapping, including complete unresolved and not-found reports. Not-found text says the bound; it does not say unreachable. One trailing newline on stdout |
-| Snapshot / lease | Same retained-snapshot read scope as other queries. Lease held through load, endpoint resolution, the single producer call, serialization, stdout write, and flush. No nested public query. No `.publish.lock` creation |
+| Records | `nodes` are ordered titles. Each step is `source`, `target`, `n_relationship_rows_total`. No descriptions, snippets, spans, weights, confidence, or original row ids |
+| JSON / human | Deterministic JSON (`sort_keys=True`, `allow_nan=False`, `ensure_ascii=False`). Human output is derived from the same mapping, including complete unresolved and not-found reports. Not-found text says the bound; it does not say unreachable. One trailing newline on stdout. `--json` and `--dot` are mutually exclusive |
+| DOT | Deterministic Graphviz DOT interchange on stdout from the same producer result (`src/graphrag_code/shortest_path_dot.py`). Non-strict `digraph graphrag_shortest_path`. Schema version `1`. Internal ids `n0000`… in producer node order; stored titles are never identifiers. Edges keep stored source→target orientation and the producer's aggregated `n_relationship_rows_total`. Graph metadata (quoted), in fixed order: schema version, status, found, source, target, source_resolved, target_resolved, canonical `edge_types` as JSON text (`null` for no filter or a non-empty JSON array, preserving commas and distinguishing a literal `"all"` type), max_depth, distance, returned node/step counts, and path row total. Nullable `source`, `target`, and `distance` are canonical JSON tokens so JSON `null` stays distinct from a real string or integer. Nodes: exact title label plus title, path_index, is_source, is_target. Source equal to target sets both endpoint flags. Edges: readable `rows N` label plus source, target, step_index, n_relationship_rows_total. Presentation baseline only: `rankdir=LR`, box nodes, endpoint `peripheries=2`. The serializer does not reconstruct, expand, sort, or truncate the producer result and does not invent edges, nodes, or extra paths. A found zero-hop path emits one node and no edges. Unresolved and `not_found_within_max_depth` results emit a valid empty digraph with graph-level metadata. Hard limit 1,000,000 UTF-8 bytes including the final newline; overflow and invalid renderer input fail closed with exit 2 and empty stdout. Graphviz is not invoked or required. No output-file option |
+| Snapshot / lease | Same retained-snapshot read scope as other queries. Lease held through load, endpoint resolution, the single producer call, JSON/human/DOT serialization, stdout write, and flush. No nested public query. No `.publish.lock` creation |
 | MCP | Seventeenth read-only tool added, registered immediately after `condensation` and immediately before `degree_ranking`. Envelope `data` is the exact `ByogGraph.shortest_path` result. `truncated` is always false: `max_depth` bounds the search and is not output-list truncation. Envelope `total` and `returned` are both `n_nodes_returned + n_steps_returned`. `n_relationship_rows_on_path_total` remains an exact scalar in `data` and is not added to those envelope counters. Limits include the validated `max_depth`, `edge_types`, and `max_envelope_bytes`. The 1 MiB envelope limit fails closed without shrinking nodes, steps, or strings. MCP always uses `allow_unlocked_managed=False`. MCP does not expose DOT, a graph path, a direction, a format, an algorithm, `max_nodes`, `max_edges`, a rank, or an output path. There is no hyphenated `shortest-path` alias. Endpoint ambiguity remains an unresolved producer result, not an argument error. `not_found_within_max_depth` is not global unreachability. The fixed surface remains exactly 17 tools |
-| Malformed args | Bad limits, filters, duplicate titles/ids, missing columns, or invalid scalars: exit 2, empty stdout |
-| Non-claims | Not provenance, execution evidence, call/import/build/semantic dependency meaning, architecture, hierarchy, GraphRAG, natural-language analysis, indexer, renderer, or UI. A shortest hop sequence is not importance, ownership, or a unique semantic path |
+| Malformed args | Bad limits, filters, duplicate titles/ids, missing columns, invalid scalars, or combined `--json --dot`: exit 2, empty stdout |
+| Non-claims | Not provenance, execution evidence, call/import/build/semantic dependency meaning, architecture, hierarchy, GraphRAG, natural-language analysis, indexer, renderer, or UI. `--dot` is interchange only; it does not search, reconstruct, enumerate, or weigh paths. A shortest hop sequence is not importance, ownership, or a unique semantic path. `not_found_within_max_depth` is not global unreachability |
 
 ### Operator-managed snapshot retention pins
 

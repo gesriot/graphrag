@@ -106,7 +106,9 @@ precise call structure. The intended path is:
    rows (`--edge-type`, `--max-depth`). Stored orientation only; among
    minimum-hop paths the UTF-8-smallest complete node-title sequence is
    returned. `not_found_within_max_depth` is not global unreachability.
-   There is no DOT. MCP exposes that existing producer as `shortest_path`,
+   `--dot` is a deterministic Graphviz DOT interchange of that same
+   producer result on stdout; Graphviz is not invoked. `--json` and
+   `--dot` are mutually exclusive. MCP exposes that existing producer as `shortest_path`,
    the seventeenth read-only tool, immediately after `condensation` and
    immediately before `degree_ranking`. There is no hyphenated alias.
    MCP remains exactly 17 read-only tools.
@@ -224,7 +226,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`2132 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`2146 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`

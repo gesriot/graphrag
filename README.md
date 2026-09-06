@@ -336,8 +336,15 @@ means no selected directed path was found within the bound; it does not claim
 global unreachability. Unresolved or ambiguous endpoints under the existing
 `resolve` contract return a complete result and exit 0. This is structural
 path search only: not provenance, execution evidence, call/import/build
-meaning, architecture, GraphRAG, or natural-language analysis. There is no
-DOT. MCP exposes this existing producer as `shortest_path`, the seventeenth
+meaning, architecture, GraphRAG, or natural-language analysis. `--dot` writes a
+deterministic Graphviz DOT interchange for the same producer result (non-strict
+`digraph graphrag_shortest_path`, producer node/step order, internal `n0000`
+identifiers). It does not invoke Graphviz, render an image, or provide an
+interactive UI. `--json` and `--dot` are mutually exclusive. DOT is capped at
+1,000,000 UTF-8 bytes and fails closed before writing. Zero-hop found paths emit
+one node and no edges. Unresolved and `not_found_within_max_depth` results emit
+a valid empty digraph with graph-level metadata; that is not global
+unreachability. MCP exposes this existing producer as `shortest_path`, the seventeenth
 read-only tool, immediately after `condensation` and immediately before
 `degree_ranking`. It does not expose DOT, a direction, a format, an
 algorithm, `max_nodes`, `max_edges`, a rank, or an output path. There is no
@@ -861,6 +868,7 @@ uv run python scripts/graph_query.py strong-components --graph <root>
 uv run python scripts/graph_query.py condensation --graph <root>
 uv run python scripts/graph_query.py condensation --graph <root> --dot
 uv run python scripts/graph_query.py shortest-path <source> <target> --graph <root>
+uv run python scripts/graph_query.py shortest-path <source> <target> --graph <root> --dot
 uv run python scripts/graph_query.py degree-ranking --graph <root>
 uv run python scripts/graph_query.py dependency-order --graph <root>
 uv run python scripts/context_pack.py <title> --graph <root>
