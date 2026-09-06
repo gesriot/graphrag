@@ -1,7 +1,7 @@
 """Directed strongly connected components over persisted relationship rows.
 
-Topology summary only. MCP exposes the existing producer. No DOT,
-NetworkX, or Graphviz.
+Topology summary only. MCP exposes the existing producer. DOT interchange
+is covered in test_strong_components_dot.py. No NetworkX or Graphviz runtime.
 """
 from __future__ import annotations
 
@@ -930,7 +930,6 @@ def test_human_json_cli_parity_and_malformed_exit(tmp_path: Path):
     assert snap_bad.stdout == ""
     help_out = _run(sys.executable, str(QUERY), "strong-components", "--help")
     assert "--json" in help_out.stdout
-    assert "--dot" not in help_out.stdout
     assert "--edge-type" in help_out.stdout
     assert "community" in help_out.stdout.lower() or "mutual" in help_out.stdout.lower()
 

@@ -89,7 +89,10 @@ precise call structure. The intended path is:
    `--max-nodes-per-component`). It is not weak `components`, not a
    containment `dependency-order`, not semantic communities, Leiden,
    architecture, hierarchy, importance, or a runtime recursion/deadlock
-   proof. There is no DOT. MCP exposes that existing bounded structural
+   proof. `--dot` is a deterministic Graphviz DOT interchange of that same
+   bounded producer result on stdout; Graphviz is not invoked. Clusters
+   show the returned SCC grouping only; use `condensation --dot` for the
+   cross-SCC DAG. `--json` and `--dot` are mutually exclusive. MCP exposes that existing bounded structural
    producer as `strong_components` immediately after `components`. MCP
    remains exactly 17 read-only tools. `condensation` is a bounded directed
    SCC condensation DAG over selected persisted rows (`--edge-type`,
@@ -229,7 +232,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`2162 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`2178 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`

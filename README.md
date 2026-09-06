@@ -260,7 +260,14 @@ reachability only, not a runtime loop, recursive execution, or an
 architectural defect. This is directed structural grouping: not weak
 components, semantic communities, Leiden, clustering, architecture,
 hierarchy, importance, dependency/build order, GraphRAG, or
-natural-language analysis. There is no DOT. MCP exposes this existing
+natural-language analysis. `--dot` writes a deterministic Graphviz DOT
+interchange for the same producer result (non-strict `digraph
+graphrag_strong_components`, one cluster per returned SCC, internal
+`c0000` / `n0000` identifiers). It does not invoke Graphviz, render an
+image, reconstruct relationship or cross-component edges, or provide an
+interactive UI. Use `condensation --dot` for the bounded cross-SCC DAG.
+`--json` and `--dot` are mutually exclusive. DOT is capped at 1,000,000
+UTF-8 bytes and fails closed before writing. MCP exposes this existing
 bounded structural producer as `strong_components`, registered
 immediately after `components`. It does not expose DOT, output-format
 selection, a graph path, a symbol, a direction, a rank, or an algorithm.
@@ -872,6 +879,7 @@ uv run python scripts/graph_query.py subgraph <symbol-or-module> --graph <root> 
 uv run python scripts/graph_query.py components --graph <root>
 uv run python scripts/graph_query.py components --graph <root> --dot
 uv run python scripts/graph_query.py strong-components --graph <root>
+uv run python scripts/graph_query.py strong-components --graph <root> --dot
 uv run python scripts/graph_query.py condensation --graph <root>
 uv run python scripts/graph_query.py condensation --graph <root> --dot
 uv run python scripts/graph_query.py shortest-path <source> <target> --graph <root>

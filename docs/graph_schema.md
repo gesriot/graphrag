@@ -471,7 +471,10 @@ are the same contract. Stored edge direction is preserved. Persisted rows
 are not rewritten and are not returned. This query shares the iterative
 SCC engine with `dependency-order` and `condensation` but does not change
 those contracts. Strong-components keeps size/internal-edge ordering.
-This milestone has no DOT output. MCP exposes the same bounded producer as
+`--dot` serializes the same producer result as deterministic Graphviz DOT
+interchange on stdout; Graphviz is not invoked. Clusters show the returned
+SCC grouping only; use `condensation --dot` for the bounded cross-SCC DAG.
+MCP exposes the same bounded producer as
 `strong_components`, registered immediately after `components`. The fixed
 MCP surface remains exactly 17 tools.
 
@@ -486,7 +489,7 @@ graphrag-code strong-components \
   [--edge-type TYPE ...] \
   [--max-components N] \
   [--max-nodes-per-component N] \
-  [--json]
+  [--json | --dot]
 ```
 
 | Property | Contract |
@@ -499,11 +502,12 @@ graphrag-code strong-components \
 | Totals | Global `n_nodes_total` is the exact topology-node universe. `n_edges_total` is the exact selected relationship-row count. `n_internal_edges_total` + `n_cross_component_edges_total` equals that count. `n_self_loop_edges_total` counts selected `source == target` rows. `n_cyclic_components_total` counts SCCs with more than one node or at least one self-loop row, before output caps. `n_entity_nodes_total` / `n_endpoint_only_nodes_total` partition the node universe |
 | Truncation | `components_truncated` iff returned components are fewer than total. Top-level `nodes_truncated` iff any **returned** component's node list is truncated. A component omitted by `max_components` does not set top-level `nodes_truncated` |
 | Records | Bounded topology summary only: no descriptions, snippets, spans, weights, confidence, ids, or extra dataframe columns. No ordinal component/rank field |
-| JSON / human | Deterministic JSON (`sort_keys=True`, `allow_nan=False`, `ensure_ascii=False`). Human output is derived from the same mapping, including a complete zero-count report for an empty graph. One trailing newline on stdout |
-| Snapshot / lease | Same retained-snapshot read scope as other queries. Lease held through load, computation, serialization, stdout write, and flush. No nested public query. No `.publish.lock` creation |
+| JSON / human | Deterministic JSON (`sort_keys=True`, `allow_nan=False`, `ensure_ascii=False`). Human output is derived from the same mapping, including a complete zero-count report for an empty graph. One trailing newline on stdout. `--json` and `--dot` are mutually exclusive |
+| DOT | Deterministic Graphviz DOT interchange on stdout from the same producer result (`src/graphrag_code/strong_components_dot.py`). Non-strict directed `digraph graphrag_strong_components`. Schema version `1`. Each returned SCC is one Graphviz cluster `cluster_c0000`… in producer order; internal component ids `c0000`…; globally numbered node ids `n0000`… in flattened producer component/node order. Raw representatives and titles are never identifiers. No relationship-edge or cross-component-edge statements: the producer does not return individual rows, and internal/cross/self-loop/cyclic values are metadata only. Use `condensation --dot` for the bounded cross-SCC DAG. Graph metadata (quoted), in fixed order: schema version, canonical `edge_types` as JSON text (`null` for no filter or a non-empty JSON array, preserving commas and distinguishing a literal `"all"` type), requested caps, exact totals including internal/cross/self-loop/cyclic counts, returned counts, and both truncation flags. Clusters: exact representative as `label`, `component_id`, representative, n_nodes_total, n_nodes_returned, n_internal_edges_total, n_self_loop_edges_total, n_entity_nodes, n_endpoint_only_nodes, is_cyclic, nodes_truncated. Nodes: exact title `label`/`title`. Presentation baseline only: `rankdir=LR`, box nodes. No per-node entity/endpoint-only inference, reconstructed edges, extra path search, or style encoding of importance/severity/architecture. One shared quoted-string escaper. Counts, caps, truncation flags, representative order, UTF-8 node order, disjoint titles, `is_cyclic`, and canonical edge-type metadata are checked before rendering. Hard limit 1,000,000 UTF-8 bytes including the final newline; overflow and invalid renderer input fail closed with exit 2 and empty stdout. Graphviz is not invoked or required. No output-file option |
+| Snapshot / lease | Same retained-snapshot read scope as other queries. Lease held through load, computation, complete DOT construction, UTF-8 byte-limit validation, stdout write, and flush. No nested public query. No `.publish.lock` creation |
 | MCP | Fifteenth read-only tool, registered immediately after `components`. Envelope `data` is the exact `ByogGraph.strong_components` result. `truncated` is `components_truncated or nodes_truncated`. Envelope `total` is `n_components_total + n_nodes_total`; `returned` is `n_components_returned` plus the sum of each returned component's `n_nodes_returned`. Internal, cross-component, self-loop, and total relationship-row counts remain exact scalars in `data` and are not added to those envelope counters. Limits include the validated `max_components`, `max_nodes_per_component`, `edge_types`, and `max_envelope_bytes`. The producer is the only truncation source. The 1 MiB envelope limit fails closed. MCP always uses `allow_unlocked_managed=False`. MCP does not expose DOT, a graph path, a symbol, a direction, a rank, an algorithm, or a format. Representatives remain smallest UTF-8 titles, not leaders. `is_cyclic` is mutual directed reachability only. The fixed surface remains exactly 17 tools |
-| Malformed args | Bad limits, filters, duplicate titles/ids, missing columns, or invalid scalars: exit 2, empty stdout |
-| Non-claims | Not weak components, semantic communities, Leiden clustering, architecture, hierarchy, importance, centrality, dependency/build order, proof of runtime recursion or deadlock, ownership or module boundaries, GraphRAG, natural-language analysis, indexer, renderer, or UI. A cyclic SCC proves only mutual directed reachability in the selected persisted relation topology |
+| Malformed args | Bad limits, filters, duplicate titles/ids, missing columns, invalid scalars, or combined `--json --dot`: exit 2, empty stdout |
+| Non-claims | Not weak components, semantic communities, Leiden clustering, architecture, hierarchy, importance, centrality, dependency/build order, proof of runtime recursion or deadlock, ownership or module boundaries, GraphRAG, natural-language analysis, indexer, renderer, or UI. `--dot` is interchange only; it does not reconstruct edges, invoke Graphviz, render an image, or provide an interactive UI. Truncation and totals still come only from the bounded strong-components producer. A representative is not a leader. Component size is not importance. `is_cyclic` is multi-node SCC or a singleton with a selected self-loop, not runtime recursion, execution, deadlock, or severity. Internal/cross/self-loop values are not rendered edge material |
 
 ### Directed SCC condensation DAG
 

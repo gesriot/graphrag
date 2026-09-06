@@ -31,6 +31,7 @@ Example:
     uv run python scripts/graph_query.py components --graph byog_mini_game
     uv run python scripts/graph_query.py components --graph byog_mini_game --dot
     uv run python scripts/graph_query.py strong-components --graph byog_mini_game
+    uv run python scripts/graph_query.py strong-components --graph byog_mini_game --dot
     uv run python scripts/graph_query.py condensation --graph byog_mini_game
     uv run python scripts/graph_query.py condensation --graph byog_mini_game --dot
     uv run python scripts/graph_query.py shortest-path sim:run_simulation sim:update --graph byog_mini_game
@@ -97,6 +98,7 @@ from graphrag_code.snapshot_read import (
 from graphrag_code.components_dot import dumps_components_dot
 from graphrag_code.condensation_dot import dumps_condensation_dot
 from graphrag_code.shortest_path_dot import dumps_shortest_path_dot
+from graphrag_code.strong_components_dot import dumps_strong_components_dot
 from graphrag_code.subgraph_dot import dumps_subgraph_dot
 
 app = typer.Typer(help="Local BYOG graph queries (callers, callees, impact, etc.)")
@@ -1088,13 +1090,35 @@ def cli_strong_components(
         help="Exact relationship-type allow-list (repeatable). Omit for all types.",
     ),
     json_output: bool = typer.Option(False, "--json"),
+    dot_output: bool = typer.Option(
+        False,
+        "--dot",
+        help=(
+            "Write deterministic Graphviz DOT to stdout. Interchange only; "
+            "does not invoke Graphviz or render an image. Mutually exclusive "
+            "with --json."
+        ),
+    ),
 ):
     """Directed strongly connected components over persisted relationships.
 
     Exact mutual-reachability grouping: not weak components, semantic
     communities, Leiden, architecture inference, GraphRAG, or a runtime
     recursion/deadlock proof.
+
+    ``--dot`` is Graphviz DOT interchange on stdout: Graphviz is not invoked
+    and no image is rendered. Clusters are the returned bounded SCC grouping;
+    no relationship edges are emitted because the producer does not return
+    individual rows. Use ``condensation --dot`` for the bounded cross-SCC
+    DAG. ``--json`` and ``--dot`` are mutually exclusive.
     """
+    if json_output and dot_output:
+        typer.secho(
+            "--json and --dot are mutually exclusive",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(2)
     try:
         with _scoped_graph(graph, snapshot) as g:
             result = g.strong_components(
@@ -1104,6 +1128,9 @@ def cli_strong_components(
             )
             if json_output:
                 print(dumps_strong_components_json(result), flush=True)
+            elif dot_output:
+                sys.stdout.write(dumps_strong_components_dot(result))
+                sys.stdout.flush()
             else:
                 print(format_strong_components_human(result), flush=True)
     except ValueError as e:

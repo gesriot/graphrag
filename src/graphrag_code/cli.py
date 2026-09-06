@@ -574,12 +574,24 @@ def strong_components(
         help="Exact relationship-type allow-list (repeatable). Omit for all types.",
     ),
     json_out: bool = typer.Option(False, "--json"),
+    dot_out: bool = typer.Option(
+        False,
+        "--dot",
+        help=(
+            "Write deterministic Graphviz DOT to stdout. Interchange only; "
+            "does not invoke Graphviz or render an image. Mutually exclusive "
+            "with --json."
+        ),
+    ),
 ):
     """Directed strongly connected components (graph_query.py strong-components).
 
     Exact mutual-reachability grouping only. Not weak components, semantic
     community detection, Leiden, architecture inference, GraphRAG, a
-    runtime recursion/deadlock proof, or a UI.
+    runtime recursion/deadlock proof, or a UI. ``--dot`` is Graphviz DOT
+    interchange on stdout: it does not invoke Graphviz, render an image,
+    or provide an interactive UI. ``--json`` and ``--dot`` are mutually
+    exclusive.
     """
     args = _append_snapshot(["strong-components", "--graph", str(graph)], snapshot)
     args.extend(
@@ -594,6 +606,8 @@ def strong_components(
         args.extend(["--edge-type", rel_type])
     if json_out:
         args.append("--json")
+    if dot_out:
+        args.append("--dot")
     _delegate("graph_query.py", args)
 
 
