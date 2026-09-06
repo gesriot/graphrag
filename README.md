@@ -196,8 +196,14 @@ descending exact node count, then descending exact selected relationship-row
 count, then representative UTF-8 bytes. A representative is only the
 smallest UTF-8 title in that component, not a leader or architectural root.
 Component size is not importance. Directed mutual-reachability grouping is
-`strong-components`, not this weak-connectivity summary. This is
-structural topology only: not semantic community detection, Leiden,
+`strong-components`, not this weak-connectivity summary. `--dot` writes a
+deterministic Graphviz DOT interchange for the same producer result
+(non-strict undirected `graph graphrag_components`, one cluster per
+returned component, internal `c0000` / `n0000` identifiers). It does not
+invoke Graphviz, render an image, reconstruct relationship edges, or
+provide an interactive UI. `--json` and `--dot` are mutually exclusive.
+DOT is capped at 1,000,000 UTF-8 bytes and fails closed before writing.
+This is structural topology only: not semantic community detection, Leiden,
 clustering, centrality, hierarchy, architecture inference, GraphRAG,
 natural-language analysis, an indexer, a renderer, or a UI. MCP exposes
 this existing bounded topology producer as
@@ -864,6 +870,7 @@ uv run python scripts/graph_query.py symbol <title> --graph <root>
 uv run python scripts/graph_query.py subgraph <symbol-or-module> --graph <root>
 uv run python scripts/graph_query.py subgraph <symbol-or-module> --graph <root> --dot
 uv run python scripts/graph_query.py components --graph <root>
+uv run python scripts/graph_query.py components --graph <root> --dot
 uv run python scripts/graph_query.py strong-components --graph <root>
 uv run python scripts/graph_query.py condensation --graph <root>
 uv run python scripts/graph_query.py condensation --graph <root> --dot

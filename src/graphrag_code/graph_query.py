@@ -29,6 +29,7 @@ Example:
     uv run python scripts/graph_query.py subgraph sim:run_simulation --graph byog_mini_game --direction both
     uv run python scripts/graph_query.py subgraph sim:run_simulation --graph byog_mini_game --dot
     uv run python scripts/graph_query.py components --graph byog_mini_game
+    uv run python scripts/graph_query.py components --graph byog_mini_game --dot
     uv run python scripts/graph_query.py strong-components --graph byog_mini_game
     uv run python scripts/graph_query.py condensation --graph byog_mini_game
     uv run python scripts/graph_query.py condensation --graph byog_mini_game --dot
@@ -93,6 +94,7 @@ from graphrag_code.snapshot_read import (
     SnapshotReadError,
     retained_snapshot_read,
 )
+from graphrag_code.components_dot import dumps_components_dot
 from graphrag_code.condensation_dot import dumps_condensation_dot
 from graphrag_code.shortest_path_dot import dumps_shortest_path_dot
 from graphrag_code.subgraph_dot import dumps_subgraph_dot
@@ -1014,12 +1016,33 @@ def cli_components(
         help="Exact relationship-type allow-list (repeatable). Omit for all types.",
     ),
     json_output: bool = typer.Option(False, "--json"),
+    dot_output: bool = typer.Option(
+        False,
+        "--dot",
+        help=(
+            "Write deterministic Graphviz DOT to stdout. Interchange only; "
+            "does not invoke Graphviz or render an image. Mutually exclusive "
+            "with --json."
+        ),
+    ),
 ):
     """Weakly connected components over persisted relationships (topology only).
 
     Structural grouping summary: not semantic community detection, Leiden,
     centrality, architecture inference, GraphRAG, or natural-language analysis.
+
+    ``--dot`` is Graphviz DOT interchange on stdout: Graphviz is not invoked
+    and no image is rendered. Clusters are the returned bounded component
+    grouping; no relationship edges are emitted because the producer does
+    not return individual rows. ``--json`` and ``--dot`` are mutually exclusive.
     """
+    if json_output and dot_output:
+        typer.secho(
+            "--json and --dot are mutually exclusive",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(2)
     try:
         with _scoped_graph(graph, snapshot) as g:
             result = g.components(
@@ -1029,6 +1052,9 @@ def cli_components(
             )
             if json_output:
                 print(dumps_components_json(result), flush=True)
+            elif dot_output:
+                sys.stdout.write(dumps_components_dot(result))
+                sys.stdout.flush()
             else:
                 print(format_components_human(result), flush=True)
     except ValueError as e:

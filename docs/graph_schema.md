@@ -357,8 +357,9 @@ and `scripts/graph_query.py components` expose one retained-snapshot
 read of a weakly-connected-components grouping summary.
 `ByogGraph.components(...)` and `compute_weakly_connected_components(...)`
 are the same contract. Direction is ignored only for membership; persisted
-edges are not rewritten and are not returned. This milestone has no DOT
-output. MCP exposes the same bounded topology producer as the thirteenth
+edges are not rewritten and are not returned. `--dot` serializes the same
+producer result as deterministic Graphviz DOT interchange on stdout;
+Graphviz is not invoked. MCP exposes the same bounded topology producer as the thirteenth
 read-only tool, immediately after `subgraph`, and does not expose DOT or
 output-format selection. The fixed MCP surface is exactly 17 tools.
 
@@ -369,7 +370,7 @@ graphrag-code components \
   [--edge-type TYPE ...] \
   [--max-components N] \
   [--max-nodes-per-component N] \
-  [--json]
+  [--json | --dot]
 ```
 
 | Property | Contract |
@@ -382,11 +383,12 @@ graphrag-code components \
 | Totals | Global `n_nodes_total` is the exact topology-node universe. `n_edges_total` is the exact selected relationship-row count. `n_entity_nodes_total` / `n_endpoint_only_nodes_total` partition that universe. Per-component node/edge totals are exact before output caps. The sum of all exact component node counts equals global `n_nodes_total`; the sum of all exact component edge counts equals global `n_edges_total` |
 | Truncation | `components_truncated` iff returned components are fewer than total. Top-level `nodes_truncated` iff any **returned** component's node list is truncated. A component omitted by `max_components` does not set top-level `nodes_truncated` |
 | Records | Bounded topology summary only: no descriptions, snippets, spans, weights, confidence, or extra dataframe columns |
-| JSON / human | Deterministic JSON (`sort_keys=True`, `allow_nan=False`, `ensure_ascii=False`). Human output is derived from the same mapping. One trailing newline on stdout |
-| Snapshot / lease | Same retained-snapshot read scope as other queries. Lease held through load, computation, serialization, stdout write, and flush. No nested public query. No `.publish.lock` creation |
+| JSON / human | Deterministic JSON (`sort_keys=True`, `allow_nan=False`, `ensure_ascii=False`). Human output is derived from the same mapping. One trailing newline on stdout. `--json` and `--dot` are mutually exclusive |
+| DOT | Deterministic Graphviz DOT interchange on stdout from the same producer result (`src/graphrag_code/components_dot.py`). Non-strict undirected `graph graphrag_components`. Schema version `1`. Each returned component is one Graphviz cluster `cluster_c0000`… in producer order; internal component ids `c0000`…; globally numbered node ids `n0000`… in flattened producer component/node order. Raw representatives and titles are never identifiers. No relationship-edge statements: the producer does not return individual rows, and `n_edges_total` is metadata only. Graph metadata (quoted), in fixed order: schema version, canonical `edge_types` as JSON text (`null` for no filter or a non-empty JSON array, preserving commas and distinguishing a literal `"all"` type), requested caps, exact totals, returned counts, and both truncation flags. Clusters: exact representative as `label`, `component_id`, representative, n_nodes_total, n_edges_total, n_nodes_returned, n_entity_nodes, n_endpoint_only_nodes, nodes_truncated. Nodes: exact title `label`/`title`. Presentation baseline only: `rankdir=LR`, box nodes. No per-node entity/endpoint-only inference, descriptions, snippets, spans, weights, confidence, extra dataframe columns, reconstructed edges, or extra path search. One shared quoted-string escaper. Counts, caps, truncation flags, representative order, UTF-8 node order, disjoint titles, and canonical edge-type metadata are checked before rendering. Hard limit 1,000,000 UTF-8 bytes including the final newline; overflow and invalid renderer input fail closed with exit 2 and empty stdout. Graphviz is not invoked or required. No output-file option |
+| Snapshot / lease | Same retained-snapshot read scope as other queries. Lease held through load, computation, complete DOT construction, UTF-8 byte-limit validation, stdout write, and flush. No nested public query. No `.publish.lock` creation |
 | MCP | Thirteenth read-only tool, registered immediately after `subgraph`. Envelope `data` is the exact `ByogGraph.components` result. `truncated` is `components_truncated or nodes_truncated`. Envelope `total` is `n_components_total + n_nodes_total`; `returned` is `n_components_returned` plus the sum of each returned component's `n_nodes_returned`. Relationship rows remain exact scalar counts in `data` and are not added to those envelope counters. Limits include the validated `max_components`, `max_nodes_per_component`, `edge_types`, and `max_envelope_bytes`. The producer is the only truncation source. The 1 MiB envelope limit fails closed. MCP always uses `allow_unlocked_managed=False`. MCP does not expose DOT or a format parameter. Representatives remain smallest UTF-8 titles, not leaders. Component size remains topology, not importance. The fixed surface remains exactly 17 tools |
-| Malformed args | Bad limits, filters, duplicate titles/ids, missing columns, or invalid scalars: exit 2, empty stdout |
-| Non-claims | Not a semantic community, Leiden clustering, centrality, hierarchy, architecture, importance ranking, GraphRAG, natural-language analysis, indexer, renderer, or UI. Weak connectivity is not directed reachability or dependency order |
+| Malformed args | Bad limits, filters, duplicate titles/ids, missing columns, invalid scalars, or combined `--json --dot`: exit 2, empty stdout |
+| Non-claims | Not a semantic community, Leiden clustering, centrality, hierarchy, architecture, importance ranking, GraphRAG, natural-language analysis, indexer, renderer, or UI. Weak connectivity is not directed reachability or dependency order. `--dot` is interchange only; it does not reconstruct edges, invoke Graphviz, render an image, or provide an interactive UI. Truncation and totals still come only from the bounded components producer. A representative is not a leader. Component size is not importance. `n_edges_total` is not rendered edge material |
 
 ### Directed structural degree ranking
 

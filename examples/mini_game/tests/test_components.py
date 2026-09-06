@@ -1,7 +1,7 @@
 """Weakly connected components over the persisted structural graph.
 
-Topology summary only. MCP exposes the existing producer. No DOT,
-NetworkX, or Graphviz.
+Topology summary only. MCP exposes the existing producer. DOT interchange
+is covered in test_components_dot.py. No NetworkX or Graphviz runtime.
 """
 from __future__ import annotations
 
@@ -465,7 +465,6 @@ def test_human_json_cli_parity_and_malformed_exit(tmp_path: Path):
     assert "max_components" in bad.stderr
     help_out = _run(sys.executable, str(QUERY), "components", "--help")
     assert "--json" in help_out.stdout
-    assert "--dot" not in help_out.stdout
     assert "community" in help_out.stdout.lower() or "topology" in help_out.stdout.lower()
 
 

@@ -52,7 +52,10 @@ precise call structure. The intended path is:
    Graphviz, render an image, or provide an interactive UI. `components` is
    a weakly-connected-components topology summary over persisted titles and
    selected relationship rows, not semantic community detection, Leiden,
-   centrality, or architecture inference. MCP remains exactly 17 read-only
+   centrality, or architecture inference. `--dot` is a deterministic Graphviz
+   DOT interchange of that same bounded producer result on stdout;
+   Graphviz is not invoked. `--json` and `--dot` are mutually exclusive.
+   MCP remains exactly 17 read-only
    tools, does not expose DOT, includes `subgraph` immediately after
    `neighbors`, includes `components` immediately after `subgraph`, and
    includes `strong_components` immediately after `components`,
@@ -226,7 +229,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`2146 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`2162 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
