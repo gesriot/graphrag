@@ -397,10 +397,13 @@ and `scripts/graph_query.py degree-ranking` expose one retained-snapshot
 read of a raw directed relationship-row degree ranking.
 `ByogGraph.degree_ranking(...)` and `compute_structural_degree_ranking(...)`
 are the same contract. Direction is preserved for accounting. Persisted
-rows are not rewritten, inferred, or returned. This milestone has no DOT
-output. MCP exposes the same bounded producer as the fourteenth
-read-only tool added, immediately after `shortest_path`, and does not expose DOT or
-output-format selection. The fixed MCP surface is exactly 17 tools.
+rows are not rewritten, inferred, or returned. `--dot` writes a
+deterministic Graphviz DOT interchange of that same producer result to
+stdout. Graphviz is not invoked, no image or interactive UI is produced,
+and no relationship edges are reconstructed. MCP exposes the same bounded
+producer as the fourteenth read-only tool added, immediately after
+`shortest_path`, and does not expose DOT or output-format selection. The
+fixed MCP surface is exactly 17 tools.
 
 ```text
 graphrag-code degree-ranking \
@@ -409,7 +412,7 @@ graphrag-code degree-ranking \
   [--rank-by total|incoming|outgoing] \
   [--edge-type TYPE ...] \
   [--max-nodes N] \
-  [--json]
+  [--json | --dot]
 ```
 
 | Property | Contract |
@@ -423,10 +426,11 @@ graphrag-code degree-ranking \
 | Truncation | `nodes_truncated` iff `n_nodes_returned < n_nodes_total` |
 | Records | Bounded topology summary only: title, in/out/total degree, `is_entity`. No descriptions, snippets, ids, spans, weights, confidence, relationship payloads, extra dataframe columns, normalized score, or component data |
 | JSON / human | Deterministic JSON (`sort_keys=True`, `allow_nan=False`, `ensure_ascii=False`). Human output is derived from the same mapping. One trailing newline on stdout |
+| DOT | Deterministic Graphviz DOT interchange on stdout for the same producer mapping (`dumps_degree_ranking_dot`). Non-strict `digraph graphrag_degree_ranking`. One node statement per returned ranking row in producer order (`n0000` identifiers; raw titles never identifiers). No relationship, invisible, or layout edges: the producer does not return individual rows, and `n_edges_total` / degree sums are metadata only. Statement order follows producer order; rendered Graphviz layout order is not guaranteed and is not forced with rank constraints. Internal `n0000` identifiers are not an ordinal rank. Graphviz is not invoked; no image or interactive UI is produced. `--json` and `--dot` are mutually exclusive and rejected before graph, snapshot, or lease observation. Payload is complete UTF-8, one trailing newline, at most 1,000,000 bytes, fail-closed before write |
 | Snapshot / lease | Same retained-snapshot read scope as other queries. Lease held through load, computation, serialization, stdout write, and flush. No nested public query. No `.publish.lock` creation |
 | MCP | Fourteenth read-only tool added, registered immediately after `shortest_path`. Envelope `data` is the exact `ByogGraph.degree_ranking` result. `truncated` is `nodes_truncated`. Envelope `total` is `n_nodes_total`; `returned` is `n_nodes_returned`. Relationship-row counts remain exact scalars in `data` and are not added to those envelope counters. Limits include the validated `rank_by`, `max_nodes`, `edge_types`, and `max_envelope_bytes`. The producer is the only truncation source. The 1 MiB envelope limit fails closed. MCP always uses `allow_unlocked_managed=False`. MCP does not expose DOT, a graph path, a symbol, a direction, a format, a metric, a normalized score, or an ordinal rank. This is raw directed relationship-row degree accounting only: not PageRank, betweenness, closeness, eigenvector centrality, a normalized score, semantic importance, leadership, architecture, communities, hierarchy, GraphRAG, or natural-language analysis. The fixed surface remains exactly 17 tools |
-| Malformed args | Bad rank_by, limits, filters, duplicate titles/ids, missing columns, or invalid scalars: exit 2, empty stdout |
-| Non-claims | Not PageRank, betweenness, closeness, eigenvector centrality, normalized centrality, importance, leadership, architecture, community detection, hierarchy, GraphRAG, natural-language analysis, indexer, renderer, or UI |
+| Malformed args | Bad rank_by, limits, filters, duplicate titles/ids, missing columns, invalid scalars, or combined `--json --dot`: exit 2, empty stdout |
+| Non-claims | Not PageRank, betweenness, closeness, eigenvector centrality, normalized centrality, importance, leadership, architecture, community detection, hierarchy, GraphRAG, natural-language analysis, indexer, renderer, or UI. `--dot` is interchange only; it does not reconstruct edges, invoke Graphviz, render an image, or provide an interactive UI. Truncation and totals still come only from the bounded degree-ranking producer. Internal identifiers are not ordinal ranks. Rendered layout order is not guaranteed |
 
 ### Directed structural containment order
 

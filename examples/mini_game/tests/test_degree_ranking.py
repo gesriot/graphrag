@@ -1,7 +1,8 @@
 """Raw directed relationship-row degree ranking.
 
-Structural accounting only. MCP exposes the existing producer. No DOT,
-NetworkX, or Graphviz.
+Structural accounting only. MCP exposes the existing producer without
+DOT or output-format selection. CLI/Python ``--dot`` coverage lives in
+``test_degree_ranking_dot.py``.
 """
 from __future__ import annotations
 
@@ -541,7 +542,6 @@ def test_human_json_cli_parity_and_malformed_exit(tmp_path: Path):
     assert "max_nodes" in bad.stderr
     help_out = _run(sys.executable, str(QUERY), "degree-ranking", "--help")
     assert "--json" in help_out.stdout
-    assert "--dot" not in help_out.stdout
     assert "pagerank" in help_out.stdout.lower() or "structural" in help_out.stdout.lower()
 
 

@@ -231,16 +231,24 @@ rows while totals and degree-sum invariants stay exact:
 degree accounting, not PageRank, betweenness, closeness, eigenvector
 centrality, normalized score, semantic importance, architecture inference,
 community detection, hierarchy, GraphRAG, or natural-language analysis.
-MCP exposes this existing producer as the fourteenth read-only
-tool added, registered immediately after `shortest_path`. It does not expose DOT,
-output-format selection, a graph path, a symbol, a direction, a
-metric, a normalized score, or an ordinal rank. This is raw
-directed relationship-row degree accounting only: not PageRank,
-betweenness, closeness, eigenvector centrality, a normalized
-score, semantic importance, leadership, architecture, communities,
-hierarchy, GraphRAG, or natural-language analysis. The MCP tool
-set remains exactly 17 read-only tools. This milestone has no DOT
-or visualization.
+`--dot` writes a deterministic Graphviz DOT interchange for the same
+producer result (non-strict `digraph graphrag_degree_ranking`, one node
+per returned ranking row, internal `n0000` identifiers). It does not
+invoke Graphviz, render an image, reconstruct relationship edges, or
+provide an interactive UI. DOT statement order follows producer ranking
+order; rendered Graphviz layout order is not guaranteed. Internal
+`n0000` identifiers are serialization identifiers only, not an ordinal
+rank. Degree sums and `n_edges_total` are metadata only. `--json` and
+`--dot` are mutually exclusive. DOT is capped at 1,000,000 UTF-8 bytes
+and fails closed before writing. MCP exposes this existing producer as
+the fourteenth read-only tool added, registered immediately after
+`shortest_path`. It does not expose DOT, output-format selection, a
+graph path, a symbol, a direction, a metric, a normalized score, or an
+ordinal rank. This is raw directed relationship-row degree accounting
+only: not PageRank, betweenness, closeness, eigenvector centrality, a
+normalized score, semantic importance, leadership, architecture,
+communities, hierarchy, GraphRAG, or natural-language analysis. The MCP
+tool set remains exactly 17 read-only tools.
 
 `graphrag-code strong-components` (also `python -m graphrag_code.graph_query strong-components`
 and `scripts/graph_query.py strong-components`) is a deterministic read-only
@@ -885,6 +893,7 @@ uv run python scripts/graph_query.py condensation --graph <root> --dot
 uv run python scripts/graph_query.py shortest-path <source> <target> --graph <root>
 uv run python scripts/graph_query.py shortest-path <source> <target> --graph <root> --dot
 uv run python scripts/graph_query.py degree-ranking --graph <root>
+uv run python scripts/graph_query.py degree-ranking --graph <root> --dot
 uv run python scripts/graph_query.py dependency-order --graph <root>
 uv run python scripts/context_pack.py <title> --graph <root>
 uv run python scripts/port_eval.py --all-gates --full

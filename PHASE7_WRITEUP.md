@@ -72,13 +72,19 @@ precise call structure. The intended path is:
    closeness, eigenvector centrality, importance, architecture, community
    detection, GraphRAG, or natural-language analysis. Self-loops contribute
    in=1 / out=1 / total=2; parallel rows each count; isolates remain;
-   endpoint-only nodes are marked non-entities. MCP exposes that existing
-   producer as `degree_ranking` immediately after `shortest_path` and does
-   not expose DOT. This is raw directed relationship-row degree accounting
-   only: not PageRank, betweenness, closeness, eigenvector centrality, a
-   normalized score, semantic importance, leadership, architecture,
-   communities, hierarchy, GraphRAG, or natural-language analysis. MCP
-   remains exactly 17 read-only tools. This milestone has no DOT.
+   endpoint-only nodes are marked non-entities. `--dot` is a deterministic
+   Graphviz DOT interchange of that same bounded producer result on stdout;
+   Graphviz is not invoked. Only returned ranked nodes and degree metadata
+   are represented; no relationship edges are emitted because the producer
+   does not return individual rows. Statement order follows producer order
+   and is not a rendered-layout guarantee. Internal `n0000` identifiers are
+   not ordinal ranks. `--json` and `--dot` are mutually exclusive. MCP
+   exposes that existing producer as `degree_ranking` immediately after
+   `shortest_path` and does not expose DOT. This is raw directed
+   relationship-row degree accounting only: not PageRank, betweenness,
+   closeness, eigenvector centrality, a normalized score, semantic
+   importance, leadership, architecture, communities, hierarchy, GraphRAG,
+   or natural-language analysis. MCP remains exactly 17 read-only tools.
    `dependency-order` is a deterministic structural containment order over
    persisted `contains` rows: source before target across strongly connected
    components, UTF-8 presentation inside a cycle, full unbounded title list.
@@ -232,7 +238,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`2178 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`2194 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`

@@ -37,6 +37,7 @@ Example:
     uv run python scripts/graph_query.py shortest-path sim:run_simulation sim:update --graph byog_mini_game
     uv run python scripts/graph_query.py shortest-path sim:run_simulation sim:update --graph byog_mini_game --dot
     uv run python scripts/graph_query.py degree-ranking --graph byog_mini_game
+    uv run python scripts/graph_query.py degree-ranking --graph byog_mini_game --dot
     uv run python scripts/graph_query.py dependency-order --graph byog_mini_game
     uv run python scripts/graph_query.py observations sim:run_simulation --graph byog_mini_game
 """
@@ -97,6 +98,7 @@ from graphrag_code.snapshot_read import (
 )
 from graphrag_code.components_dot import dumps_components_dot
 from graphrag_code.condensation_dot import dumps_condensation_dot
+from graphrag_code.degree_ranking_dot import dumps_degree_ranking_dot
 from graphrag_code.shortest_path_dot import dumps_shortest_path_dot
 from graphrag_code.strong_components_dot import dumps_strong_components_dot
 from graphrag_code.subgraph_dot import dumps_subgraph_dot
@@ -1305,12 +1307,35 @@ def cli_degree_ranking(
         help="Exact relationship-type allow-list (repeatable). Omit for all types.",
     ),
     json_output: bool = typer.Option(False, "--json"),
+    dot_output: bool = typer.Option(
+        False,
+        "--dot",
+        help=(
+            "Write deterministic Graphviz DOT to stdout. Interchange only; "
+            "does not invoke Graphviz or render an image. Mutually exclusive "
+            "with --json."
+        ),
+    ),
 ):
     """Raw directed relationship-row degree ranking (structural accounting only).
 
     Not PageRank, betweenness, closeness, eigenvector centrality, semantic
     importance, architecture inference, community detection, or GraphRAG.
+
+    ``--dot`` is Graphviz DOT interchange on stdout: Graphviz is not invoked
+    and no image is rendered. Only returned ranked nodes and degree metadata
+    are represented; no relationship edges are emitted because the producer
+    does not return individual rows. Statement order follows producer order
+    and is not a rendered-layout guarantee. Internal ``n0000`` identifiers
+    are not ordinal ranks. ``--json`` and ``--dot`` are mutually exclusive.
     """
+    if json_output and dot_output:
+        typer.secho(
+            "--json and --dot are mutually exclusive",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(2)
     try:
         with _scoped_graph(graph, snapshot) as g:
             result = g.degree_ranking(
@@ -1320,6 +1345,9 @@ def cli_degree_ranking(
             )
             if json_output:
                 print(dumps_degree_ranking_json(result), flush=True)
+            elif dot_output:
+                sys.stdout.write(dumps_degree_ranking_dot(result))
+                sys.stdout.flush()
             else:
                 print(format_degree_ranking_human(result), flush=True)
     except ValueError as e:

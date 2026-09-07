@@ -744,12 +744,24 @@ def degree_ranking(
         help="Exact relationship-type allow-list (repeatable). Omit for all types.",
     ),
     json_out: bool = typer.Option(False, "--json"),
+    dot_out: bool = typer.Option(
+        False,
+        "--dot",
+        help=(
+            "Write deterministic Graphviz DOT to stdout. Interchange only; "
+            "does not invoke Graphviz or render an image. Mutually exclusive "
+            "with --json."
+        ),
+    ),
 ):
     """Raw directed relationship-row degree ranking (graph_query.py degree-ranking).
 
     Structural accounting only. Not PageRank, betweenness, closeness,
     eigenvector centrality, semantic importance, architecture inference,
-    community detection, GraphRAG, or a UI.
+    community detection, GraphRAG, or a UI. ``--dot`` is Graphviz DOT
+    interchange on stdout: it does not invoke Graphviz, render an image,
+    or provide an interactive UI. ``--json`` and ``--dot`` are mutually
+    exclusive.
     """
     args = _append_snapshot(["degree-ranking", "--graph", str(graph)], snapshot)
     args.extend(["--rank-by", rank_by, "--max-nodes", str(max_nodes)])
@@ -757,6 +769,8 @@ def degree_ranking(
         args.extend(["--edge-type", rel_type])
     if json_out:
         args.append("--json")
+    if dot_out:
+        args.append("--dot")
     _delegate("graph_query.py", args)
 
 
