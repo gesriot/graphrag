@@ -300,10 +300,20 @@ that appear only on filtered non-contains rows are excluded unless they
 are entities. Parallel contains rows are validated and then ignored for
 topology. Self-loops do not duplicate a node. The result is the complete
 title list: this is an unbounded full-list legacy surface, not a bounded
-query. `--json` emits that list. This is not a build order, import order,
-call order, semantic dependency order, architecture hierarchy, ownership
-proof, porting plan, GraphRAG, or natural-language analysis. There is no
-DOT. MCP remains exactly 17 read-only tools and does not expose
+query. `--json` emits that list. `--dot` writes a deterministic Graphviz
+DOT interchange for the same producer list (non-strict `digraph
+graphrag_dependency_order`, one node per title in producer order,
+internal `n0000` identifiers). It does not invoke Graphviz, render an
+image, reconstruct `contains` or other relationship edges, infer SCC
+clusters, or provide an interactive UI. DOT statement order follows the
+producer list; rendered Graphviz layout order is not guaranteed.
+Internal `n0000` identifiers are serialization identifiers only, not
+ordinal ranks. `--json` and `--dot` are mutually exclusive. DOT is
+capped at 1,000,000 UTF-8 bytes and fails closed before writing; the
+producer list itself remains unbounded. This is not a build order,
+import order, call order, semantic dependency order, architecture
+hierarchy, ownership proof, porting plan, GraphRAG, or natural-language
+analysis. MCP remains exactly 17 read-only tools and does not expose
 `dependency_order` or `dependency-order`.
 
 `graphrag-code condensation` (also `python -m graphrag_code.graph_query condensation`
@@ -895,6 +905,7 @@ uv run python scripts/graph_query.py shortest-path <source> <target> --graph <ro
 uv run python scripts/graph_query.py degree-ranking --graph <root>
 uv run python scripts/graph_query.py degree-ranking --graph <root> --dot
 uv run python scripts/graph_query.py dependency-order --graph <root>
+uv run python scripts/graph_query.py dependency-order --graph <root> --dot
 uv run python scripts/context_pack.py <title> --graph <root>
 uv run python scripts/port_eval.py --all-gates --full
 ```

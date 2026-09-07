@@ -440,15 +440,17 @@ read of a deterministic containment order.
 `ByogGraph.dependency_order()` and `compute_containment_dependency_order(...)`
 are the same contract and return `List[str]`. Only persisted rows whose type
 is exactly `contains` participate; stored orientation is `source contains
-target`. This is an unbounded full-list legacy surface. This milestone has
-no DOT output. MCP does not expose `dependency_order`. The fixed MCP
-surface remains exactly 17 tools.
+target`. This is an unbounded full-list legacy surface. `--dot` writes a
+deterministic Graphviz DOT interchange of that same title list to stdout.
+Graphviz is not invoked, no image or interactive UI is produced, and no
+`contains` or other relationship edges are reconstructed. MCP does not
+expose `dependency_order`. The fixed MCP surface remains exactly 17 tools.
 
 ```text
 graphrag-code dependency-order \
   --graph <root> \
   [--snapshot <id|current>] \
-  [--json]
+  [--json | --dot]
 ```
 
 | Property | Contract |
@@ -458,12 +460,13 @@ graphrag-code dependency-order \
 | Ordering | Compute exact SCCs; sort members by UTF-8 title bytes; representative is the smallest member. Deduplicated SCC condensation is a DAG. Kahn’s algorithm with a UTF-8-representative priority queue; newly unlocked SCCs re-enter that queue. Flatten SCCs in that order, members contiguous |
 | Cross-SCC | Every contains edge whose endpoints are in different SCCs has source before target |
 | Cycles | Members of a directed cycle remain contiguous. UTF-8 order inside an SCC is presentation only and is not a topological claim |
-| Result | Complete title list; each node exactly once. Empty graph is `[]`. No max-nodes, edge-type, cycle, format, or DOT parameter |
+| Result | Complete title list; each node exactly once. Empty graph is `[]`. No max-nodes, edge-type, or cycle-metadata parameter. The producer remains unbounded |
 | JSON / human | JSON is the list (`indent=2`, `sort_keys=True`, `allow_nan=False`, `ensure_ascii=False`) plus one trailing newline. Human is one title per line. Empty human stdout is empty; empty JSON is `[]` plus one newline |
+| DOT | Deterministic Graphviz DOT interchange on stdout for the same producer list (`dumps_dependency_order_dot`). Non-strict `digraph graphrag_dependency_order`. One node statement per title in producer order (`n0000` identifiers; raw titles never identifiers). Graph metadata is only `schema_version` and `n_nodes_total`. No relationship, reconstructed `contains`, invisible, or layout edges; no SCC clusters, rank constraints, or synthetic root. Statement order follows producer order; rendered Graphviz layout order is not guaranteed. Internal `n0000` identifiers are not an ordinal rank. Graphviz is not invoked; no image or interactive UI is produced. `--json` and `--dot` are mutually exclusive and rejected before graph, snapshot, or lease observation. Payload is complete UTF-8, one trailing newline, at most 1,000,000 bytes, fail-closed before write. Overflow does not truncate the producer list |
 | Snapshot / lease | Same retained-snapshot read scope as other queries. Lease held through load, computation, serialization, stdout write, and flush. No nested public query. No `.publish.lock` creation |
 | MCP | Not exposed. The read-only tool set remains exactly 17 |
-| Malformed args | Duplicate titles/ids, missing columns, or invalid scalars: exit 2, empty stdout |
-| Non-claims | Not a build order, import order, call order, semantic dependency order, architecture hierarchy, ownership proof, porting plan, GraphRAG, natural-language analysis, indexer, renderer, or UI. Not bounded |
+| Malformed args | Duplicate titles/ids, missing columns, invalid scalars, or combined `--json --dot`: exit 2, empty stdout |
+| Non-claims | Not a build order, import order, call order, semantic dependency order, architecture hierarchy, ownership proof, porting plan, GraphRAG, natural-language analysis, indexer, renderer, or UI. Not bounded. `--dot` is interchange only; it does not reconstruct edges, infer SCC boundaries, invoke Graphviz, render an image, or provide an interactive UI. Internal identifiers are not ordinal ranks. Rendered layout order is not guaranteed |
 
 ### Directed strongly connected components summary
 

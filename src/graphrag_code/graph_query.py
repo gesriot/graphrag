@@ -39,6 +39,7 @@ Example:
     uv run python scripts/graph_query.py degree-ranking --graph byog_mini_game
     uv run python scripts/graph_query.py degree-ranking --graph byog_mini_game --dot
     uv run python scripts/graph_query.py dependency-order --graph byog_mini_game
+    uv run python scripts/graph_query.py dependency-order --graph byog_mini_game --dot
     uv run python scripts/graph_query.py observations sim:run_simulation --graph byog_mini_game
 """
 
@@ -99,6 +100,7 @@ from graphrag_code.snapshot_read import (
 from graphrag_code.components_dot import dumps_components_dot
 from graphrag_code.condensation_dot import dumps_condensation_dot
 from graphrag_code.degree_ranking_dot import dumps_degree_ranking_dot
+from graphrag_code.dependency_order_dot import dumps_dependency_order_dot
 from graphrag_code.shortest_path_dot import dumps_shortest_path_dot
 from graphrag_code.strong_components_dot import dumps_strong_components_dot
 from graphrag_code.subgraph_dot import dumps_subgraph_dot
@@ -1372,18 +1374,45 @@ def cli_dep_order(
     graph: Path = _graph_opt(),
     snapshot: Optional[str] = _snapshot_opt(),
     json_output: bool = typer.Option(False, "--json"),
+    dot_output: bool = typer.Option(
+        False,
+        "--dot",
+        help=(
+            "Write deterministic Graphviz DOT to stdout. Interchange only; "
+            "does not invoke Graphviz or render an image. Mutually exclusive "
+            "with --json."
+        ),
+    ),
 ):
     """Deterministic structural containment order over persisted contains rows.
 
     Source appears before target across strongly connected components.
     Not a build, import, call, or semantic dependency order. Unbounded
-    full list; no DOT and not an MCP tool.
+    full list; not an MCP tool.
+
+    ``--dot`` is Graphviz DOT interchange on stdout: Graphviz is not invoked
+    and no image is rendered. Only returned titles are represented; no
+    relationship, ``contains``, invisible, or layout edges are emitted
+    because the producer returns a title list. Statement order follows
+    producer order and is not a rendered-layout guarantee. Internal
+    ``n0000`` identifiers are not ordinal ranks. ``--json`` and ``--dot``
+    are mutually exclusive.
     """
+    if json_output and dot_output:
+        typer.secho(
+            "--json and --dot are mutually exclusive",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(2)
     try:
         with _scoped_graph(graph, snapshot) as g:
             result = g.dependency_order()
             if json_output:
                 print(dumps_dependency_order_json(result), flush=True)
+            elif dot_output:
+                sys.stdout.write(dumps_dependency_order_dot(result))
+                sys.stdout.flush()
             else:
                 human = format_dependency_order_human(result)
                 if human:

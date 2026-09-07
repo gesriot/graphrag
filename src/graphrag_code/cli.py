@@ -779,17 +779,30 @@ def dependency_order(
     graph: Path = _graph_opt(),
     snapshot: Optional[str] = _snapshot_opt(),
     json_out: bool = typer.Option(False, "--json"),
+    dot_out: bool = typer.Option(
+        False,
+        "--dot",
+        help=(
+            "Write deterministic Graphviz DOT to stdout. Interchange only; "
+            "does not invoke Graphviz or render an image. Mutually exclusive "
+            "with --json."
+        ),
+    ),
 ):
     """Deterministic structural containment order (graph_query.py dependency-order).
 
     Source appears before target across strongly connected components.
     UTF-8 order inside a cyclic component is presentation only. Not a
     build, import, call, or semantic dependency order. Unbounded full
-    list; no DOT and not an MCP tool.
+    list; not an MCP tool. ``--dot`` is Graphviz DOT interchange on
+    stdout: it does not invoke Graphviz, render an image, or provide an
+    interactive UI. ``--json`` and ``--dot`` are mutually exclusive.
     """
     args = _append_snapshot(["dependency-order", "--graph", str(graph)], snapshot)
     if json_out:
         args.append("--json")
+    if dot_out:
+        args.append("--dot")
     _delegate("graph_query.py", args)
 
 

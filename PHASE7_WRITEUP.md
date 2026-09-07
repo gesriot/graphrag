@@ -88,9 +88,14 @@ precise call structure. The intended path is:
    `dependency-order` is a deterministic structural containment order over
    persisted `contains` rows: source before target across strongly connected
    components, UTF-8 presentation inside a cycle, full unbounded title list.
-   It is not a build, import, call, or semantic dependency order, not
-   hierarchy or architecture inference, and not GraphRAG. MCP does not
-   expose it. `strong-components` is exact directed mutual-reachability
+   `--dot` is a deterministic Graphviz DOT interchange of that same title
+   list on stdout; Graphviz is not invoked. Only returned titles are
+   represented; no relationship edges, SCC clusters, or rank constraints
+   are emitted. Statement order follows producer order and is not a
+   rendered-layout guarantee. Internal `n0000` identifiers are not ordinal
+   ranks. `--json` and `--dot` are mutually exclusive. It is not a build,
+   import, call, or semantic dependency order, not hierarchy or architecture
+   inference, and not GraphRAG. MCP does not expose it. `strong-components` is exact directed mutual-reachability
    grouping over selected persisted rows (`--edge-type`, `--max-components`,
    `--max-nodes-per-component`). It is not weak `components`, not a
    containment `dependency-order`, not semantic communities, Leiden,
@@ -238,7 +243,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`2194 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`2207 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`

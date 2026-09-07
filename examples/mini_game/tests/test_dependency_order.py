@@ -1,7 +1,7 @@
 """Deterministic structural containment order over persisted contains rows.
 
-Full-list compatibility surface. MCP does not expose this producer. No DOT,
-NetworkX, or Graphviz.
+Full-list compatibility surface. MCP does not expose this producer.
+CLI/Python ``--dot`` coverage lives in ``test_dependency_order_dot.py``.
 """
 from __future__ import annotations
 
@@ -568,7 +568,6 @@ def test_human_json_cli_parity_and_malformed_exit(tmp_path: Path):
     assert bad.stderr != ""
     help_out = _run(sys.executable, str(QUERY), "dependency-order", "--help")
     assert "--json" in help_out.stdout
-    assert "--dot" not in help_out.stdout
     assert "--max-nodes" not in help_out.stdout
 
 
