@@ -45,6 +45,14 @@ HARD_MAX_SUBGRAPH_DEPTH = 32
 HARD_MAX_SUBGRAPH_NODES = 500
 HARD_MAX_SUBGRAPH_EDGES = 500
 
+# Bounded reverse-call impact graph (CLI/Python only; not MCP).
+DEFAULT_IMPACT_GRAPH_MAX_DEPTH = 3
+DEFAULT_IMPACT_GRAPH_MAX_NODES = 50
+DEFAULT_IMPACT_GRAPH_MAX_EDGES = 100
+HARD_MAX_IMPACT_GRAPH_DEPTH = 32
+HARD_MAX_IMPACT_GRAPH_NODES = 500
+HARD_MAX_IMPACT_GRAPH_EDGES = 500
+
 # Weakly connected components (structural grouping summary only).
 DEFAULT_COMPONENTS_MAX_COMPONENTS = 20
 DEFAULT_COMPONENTS_MAX_NODES_PER_COMPONENT = 20
@@ -2730,6 +2738,30 @@ class ByogGraph:
         """
         return compute_transitive_call_impact(self.rels, self.resolve(symbol))
 
+    def impact_graph(
+        self,
+        symbol: str,
+        *,
+        max_depth: int = DEFAULT_IMPACT_GRAPH_MAX_DEPTH,
+        max_nodes: int = DEFAULT_IMPACT_GRAPH_MAX_NODES,
+        max_edges: int = DEFAULT_IMPACT_GRAPH_MAX_EDGES,
+    ) -> Dict[str, Any]:
+        """Bounded reverse-call impact graph over persisted ``calls`` rows.
+
+        Incoming stored calls from the resolved root. Caps truncate
+        returned material; totals within ``max_depth`` stay exact. This
+        is not the unbounded ``impact`` title list, runtime execution
+        proof, or semantic impact.
+        """
+        return compute_bounded_call_impact(
+            self.ents,
+            self.rels,
+            self.resolve(symbol),
+            max_depth=max_depth,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
+        )
+
     def dependency_order(self) -> List[str]:
         """Deterministic structural containment order over ``contains`` rows.
 
@@ -3642,6 +3674,165 @@ def compute_transitive_call_impact(
     return sorted(reachable, key=_utf8_key)
 
 
+def _empty_impact_graph(
+    *,
+    max_depth: int,
+    max_nodes: int,
+    max_edges: int,
+) -> Dict[str, Any]:
+    return {
+        "root": None,
+        "resolved": False,
+        "max_depth": max_depth,
+        "max_nodes": max_nodes,
+        "max_edges": max_edges,
+        "nodes": [],
+        "edges": [],
+        "n_nodes_total": 0,
+        "n_edges_total": 0,
+        "n_nodes_returned": 0,
+        "n_edges_returned": 0,
+        "nodes_truncated": False,
+        "edges_truncated": False,
+    }
+
+
+def compute_bounded_call_impact(
+    ents: Optional[pd.DataFrame],
+    rels: Optional[pd.DataFrame],
+    root_title: Optional[str],
+    *,
+    max_depth: int = DEFAULT_IMPACT_GRAPH_MAX_DEPTH,
+    max_nodes: int = DEFAULT_IMPACT_GRAPH_MAX_NODES,
+    max_edges: int = DEFAULT_IMPACT_GRAPH_MAX_EDGES,
+) -> Dict[str, Any]:
+    """Pure bounded reverse-call graph over persisted ``calls`` rows.
+
+    ``root_title`` is already resolved. This function does not open a
+    graph, resolve a symbol, or mutate inputs. Relationship rows are
+    strictly validated before exact-``calls`` filtering and before an
+    unresolved-root early return. Caps truncate returned lists; totals
+    within ``max_depth`` stay exact.
+    """
+    max_depth = _require_limit_int(
+        "max_depth", max_depth, minimum=0, maximum=HARD_MAX_IMPACT_GRAPH_DEPTH
+    )
+    max_nodes = _require_limit_int(
+        "max_nodes",
+        max_nodes,
+        minimum=1,
+        maximum=HARD_MAX_IMPACT_GRAPH_NODES,
+    )
+    max_edges = _require_limit_int(
+        "max_edges", max_edges, minimum=0, maximum=HARD_MAX_IMPACT_GRAPH_EDGES
+    )
+    selected = _strict_selected_relationship_rows(rels, ["calls"])
+    if root_title is None:
+        return _empty_impact_graph(
+            max_depth=max_depth, max_nodes=max_nodes, max_edges=max_edges
+        )
+    if not isinstance(root_title, str) or not root_title:
+        raise ValueError(
+            f"root_title must be a non-empty resolved title or null, got {root_title!r}"
+        )
+    try:
+        root_title.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError(
+            f"root_title must be a non-empty resolved title or null, got {root_title!r}"
+        ) from exc
+
+    rev: Dict[str, List[str]] = defaultdict(list)
+    for _rid, src, tgt, _rel_type, _row in selected:
+        rev[tgt].append(src)
+    for key in list(rev.keys()):
+        rev[key] = sorted(set(rev[key]), key=_utf8_key)
+
+    depth_of: Dict[str, int] = {root_title: 0}
+    queue: deque[str] = deque([root_title])
+    while queue:
+        cur = queue.popleft()
+        cur_depth = depth_of[cur]
+        if cur_depth >= max_depth:
+            continue
+        for pred in rev.get(cur, []):
+            if pred == cur:
+                continue
+            if pred not in depth_of:
+                next_depth = cur_depth + 1
+                depth_of[pred] = next_depth
+                if next_depth < max_depth:
+                    queue.append(pred)
+
+    entity_by_title = _entity_lookup(ents)
+    reachable = set(depth_of)
+    nodes_all = [
+        _node_record(title, depth, entity_by_title.get(title))
+        for title, depth in depth_of.items()
+    ]
+    root_nodes = [node for node in nodes_all if node["title"] == root_title]
+    other_nodes = [node for node in nodes_all if node["title"] != root_title]
+    other_nodes.sort(
+        key=lambda node: (int(node["depth"]), _utf8_key(str(node["title"])))
+    )
+    nodes_all = root_nodes + other_nodes
+
+    edges_all: List[Dict[str, Any]] = []
+    for rid, src, tgt, rel_type, row in selected:
+        if src not in reachable or tgt not in reachable:
+            continue
+        edge_depth = min(int(depth_of[src]), int(depth_of[tgt]))
+        edges_all.append(
+            _edge_record(
+                rid=rid,
+                source=src,
+                target=tgt,
+                rel_type=rel_type,
+                depth=edge_depth,
+                row=row,
+            )
+        )
+    edges_all.sort(
+        key=lambda edge: (
+            int(edge["depth"]),
+            _utf8_key(str(edge["source"])),
+            _utf8_key(str(edge["target"])),
+            _utf8_key(str(edge["type"])),
+            _utf8_key(str(edge["id"])),
+        )
+    )
+
+    n_nodes_total = len(nodes_all)
+    n_edges_total = len(edges_all)
+    nodes_out = nodes_all[:max_nodes]
+    if not nodes_out or nodes_out[0]["title"] != root_title:
+        raise ValueError(
+            "max_nodes must be large enough to return the resolved root"
+        )
+    returned_titles = {str(node["title"]) for node in nodes_out}
+    returnable_edges = [
+        edge
+        for edge in edges_all
+        if edge["source"] in returned_titles and edge["target"] in returned_titles
+    ]
+    edges_out = returnable_edges[:max_edges]
+    return {
+        "root": root_title,
+        "resolved": True,
+        "max_depth": max_depth,
+        "max_nodes": max_nodes,
+        "max_edges": max_edges,
+        "nodes": nodes_out,
+        "edges": edges_out,
+        "n_nodes_total": n_nodes_total,
+        "n_edges_total": n_edges_total,
+        "n_nodes_returned": len(nodes_out),
+        "n_edges_returned": len(edges_out),
+        "nodes_truncated": n_nodes_total > len(nodes_out),
+        "edges_truncated": n_edges_total > len(edges_out),
+    }
+
+
 def compute_containment_dependency_order(
     ents: Optional[pd.DataFrame],
     rels: Optional[pd.DataFrame],
@@ -4423,10 +4614,11 @@ def _component_entity_titles(ents: Optional[pd.DataFrame]) -> set[str]:
     return titles
 
 
-def _component_selected_relationships(
+def _strict_selected_relationship_rows(
     rels: Optional[pd.DataFrame],
-    allow: Optional[List[str]],
-) -> List[Tuple[str, str, str]]:
+    allow: Optional[Sequence[str]],
+) -> List[Tuple[str, str, str, str, Any]]:
+    """Validate every relationship row, then keep rows whose type is allowed."""
     if rels is None:
         return []
     if not isinstance(rels, pd.DataFrame):
@@ -4440,7 +4632,7 @@ def _component_selected_relationships(
         )
     allow_set = None if allow is None else set(allow)
     seen_ids: set[str] = set()
-    selected: List[Tuple[str, str, str]] = []
+    selected: List[Tuple[str, str, str, str, Any]] = []
     for row_index, row in rels.iterrows():
         values: Dict[str, str] = {}
         for field in _SUBGRAPH_REL_REQUIRED:
@@ -4453,8 +4645,22 @@ def _component_selected_relationships(
         seen_ids.add(rid)
         if allow_set is not None and values["type"] not in allow_set:
             continue
-        selected.append((rid, values["source"], values["target"]))
+        selected.append(
+            (rid, values["source"], values["target"], values["type"], row)
+        )
     return selected
+
+
+def _component_selected_relationships(
+    rels: Optional[pd.DataFrame],
+    allow: Optional[List[str]],
+) -> List[Tuple[str, str, str]]:
+    return [
+        (rid, src, tgt)
+        for rid, src, tgt, _rel_type, _row in _strict_selected_relationship_rows(
+            rels, allow
+        )
+    ]
 
 
 def _require_component_str(raw: Any, field: str, loc: Any, *, kind: str) -> str:

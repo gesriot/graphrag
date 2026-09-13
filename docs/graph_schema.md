@@ -278,7 +278,7 @@ Query, context-pack, doctor, and status tools accept an optional selector:
   `callees`, `types-used-by`, `type-users`, `type-closure`, `neighbors`,
   `subgraph`, `components`, `strong-components`, `condensation`,
   `shortest-path`, `degree-ranking`, `dependency-order`, `impact`,
-  `observations`, and `context-pack`.
+  `impact-graph`, `observations`, and `context-pack`.
 - MCP: optional last argument `snapshot: str = "current"` on
   `graph_status`, `graph_doctor`, `query_symbol`, `callers`, `callees`,
   `neighbors`, `subgraph`, `components`, `strong_components`, `condensation`, `shortest_path`, `degree_ranking`, `impact`,
@@ -2976,7 +2976,7 @@ When `scripts/index_c.py --clang-type-uses` is enabled (default **off**),
 | Evidence bounding | Defaults: 20 edges/direction (also 20 returned closure-node payloads when depth > 1), 5 observations/edge; sample + truncation counts; no unbounded raw observations JSON; malformed legacy JSON and declared/decoded count disagreements are surfaced without invented samples |
 | Neighbor cap | Type sections are built from the full relationship set, not the capped 30-neighbor list |
 
-Call-graph queries (`callers` / `callees` / `impact` / `dependency_order`) never
+Call-graph queries (`callers` / `callees` / `impact` / `impact-graph` / `dependency_order`) never
 traverse `uses_type`. Closure never traverses `calls`, `contains`,
 `depends_on`, `includes`, or `uses_data`. Graphs without `uses_type` edges
 return empty query lists and omit the type_* pack keys (byte-identical pack
@@ -2993,13 +2993,48 @@ isolates and unreachable titles do not. Output is sorted by UTF-8 title
 bytes. Relationship tables are strictly validated before traversal and
 before an unresolved-root `[]`. Human output is one title per line
 (empty human stdout is one newline); `--json` emits the list. There is
-no `--dot` and no bounded impact graph yet. MCP keeps the existing
-`impact` tool immediately after `degree_ranking` and may apply
-`max_items` to the complete producer list. This is not runtime execution
-proof, complete dynamic dispatch, call-observation reconstruction,
-semantic impact, severity, ownership, importance, architecture, a path
-explanation, change-risk probability, GraphRAG, or natural-language
-analysis.
+no `--dot` on that command. MCP keeps the existing `impact` tool
+immediately after `degree_ranking` and may apply `max_items` to the
+complete producer list. This is not runtime execution proof, complete
+dynamic dispatch, call-observation reconstruction, semantic impact,
+severity, ownership, importance, architecture, a path explanation,
+change-risk probability, GraphRAG, or natural-language analysis.
+
+### Bounded reverse-call impact graph
+
+`graphrag-code impact-graph`, `python -m graphrag_code.graph_query impact-graph`,
+and `scripts/graph_query.py impact-graph` expose one retained-snapshot
+read of a bounded reverse-call graph over persisted rows whose type is
+exactly `calls`. `ByogGraph.impact_graph(...)` and the pure helper
+`compute_bounded_call_impact(...)` are the same contract. This is **not**
+the unbounded `impact` title list. There is no `--dot`. MCP stays exactly
+17 tools and does not expose `impact_graph`.
+
+```text
+graphrag-code impact-graph <symbol> \
+  --graph <root> \
+  [--snapshot <id|current>] \
+  [--max-depth N] \
+  [--max-nodes N] \
+  [--max-edges N] \
+  [--json]
+```
+
+| Property | Contract |
+| --- | --- |
+| Root resolution | Existing exact title, unique module alias, or unique case-insensitive partial. Unresolved or ambiguous queries complete with `resolved=false`, empty material, exact zero totals, requested limits retained, exit 0. Relationship tables are strictly validated before that unresolved return |
+| Traversal | Incoming stored `calls` only. BFS, cycle-safe, recording minimum reverse-call depth from the resolved root (depth 0). Self-loops are evidence and do not duplicate or requeue a node. Cycles terminate and keep minimum depths. Stored `source -> target` orientation is never rewritten |
+| Type filter | Exact `calls`. `uses_type`, `contains`, `depends_on`, and `CALLS` do not participate. No trim, case folding, aliases, or reconstructed `call_observations` |
+| Induced edges | After the reachable node set within `max_depth` is known, the complete induced total counts exact `calls` rows whose **both** endpoints are reachable. Returned edges are additionally endpoint-closed over returned nodes. Parallel rows remain distinct by relationship id. Endpoint-only callers remain with explicit null entity fields |
+| Caps | Defaults: depth 3, nodes 50, edges 100. Hard maxima: depth 32, nodes 500, edges 500. `max_nodes` minimum 1 so a resolved root is never dropped. Caps truncate **returned** lists; `n_nodes_total` / `n_edges_total` stay exact for the complete reachable induced set within `max_depth`. Node truncation may therefore reduce returned edges before `max_edges` is reached |
+| Ordering | Root node first; remaining nodes by minimum depth then UTF-8 title bytes. Edges by `(min(endpoint depths), UTF-8 source, UTF-8 target, type, relationship id)`. Independent of parquet row order, hash iteration, locale, and `PYTHONHASHSEED` |
+| Records | The existing subgraph node/edge projection and field shape. `type` on edges is always exactly `calls`. Pandas/Arrow nulls → JSON null. NaN is normalized to null; Inf is refused |
+| JSON | The producer mapping itself: `indent=2`, `ensure_ascii=False`, `sort_keys=True`, `allow_nan=False`, one trailing newline |
+| Human | Root, resolved, requested limits, `nodes (returned/total)` with truncation marker, one node per line (`depth`, title, entity type when present), `edges (returned/total)` with truncation marker, one edge per line (`depth`, stored `source -> target`, type, id). Exactly one trailing newline |
+| Snapshot / lease | Same retained-snapshot read scope as other queries. `current` and explicit historical ids. Historical reads never activate or change `current`. Shared reader lease held through load, resolution, producer execution, serialization, stdout write, and stdout flush. One graph load, one symbol resolution, one producer call. No nested public query. No `.publish.lock` creation |
+| MCP | Not exposed. The existing `impact` tool, envelope, `max_items` truncation, and producer call remain unchanged. The fixed surface remains exactly 17 tools |
+| Malformed args | Bad limits, invalid graph/snapshot/data: exit 2, empty stdout, stderr-only diagnostics |
+| Non-claims | Not runtime execution proof, complete dynamic dispatch, call-observation reconstruction, semantic impact, severity, ownership, importance, architecture, change-risk probability, a unique path or explanation, GraphRAG, or natural-language analysis. Depth is minimum persisted reverse-call hop count only. Caps bound returned material, not traversal work. Totals are exact only within `max_depth` over persisted exact `calls` rows. No DOT yet. No MCP exposure yet |
 
 **Persisted integrity audit (read-only):**
 `scripts/c_clang_type_use_graph_audit.py` validates already-published

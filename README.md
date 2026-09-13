@@ -42,7 +42,7 @@ graphs, `examples/`, or experimental evidence.
 These generic installed commands operate on user-supplied directories:
 
 - `graphrag-code doctor`
-- `graphrag-code query-symbol` / `callers` / `callees` / `neighbors` / `subgraph` / `components` / `strong-components` / `condensation` / `shortest-path` / `degree-ranking` / `dependency-order`
+- `graphrag-code query-symbol` / `callers` / `callees` / `neighbors` / `subgraph` / `components` / `strong-components` / `condensation` / `shortest-path` / `degree-ranking` / `dependency-order` / `impact` / `impact-graph`
 - `graphrag-code context-pack`
 - `graphrag-code index-python` / `index-c`
 - `graphrag-code adopt-publication-lock --graph <root> --indexer auto --offline-confirmed`
@@ -421,14 +421,34 @@ excluded even when it has a self-loop or sits in a cycle. Endpoint-only
 caller titles remain. Isolates and unreachable titles do not. The public
 result is the complete UTF-8-sorted `List[str]`. Human output is one
 title per line; empty human stdout is exactly one newline. `--json`
-emits that list. There is no `--dot` and no bounded impact graph yet.
-MCP keeps the existing `impact` tool immediately after `degree_ranking`,
-applies its existing `max_items` truncation to the complete producer
-list, and does not add DOT, paths, or a second impact tool. This is not
-runtime execution proof, complete dynamic dispatch, call-observation
+emits that list. There is no `--dot` on that command. MCP keeps the
+existing `impact` tool immediately after `degree_ranking`, applies its
+existing `max_items` truncation to the complete producer list, and does
+not add DOT, paths, or a second impact tool. This is not runtime
+execution proof, complete dynamic dispatch, call-observation
 reconstruction, semantic impact, severity, ownership, importance,
 architecture, a path explanation, change-risk probability, GraphRAG, or
 natural-language analysis.
+
+`graphrag-code impact-graph` (also `python -m graphrag_code.graph_query impact-graph`
+and `scripts/graph_query.py impact-graph`) is a separate bounded reverse-call
+graph over persisted rows whose type is exactly `calls`. One canonical
+pure producer, `compute_bounded_call_impact`, is shared by
+`ByogGraph.impact_graph` and the free `graph_query.impact_graph` helper.
+The resolved root is a node at depth 0. Traversal follows incoming stored
+`calls` (direct callers at depth 1). BFS first discovery is the minimum
+reverse-call hop count. Endpoint-only callers remain with null entity
+metadata. Caps (`--max-depth` / `--max-nodes` / `--max-edges`, defaults
+3/50/100, hard maxima 32/500/500) truncate returned lists; totals within
+`max_depth` stay exact. Node truncation drops edges whose endpoints are
+not returned. `--json` emits the producer mapping. There is no `--dot`
+yet. MCP stays exactly 17 read-only tools and does not expose
+`impact_graph`. This is not the unbounded `impact` title list, runtime
+execution proof, complete dynamic dispatch, call-observation
+reconstruction, semantic impact, severity, ownership, importance,
+architecture, a unique path explanation, change-risk probability,
+GraphRAG, or natural-language analysis. Depth is minimum persisted
+reverse-call hops only. Caps bound returned material, not traversal work.
 
 `adopt-publication-lock` is an explicit migration, never an automatic
 MCP or doctor side effect. `--offline-confirmed` is required to create
@@ -954,6 +974,9 @@ uv run python scripts/graph_query.py degree-ranking --graph <root>
 uv run python scripts/graph_query.py degree-ranking --graph <root> --dot
 uv run python scripts/graph_query.py dependency-order --graph <root>
 uv run python scripts/graph_query.py dependency-order --graph <root> --dot
+uv run python scripts/graph_query.py impact <symbol> --graph <root>
+uv run python scripts/graph_query.py impact-graph <symbol> --graph <root>
+uv run python scripts/graph_query.py impact-graph <symbol> --graph <root> --json
 uv run python scripts/context_pack.py <title> --graph <root>
 uv run python scripts/port_eval.py --all-gates --full
 ```

@@ -67,6 +67,7 @@ QUERY_COMMANDS = (
     "subgraph",
     "dependency-order",
     "impact",
+    "impact-graph",
     "observations",
     "context-pack",
 )

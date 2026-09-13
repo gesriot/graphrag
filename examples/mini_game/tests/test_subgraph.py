@@ -725,6 +725,7 @@ def test_no_nested_public_queries_and_mcp_subgraph_precedes_components(
     monkeypatch.setattr(g, "callers", track("callers"))
     monkeypatch.setattr(g, "callees", track("callees"))
     monkeypatch.setattr(g, "impact", track("impact"))
+    monkeypatch.setattr(g, "impact_graph", track("impact_graph"))
     result = g.subgraph("A", max_depth=1)
     assert result["resolved"] is True
     assert called == []

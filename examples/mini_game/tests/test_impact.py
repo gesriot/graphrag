@@ -386,12 +386,14 @@ def test_old_duplicated_bfs_bodies_are_gone():
     assert "compute_transitive_call_impact(" in impact_fn
     assert impact_fn.count("compute_transitive_call_impact(") == 1
     assert impact_fn.count("self.resolve(") == 1
+    assert "compute_bounded_call_impact(" not in impact_fn
     assert "defaultdict" not in impact_fn
     assert "deque" not in impact_fn
     assert "astype(str)" not in impact_fn
     assert "seen.discard" not in impact_fn
     assert "compute_transitive_call_impact(" in free_fn
     assert free_fn.count("compute_transitive_call_impact(") == 1
+    assert "compute_bounded_call_impact(" not in free_fn
     assert "_resolve_symbol(" in free_fn
     assert "defaultdict" not in free_fn
     assert "deque" not in free_fn
@@ -805,6 +807,7 @@ def test_one_load_resolve_producer_serialize_no_nested_query(
         "dependency_order",
         "degree_ranking",
         "shortest_path",
+        "impact_graph",
     ):
         monkeypatch.setattr(
             g,

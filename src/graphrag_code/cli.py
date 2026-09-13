@@ -43,6 +43,9 @@ from graphrag_code.byog_graph import (
     DEFAULT_CONDENSATION_MAX_EDGES,
     DEFAULT_CONDENSATION_MAX_NODES_PER_COMPONENT,
     DEFAULT_DEGREE_RANKING_MAX_NODES,
+    DEFAULT_IMPACT_GRAPH_MAX_DEPTH,
+    DEFAULT_IMPACT_GRAPH_MAX_EDGES,
+    DEFAULT_IMPACT_GRAPH_MAX_NODES,
     DEFAULT_SHORTEST_PATH_MAX_DEPTH,
     DEFAULT_STRONG_COMPONENTS_MAX_COMPONENTS,
     DEFAULT_STRONG_COMPONENTS_MAX_NODES_PER_COMPONENT,
@@ -835,6 +838,42 @@ def impact(
     ``graph_query.py``. There is no ``--dot`` on this command.
     """
     args = _append_snapshot(["impact", symbol, "--graph", str(graph)], snapshot)
+    if json_out:
+        args.append("--json")
+    _delegate("graph_query.py", args)
+
+
+@app.command("impact-graph")
+def impact_graph(
+    symbol: str = typer.Argument(...),
+    graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
+    max_depth: int = typer.Option(DEFAULT_IMPACT_GRAPH_MAX_DEPTH, "--max-depth"),
+    max_nodes: int = typer.Option(DEFAULT_IMPACT_GRAPH_MAX_NODES, "--max-nodes"),
+    max_edges: int = typer.Option(DEFAULT_IMPACT_GRAPH_MAX_EDGES, "--max-edges"),
+    json_out: bool = typer.Option(False, "--json"),
+):
+    """Bounded reverse-call impact graph (graph_query.py impact-graph).
+
+    Incoming stored calls from the resolved root. Human and JSON both
+    delegate to ``graph_query.py``. There is no ``--dot`` on this command.
+    This is not the unbounded ``impact`` title list.
+    """
+    args = _append_snapshot(
+        [
+            "impact-graph",
+            symbol,
+            "--graph",
+            str(graph),
+            "--max-depth",
+            str(max_depth),
+            "--max-nodes",
+            str(max_nodes),
+            "--max-edges",
+            str(max_edges),
+        ],
+        snapshot,
+    )
     if json_out:
         args.append("--json")
     _delegate("graph_query.py", args)

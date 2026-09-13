@@ -42,7 +42,7 @@ precise call structure. The intended path is:
    `calls` edges, dangling targets, semantic-suspicion heuristics (including an
    import-aware check), and a seeded precision sample.
 5. **Local queries and context packs** – `scripts/graph_query.py` (callers,
-   callees, neighbors, subgraph, components, strong-components, condensation, shortest-path, degree-ranking, impact, type-closure, dependency order, symbol, observations)
+   callees, neighbors, subgraph, components, strong-components, condensation, shortest-path, degree-ranking, impact, impact-graph, type-closure, dependency order, symbol, observations)
    and `scripts/context_pack.py` (entity + neighbors + text units + first-class
    `uses_data` / `data_dependencies` when present). `subgraph` is a bounded
    cycle-safe multi-hop induced subgraph over stored relationships, not an
@@ -143,10 +143,16 @@ precise call structure. The intended path is:
    `calls` rows: reverse reachability, root excluded, UTF-8-sorted
    unbounded `List[str]`. `ByogGraph.impact` and `graph_query.impact`
    both delegate to it. Human/JSON remain the title list; empty human
-   stdout is one newline. There is no `--dot` yet. MCP keeps the
-   existing `impact` tool and `max_items` truncation. This is not
-   runtime execution proof, dynamic-dispatch completeness, semantic
-   impact, or a path explanation. MCP remains exactly 17 read-only tools.
+   stdout is one newline. There is no `--dot` on that command. MCP keeps
+   the existing `impact` tool and `max_items` truncation. `impact-graph`
+   is a separate bounded reverse-call graph (`compute_bounded_call_impact`)
+   over exact persisted `calls` rows: resolved root at depth 0, incoming
+   stored calls, minimum reverse-call depth, subgraph node/edge
+   projection, independent node/edge caps, referential closure, UTF-8
+   ordering. CLI/Python only; no `--dot`; MCP does not expose
+   `impact_graph`. This is not runtime execution proof, dynamic-dispatch
+   completeness, semantic impact, a path explanation, or the unbounded
+   `impact` title list. MCP remains exactly 17 read-only tools.
 6. **Golden-first porting gate** – before Rust: license/provenance, a golden
    contract the **reference language** already passes, then a clean graph audit,
    then porting. Recorded in [Plan.md](Plan.md) (“Porting gate”).
@@ -261,7 +267,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`2234 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`2245 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`

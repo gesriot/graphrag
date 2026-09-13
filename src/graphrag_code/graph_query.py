@@ -17,6 +17,7 @@ Provides:
 - neighbors(symbol)
 - dependency_order()      # deterministic containment order over contains rows
 - impact(symbol)          # unbounded transitive callers over exact calls
+- impact_graph(symbol)    # bounded reverse-call impact graph over exact calls
 - symbol(query)
 - observations(symbol_or_module)   # weak/ambiguous/container resolver diagnostics
 
@@ -43,6 +44,8 @@ Example:
     uv run python scripts/graph_query.py dependency-order --graph byog_mini_game --dot
     uv run python scripts/graph_query.py impact sim:run_simulation --graph byog_mini_game
     uv run python scripts/graph_query.py impact sim:run_simulation --graph byog_mini_game --json
+    uv run python scripts/graph_query.py impact-graph sim:run_simulation --graph byog_mini_game
+    uv run python scripts/graph_query.py impact-graph sim:run_simulation --graph byog_mini_game --json
     uv run python scripts/graph_query.py observations sim:run_simulation --graph byog_mini_game
 """
 
@@ -64,6 +67,9 @@ from graphrag_code.byog_graph import (  # re-export for backward compat
     DEFAULT_CONDENSATION_MAX_EDGES,
     DEFAULT_CONDENSATION_MAX_NODES_PER_COMPONENT,
     DEFAULT_DEGREE_RANKING_MAX_NODES,
+    DEFAULT_IMPACT_GRAPH_MAX_DEPTH,
+    DEFAULT_IMPACT_GRAPH_MAX_EDGES,
+    DEFAULT_IMPACT_GRAPH_MAX_NODES,
     DEFAULT_SHORTEST_PATH_MAX_DEPTH,
     DEFAULT_STRONG_COMPONENTS_MAX_COMPONENTS,
     DEFAULT_STRONG_COMPONENTS_MAX_NODES_PER_COMPONENT,
@@ -79,6 +85,9 @@ from graphrag_code.byog_graph import (  # re-export for backward compat
     HARD_MAX_CONDENSATION_COMPONENTS,
     HARD_MAX_CONDENSATION_EDGES,
     HARD_MAX_DEGREE_RANKING_NODES,
+    HARD_MAX_IMPACT_GRAPH_DEPTH,
+    HARD_MAX_IMPACT_GRAPH_EDGES,
+    HARD_MAX_IMPACT_GRAPH_NODES,
     HARD_MAX_SHORTEST_PATH_DEPTH,
     HARD_MAX_STRONG_COMPONENTS,
     HARD_MAX_STRONG_COMPONENT_NODES,
@@ -86,6 +95,7 @@ from graphrag_code.byog_graph import (  # re-export for backward compat
     HARD_MAX_SUBGRAPH_EDGES,
     HARD_MAX_SUBGRAPH_NODES,
     ByogGraph,
+    compute_bounded_call_impact,
     compute_bounded_subgraph,
     compute_condensation_graph,
     compute_containment_dependency_order,
@@ -810,6 +820,66 @@ def impact(ents: pd.DataFrame, rels: pd.DataFrame, symbol: str) -> List[str]:
     return compute_transitive_call_impact(rels, _resolve_symbol(ents, symbol))
 
 
+def dumps_impact_graph_json(result: Dict[str, Any]) -> str:
+    """Deterministic JSON for the bounded reverse-call impact graph."""
+    return json.dumps(
+        result,
+        indent=2,
+        ensure_ascii=False,
+        sort_keys=True,
+        allow_nan=False,
+    )
+
+
+def format_impact_graph_human(result: Dict[str, Any]) -> str:
+    """Stable human-readable impact-graph report (bounded subgraph presentation)."""
+    lines: List[str] = []
+    root = result.get("root")
+    lines.append(f"root: {root if root is not None else 'null'}")
+    lines.append(f"resolved: {bool(result.get('resolved'))}")
+    lines.append(f"max_depth: {result.get('max_depth')}")
+    lines.append(f"max_nodes: {result.get('max_nodes')}")
+    lines.append(f"max_edges: {result.get('max_edges')}")
+    n_ret = int(result.get("n_nodes_returned") or 0)
+    n_tot = int(result.get("n_nodes_total") or 0)
+    e_ret = int(result.get("n_edges_returned") or 0)
+    e_tot = int(result.get("n_edges_total") or 0)
+    trunc_n = " truncated" if result.get("nodes_truncated") else ""
+    trunc_e = " truncated" if result.get("edges_truncated") else ""
+    lines.append(f"nodes ({n_ret}/{n_tot}){trunc_n}:")
+    for node in result.get("nodes") or []:
+        node_type = node.get("type")
+        type_bit = f"\t{node_type}" if node_type is not None else ""
+        lines.append(f"  {node.get('depth')}\t{node.get('title')}{type_bit}")
+    lines.append(f"edges ({e_ret}/{e_tot}){trunc_e}:")
+    for edge in result.get("edges") or []:
+        lines.append(
+            f"  {edge.get('depth')}\t{edge.get('source')} -> {edge.get('target')}\t"
+            f"{edge.get('type')}\t{edge.get('id')}"
+        )
+    return "\n".join(lines)
+
+
+def impact_graph(
+    ents: pd.DataFrame,
+    rels: pd.DataFrame,
+    symbol: str,
+    *,
+    max_depth: int = DEFAULT_IMPACT_GRAPH_MAX_DEPTH,
+    max_nodes: int = DEFAULT_IMPACT_GRAPH_MAX_NODES,
+    max_edges: int = DEFAULT_IMPACT_GRAPH_MAX_EDGES,
+) -> Dict[str, Any]:
+    """Bounded reverse-call impact graph (delegates to the pure producer)."""
+    return compute_bounded_call_impact(
+        ents,
+        rels,
+        _resolve_symbol(ents, symbol),
+        max_depth=max_depth,
+        max_nodes=max_nodes,
+        max_edges=max_edges,
+    )
+
+
 def symbol_lookup(ents: pd.DataFrame, query: str) -> Dict[str, Any] | None:
     title = _resolve_symbol(ents, query)
     if not title:
@@ -1475,6 +1545,53 @@ def cli_impact(
                 print(dumps_impact_json(result), flush=True)
             else:
                 print(format_impact_human(result), flush=True)
+    except ValueError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from e
+
+
+@app.command("impact-graph")
+def cli_impact_graph(
+    symbol: str,
+    graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
+    max_depth: int = typer.Option(
+        DEFAULT_IMPACT_GRAPH_MAX_DEPTH,
+        "--max-depth",
+        help=f"Maximum reverse-call depth (0..{HARD_MAX_IMPACT_GRAPH_DEPTH})",
+    ),
+    max_nodes: int = typer.Option(
+        DEFAULT_IMPACT_GRAPH_MAX_NODES,
+        "--max-nodes",
+        help=f"Max nodes returned (1..{HARD_MAX_IMPACT_GRAPH_NODES}); totals stay exact",
+    ),
+    max_edges: int = typer.Option(
+        DEFAULT_IMPACT_GRAPH_MAX_EDGES,
+        "--max-edges",
+        help=f"Max edges returned (0..{HARD_MAX_IMPACT_GRAPH_EDGES}); totals stay exact",
+    ),
+    json_output: bool = typer.Option(False, "--json"),
+):
+    """Bounded reverse-call impact graph over persisted calls rows.
+
+    Incoming stored calls from the resolved root. Caps truncate returned
+    lists; totals within ``max_depth`` stay exact. Human output follows
+    the bounded-subgraph presentation. ``--json`` emits the producer
+    mapping. There is no ``--dot`` on this command. This is not the
+    unbounded ``impact`` title list.
+    """
+    try:
+        with _scoped_graph(graph, snapshot) as g:
+            result = g.impact_graph(
+                symbol,
+                max_depth=max_depth,
+                max_nodes=max_nodes,
+                max_edges=max_edges,
+            )
+            if json_output:
+                print(dumps_impact_graph_json(result), flush=True)
+            else:
+                print(format_impact_graph_human(result), flush=True)
     except ValueError as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from e
