@@ -852,12 +852,23 @@ def impact_graph(
     max_nodes: int = typer.Option(DEFAULT_IMPACT_GRAPH_MAX_NODES, "--max-nodes"),
     max_edges: int = typer.Option(DEFAULT_IMPACT_GRAPH_MAX_EDGES, "--max-edges"),
     json_out: bool = typer.Option(False, "--json"),
+    dot_out: bool = typer.Option(
+        False,
+        "--dot",
+        help=(
+            "Write deterministic Graphviz DOT to stdout. Interchange only; "
+            "does not invoke Graphviz or render an image. Mutually exclusive "
+            "with --json."
+        ),
+    ),
 ):
     """Bounded reverse-call impact graph (graph_query.py impact-graph).
 
-    Incoming stored calls from the resolved root. Human and JSON both
-    delegate to ``graph_query.py``. There is no ``--dot`` on this command.
-    This is not the unbounded ``impact`` title list.
+    Incoming stored calls from the resolved root. Human, JSON, and DOT
+    all delegate to ``graph_query.py``. ``--dot`` is Graphviz DOT
+    interchange on stdout: it does not invoke Graphviz, render an image,
+    or provide an interactive UI. ``--json`` and ``--dot`` are mutually
+    exclusive. This is not the unbounded ``impact`` title list.
     """
     args = _append_snapshot(
         [
@@ -876,6 +887,8 @@ def impact_graph(
     )
     if json_out:
         args.append("--json")
+    if dot_out:
+        args.append("--dot")
     _delegate("graph_query.py", args)
 
 

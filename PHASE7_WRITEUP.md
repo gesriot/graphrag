@@ -149,10 +149,14 @@ precise call structure. The intended path is:
    over exact persisted `calls` rows: resolved root at depth 0, incoming
    stored calls, minimum reverse-call depth, subgraph node/edge
    projection, independent node/edge caps, referential closure, UTF-8
-   ordering. CLI/Python only; no `--dot`; MCP does not expose
-   `impact_graph`. This is not runtime execution proof, dynamic-dispatch
-   completeness, semantic impact, a path explanation, or the unbounded
-   `impact` title list. MCP remains exactly 17 read-only tools.
+   ordering. `--dot` is a deterministic Graphviz DOT interchange of that
+   same producer mapping on stdout; Graphviz is not invoked. Only
+   returned producer material is rendered. `--json` and `--dot` are
+   mutually exclusive. CLI/Python only; MCP does not expose
+   `impact_graph` or DOT. This is not runtime execution proof,
+   dynamic-dispatch completeness, semantic impact, a path explanation,
+   or the unbounded `impact` title list. MCP remains exactly 17
+   read-only tools.
 6. **Golden-first porting gate** – before Rust: license/provenance, a golden
    contract the **reference language** already passes, then a clean graph audit,
    then porting. Recorded in [Plan.md](Plan.md) (“Porting gate”).
@@ -267,7 +271,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`2245 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`2257 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`

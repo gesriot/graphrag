@@ -46,6 +46,7 @@ Example:
     uv run python scripts/graph_query.py impact sim:run_simulation --graph byog_mini_game --json
     uv run python scripts/graph_query.py impact-graph sim:run_simulation --graph byog_mini_game
     uv run python scripts/graph_query.py impact-graph sim:run_simulation --graph byog_mini_game --json
+    uv run python scripts/graph_query.py impact-graph sim:run_simulation --graph byog_mini_game --dot
     uv run python scripts/graph_query.py observations sim:run_simulation --graph byog_mini_game
 """
 
@@ -117,6 +118,7 @@ from graphrag_code.degree_ranking_dot import dumps_degree_ranking_dot
 from graphrag_code.dependency_order_dot import dumps_dependency_order_dot
 from graphrag_code.shortest_path_dot import dumps_shortest_path_dot
 from graphrag_code.strong_components_dot import dumps_strong_components_dot
+from graphrag_code.impact_graph_dot import dumps_impact_graph_dot
 from graphrag_code.subgraph_dot import dumps_subgraph_dot
 from graphrag_code.type_closure_dot import dumps_type_closure_dot
 
@@ -1571,15 +1573,33 @@ def cli_impact_graph(
         help=f"Max edges returned (0..{HARD_MAX_IMPACT_GRAPH_EDGES}); totals stay exact",
     ),
     json_output: bool = typer.Option(False, "--json"),
+    dot_output: bool = typer.Option(
+        False,
+        "--dot",
+        help=(
+            "Write deterministic Graphviz DOT to stdout. Interchange only; "
+            "does not invoke Graphviz or render an image. Mutually exclusive "
+            "with --json."
+        ),
+    ),
 ):
     """Bounded reverse-call impact graph over persisted calls rows.
 
     Incoming stored calls from the resolved root. Caps truncate returned
     lists; totals within ``max_depth`` stay exact. Human output follows
     the bounded-subgraph presentation. ``--json`` emits the producer
-    mapping. There is no ``--dot`` on this command. This is not the
-    unbounded ``impact`` title list.
+    mapping. ``--dot`` is Graphviz DOT interchange on stdout: Graphviz
+    is not invoked and no image is rendered. ``--json`` and ``--dot``
+    are mutually exclusive. This is not the unbounded ``impact`` title
+    list.
     """
+    if json_output and dot_output:
+        typer.secho(
+            "--json and --dot are mutually exclusive",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(2)
     try:
         with _scoped_graph(graph, snapshot) as g:
             result = g.impact_graph(
@@ -1590,6 +1610,9 @@ def cli_impact_graph(
             )
             if json_output:
                 print(dumps_impact_graph_json(result), flush=True)
+            elif dot_output:
+                sys.stdout.write(dumps_impact_graph_dot(result))
+                sys.stdout.flush()
             else:
                 print(format_impact_graph_human(result), flush=True)
     except ValueError as e:

@@ -3007,8 +3007,10 @@ and `scripts/graph_query.py impact-graph` expose one retained-snapshot
 read of a bounded reverse-call graph over persisted rows whose type is
 exactly `calls`. `ByogGraph.impact_graph(...)` and the pure helper
 `compute_bounded_call_impact(...)` are the same contract. This is **not**
-the unbounded `impact` title list. There is no `--dot`. MCP stays exactly
-17 tools and does not expose `impact_graph`.
+the unbounded `impact` title list. `--dot` serializes the same producer
+result as deterministic Graphviz DOT interchange on stdout; Graphviz is
+not invoked. MCP stays exactly 17 tools and does not expose
+`impact_graph` or DOT.
 
 ```text
 graphrag-code impact-graph <symbol> \
@@ -3017,7 +3019,7 @@ graphrag-code impact-graph <symbol> \
   [--max-depth N] \
   [--max-nodes N] \
   [--max-edges N] \
-  [--json]
+  [--json | --dot]
 ```
 
 | Property | Contract |
@@ -3029,12 +3031,13 @@ graphrag-code impact-graph <symbol> \
 | Caps | Defaults: depth 3, nodes 50, edges 100. Hard maxima: depth 32, nodes 500, edges 500. `max_nodes` minimum 1 so a resolved root is never dropped. Caps truncate **returned** lists; `n_nodes_total` / `n_edges_total` stay exact for the complete reachable induced set within `max_depth`. Node truncation may therefore reduce returned edges before `max_edges` is reached |
 | Ordering | Root node first; remaining nodes by minimum depth then UTF-8 title bytes. Edges by `(min(endpoint depths), UTF-8 source, UTF-8 target, type, relationship id)`. Independent of parquet row order, hash iteration, locale, and `PYTHONHASHSEED` |
 | Records | The existing subgraph node/edge projection and field shape. `type` on edges is always exactly `calls`. Pandas/Arrow nulls → JSON null. NaN is normalized to null; Inf is refused |
-| JSON | The producer mapping itself: `indent=2`, `ensure_ascii=False`, `sort_keys=True`, `allow_nan=False`, one trailing newline |
+| JSON | The producer mapping itself: `indent=2`, `ensure_ascii=False`, `sort_keys=True`, `allow_nan=False`, one trailing newline. `--json` and `--dot` are mutually exclusive |
 | Human | Root, resolved, requested limits, `nodes (returned/total)` with truncation marker, one node per line (`depth`, title, entity type when present), `edges (returned/total)` with truncation marker, one edge per line (`depth`, stored `source -> target`, type, id). Exactly one trailing newline |
-| Snapshot / lease | Same retained-snapshot read scope as other queries. `current` and explicit historical ids. Historical reads never activate or change `current`. Shared reader lease held through load, resolution, producer execution, serialization, stdout write, and stdout flush. One graph load, one symbol resolution, one producer call. No nested public query. No `.publish.lock` creation |
-| MCP | Not exposed. The existing `impact` tool, envelope, `max_items` truncation, and producer call remain unchanged. The fixed surface remains exactly 17 tools |
-| Malformed args | Bad limits, invalid graph/snapshot/data: exit 2, empty stdout, stderr-only diagnostics |
-| Non-claims | Not runtime execution proof, complete dynamic dispatch, call-observation reconstruction, semantic impact, severity, ownership, importance, architecture, change-risk probability, a unique path or explanation, GraphRAG, or natural-language analysis. Depth is minimum persisted reverse-call hop count only. Caps bound returned material, not traversal work. Totals are exact only within `max_depth` over persisted exact `calls` rows. No DOT yet. No MCP exposure yet |
+| DOT | Deterministic Graphviz DOT interchange on stdout from the same producer result (`src/graphrag_code/impact_graph_dot.py`). Non-strict `digraph graphrag_impact_graph`. Schema version `1`. Internal ids `n0000`… in producer node order; titles are never identifiers; the resolved root is `n0000`. Edges keep stored `source -> target` orientation. Graph metadata (quoted): schema version, resolved, root when resolved, `relationship_type="calls"`, max_depth, max_nodes, max_edges, totals, returned counts, truncation flags. Nodes: `label`/`title`, persisted title, depth, type when present, `is_root`. Edges: `label="calls"`, persisted id, type, depth. Presentation baseline only: `rankdir=LR`, box nodes, root `peripheries=2`. No descriptions, snippets, spans, weights, confidence, or extra dataframe columns. One shared quoted-string escaper (`quote_dot_string`). Only returned producer material is rendered; omitted nodes/edges are not reconstructed. Hard limit 1,000,000 UTF-8 bytes including the final newline; overflow and invalid renderer input fail closed with exit 2 and empty stdout. Graphviz is not invoked or required. No output-file option |
+| Snapshot / lease | Same retained-snapshot read scope as other queries. `current` and explicit historical ids. Historical reads never activate or change `current`. Shared reader lease and retained descriptors are held through materialization, impact-graph computation, JSON/human/DOT serialization, stdout write, and stdout flush. No nested public query. No `.publish.lock` creation. Unlocked legacy compatibility is unchanged and not broadened |
+| MCP | Not exposed. The existing `impact` tool, envelope, `max_items` truncation, and producer call remain unchanged. The fixed surface remains exactly 17 tools and does not expose DOT or a format parameter |
+| Malformed args | Bad limits, invalid graph/snapshot/data, combined `--json --dot`, or DOT overflow: exit 2, empty stdout, stderr-only diagnostics |
+| Non-claims | Not runtime execution proof, complete dynamic dispatch, call-observation reconstruction, semantic impact, severity, ownership, importance, architecture, change-risk probability, a unique path or explanation, GraphRAG, or natural-language analysis. Depth is minimum persisted reverse-call hop count only. Caps bound returned material, not traversal work. Totals are exact only within `max_depth` over persisted exact `calls` rows. `--dot` is interchange only. No MCP exposure |
 
 **Persisted integrity audit (read-only):**
 `scripts/c_clang_type_use_graph_audit.py` validates already-published

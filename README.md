@@ -441,9 +441,19 @@ reverse-call hop count. Endpoint-only callers remain with null entity
 metadata. Caps (`--max-depth` / `--max-nodes` / `--max-edges`, defaults
 3/50/100, hard maxima 32/500/500) truncate returned lists; totals within
 `max_depth` stay exact. Node truncation drops edges whose endpoints are
-not returned. `--json` emits the producer mapping. There is no `--dot`
-yet. MCP stays exactly 17 read-only tools and does not expose
-`impact_graph`. This is not the unbounded `impact` title list, runtime
+not returned. `--json` emits the producer mapping. `--dot` is a
+deterministic Graphviz DOT interchange of that same producer result on
+stdout (`src/graphrag_code/impact_graph_dot.py`; non-strict
+`digraph graphrag_impact_graph`; stored `source -> target` orientation;
+only returned producer material; omitted nodes/edges are not
+reconstructed; Graphviz is not invoked). Statement order follows the
+producer lists; rendered Graphviz layout order is not guaranteed.
+Internal `n0000` identifiers are serialization identifiers only, not
+ordinal ranks. `--json` and `--dot` are mutually exclusive. DOT is
+capped at 1,000,000 UTF-8 bytes and fails closed before writing. MCP
+stays exactly 17 read-only tools and does not expose `impact_graph`,
+DOT, or output-format selection. This is not the unbounded `impact`
+title list, runtime
 execution proof, complete dynamic dispatch, call-observation
 reconstruction, semantic impact, severity, ownership, importance,
 architecture, a unique path explanation, change-risk probability,
@@ -977,6 +987,7 @@ uv run python scripts/graph_query.py dependency-order --graph <root> --dot
 uv run python scripts/graph_query.py impact <symbol> --graph <root>
 uv run python scripts/graph_query.py impact-graph <symbol> --graph <root>
 uv run python scripts/graph_query.py impact-graph <symbol> --graph <root> --json
+uv run python scripts/graph_query.py impact-graph <symbol> --graph <root> --dot
 uv run python scripts/context_pack.py <title> --graph <root>
 uv run python scripts/port_eval.py --all-gates --full
 ```

@@ -1,7 +1,8 @@
 """Bounded reverse-call impact graph (CLI/Python only).
 
 Canonical producer: compute_bounded_call_impact. Legacy unbounded
-impact List[str] and MCP impact remain unchanged. No DOT, no MCP tool.
+impact List[str] and MCP impact remain unchanged. DOT is a separate
+serializer over this producer result.
 """
 from __future__ import annotations
 
@@ -596,9 +597,10 @@ def test_one_load_resolve_producer_no_nested_query_and_no_dot(
     assert cli_fn.count(".impact_graph(") == 1
     assert cli_fn.count("dumps_impact_graph_json(") == 1
     assert cli_fn.count("format_impact_graph_human(") == 1
+    assert cli_fn.count("dumps_impact_graph_dot(") == 1
     assert "flush=True" in cli_fn
     assert "with _scoped_graph" in cli_fn
-    assert "--dot" not in cli_fn.split("typer.Option", 1)[0] or "no ``--dot``" in cli_fn
+    assert "mutually exclusive" in cli_fn
     assert inspect.signature(compute_bounded_call_impact).parameters["max_depth"].default == (
         DEFAULT_IMPACT_GRAPH_MAX_DEPTH
     )
@@ -751,7 +753,7 @@ def test_cli_human_json_byte_parity_and_wheel(
     assert not (graph / ".publish.lock").is_symlink()
     help_proc = _run(sys.executable, str(QUERY), "impact-graph", "--help")
     options = help_proc.stdout.split(b"Options")[-1]
-    assert b"--dot" not in options
+    assert b"--dot" in options
     assert b"--json" in options
 
 
@@ -795,18 +797,18 @@ def test_invalid_graph_snapshot_and_data_exit_2_empty_stdout(tmp_path: Path):
     assert bad_nodes.returncode == 2
     assert bad_nodes.stdout == b""
     assert b"max_nodes" in bad_nodes.stderr
-    dotted = _run(
+    bogus = _run(
         sys.executable,
         str(QUERY),
         "impact-graph",
         "A",
         "--graph",
         str(graph),
-        "--dot",
+        "--bogus-flag",
         check=False,
     )
-    assert dotted.returncode == 2
-    assert dotted.stdout == b""
+    assert bogus.returncode == 2
+    assert bogus.stdout == b""
     unresolved = _run(
         sys.executable,
         str(QUERY),
