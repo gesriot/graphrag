@@ -35,6 +35,7 @@ from scripts.byog_graph import (  # type: ignore
     compute_containment_dependency_order,
     compute_structural_degree_ranking,
     compute_strongly_connected_components,
+    compute_transitive_call_impact,
     compute_weakly_connected_components,
     publish_byog_snapshot,
 )
@@ -1176,7 +1177,9 @@ def test_no_nested_query_mcp_unchanged_and_existing_surfaces(
     assert other.dependency_order() == compute_containment_dependency_order(
         other.ents, other.rels
     )
-    assert isinstance(other.impact("B"), list)
+    assert other.impact("B") == compute_transitive_call_impact(
+        other.rels, other.resolve("B")
+    )
 
 
 def test_mcp_exposes_strong_components_as_fifteenth_tool(tmp_path: Path):

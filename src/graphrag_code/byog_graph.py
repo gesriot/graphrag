@@ -2721,29 +2721,14 @@ class ByogGraph:
         return {"incoming": sorted(inc), "outgoing": sorted(out)}
 
     def impact(self, symbol: str) -> List[str]:
-        """Transitive callers (affected symbols)."""
-        title = self.resolve(symbol)
-        if not title:
-            return []
-        from collections import defaultdict, deque
+        """Transitive callers over persisted ``calls`` rows.
 
-        rev: Dict[str, List[str]] = defaultdict(list)
-        call_mask = self.rels["type"].astype(str) == "calls"
-        for _, row in self.rels[call_mask].astype(str).iterrows():
-            rev[row["target"]].append(row["source"])
-
-        seen = set()
-        q = deque([title])
-        while q:
-            cur = q.popleft()
-            if cur in seen:
-                continue
-            seen.add(cur)
-            for pred in rev.get(cur, []):
-                if pred not in seen:
-                    q.append(pred)
-        seen.discard(title)
-        return sorted(seen)
+        Reverse reachability on stored orientation. The resolved root is
+        excluded even in a cycle or self-loop. Unbounded full-list legacy
+        query: not runtime execution proof, dynamic-dispatch completeness,
+        semantic impact, or a path explanation.
+        """
+        return compute_transitive_call_impact(self.rels, self.resolve(symbol))
 
     def dependency_order(self) -> List[str]:
         """Deterministic structural containment order over ``contains`` rows.
@@ -3609,6 +3594,52 @@ def compute_structural_degree_ranking(
         "sum_total_degree": sum_total_degree,
         "nodes_truncated": n_nodes_total > len(returned),
     }
+
+
+def compute_transitive_call_impact(
+    rels: Optional[pd.DataFrame],
+    root_title: Optional[str],
+) -> List[str]:
+    """Pure reverse reachability over persisted ``calls`` rows.
+
+    ``root_title`` is already resolved. This function does not open a
+    graph, resolve a symbol, or mutate inputs. Relationship rows are
+    strictly validated before traversal and before an unresolved-root
+    early return. Only exact ``calls`` rows participate. The root is
+    excluded. The result is the complete UTF-8-sorted title list.
+    """
+    selected = _component_selected_relationships(rels, ["calls"])
+    if root_title is None:
+        return []
+    if not isinstance(root_title, str) or not root_title:
+        raise ValueError(
+            f"root_title must be a non-empty resolved title or null, got {root_title!r}"
+        )
+    try:
+        root_title.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError(
+            f"root_title must be a non-empty resolved title or null, got {root_title!r}"
+        ) from exc
+
+    rev: Dict[str, List[str]] = defaultdict(list)
+    for _rid, src, tgt in selected:
+        rev[tgt].append(src)
+    for key in list(rev.keys()):
+        rev[key] = sorted(set(rev[key]), key=_utf8_key)
+
+    seen = {root_title}
+    reachable: List[str] = []
+    queue: deque[str] = deque([root_title])
+    while queue:
+        cur = queue.popleft()
+        for pred in rev.get(cur, []):
+            if pred in seen:
+                continue
+            seen.add(pred)
+            reachable.append(pred)
+            queue.append(pred)
+    return sorted(reachable, key=_utf8_key)
 
 
 def compute_containment_dependency_order(

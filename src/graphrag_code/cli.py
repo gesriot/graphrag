@@ -829,14 +829,15 @@ def impact(
     snapshot: Optional[str] = _snapshot_opt(),
     json_out: bool = typer.Option(False, "--json"),
 ):
-    """Transitive callers (who would be affected) — graph_query.py impact."""
-    if not json_out:
-        _delegate(
-            "graph_query.py",
-            _append_snapshot(["impact", symbol, "--graph", str(graph)], snapshot),
-        )
-        return
-    _json_query(graph, snapshot, lambda g: g.impact(symbol))
+    """Transitive callers over persisted calls rows (graph_query.py impact).
+
+    Unbounded reverse reachability. Human and JSON both delegate to
+    ``graph_query.py``. There is no ``--dot`` on this command.
+    """
+    args = _append_snapshot(["impact", symbol, "--graph", str(graph)], snapshot)
+    if json_out:
+        args.append("--json")
+    _delegate("graph_query.py", args)
 
 
 @app.command("observations")

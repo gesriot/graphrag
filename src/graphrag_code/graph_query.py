@@ -16,7 +16,7 @@ Provides:
 - degree_ranking()        # raw directed relationship-row degree ranking
 - neighbors(symbol)
 - dependency_order()      # deterministic containment order over contains rows
-- impact(symbol)
+- impact(symbol)          # unbounded transitive callers over exact calls
 - symbol(query)
 - observations(symbol_or_module)   # weak/ambiguous/container resolver diagnostics
 
@@ -41,6 +41,8 @@ Example:
     uv run python scripts/graph_query.py degree-ranking --graph byog_mini_game --dot
     uv run python scripts/graph_query.py dependency-order --graph byog_mini_game
     uv run python scripts/graph_query.py dependency-order --graph byog_mini_game --dot
+    uv run python scripts/graph_query.py impact sim:run_simulation --graph byog_mini_game
+    uv run python scripts/graph_query.py impact sim:run_simulation --graph byog_mini_game --json
     uv run python scripts/graph_query.py observations sim:run_simulation --graph byog_mini_game
 """
 
@@ -90,6 +92,7 @@ from graphrag_code.byog_graph import (  # re-export for backward compat
     compute_shortest_path,
     compute_structural_degree_ranking,
     compute_strongly_connected_components,
+    compute_transitive_call_impact,
     compute_uses_type_closure,
     compute_weakly_connected_components,
     load_graph,
@@ -783,32 +786,28 @@ def format_dependency_order_human(result: List[str]) -> str:
     return "\n".join(result)
 
 
+def dumps_impact_json(result: List[str]) -> str:
+    """Deterministic JSON for the unbounded transitive-caller title list."""
+    return json.dumps(
+        result,
+        indent=2,
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+
+
+def format_impact_human(result: List[str]) -> str:
+    """One title per line in producer order.
+
+    Empty results are empty text; the CLI prints a trailing newline, so
+    empty human stdout is exactly one newline.
+    """
+    return "\n".join(result)
+
+
 def impact(ents: pd.DataFrame, rels: pd.DataFrame, symbol: str) -> List[str]:
-    """Transitive callers (who would be affected if this symbol changes)."""
-    title = _resolve_symbol(ents, symbol)
-    if not title:
-        return []
-    # Build reverse call graph
-    from collections import defaultdict, deque
-
-    rev: Dict[str, List[str]] = defaultdict(list)
-    call_mask = rels["type"].astype(str) == "calls"
-    for _, row in rels[call_mask].astype(str).iterrows():
-        rev[row["target"]].append(row["source"])
-
-    # BFS from the symbol
-    seen = set()
-    q = deque([title])
-    while q:
-        cur = q.popleft()
-        if cur in seen:
-            continue
-        seen.add(cur)
-        for pred in rev.get(cur, []):
-            if pred not in seen:
-                q.append(pred)
-    seen.discard(title)
-    return sorted(seen)
+    """Transitive callers over persisted ``calls`` rows (delegates to pure BFS)."""
+    return compute_transitive_call_impact(rels, _resolve_symbol(ents, symbol))
 
 
 def symbol_lookup(ents: pd.DataFrame, query: str) -> Dict[str, Any] | None:
@@ -1460,9 +1459,25 @@ def cli_impact(
     symbol: str,
     graph: Path = _graph_opt(),
     snapshot: Optional[str] = _snapshot_opt(),
+    json_output: bool = typer.Option(False, "--json"),
 ):
-    with _scoped_graph(graph, snapshot) as g:
-        print("\n".join(g.impact(symbol)))
+    """Unbounded transitive callers over persisted calls rows.
+
+    Reverse reachability on stored orientation. The resolved root is
+    excluded even in a cycle or self-loop. Human output is one title per
+    line; empty results still emit one newline. ``--json`` emits the list
+    itself. There is no ``--dot`` on this command.
+    """
+    try:
+        with _scoped_graph(graph, snapshot) as g:
+            result = g.impact(symbol)
+            if json_output:
+                print(dumps_impact_json(result), flush=True)
+            else:
+                print(format_impact_human(result), flush=True)
+    except ValueError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from e
 
 
 @app.command("symbol")

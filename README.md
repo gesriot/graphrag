@@ -410,6 +410,26 @@ community, GraphRAG, or natural-language analysis. MCP stays exactly 17
 read-only tools. The existing `type_closure` producer/envelope is
 unchanged and does not expose DOT or output-format selection.
 
+`graphrag-code impact` (also `python -m graphrag_code.graph_query impact`
+and `scripts/graph_query.py impact`) is the unbounded reverse-reachability
+list of persisted `calls` callers of one resolved symbol. One canonical
+pure producer, `compute_transitive_call_impact`, is shared by
+`ByogGraph.impact` and the free `graph_query.impact` helper. Only
+relationship rows whose type is exactly `calls` participate; stored
+`source -> target` orientation is never rewritten. The resolved root is
+excluded even when it has a self-loop or sits in a cycle. Endpoint-only
+caller titles remain. Isolates and unreachable titles do not. The public
+result is the complete UTF-8-sorted `List[str]`. Human output is one
+title per line; empty human stdout is exactly one newline. `--json`
+emits that list. There is no `--dot` and no bounded impact graph yet.
+MCP keeps the existing `impact` tool immediately after `degree_ranking`,
+applies its existing `max_items` truncation to the complete producer
+list, and does not add DOT, paths, or a second impact tool. This is not
+runtime execution proof, complete dynamic dispatch, call-observation
+reconstruction, semantic impact, severity, ownership, importance,
+architecture, a path explanation, change-risk probability, GraphRAG, or
+natural-language analysis.
+
 `adopt-publication-lock` is an explicit migration, never an automatic
 MCP or doctor side effect. `--offline-confirmed` is required to create
 `.publish.lock`. Passing it asserts that no legacy reader or

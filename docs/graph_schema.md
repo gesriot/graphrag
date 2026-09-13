@@ -2982,6 +2982,25 @@ traverse `uses_type`. Closure never traverses `calls`, `contains`,
 return empty query lists and omit the type_* pack keys (byte-identical pack
 shape at default depth aside from docs/pins).
 
+`impact` is the unbounded reverse-reachability caller list over persisted
+rows whose type is exactly `calls`. One canonical pure producer,
+`compute_transitive_call_impact(rels, root_title) -> List[str]`, is the
+only algorithm. `ByogGraph.impact(symbol)` resolves once and delegates;
+`graph_query.impact(ents, rels, symbol)` uses `_resolve_symbol` once and
+delegates. Stored orientation is never rewritten. The resolved root is
+excluded even with a self-loop or cycle. Endpoint-only callers remain;
+isolates and unreachable titles do not. Output is sorted by UTF-8 title
+bytes. Relationship tables are strictly validated before traversal and
+before an unresolved-root `[]`. Human output is one title per line
+(empty human stdout is one newline); `--json` emits the list. There is
+no `--dot` and no bounded impact graph yet. MCP keeps the existing
+`impact` tool immediately after `degree_ranking` and may apply
+`max_items` to the complete producer list. This is not runtime execution
+proof, complete dynamic dispatch, call-observation reconstruction,
+semantic impact, severity, ownership, importance, architecture, a path
+explanation, change-risk probability, GraphRAG, or natural-language
+analysis.
+
 **Persisted integrity audit (read-only):**
 `scripts/c_clang_type_use_graph_audit.py` validates already-published
 configured `uses_type` edges against the producer contract without invoking

@@ -211,7 +211,14 @@ def test_graph_query_impact_symbol(mini_game_byog_root: Path):
     ents, rels = load_graph(mini_game_byog_root)
 
     impacted = impact(ents, rels, "core:Config")
-    assert isinstance(impacted, list)
+    from scripts.byog_graph import ByogGraph, compute_transitive_call_impact
+
+    view = ByogGraph(mini_game_byog_root)
+    assert impacted == view.impact("core:Config")
+    assert impacted == compute_transitive_call_impact(rels, view.resolve("core:Config"))
+    assert impacted == sorted(impacted, key=lambda title: title.encode("utf-8"))
+    assert all(isinstance(title, str) and title for title in impacted)
+    assert "core:Config" not in impacted
 
     s = symbol_lookup(ents, "sim:run_simulation")
     assert s is not None and s.get("title") == "sim:run_simulation"

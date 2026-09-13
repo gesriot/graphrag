@@ -29,6 +29,7 @@ from scripts.byog_graph import (  # type: ignore
     compute_bounded_subgraph,
     compute_containment_dependency_order,
     compute_structural_degree_ranking,
+    compute_transitive_call_impact,
     compute_weakly_connected_components,
     publish_byog_snapshot,
 )
@@ -828,7 +829,9 @@ def test_no_nested_query_mcp_unchanged_and_existing_surfaces(
     ranked = compute_structural_degree_ranking(other.ents, other.rels)
     assert dumps_degree_ranking_json(ranked)
     assert other.degree_ranking() == ranked
-    assert isinstance(other.impact("B"), list)
+    assert other.impact("B") == compute_transitive_call_impact(
+        other.rels, other.resolve("B")
+    )
 
 
 def test_mcp_remains_seventeen_tools_without_dependency_order(tmp_path: Path):
