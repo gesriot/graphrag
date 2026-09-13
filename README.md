@@ -84,7 +84,8 @@ stderr.
 
 The server exposes a fixed read-only tool set: `graph_status`,
 `graph_doctor`, `query_symbol`, `callers`, `callees`, `neighbors`,
-`subgraph`, `components`, `strong_components`, `condensation`, `degree_ranking`, `impact`, `type_closure`,
+`subgraph`, `components`, `strong_components`, `condensation`, `shortest_path`,
+`degree_ranking`, `impact`, `type_closure`,
 `context_pack`, `snapshot_history`, and `snapshot_diff`. There is no `snapshot_activate`, `snapshot_pin`,
 `snapshot_unpin`, `snapshot_retention_plan`, `snapshot_prune`,
 `snapshot_staging`, `snapshot_staging_cleanup_plan`,
@@ -381,6 +382,33 @@ read-only tool, immediately after `condensation` and immediately before
 algorithm, `max_nodes`, `max_edges`, a rank, or an output path. There is no
 hyphenated alias. Endpoint ambiguity remains an unresolved result. The MCP
 tool set remains exactly 17 read-only tools.
+
+`graphrag-code type-closure` (also `python -m graphrag_code.graph_query type-closure`
+and `scripts/graph_query.py type-closure`) is a bounded cycle-safe BFS over
+**only** persisted `uses_type` rows on one retained BYOG snapshot. It does
+not traverse `calls`, `contains`, `depends_on`, `includes`, `uses_data`, or
+any other relationship type. `--direction dependencies|users|both` selects
+outgoing, incoming, or both; returned edge `source`/`target` stay as stored.
+Caps (`--max-depth` default 3; `--max-nodes` default 50; `--max-edges`
+default 100; all non-negative, including zero) truncate **returned** lists
+while `n_*_total` stays exact within `max_depth`. Self-edges are evidence
+without duplicating nodes. Parallel relationship rows remain distinct by
+id. Unresolved or ambiguous symbols exit 0 with `resolved=false` and empty
+material. `--dot` writes a deterministic Graphviz DOT interchange for the
+same producer mapping (non-strict `digraph graphrag_type_closure`, stored
+orientation, producer node/edge order, internal `n0000` identifiers).
+Independent node/edge caps may emit explicit edge-only endpoint nodes with
+`in_nodes=false` and no invented depth; omitted producer material is not
+reconstructed. It does not invoke Graphviz, render an image, or provide an
+interactive UI. Statement order follows the producer lists; rendered
+Graphviz layout order is not guaranteed. Internal `n0000` identifiers are
+serialization identifiers only, not ordinal ranks. `--json` and `--dot`
+are mutually exclusive. DOT is capped at 1,000,000 UTF-8 bytes and fails
+closed before writing. This is not semantic type resolution, ABI proof,
+runtime dispatch, ownership, architecture, importance, hierarchy,
+community, GraphRAG, or natural-language analysis. MCP stays exactly 17
+read-only tools. The existing `type_closure` producer/envelope is
+unchanged and does not expose DOT or output-format selection.
 
 `adopt-publication-lock` is an explicit migration, never an automatic
 MCP or doctor side effect. `--offline-confirmed` is required to create
@@ -1012,7 +1040,11 @@ flags on `scripts/index_c.py`:
   `type-closure` is a bounded cycle-safe BFS over **only** `uses_type`
   (`--direction dependencies|users|both`, `--max-depth` / `--max-nodes` /
   `--max-edges`; caps truncate returned material while totals within depth
-  stay exact; malformed rows fail closed). Context packs surface bounded direct
+  stay exact; malformed rows fail closed). `--dot` writes a deterministic
+  Graphviz DOT interchange of that same bounded producer mapping on stdout
+  (Graphviz is not invoked; independent caps may emit edge-only endpoint
+  nodes with `in_nodes=false`; omitted material is not reconstructed).
+  Context packs surface bounded direct
   `type_dependencies` / `type_dependency_edges` / `type_user_edges` from the
   full relationship set (not the 30-neighbor cap). Default `--type-depth 1`
   keeps pack JSON unchanged; depth > 1 adds `type_dependency_closure` /

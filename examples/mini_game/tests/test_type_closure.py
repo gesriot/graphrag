@@ -1,6 +1,7 @@
 """Bounded cycle-safe transitive uses_type closure (consumer-only).
 
 Does not modify extraction, overlays, or published byog_* roots.
+DOT interchange for this producer is covered in test_type_closure_dot.py.
 """
 from __future__ import annotations
 

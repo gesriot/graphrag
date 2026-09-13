@@ -347,7 +347,12 @@ graphrag-code subgraph <symbol-or-module> \
 | Non-claims | Not natural-language search, semantic inference, GraphRAG, community detection, architecture understanding, indexing, completeness beyond stored relationships, an image renderer, an interactive UI, or a semantic/community visualization. `--dot` is interchange only; truncation and totals still come only from the bounded subgraph producer |
 
 `type_closure` remains a **uses_type-only** consumer with its existing
-direction names, defaults, and output schema. Subgraph is relation-generic
+direction names, defaults, and output schema. `--dot` serializes that
+same bounded producer mapping as deterministic Graphviz DOT interchange
+on stdout; Graphviz is not invoked. Independent node/edge caps may emit
+explicit edge-only endpoint nodes (`in_nodes=false`, no invented depth);
+omitted producer material is not reconstructed. MCP keeps the existing
+`type_closure` envelope and does not expose DOT. Subgraph is relation-generic
 and does not replace or wrap that helper.
 
 ### Weakly connected components summary
@@ -2963,7 +2968,8 @@ When `scripts/index_c.py --clang-type-uses` is enabled (default **off**),
 | `ByogGraph.type_users(symbol)` | Sorted unique incoming `uses_type` source titles |
 | `ByogGraph.type_closure(symbol, …)` | Bounded cycle-safe BFS over **only** `uses_type` (directions: `dependencies` / `users` / `both`); min depths; self-edges as evidence without node duplication; caps truncate **returned** lists while `n_*_total` stay exact within `max_depth`; malformed rows or duplicate relationship IDs fail closed |
 | `ByogGraph.subgraph(symbol, …)` | Separate relation-generic bounded induced subgraph (see [Bounded multi-hop subgraph query](#bounded-multi-hop-subgraph-query)); does **not** wrap or rename `type_closure` |
-| CLI | `graph_query.py types-used-by` / `type-users` / `type-closure`; same via `graphrag_code.py` (delegation; human + `--json` parity); negative limits / bad directions / malformed `uses_type` rows exit non-zero |
+| CLI | `graph_query.py types-used-by` / `type-users` / `type-closure`; same via `graphrag_code.py` (delegation; human + `--json` parity); `type-closure --dot` is deterministic Graphviz DOT interchange of the same producer mapping (`src/graphrag_code/type_closure_dot.py`; non-strict `digraph graphrag_type_closure`; stored orientation; independent caps may emit explicit edge-only endpoint nodes with `in_nodes=false` and no invented depth; omitted material is not reconstructed; Graphviz is not invoked; `--json` and `--dot` mutually exclusive; 1,000,000 UTF-8 byte hard limit). Negative limits / bad directions / malformed `uses_type` rows / combined `--json --dot` / DOT overflow exit 2 with empty stdout |
+| MCP | Existing `type_closure` producer/envelope is unchanged. The fixed surface remains exactly 17 tools and does not expose DOT or a format parameter |
 | Context pack (outgoing, depth 1) | `type_dependencies` + `type_dependency_edges` (+ totals/truncated) |
 | Context pack (incoming, depth 1) | `type_user_edges` (+ totals/truncated) |
 | Context pack (depth > 1) | Adds `type_dependency_closure` / `type_user_closure` with per-node min depth, bounded entity text, compact edge evidence, exact totals and truncation flags; default `--type-depth 1` keeps pack JSON byte-identical to direct-only; dangling or non-unique entity endpoints retain one explicit `missing` / `ambiguous` node payload rather than falsifying returned counts |

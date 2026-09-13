@@ -402,8 +402,22 @@ def type_closure(
     max_nodes: int = typer.Option(DEFAULT_TYPE_CLOSURE_MAX_NODES, "--max-nodes"),
     max_edges: int = typer.Option(DEFAULT_TYPE_CLOSURE_MAX_EDGES, "--max-edges"),
     json_out: bool = typer.Option(False, "--json"),
+    dot_out: bool = typer.Option(
+        False,
+        "--dot",
+        help=(
+            "Write deterministic Graphviz DOT to stdout. Interchange only; "
+            "does not invoke Graphviz or render an image. Mutually exclusive "
+            "with --json."
+        ),
+    ),
 ):
-    """Bounded cycle-safe transitive uses_type closure (graph_query.py type-closure)."""
+    """Bounded cycle-safe transitive uses_type closure (graph_query.py type-closure).
+
+    ``--dot`` is Graphviz DOT interchange on stdout: it does not invoke
+    Graphviz, render an image, or provide an interactive UI. ``--json``
+    and ``--dot`` are mutually exclusive.
+    """
     args = _append_snapshot(
         [
             "type-closure",
@@ -423,6 +437,8 @@ def type_closure(
     )
     if json_out:
         args.append("--json")
+    if dot_out:
+        args.append("--dot")
     _delegate("graph_query.py", args)
 
 

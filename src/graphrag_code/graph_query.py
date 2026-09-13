@@ -26,6 +26,7 @@ Example:
     uv run python scripts/graph_query.py callers sim:run_simulation --graph byog_mini_game
     uv run python scripts/graph_query.py types-used-by ini:ini_parse --graph byog_inih
     uv run python scripts/graph_query.py type-closure ini:ini_parse --direction dependencies --max-depth 2
+    uv run python scripts/graph_query.py type-closure ini:ini_parse --graph byog_inih --dot
     uv run python scripts/graph_query.py subgraph sim:run_simulation --graph byog_mini_game --direction both
     uv run python scripts/graph_query.py subgraph sim:run_simulation --graph byog_mini_game --dot
     uv run python scripts/graph_query.py components --graph byog_mini_game
@@ -104,6 +105,7 @@ from graphrag_code.dependency_order_dot import dumps_dependency_order_dot
 from graphrag_code.shortest_path_dot import dumps_shortest_path_dot
 from graphrag_code.strong_components_dot import dumps_strong_components_dot
 from graphrag_code.subgraph_dot import dumps_subgraph_dot
+from graphrag_code.type_closure_dot import dumps_type_closure_dot
 
 app = typer.Typer(help="Local BYOG graph queries (callers, callees, impact, etc.)")
 
@@ -904,8 +906,36 @@ def cli_type_closure(
         help="Max edges returned (exact totals still reported)",
     ),
     json_output: bool = typer.Option(False, "--json"),
+    dot_output: bool = typer.Option(
+        False,
+        "--dot",
+        help=(
+            "Write deterministic Graphviz DOT to stdout. Interchange only; "
+            "does not invoke Graphviz or render an image. Mutually exclusive "
+            "with --json."
+        ),
+    ),
 ):
-    """Bounded cycle-safe transitive uses_type closure (consumer-only)."""
+    """Bounded cycle-safe transitive uses_type closure (consumer-only).
+
+    Traverses only persisted ``uses_type`` rows. ``--direction dependencies``
+    follows outgoing edges, ``users`` follows incoming, and ``both`` follows
+    either; returned ``source -> target`` stays as stored. Caps truncate
+    returned lists; totals within ``max_depth`` stay exact.
+
+    ``--dot`` is Graphviz DOT interchange on stdout: Graphviz is not invoked
+    and no image is rendered. Independently truncated node/edge lists may
+    emit explicit edge-only endpoint nodes with ``in_nodes=false`` and no
+    invented depth. Omitted producer material is not reconstructed.
+    ``--json`` and ``--dot`` are mutually exclusive.
+    """
+    if json_output and dot_output:
+        typer.secho(
+            "--json and --dot are mutually exclusive",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(2)
     try:
         with _scoped_graph(graph, snapshot) as g:
             result = g.type_closure(
@@ -916,9 +946,12 @@ def cli_type_closure(
                 max_edges=max_edges,
             )
             if json_output:
-                print(json.dumps(result, indent=2, ensure_ascii=False))
+                print(json.dumps(result, indent=2, ensure_ascii=False), flush=True)
+            elif dot_output:
+                sys.stdout.write(dumps_type_closure_dot(result))
+                sys.stdout.flush()
             else:
-                print(format_type_closure_human(result))
+                print(format_type_closure_human(result), flush=True)
     except ValueError as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from e

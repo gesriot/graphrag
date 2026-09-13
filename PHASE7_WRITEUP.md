@@ -42,7 +42,7 @@ precise call structure. The intended path is:
    `calls` edges, dangling targets, semantic-suspicion heuristics (including an
    import-aware check), and a seeded precision sample.
 5. **Local queries and context packs** – `scripts/graph_query.py` (callers,
-   callees, neighbors, subgraph, components, strong-components, condensation, shortest-path, degree-ranking, impact, dependency order, symbol, observations)
+   callees, neighbors, subgraph, components, strong-components, condensation, shortest-path, degree-ranking, impact, type-closure, dependency order, symbol, observations)
    and `scripts/context_pack.py` (entity + neighbors + text units + first-class
    `uses_data` / `data_dependencies` when present). `subgraph` is a bounded
    cycle-safe multi-hop induced subgraph over stored relationships, not an
@@ -128,6 +128,16 @@ precise call structure. The intended path is:
    `--dot` are mutually exclusive. MCP exposes that existing producer as `shortest_path`,
    the seventeenth read-only tool, immediately after `condensation` and
    immediately before `degree_ranking`. There is no hyphenated alias.
+   MCP remains exactly 17 read-only tools. `type-closure` is a bounded
+   cycle-safe BFS over **only** persisted `uses_type` rows
+   (`--direction dependencies|users|both`). Caps truncate returned lists;
+   totals within `max_depth` stay exact. Stored orientation is preserved.
+   `--dot` is a deterministic Graphviz DOT interchange of that same
+   producer mapping on stdout; Graphviz is not invoked. Independent
+   node/edge caps may emit edge-only endpoint nodes with `in_nodes=false`
+   and no invented depth; omitted material is not reconstructed.
+   `--json` and `--dot` are mutually exclusive. MCP keeps the existing
+   `type_closure` producer/envelope unchanged and does not expose DOT.
    MCP remains exactly 17 read-only tools.
 6. **Golden-first porting gate** – before Rust: license/provenance, a golden
    contract the **reference language** already passes, then a clean graph audit,
@@ -243,7 +253,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`2207 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`2222 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`

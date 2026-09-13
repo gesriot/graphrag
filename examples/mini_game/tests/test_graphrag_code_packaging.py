@@ -216,6 +216,7 @@ def test_wheel_and_sdist_contents(built_wheel_and_sdist):
         assert "graphrag_code/strong_components_dot.py" in names
         assert "graphrag_code/degree_ranking_dot.py" in names
         assert "graphrag_code/dependency_order_dot.py" in names
+        assert "graphrag_code/type_closure_dot.py" in names
         assert "graphrag_code/persisted_graph_doctor.py" in names
         assert "graphrag_code/index_reuse.py" in names
         assert "graphrag_code/python_inputs.py" in names
@@ -281,6 +282,7 @@ def test_wheel_and_sdist_contents(built_wheel_and_sdist):
     assert any(n.endswith("graphrag_code/strong_components_dot.py") for n in snames)
     assert any(n.endswith("graphrag_code/degree_ranking_dot.py") for n in snames)
     assert any(n.endswith("graphrag_code/dependency_order_dot.py") for n in snames)
+    assert any(n.endswith("graphrag_code/type_closure_dot.py") for n in snames)
     assert "examples/mini_game" not in sjoined
     assert "byog_cjson" not in sjoined
     assert "__pycache__" not in sjoined
