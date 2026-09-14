@@ -1098,6 +1098,7 @@ def test_mcp_remains_seventeen_legacy_impact_unchanged(
         "graph_status",
         "graph_doctor",
         "query_symbol",
+        "observations",
         "callers",
         "callees",
         "neighbors",
@@ -1114,7 +1115,7 @@ def test_mcp_remains_seventeen_legacy_impact_unchanged(
         "snapshot_history",
         "snapshot_diff",
     ]
-    assert len(TOOL_NAMES) == 18
+    assert len(TOOL_NAMES) == 19
     assert TOOL_NAMES[TOOL_NAMES.index("impact") + 1] == "impact_graph"
     assert "impact-graph" not in TOOL_NAMES
     assert not (graph / ".publish.lock").is_symlink()

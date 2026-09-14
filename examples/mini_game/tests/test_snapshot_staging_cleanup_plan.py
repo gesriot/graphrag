@@ -1035,7 +1035,7 @@ def test_cli_serializes_writes_and_flushes_under_lease(
 
 
 def test_mcp_remains_exactly_seventeen():
-    assert len(TOOL_NAMES) == 18
+    assert len(TOOL_NAMES) == 19
     assert "snapshot_staging" not in TOOL_NAMES
     assert "snapshot_staging_cleanup_plan" not in TOOL_NAMES
     assert "snapshot_staging_cleanup_plan" not in " ".join(TOOL_NAMES)
@@ -1055,7 +1055,7 @@ def test_mcp_list_tools_has_no_cleanup_plan(tmp_path: Path):
         async with Client(server) as client:
             names = {tool.name for tool in (await client.list_tools()).tools}
             assert names == set(TOOL_NAMES)
-            assert len(names) == 18
+            assert len(names) == 19
             assert "snapshot_staging_cleanup_plan" not in names
 
     anyio_run(_body)

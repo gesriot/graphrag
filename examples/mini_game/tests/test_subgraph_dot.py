@@ -1062,7 +1062,7 @@ def test_mcp_remains_seventeen_tools_without_dot(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == 18
+            assert len(names) == 19
             sub = next(tool for tool in tools if tool.name == "subgraph")
             props = (sub.input_schema.get("properties") or {})
             assert "dot" not in props

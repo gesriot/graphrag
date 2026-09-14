@@ -850,6 +850,7 @@ def test_mcp_remains_seventeen_tools_without_dependency_order(tmp_path: Path):
         "graph_status",
         "graph_doctor",
         "query_symbol",
+        "observations",
         "callers",
         "callees",
         "neighbors",
@@ -866,7 +867,7 @@ def test_mcp_remains_seventeen_tools_without_dependency_order(tmp_path: Path):
         "snapshot_history",
         "snapshot_diff",
     ]
-    assert len(TOOL_NAMES) == len(set(TOOL_NAMES)) == 18
+    assert len(TOOL_NAMES) == len(set(TOOL_NAMES)) == 19
 
     async def _body():
         async with Client(server) as client:

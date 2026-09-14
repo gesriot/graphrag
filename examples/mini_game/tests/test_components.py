@@ -738,7 +738,7 @@ def test_mcp_exposes_components_as_thirteenth_tool(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == len(set(names)) == 18
+            assert len(names) == len(set(names)) == 19
             assert names[names.index("neighbors") + 1] == "subgraph"
             assert names[names.index("subgraph") + 1] == "components"
             assert names[names.index("components") + 1] == "strong_components"

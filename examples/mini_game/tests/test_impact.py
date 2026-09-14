@@ -921,6 +921,7 @@ def test_mcp_remains_seventeen_tools_unchanged_envelope_and_one_producer(
         "graph_status",
         "graph_doctor",
         "query_symbol",
+        "observations",
         "callers",
         "callees",
         "neighbors",
@@ -937,7 +938,7 @@ def test_mcp_remains_seventeen_tools_unchanged_envelope_and_one_producer(
         "snapshot_history",
         "snapshot_diff",
     ]
-    assert len(TOOL_NAMES) == 18
+    assert len(TOOL_NAMES) == 19
     assert not (graph / ".publish.lock").is_symlink()
 
     async def _body():

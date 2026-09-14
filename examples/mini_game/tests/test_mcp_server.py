@@ -69,7 +69,9 @@ from graphrag_code.byog_graph import (  # type: ignore
     publish_byog_snapshot,
 )
 from graphrag_code.mcp_server import (  # type: ignore
+    DEFAULT_MAX_ITEMS,
     HARD_MAX_ENVELOPE_BYTES,
+    HARD_MAX_ITEMS,
     TOOL_NAMES,
     GraphMcpError,
     GraphMcpSession,
@@ -266,7 +268,9 @@ def test_tools_list_is_exactly_documented(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == len(set(names)) == len(TOOL_NAMES) == 18
+            assert len(names) == len(set(names)) == len(TOOL_NAMES) == 19
+            assert names[names.index("query_symbol") + 1] == "observations"
+            assert names[names.index("observations") + 1] == "callers"
             assert names[names.index("neighbors") + 1] == "subgraph"
             assert names[names.index("subgraph") + 1] == "components"
             assert names[names.index("components") + 1] == "strong_components"
@@ -282,6 +286,7 @@ def test_tools_list_is_exactly_documented(tmp_path: Path):
             assert "condensation_graph" not in names
             assert "shortest-path" not in names
             assert "impact-graph" not in names
+            assert "call_observations" not in names
             assert "snapshot_activate" not in names
             for tool in tools:
                 assert tool.input_schema["additionalProperties"] is False
@@ -323,6 +328,8 @@ def test_every_required_tool_via_sdk_client(tmp_path: Path):
                     result = await client.call_tool(name, {"symbol": symbol, "direction": "dependencies"})
                 elif name == "context_pack":
                     result = await client.call_tool(name, {"symbol": symbol})
+                elif name == "observations":
+                    result = await client.call_tool(name, {"query": symbol})
                 else:
                     result = await client.call_tool(name, {"symbol": symbol})
                 payload = _payload(result)
@@ -381,6 +388,9 @@ def test_query_and_graph_walks_match_byog_graph(tmp_path: Path):
     assert session.impact(symbol)["data"] == view.impact(symbol)
     assert session.impact_graph(symbol)["data"] == json.loads(
         json.dumps(view.impact_graph(symbol), allow_nan=False, default=str)
+    )
+    assert session.observations(symbol)["data"] == json.loads(
+        json.dumps(view.observations(symbol), allow_nan=False, default=str)
     )
 
 
@@ -686,6 +696,7 @@ def test_mcp_calls_do_not_mutate_graph(
     session.graph_status()
     session.graph_doctor()
     session.query_symbol(symbol)
+    session.observations(symbol)
     session.callers(symbol)
     session.callees(symbol)
     session.neighbors(symbol)
@@ -1961,7 +1972,7 @@ def test_degree_ranking_mcp_schema_defaults_and_unknown_args(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == len(set(names)) == 18
+            assert len(names) == len(set(names)) == 19
             assert names[names.index("components") + 1] == "strong_components"
             assert names[names.index("strong_components") + 1] == "condensation"
             assert names[names.index("condensation") + 1] == "shortest_path"
@@ -2526,7 +2537,7 @@ def test_strong_components_mcp_schema_defaults_and_unknown_args(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == len(set(names)) == 18
+            assert len(names) == len(set(names)) == 19
             assert names[names.index("components") + 1] == "strong_components"
             assert names[names.index("strong_components") + 1] == "condensation"
             assert names[names.index("condensation") + 1] == "shortest_path"
@@ -3108,7 +3119,7 @@ def test_condensation_mcp_schema_defaults_and_unknown_args(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == len(set(names)) == 18
+            assert len(names) == len(set(names)) == 19
             assert names[names.index("strong_components") + 1] == "condensation"
             assert names[names.index("condensation") + 1] == "shortest_path"
             assert names[names.index("shortest_path") + 1] == "degree_ranking"
@@ -3706,7 +3717,7 @@ def test_shortest_path_mcp_schema_defaults_and_unknown_args(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == len(set(names)) == 18
+            assert len(names) == len(set(names)) == 19
             assert names[names.index("condensation") + 1] == "shortest_path"
             assert names[names.index("shortest_path") + 1] == "degree_ranking"
             assert "shortest-path" not in names
@@ -4403,6 +4414,7 @@ def test_impact_graph_mcp_schema_defaults_and_unknown_args(tmp_path: Path):
         "graph_status",
         "graph_doctor",
         "query_symbol",
+        "observations",
         "callers",
         "callees",
         "neighbors",
@@ -4419,7 +4431,7 @@ def test_impact_graph_mcp_schema_defaults_and_unknown_args(tmp_path: Path):
         "snapshot_history",
         "snapshot_diff",
     ]
-    assert len(TOOL_NAMES) == 18
+    assert len(TOOL_NAMES) == 19
 
     server = build_mcp_server(session)
 
@@ -4428,7 +4440,7 @@ def test_impact_graph_mcp_schema_defaults_and_unknown_args(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == len(set(names)) == 18
+            assert len(names) == len(set(names)) == 19
             assert names[names.index("degree_ranking") + 1] == "impact"
             assert names[names.index("impact") + 1] == "impact_graph"
             assert names[names.index("impact_graph") + 1] == "type_closure"
@@ -5111,6 +5123,638 @@ def test_impact_graph_mcp_publisher_wait_and_no_nested_query(
     q = ctx.Queue()
     reader = ctx.Process(
         target=_mcp_paused_impact_graph, args=(str(graph), pinned, resume, q)
+    )
+    from test_reader_lease import _cleanup_processes, _publisher
+
+    pub = ctx.Process(target=_publisher, args=(str(graph), "next", 1, about, got, q))
+    try:
+        reader.start()
+        assert pinned.wait(timeout=20)
+        pub.start()
+        assert about.wait(timeout=20)
+        assert not got.is_set()
+        assert _current(graph) == first
+        assert (first_dir / "entities.parquet").is_file()
+        resume.set()
+        reader.join(timeout=20)
+        pub.join(timeout=20)
+        assert not reader.is_alive() and not pub.is_alive()
+        assert got.is_set()
+    finally:
+        _cleanup_processes(pub, reader, release=resume)
+
+def _obs_row(source: str, display_target: str, **extra) -> dict:
+    row = {
+        "id": extra.pop("id", f"obs:{source}->{display_target}"),
+        "source": source,
+        "display_target": display_target,
+        "confidence": extra.pop("confidence", "low"),
+        "reason": extra.pop("reason", "weak"),
+        "source_file": extra.pop("source_file", "a.py"),
+        "span": extra.pop("span", "1:0-1:1"),
+    }
+    row.update(extra)
+    return row
+
+
+def _publish_obs(
+    tmp_path: Path,
+    ents: list,
+    rels: list,
+    obs: list | None,
+    *,
+    name: str = "obs",
+) -> Path:
+    graph = tmp_path / name
+    tus = [
+        {
+            "id": f"tu:{row['title']}",
+            "title": row.get("source_file", "a.py"),
+            "source_file": row.get("source_file", "a.py"),
+            "entity_id": row["id"],
+        }
+        for row in ents
+    ]
+    kwargs: dict = {}
+    if obs:
+        kwargs["call_observations_df"] = pd.DataFrame(obs)
+    publish_byog_snapshot(
+        pd.DataFrame(ents),
+        pd.DataFrame(rels) if rels else pd.DataFrame(columns=["id", "source", "target", "type"]),
+        pd.DataFrame(tus) if tus else pd.DataFrame(columns=["id", "title", "source_file"]),
+        graph,
+        settings_text=f"mcp: {name}\n",
+        keep_last=5,
+        **kwargs,
+    )
+    return graph
+
+
+def _assert_observations_envelope(payload: dict, produced: list, *, max_items: int) -> None:
+    ready = json.loads(json.dumps(produced, allow_nan=False, default=str))
+    assert payload["schema_version"] == 1
+    assert payload["tool"] == "observations"
+    assert payload["ok"] is True
+    assert payload["data"] == ready[:max_items]
+    assert payload["total"] == len(ready)
+    assert payload["returned"] == len(payload["data"])
+    assert payload["truncated"] is (len(ready) > max_items)
+    assert list(payload["limits"]) == ["max_items", "max_envelope_bytes"]
+    assert payload["limits"]["max_items"] == max_items
+    assert payload["limits"]["max_envelope_bytes"] == HARD_MAX_ENVELOPE_BYTES
+
+
+def _obs_fixture(tmp_path: Path, *, name: str = "obs") -> Path:
+    ents = [
+        _component_entity("pkg:alpha"),
+        _component_entity("pkg:beta"),
+        _component_entity("pkg:pkg", type="module"),
+        _component_entity("pkg:Helper"),
+        _component_entity("pkg:lonely"),
+    ]
+    rels = [_component_rel("pkg:beta", "pkg:alpha", "calls")]
+    obs = [
+        _obs_row("pkg:alpha", "dyn_a1", reason="weak", id="obs:a1"),
+        _obs_row("pkg:alpha", "dyn_a2", reason="annotation", id="obs:a2"),
+        _obs_row("pkg:alpha.inner", "dyn_inner", reason="container", id="obs:inner"),
+        _obs_row("pkg:pkg", "dyn_mod", reason="module", id="obs:mod"),
+        _obs_row("pkg:run", "dyn_run", reason="module-prefix", id="obs:run"),
+        _obs_row("pkg", "dyn_pkg_root", reason="module-root", id="obs:root"),
+        _obs_row("pkg:Helper", "dyn_h", reason="partial", id="obs:h"),
+        _obs_row("ghost:call", "dyn_ghost", reason="unresolved", id="obs:ghost"),
+        _obs_row("pkg:beta", "dyn_b", reason="beta", id="obs:b"),
+    ]
+    return _publish_obs(tmp_path, ents, rels, obs, name=name)
+
+
+def test_observations_mcp_schema_defaults_and_unknown_args(tmp_path: Path):
+    graph = _obs_fixture(tmp_path)
+    session = _session(graph, "python")
+    sig = inspect.signature(GraphMcpSession.observations)
+    assert list(sig.parameters) == ["self", "query", "max_items", "snapshot"]
+    assert sig.parameters["max_items"].default == DEFAULT_MAX_ITEMS
+    assert sig.parameters["snapshot"].default == "current"
+    for forbidden in (
+        "graph",
+        "symbol",
+        "json",
+        "dot",
+        "format",
+        "path",
+        "output_path",
+        "confidence",
+        "reason",
+        "source",
+        "sort",
+        "direction",
+        "max_depth",
+    ):
+        assert forbidden not in sig.parameters
+    assert "call_observations" not in TOOL_NAMES
+    assert "call-observations" not in TOOL_NAMES
+    assert list(TOOL_NAMES) == [
+        "graph_status",
+        "graph_doctor",
+        "query_symbol",
+        "observations",
+        "callers",
+        "callees",
+        "neighbors",
+        "subgraph",
+        "components",
+        "strong_components",
+        "condensation",
+        "shortest_path",
+        "degree_ranking",
+        "impact",
+        "impact_graph",
+        "type_closure",
+        "context_pack",
+        "snapshot_history",
+        "snapshot_diff",
+    ]
+    assert len(TOOL_NAMES) == 19
+
+    produced = ByogGraph(graph).observations("pkg:alpha")
+    defaulted = session.observations("pkg:alpha")
+    _assert_observations_envelope(defaulted, produced, max_items=DEFAULT_MAX_ITEMS)
+    explicit = session.observations("pkg:alpha", max_items=1)
+    _assert_observations_envelope(explicit, produced, max_items=1)
+    assert explicit["data"] == produced[:1]
+    assert explicit["truncated"] is True
+    assert explicit["total"] == len(produced)
+    assert explicit["returned"] == 1
+
+    server = build_mcp_server(session)
+
+    async def _body():
+        async with Client(server) as client:
+            tools = (await client.list_tools()).tools
+            names = [tool.name for tool in tools]
+            assert names == list(TOOL_NAMES)
+            assert len(names) == len(set(names)) == 19
+            assert names[names.index("query_symbol") + 1] == "observations"
+            assert names[names.index("observations") + 1] == "callers"
+            assert "call_observations" not in names
+            assert "call-observations" not in names
+            tool = next(item for item in tools if item.name == "observations")
+            assert tool.annotations.read_only_hint is True
+            assert tool.annotations.destructive_hint is False
+            assert tool.annotations.idempotent_hint is True
+            assert tool.annotations.open_world_hint is False
+            assert tool.input_schema["additionalProperties"] is False
+            props = tool.input_schema["properties"]
+            assert list(props) == ["query", "max_items", "snapshot"]
+            assert props["max_items"]["type"] == "integer"
+            assert props["max_items"]["default"] == DEFAULT_MAX_ITEMS
+            assert props["snapshot"]["default"] == "current"
+            for extra_args in (
+                {"graph": str(tmp_path / "other")},
+                {"symbol": "pkg:alpha"},
+                {"json": True},
+                {"dot": True},
+                {"format": "json"},
+                {"path": "out.json"},
+                {"output_path": "out.json"},
+                {"confidence": "low"},
+                {"reason": "weak"},
+                {"source": "pkg:alpha"},
+                {"sort": "source"},
+            ):
+                extra = await client.call_tool(
+                    "observations",
+                    {"query": "pkg:alpha", **extra_args},
+                )
+                assert extra.is_error is True, extra_args
+            for invalid_args in (
+                {"max_items": True},
+                {"max_items": False},
+                {"max_items": 1.0},
+                {"max_items": 0},
+            ):
+                invalid = await client.call_tool(
+                    "observations",
+                    {"query": "pkg:alpha", **invalid_args},
+                )
+                assert invalid.is_error is True, invalid_args
+            body = _payload(
+                await client.call_tool("observations", {"query": "pkg:alpha"})
+            )
+            assert body["tool"] == "observations"
+            assert body["data"] == defaulted["data"]
+            missing = await client.call_tool("observations", {"symbol": "pkg:alpha"})
+            assert missing.is_error is True
+
+    _run(_body)
+
+
+def test_observations_mcp_semantics_parity_snapshots_and_filters(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    graph = tmp_path / "g"
+    older = publish_byog_snapshot(
+        pd.DataFrame([_component_entity("demo:old", source_file="old.py")]),
+        pd.DataFrame(),
+        pd.DataFrame(
+            [
+                {
+                    "id": "tu:old",
+                    "title": "old.py",
+                    "source_file": "old.py",
+                    "entity_id": "ent:demo:old",
+                }
+            ]
+        ),
+        graph,
+        settings_text="mcp: old\n",
+        keep_last=5,
+        call_observations_df=pd.DataFrame(
+            [_obs_row("demo:old", "dyn_old", reason="old", id="obs:old")]
+        ),
+    )
+    current = _obs_fixture(tmp_path, name="g")
+    assert current == graph
+    current_id = _current(graph)
+    assert current_id != older.name
+    before = _payload_hashes(graph)
+    session = _session(graph, "python")
+    view = ByogGraph(graph)
+
+    symbol = session.observations("pkg:alpha")
+    produced = view.observations("pkg:alpha")
+    _assert_observations_envelope(symbol, produced, max_items=DEFAULT_MAX_ITEMS)
+    assert [row["display_target"] for row in symbol["data"]] == [
+        "dyn_a1",
+        "dyn_a2",
+        "dyn_inner",
+    ]
+    truncated = session.observations("pkg:alpha", max_items=2)
+    _assert_observations_envelope(truncated, produced, max_items=2)
+    assert [row["display_target"] for row in truncated["data"]] == ["dyn_a1", "dyn_a2"]
+    assert truncated["data"] == produced[:2]
+
+    module = session.observations("pkg:pkg")
+    _assert_observations_envelope(
+        module, view.observations("pkg:pkg"), max_items=DEFAULT_MAX_ITEMS
+    )
+    module_sources = {row["source"] for row in module["data"]}
+    assert "pkg:pkg" in module_sources
+    assert "pkg:run" in module_sources
+    assert "pkg" in module_sources
+
+    partial = session.observations("Helper")
+    _assert_observations_envelope(
+        partial, view.observations("Helper"), max_items=DEFAULT_MAX_ITEMS
+    )
+    assert [row["display_target"] for row in partial["data"]] == ["dyn_h"]
+
+    unresolved = session.observations("ghost")
+    _assert_observations_envelope(
+        unresolved, view.observations("ghost"), max_items=DEFAULT_MAX_ITEMS
+    )
+    assert unresolved["ok"] is True
+    assert [row["display_target"] for row in unresolved["data"]] == ["dyn_ghost"]
+
+    missing = session.observations("zzz-no-match")
+    _assert_observations_envelope(
+        missing, view.observations("zzz-no-match"), max_items=DEFAULT_MAX_ITEMS
+    )
+    assert missing["data"] == []
+    assert missing["total"] == 0
+    assert missing["returned"] == 0
+    assert missing["truncated"] is False
+    assert missing["ok"] is True
+
+    explicit_current = session.observations("pkg:alpha", snapshot="current")
+    assert explicit_current["data"] == symbol["data"]
+    assert explicit_current["snapshot"] == _current(graph)
+
+    historical = session.observations("demo:old", snapshot=older.name)
+    assert historical["snapshot"] == older.name
+    assert _current(graph) == current_id
+    assert historical["data"][0]["display_target"] == "dyn_old"
+    assert "pkg:alpha" not in [row["source"] for row in historical["data"]]
+    assert _payload_hashes(graph) == before
+    assert not (graph / ".publish.lock").is_symlink()
+    assert (graph / ".publish.lock").is_file()
+
+    import graphrag_code.snapshot_read as scope_mod
+
+    real = scope_mod.resolve_snapshot
+    seen: list = []
+
+    def counted_resolve(graph_root, snapshot=None):
+        seen.append(snapshot)
+        return real(graph_root, snapshot)
+
+    monkeypatch.setattr(scope_mod, "resolve_snapshot", counted_resolve)
+    hist_again = session.observations("demo:old", snapshot=older.name)
+    assert seen == [older.name]
+    assert hist_again["snapshot"] == older.name
+    assert _current(graph) == current_id
+    seen.clear()
+    session.observations("pkg:alpha", snapshot="current")
+    assert seen == [None]
+    monkeypatch.undo()
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(ROOT / "src")
+    human = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "graphrag_code.graph_query",
+            "observations",
+            "pkg:alpha",
+            "--graph",
+            str(graph),
+        ],
+        capture_output=True,
+        env=env,
+        cwd=str(tmp_path),
+    )
+    json_out = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "graphrag_code.graph_query",
+            "observations",
+            "pkg:alpha",
+            "--graph",
+            str(graph),
+            "--json",
+        ],
+        capture_output=True,
+        env=env,
+        cwd=str(tmp_path),
+    )
+    assert human.returncode == 0, human.stderr
+    assert json_out.returncode == 0, json_out.stderr
+    assert json_out.stdout.decode() == json.dumps(produced, indent=2, ensure_ascii=False) + "\n"
+    assert "dyn_a1" in human.stdout.decode()
+    assert "No observations" not in human.stdout.decode()
+
+    empty_graph = _publish_obs(
+        tmp_path,
+        [_component_entity("A")],
+        [],
+        None,
+        name="empty-obs",
+    )
+    empty_session = _session(empty_graph, "python")
+    empty_payload = empty_session.observations("A")
+    assert empty_payload["data"] == []
+    assert empty_payload["total"] == 0
+    assert empty_payload["returned"] == 0
+    assert empty_payload["truncated"] is False
+    assert empty_payload["ok"] is True
+    assert not (empty_graph / "snapshots" / _current(empty_graph) / "call_observations.parquet").exists()
+
+    server = build_mcp_server(session)
+
+    async def _body():
+        async with Client(server) as client:
+            payload = _payload(
+                await client.call_tool(
+                    "observations",
+                    {"query": "pkg:alpha", "snapshot": _current(graph)},
+                )
+            )
+            assert payload["tool"] == "observations"
+            assert payload["data"] == symbol["data"]
+            hist = _payload(
+                await client.call_tool(
+                    "observations",
+                    {"query": "demo:old", "snapshot": older.name},
+                )
+            )
+            assert hist["snapshot"] == older.name
+            assert hist["data"][0]["display_target"] == "dyn_old"
+
+    _run(_body)
+    assert _payload_hashes(graph) == before
+
+
+def test_observations_mcp_validation_malformed_empty_and_envelope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    graph = _obs_fixture(tmp_path)
+    session = _session(graph, "python")
+    observed: list[str] = []
+    orig_scope = session._scope
+
+    def wrapped_scope(snapshot):
+        observed.append(str(snapshot))
+        return orig_scope(snapshot)
+
+    monkeypatch.setattr(session, "_scope", wrapped_scope)
+    with pytest.raises(GraphMcpError, match="query"):
+        session.observations("")
+    with pytest.raises(GraphMcpError, match="query"):
+        session.observations(None)
+    with pytest.raises(GraphMcpError, match="query"):
+        session.observations(1)
+    with pytest.raises(GraphMcpError, match="max_items"):
+        session.observations("pkg:alpha", max_items=True)
+    with pytest.raises(GraphMcpError, match="max_items"):
+        session.observations("pkg:alpha", max_items=False)
+    with pytest.raises(GraphMcpError, match="max_items"):
+        session.observations("pkg:alpha", max_items=1.5)
+    with pytest.raises(GraphMcpError, match="max_items"):
+        session.observations("pkg:alpha", max_items="1")
+    with pytest.raises(GraphMcpError, match="max_items"):
+        session.observations("pkg:alpha", max_items=0)
+    with pytest.raises(GraphMcpError, match="max_items"):
+        session.observations("pkg:alpha", max_items=-1)
+    with pytest.raises(GraphMcpError, match="max_items"):
+        session.observations("pkg:alpha", max_items=HARD_MAX_ITEMS + 1)
+    with pytest.raises(GraphMcpError, match="max_items"):
+        session.observations("pkg:alpha", max_items=float("nan"))
+    with pytest.raises(GraphMcpError, match="max_items"):
+        session.observations("pkg:alpha", max_items=math.inf)
+    with pytest.raises(GraphMcpError, match="max_items"):
+        session.observations("pkg:alpha", max_items=-math.inf)
+    assert observed == []
+    monkeypatch.undo()
+
+    session = _session(graph, "python")
+    with pytest.raises(GraphMcpError):
+        session.observations("pkg:alpha", snapshot="..")
+
+    import graphrag_code.snapshot_read as scope_mod
+
+    real = scope_mod.resolve_snapshot
+    seen = {"n": 0}
+
+    def counted_resolve(graph_root, snapshot=None):
+        seen["n"] += 1
+        seen["last"] = snapshot
+        return real(graph_root, snapshot)
+
+    monkeypatch.setattr(scope_mod, "resolve_snapshot", counted_resolve)
+    session.observations("pkg:alpha")
+    assert seen["n"] == 1
+    assert seen["last"] is None
+    monkeypatch.undo()
+
+    missing = tmp_path / "missing-graph"
+    missing_session = GraphMcpSession(
+        missing,
+        configured_indexer="python",
+        resolved_indexer="python",
+        preflight={"indexer": "python", "indexer_resolution": {}},
+    )
+    with pytest.raises(GraphMcpError):
+        missing_session.observations("pkg:alpha")
+
+    unlocked = _obs_fixture(tmp_path / "unlocked", name="unlocked")
+    lock = unlocked / ".publish.lock"
+    lock.unlink()
+    unlocked_session = GraphMcpSession(
+        unlocked,
+        configured_indexer="python",
+        resolved_indexer="python",
+        preflight={"indexer": "python", "indexer_resolution": {}},
+    )
+    with pytest.raises(GraphMcpError, match="publication lock"):
+        unlocked_session.observations("pkg:alpha")
+    assert not lock.exists()
+
+    unsafe = _obs_fixture(tmp_path / "unsafe", name="unsafe")
+    real_lock = unsafe / ".publish.lock"
+    backup = unsafe / ".publish.lock.real"
+    real_lock.rename(backup)
+    real_lock.symlink_to(backup)
+    unsafe_session = GraphMcpSession(
+        unsafe,
+        configured_indexer="python",
+        resolved_indexer="python",
+        preflight={"indexer": "python", "indexer_resolution": {}},
+    )
+    with pytest.raises(GraphMcpError, match="unsafe"):
+        unsafe_session.observations("pkg:alpha")
+
+    nan_graph = _publish_obs(
+        tmp_path,
+        [_component_entity("A")],
+        [],
+        [_obs_row("A", "dyn", confidence=float("nan"), id="obs:nan")],
+        name="nan-obs",
+    )
+    nan_session = _session(nan_graph, "python")
+    with pytest.raises(GraphMcpError):
+        nan_session.observations("A")
+
+    import graphrag_code.mcp_server as mcp_mod
+
+    monkeypatch.setattr(mcp_mod, "HARD_MAX_ENVELOPE_BYTES", 64)
+    with pytest.raises(GraphMcpError, match="response envelope exceeds hard limit"):
+        session.observations("pkg:alpha")
+    monkeypatch.undo()
+
+    server = build_mcp_server(session)
+
+    async def _body():
+        async with Client(server) as client:
+            for invalid_args in (
+                {"max_items": True},
+                {"max_items": 0},
+                {"max_items": -1},
+                {"max_items": HARD_MAX_ITEMS + 1},
+                {"max_items": 1.5},
+                {"snapshot": ".."},
+                {"query": ""},
+            ):
+                args = {"query": "pkg:alpha", **invalid_args}
+                invalid = await client.call_tool("observations", args)
+                assert invalid.is_error is True, invalid_args
+
+    _run(_body)
+
+
+def _mcp_paused_observations(graph: str, pinned, resume, q) -> None:
+    sys.path.insert(0, str(Path(__file__).parents[3] / "src"))
+    import graphrag_code.mcp_server as mcp_mod
+
+    orig_envelope = mcp_mod._envelope
+
+    def wrapped_envelope(**kwargs):
+        payload = orig_envelope(**kwargs)
+        pinned.set()
+        if not resume.wait(timeout=20):
+            q.put("timeout")
+        return payload
+
+    mcp_mod._envelope = wrapped_envelope
+    session = mcp_mod.GraphMcpSession(
+        Path(graph),
+        configured_indexer="python",
+        resolved_indexer="python",
+        preflight={"indexer": "python", "indexer_resolution": {}},
+    )
+    payload = session.observations("pkg:alpha")
+    q.put(payload["snapshot"])
+
+
+def test_observations_mcp_publisher_wait_and_no_nested_query(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import multiprocessing
+
+    graph = _obs_fixture(tmp_path)
+    first = _current(graph)
+    first_dir = graph / "snapshots" / first
+    before = _payload_hashes(graph)
+    session = _session(graph, "python")
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("nested public query invoked from MCP observations")
+
+    producer_calls = 0
+    producer = ByogGraph.observations
+
+    def counted_producer(self, *args, **kwargs):
+        nonlocal producer_calls
+        producer_calls += 1
+        return producer(self, *args, **kwargs)
+
+    monkeypatch.setattr("graphrag_code.graph_query.cli_observations", boom)
+    monkeypatch.setattr("graphrag_code.cli.observations", boom)
+    monkeypatch.setattr("graphrag_code.graph_query.impact_graph", boom)
+    monkeypatch.setattr("graphrag_code.context_pack._assemble_context_pack_from_tables", boom)
+    monkeypatch.setattr(ByogGraph, "symbol", boom)
+    monkeypatch.setattr(ByogGraph, "callers", boom)
+    monkeypatch.setattr(ByogGraph, "callees", boom)
+    monkeypatch.setattr(ByogGraph, "impact", boom)
+    monkeypatch.setattr(ByogGraph, "impact_graph", boom)
+    monkeypatch.setattr(ByogGraph, "subgraph", boom)
+    monkeypatch.setattr(ByogGraph, "observations", counted_producer)
+    payload = session.observations("pkg:alpha")
+    assert payload["ok"] is True
+    assert producer_calls == 1
+    assert _payload_hashes(graph) == before
+    assert not list(graph.glob(".staging-*"))
+    assert (graph / ".publish.lock").is_file()
+    src = inspect.getsource(GraphMcpSession.observations)
+    assert src.count("load_graph()") == 1
+    assert src.count(".observations(") == 1
+    assert ".resolve(" not in src
+    assert ".symbol(" not in src
+    assert ".callers(" not in src
+    assert "context_pack" not in src
+    assert "cli_observations" not in src
+    assert "call_observations.parquet" not in src
+    assert "graph_query" not in src
+    assert "read_parquet" not in src
+
+    ctx = multiprocessing.get_context("spawn")
+    pinned = ctx.Event()
+    resume = ctx.Event()
+    about = ctx.Event()
+    got = ctx.Event()
+    q = ctx.Queue()
+    reader = ctx.Process(
+        target=_mcp_paused_observations, args=(str(graph), pinned, resume, q)
     )
     from test_reader_lease import _cleanup_processes, _publisher
 

@@ -1065,6 +1065,7 @@ def test_mcp_remains_seventeen_tools_without_dot(tmp_path: Path):
         "graph_status",
         "graph_doctor",
         "query_symbol",
+        "observations",
         "callers",
         "callees",
         "neighbors",
@@ -1081,7 +1082,7 @@ def test_mcp_remains_seventeen_tools_without_dot(tmp_path: Path):
         "snapshot_history",
         "snapshot_diff",
     ]
-    assert len(TOOL_NAMES) == 18
+    assert len(TOOL_NAMES) == 19
     assert "condensation_graph" not in TOOL_NAMES
     assert "condensation-graph" not in TOOL_NAMES
 
@@ -1090,7 +1091,7 @@ def test_mcp_remains_seventeen_tools_without_dot(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == 18
+            assert len(names) == 19
             tool = next(item for item in tools if item.name == "condensation")
             props = tool.input_schema.get("properties") or {}
             assert "dot" not in props

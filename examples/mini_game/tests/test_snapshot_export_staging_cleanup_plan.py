@@ -1053,7 +1053,7 @@ def test_mcp_remains_exactly_seventeen_and_byog_roots_unchanged(tmp_path: Path):
 
     before = {path.name: _root_fingerprint(path) for path in BYOG_ROOTS}
     assert len(before) == 15
-    assert len(TOOL_NAMES) == 18
+    assert len(TOOL_NAMES) == 19
     assert "snapshot_export_staging" not in TOOL_NAMES
     assert "snapshot_export_staging_cleanup_plan" not in TOOL_NAMES
     assert "snapshot_export_staging_cleanup" not in TOOL_NAMES
@@ -1068,7 +1068,7 @@ def test_mcp_remains_exactly_seventeen_and_byog_roots_unchanged(tmp_path: Path):
         async with Client(server) as client:
             names = {tool.name for tool in (await client.list_tools()).tools}
             assert names == set(TOOL_NAMES)
-            assert len(names) == 18
+            assert len(names) == 19
             assert "snapshot_export_staging_cleanup_plan" not in names
             assert "snapshot_export_staging_cleanup" not in names
 

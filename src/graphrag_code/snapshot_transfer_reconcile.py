@@ -44,7 +44,7 @@ scopes and does not create a nested observation window.
 
 ``ok=true`` means this read-only reconciliation completed. It does not
 mean apply succeeded or that either snapshot matches. A fresh transfer
-plan is required before any later apply. MCP stays exactly 18
+plan is required before any later apply. MCP stays exactly 19
 read-only tools; this command is CLI-only.
 
 Usage:

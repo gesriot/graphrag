@@ -1208,6 +1208,7 @@ def test_mcp_exposes_strong_components_as_fifteenth_tool(tmp_path: Path):
         "graph_status",
         "graph_doctor",
         "query_symbol",
+        "observations",
         "callers",
         "callees",
         "neighbors",
@@ -1224,7 +1225,7 @@ def test_mcp_exposes_strong_components_as_fifteenth_tool(tmp_path: Path):
         "snapshot_history",
         "snapshot_diff",
     ]
-    assert len(TOOL_NAMES) == len(set(TOOL_NAMES)) == 18
+    assert len(TOOL_NAMES) == len(set(TOOL_NAMES)) == 19
 
     expected = ByogGraph(graph).strong_components()
     payload = session.strong_components()

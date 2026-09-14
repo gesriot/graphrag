@@ -220,7 +220,7 @@ mutate files; pre/post fingerprints detect that and fail closed.
 --expected-current <published-id> --activate-confirmed` changes only the
 managed graph's `current` pointer. It is an explicit mutating CLI
 operation, not deletion, retention, publication, repair, or reindex, and
-it is intentionally absent from MCP. The fixed MCP tool set remains 18
+it is intentionally absent from MCP. The fixed MCP tool set remains 19
 read-only tools.
 
 `--activate-confirmed` is required. Without it the command exits 2, prints
@@ -280,9 +280,28 @@ Query, context-pack, doctor, and status tools accept an optional selector:
   `shortest-path`, `degree-ranking`, `dependency-order`, `impact`,
   `impact-graph`, `observations`, and `context-pack`.
 - MCP: optional last argument `snapshot: str = "current"` on
-  `graph_status`, `graph_doctor`, `query_symbol`, `callers`, `callees`,
+  `graph_status`, `graph_doctor`, `query_symbol`, `observations`, `callers`, `callees`,
   `neighbors`, `subgraph`, `components`, `strong_components`, `condensation`, `shortest_path`, `degree_ranking`, `impact`,
-  `type_closure`, and `context_pack`.
+  `impact_graph`, `type_closure`, and `context_pack`.
+
+`observations` is the 19th read-only MCP tool, registered immediately
+after `query_symbol` and immediately before `callers`. Envelope `data` is
+the JSON-ready prefix of the exact `ByogGraph.observations(query)` list.
+`max_items` bounds returned material only; producer order is preserved.
+`total` is the complete producer length, `returned` is `len(data)`, and
+`truncated` is `total > returned`. Limits include the validated
+`max_items` and `max_envelope_bytes = 1_000_000`. The 1 MiB envelope
+fails closed with no secondary shrinking. MCP does not resolve the query
+separately; symbol/module resolution and unresolved raw-prefix matching
+remain those of `ByogGraph.observations`. An absent `call_observations`
+table or a query with no matching rows is a successful empty result
+(`data=[]`, `ok=true`). Empty results do not prove runtime absence.
+There is no `call_observations` alias, hyphenated alias, DOT, format
+parameter, graph path, confidence/reason/source filter, or raw parquet
+reread. This is persisted weak/ambiguous/container call-observation
+evidence only: not a runtime trace, complete dynamic-dispatch
+reconstruction, proof that an unresolved call occurred, semantic call
+inference, architecture, GraphRAG, or natural-language analysis.
 
 Historical reads do not require `snapshot-activate` and never change
 `current`. Omitting CLI `--snapshot` preserves the existing default
@@ -300,7 +319,7 @@ keep-last retention cannot delete the selected snapshot during the
 call. Explicit query/context CLI selectors require that existing regular
 lock and never create it. Only their omitted-selector compatibility path
 may read a pre-lock managed graph without a lease; that path has no
-retention guarantee. MCP remains strict and remains exactly 18 read-only tools.
+retention guarantee. MCP remains strict and remains exactly 19 read-only tools.
 `snapshot_history` and `snapshot_diff` keep their own reference
 contracts. This is not activation, publication, retention, repair,
 reindex, natural-language search, or semantic equivalence.
@@ -315,7 +334,7 @@ This is **not** an alias for `neighbors` (one-hop titles). `--dot` serializes
 the same producer result as deterministic Graphviz DOT interchange on
 stdout; Graphviz is not invoked. MCP exposes the structured JSON contract
 immediately after `neighbors`, and does not expose DOT. The fixed MCP
-surface is exactly 18 tools.
+surface is exactly 19 tools.
 
 ```text
 graphrag-code subgraph <symbol-or-module> \
@@ -342,7 +361,7 @@ graphrag-code subgraph <symbol-or-module> \
 | JSON | `sort_keys=True`, `allow_nan=False`, stable arrays. Default human output is unchanged. `--json` and `--dot` are mutually exclusive |
 | DOT | Deterministic Graphviz DOT interchange on stdout from the same producer result (`src/graphrag_code/subgraph_dot.py`). Non-strict `digraph graphrag_subgraph`. Schema version `1`. Internal ids `n0000`… in producer node order; titles are never identifiers. Edges keep stored `source -> target` orientation. Graph metadata (quoted): schema version, resolved, root when resolved, direction, max_depth, max_nodes, max_edges, canonical `edge_types` as JSON text (`null` for no filter or a non-empty JSON array, preserving commas and distinguishing a literal `"all"` type), totals, returned counts, truncation flags. Nodes: `label`/`title`, persisted title, depth, type when present, `is_root`. Edges: relationship type as `label`, persisted id, type, depth. Presentation baseline only: `rankdir=LR`, box nodes, root `peripheries=2`. No descriptions, snippets, spans, weights, confidence, or extra dataframe columns. One shared quoted-string escaper. Counts, caps, truncation flags, root order/depth, edge ids/endpoints, direction, and canonical edge-type metadata are checked before rendering. Hard limit 1,000,000 UTF-8 bytes including the final newline; overflow and invalid renderer input fail closed with exit 2 and empty stdout. Graphviz is not invoked or required. No output-file option |
 | Snapshot / lease | Same retained-snapshot read scope as other queries. `current` and explicit historical ids. Historical reads never activate or change `current`. Shared reader lease and retained descriptors are held through materialization, subgraph computation, JSON/human/DOT serialization, stdout write, and stdout flush. No nested public query. No `.publish.lock` creation. Unlocked legacy compatibility is unchanged and not broadened |
-| MCP | Read-only tool, registered immediately after `neighbors`. Envelope `data` is the exact `ByogGraph.subgraph` result. `truncated` is `nodes_truncated or edges_truncated`; `total` / `returned` are the sums of the node and edge counts. Limits include the validated `direction`, `max_depth`, `max_nodes`, `max_edges`, `edge_types`, and `max_envelope_bytes`. The producer is the only truncation source. The 1 MiB envelope limit fails closed. MCP always uses `allow_unlocked_managed=False`. MCP does not expose DOT or a format parameter; the fixed surface remains exactly 18 tools |
+| MCP | Read-only tool, registered immediately after `neighbors`. Envelope `data` is the exact `ByogGraph.subgraph` result. `truncated` is `nodes_truncated or edges_truncated`; `total` / `returned` are the sums of the node and edge counts. Limits include the validated `direction`, `max_depth`, `max_nodes`, `max_edges`, `edge_types`, and `max_envelope_bytes`. The producer is the only truncation source. The 1 MiB envelope limit fails closed. MCP always uses `allow_unlocked_managed=False`. MCP does not expose DOT or a format parameter; the fixed surface remains exactly 19 tools |
 | Malformed args | Bad direction, limits, or filters, or combined `--json --dot`: exit 2, no speculative/partial stdout |
 | Non-claims | Not natural-language search, semantic inference, GraphRAG, community detection, architecture understanding, indexing, completeness beyond stored relationships, an image renderer, an interactive UI, or a semantic/community visualization. `--dot` is interchange only; truncation and totals still come only from the bounded subgraph producer |
 
@@ -366,7 +385,7 @@ edges are not rewritten and are not returned. `--dot` serializes the same
 producer result as deterministic Graphviz DOT interchange on stdout;
 Graphviz is not invoked. MCP exposes the same bounded topology producer as the thirteenth
 read-only tool, immediately after `subgraph`, and does not expose DOT or
-output-format selection. The fixed MCP surface is exactly 18 tools.
+output-format selection. The fixed MCP surface is exactly 19 tools.
 
 ```text
 graphrag-code components \
@@ -391,7 +410,7 @@ graphrag-code components \
 | JSON / human | Deterministic JSON (`sort_keys=True`, `allow_nan=False`, `ensure_ascii=False`). Human output is derived from the same mapping. One trailing newline on stdout. `--json` and `--dot` are mutually exclusive |
 | DOT | Deterministic Graphviz DOT interchange on stdout from the same producer result (`src/graphrag_code/components_dot.py`). Non-strict undirected `graph graphrag_components`. Schema version `1`. Each returned component is one Graphviz cluster `cluster_c0000`… in producer order; internal component ids `c0000`…; globally numbered node ids `n0000`… in flattened producer component/node order. Raw representatives and titles are never identifiers. No relationship-edge statements: the producer does not return individual rows, and `n_edges_total` is metadata only. Graph metadata (quoted), in fixed order: schema version, canonical `edge_types` as JSON text (`null` for no filter or a non-empty JSON array, preserving commas and distinguishing a literal `"all"` type), requested caps, exact totals, returned counts, and both truncation flags. Clusters: exact representative as `label`, `component_id`, representative, n_nodes_total, n_edges_total, n_nodes_returned, n_entity_nodes, n_endpoint_only_nodes, nodes_truncated. Nodes: exact title `label`/`title`. Presentation baseline only: `rankdir=LR`, box nodes. No per-node entity/endpoint-only inference, descriptions, snippets, spans, weights, confidence, extra dataframe columns, reconstructed edges, or extra path search. One shared quoted-string escaper. Counts, caps, truncation flags, representative order, UTF-8 node order, disjoint titles, and canonical edge-type metadata are checked before rendering. Hard limit 1,000,000 UTF-8 bytes including the final newline; overflow and invalid renderer input fail closed with exit 2 and empty stdout. Graphviz is not invoked or required. No output-file option |
 | Snapshot / lease | Same retained-snapshot read scope as other queries. Lease held through load, computation, complete DOT construction, UTF-8 byte-limit validation, stdout write, and flush. No nested public query. No `.publish.lock` creation |
-| MCP | Thirteenth read-only tool, registered immediately after `subgraph`. Envelope `data` is the exact `ByogGraph.components` result. `truncated` is `components_truncated or nodes_truncated`. Envelope `total` is `n_components_total + n_nodes_total`; `returned` is `n_components_returned` plus the sum of each returned component's `n_nodes_returned`. Relationship rows remain exact scalar counts in `data` and are not added to those envelope counters. Limits include the validated `max_components`, `max_nodes_per_component`, `edge_types`, and `max_envelope_bytes`. The producer is the only truncation source. The 1 MiB envelope limit fails closed. MCP always uses `allow_unlocked_managed=False`. MCP does not expose DOT or a format parameter. Representatives remain smallest UTF-8 titles, not leaders. Component size remains topology, not importance. The fixed surface remains exactly 18 tools |
+| MCP | Thirteenth read-only tool, registered immediately after `subgraph`. Envelope `data` is the exact `ByogGraph.components` result. `truncated` is `components_truncated or nodes_truncated`. Envelope `total` is `n_components_total + n_nodes_total`; `returned` is `n_components_returned` plus the sum of each returned component's `n_nodes_returned`. Relationship rows remain exact scalar counts in `data` and are not added to those envelope counters. Limits include the validated `max_components`, `max_nodes_per_component`, `edge_types`, and `max_envelope_bytes`. The producer is the only truncation source. The 1 MiB envelope limit fails closed. MCP always uses `allow_unlocked_managed=False`. MCP does not expose DOT or a format parameter. Representatives remain smallest UTF-8 titles, not leaders. Component size remains topology, not importance. The fixed surface remains exactly 19 tools |
 | Malformed args | Bad limits, filters, duplicate titles/ids, missing columns, invalid scalars, or combined `--json --dot`: exit 2, empty stdout |
 | Non-claims | Not a semantic community, Leiden clustering, centrality, hierarchy, architecture, importance ranking, GraphRAG, natural-language analysis, indexer, renderer, or UI. Weak connectivity is not directed reachability or dependency order. `--dot` is interchange only; it does not reconstruct edges, invoke Graphviz, render an image, or provide an interactive UI. Truncation and totals still come only from the bounded components producer. A representative is not a leader. Component size is not importance. `n_edges_total` is not rendered edge material |
 
@@ -408,7 +427,7 @@ stdout. Graphviz is not invoked, no image or interactive UI is produced,
 and no relationship edges are reconstructed. MCP exposes the same bounded
 producer as the fourteenth read-only tool added, immediately after
 `shortest_path`, and does not expose DOT or output-format selection. The
-fixed MCP surface is exactly 18 tools.
+fixed MCP surface is exactly 19 tools.
 
 ```text
 graphrag-code degree-ranking \
@@ -433,7 +452,7 @@ graphrag-code degree-ranking \
 | JSON / human | Deterministic JSON (`sort_keys=True`, `allow_nan=False`, `ensure_ascii=False`). Human output is derived from the same mapping. One trailing newline on stdout |
 | DOT | Deterministic Graphviz DOT interchange on stdout for the same producer mapping (`dumps_degree_ranking_dot`). Non-strict `digraph graphrag_degree_ranking`. One node statement per returned ranking row in producer order (`n0000` identifiers; raw titles never identifiers). No relationship, invisible, or layout edges: the producer does not return individual rows, and `n_edges_total` / degree sums are metadata only. Statement order follows producer order; rendered Graphviz layout order is not guaranteed and is not forced with rank constraints. Internal `n0000` identifiers are not an ordinal rank. Graphviz is not invoked; no image or interactive UI is produced. `--json` and `--dot` are mutually exclusive and rejected before graph, snapshot, or lease observation. Payload is complete UTF-8, one trailing newline, at most 1,000,000 bytes, fail-closed before write |
 | Snapshot / lease | Same retained-snapshot read scope as other queries. Lease held through load, computation, serialization, stdout write, and flush. No nested public query. No `.publish.lock` creation |
-| MCP | Fourteenth read-only tool added, registered immediately after `shortest_path`. Envelope `data` is the exact `ByogGraph.degree_ranking` result. `truncated` is `nodes_truncated`. Envelope `total` is `n_nodes_total`; `returned` is `n_nodes_returned`. Relationship-row counts remain exact scalars in `data` and are not added to those envelope counters. Limits include the validated `rank_by`, `max_nodes`, `edge_types`, and `max_envelope_bytes`. The producer is the only truncation source. The 1 MiB envelope limit fails closed. MCP always uses `allow_unlocked_managed=False`. MCP does not expose DOT, a graph path, a symbol, a direction, a format, a metric, a normalized score, or an ordinal rank. This is raw directed relationship-row degree accounting only: not PageRank, betweenness, closeness, eigenvector centrality, a normalized score, semantic importance, leadership, architecture, communities, hierarchy, GraphRAG, or natural-language analysis. The fixed surface remains exactly 18 tools |
+| MCP | Fourteenth read-only tool added, registered immediately after `shortest_path`. Envelope `data` is the exact `ByogGraph.degree_ranking` result. `truncated` is `nodes_truncated`. Envelope `total` is `n_nodes_total`; `returned` is `n_nodes_returned`. Relationship-row counts remain exact scalars in `data` and are not added to those envelope counters. Limits include the validated `rank_by`, `max_nodes`, `edge_types`, and `max_envelope_bytes`. The producer is the only truncation source. The 1 MiB envelope limit fails closed. MCP always uses `allow_unlocked_managed=False`. MCP does not expose DOT, a graph path, a symbol, a direction, a format, a metric, a normalized score, or an ordinal rank. This is raw directed relationship-row degree accounting only: not PageRank, betweenness, closeness, eigenvector centrality, a normalized score, semantic importance, leadership, architecture, communities, hierarchy, GraphRAG, or natural-language analysis. The fixed surface remains exactly 19 tools |
 | Malformed args | Bad rank_by, limits, filters, duplicate titles/ids, missing columns, invalid scalars, or combined `--json --dot`: exit 2, empty stdout |
 | Non-claims | Not PageRank, betweenness, closeness, eigenvector centrality, normalized centrality, importance, leadership, architecture, community detection, hierarchy, GraphRAG, natural-language analysis, indexer, renderer, or UI. `--dot` is interchange only; it does not reconstruct edges, invoke Graphviz, render an image, or provide an interactive UI. Truncation and totals still come only from the bounded degree-ranking producer. Internal identifiers are not ordinal ranks. Rendered layout order is not guaranteed |
 
@@ -449,7 +468,7 @@ target`. This is an unbounded full-list legacy surface. `--dot` writes a
 deterministic Graphviz DOT interchange of that same title list to stdout.
 Graphviz is not invoked, no image or interactive UI is produced, and no
 `contains` or other relationship edges are reconstructed. MCP does not
-expose `dependency_order`. The fixed MCP surface remains exactly 18 tools.
+expose `dependency_order`. The fixed MCP surface remains exactly 19 tools.
 
 ```text
 graphrag-code dependency-order \
@@ -469,7 +488,7 @@ graphrag-code dependency-order \
 | JSON / human | JSON is the list (`indent=2`, `sort_keys=True`, `allow_nan=False`, `ensure_ascii=False`) plus one trailing newline. Human is one title per line. Empty human stdout is empty; empty JSON is `[]` plus one newline |
 | DOT | Deterministic Graphviz DOT interchange on stdout for the same producer list (`dumps_dependency_order_dot`). Non-strict `digraph graphrag_dependency_order`. One node statement per title in producer order (`n0000` identifiers; raw titles never identifiers). Graph metadata is only `schema_version` and `n_nodes_total`. No relationship, reconstructed `contains`, invisible, or layout edges; no SCC clusters, rank constraints, or synthetic root. Statement order follows producer order; rendered Graphviz layout order is not guaranteed. Internal `n0000` identifiers are not an ordinal rank. Graphviz is not invoked; no image or interactive UI is produced. `--json` and `--dot` are mutually exclusive and rejected before graph, snapshot, or lease observation. Payload is complete UTF-8, one trailing newline, at most 1,000,000 bytes, fail-closed before write. Overflow does not truncate the producer list |
 | Snapshot / lease | Same retained-snapshot read scope as other queries. Lease held through load, computation, serialization, stdout write, and flush. No nested public query. No `.publish.lock` creation |
-| MCP | Not exposed. The read-only tool set remains exactly 18 |
+| MCP | Not exposed. The read-only tool set remains exactly 19 |
 | Malformed args | Duplicate titles/ids, missing columns, invalid scalars, or combined `--json --dot`: exit 2, empty stdout |
 | Non-claims | Not a build order, import order, call order, semantic dependency order, architecture hierarchy, ownership proof, porting plan, GraphRAG, natural-language analysis, indexer, renderer, or UI. Not bounded. `--dot` is interchange only; it does not reconstruct edges, infer SCC boundaries, invoke Graphviz, render an image, or provide an interactive UI. Internal identifiers are not ordinal ranks. Rendered layout order is not guaranteed |
 
@@ -488,7 +507,7 @@ interchange on stdout; Graphviz is not invoked. Clusters show the returned
 SCC grouping only; use `condensation --dot` for the bounded cross-SCC DAG.
 MCP exposes the same bounded producer as
 `strong_components`, registered immediately after `components`. The fixed
-MCP surface remains exactly 18 tools.
+MCP surface remains exactly 19 tools.
 
 Distinguish: `components` is weakly connected grouping; `strong-components`
 is directed mutual-reachability SCC grouping; `dependency-order` is
@@ -517,7 +536,7 @@ graphrag-code strong-components \
 | JSON / human | Deterministic JSON (`sort_keys=True`, `allow_nan=False`, `ensure_ascii=False`). Human output is derived from the same mapping, including a complete zero-count report for an empty graph. One trailing newline on stdout. `--json` and `--dot` are mutually exclusive |
 | DOT | Deterministic Graphviz DOT interchange on stdout from the same producer result (`src/graphrag_code/strong_components_dot.py`). Non-strict directed `digraph graphrag_strong_components`. Schema version `1`. Each returned SCC is one Graphviz cluster `cluster_c0000`… in producer order; internal component ids `c0000`…; globally numbered node ids `n0000`… in flattened producer component/node order. Raw representatives and titles are never identifiers. No relationship-edge or cross-component-edge statements: the producer does not return individual rows, and internal/cross/self-loop/cyclic values are metadata only. Use `condensation --dot` for the bounded cross-SCC DAG. Graph metadata (quoted), in fixed order: schema version, canonical `edge_types` as JSON text (`null` for no filter or a non-empty JSON array, preserving commas and distinguishing a literal `"all"` type), requested caps, exact totals including internal/cross/self-loop/cyclic counts, returned counts, and both truncation flags. Clusters: exact representative as `label`, `component_id`, representative, n_nodes_total, n_nodes_returned, n_internal_edges_total, n_self_loop_edges_total, n_entity_nodes, n_endpoint_only_nodes, is_cyclic, nodes_truncated. Nodes: exact title `label`/`title`. Presentation baseline only: `rankdir=LR`, box nodes. No per-node entity/endpoint-only inference, reconstructed edges, extra path search, or style encoding of importance/severity/architecture. One shared quoted-string escaper. Counts, caps, truncation flags, representative order, UTF-8 node order, disjoint titles, `is_cyclic`, and canonical edge-type metadata are checked before rendering. Hard limit 1,000,000 UTF-8 bytes including the final newline; overflow and invalid renderer input fail closed with exit 2 and empty stdout. Graphviz is not invoked or required. No output-file option |
 | Snapshot / lease | Same retained-snapshot read scope as other queries. Lease held through load, computation, complete DOT construction, UTF-8 byte-limit validation, stdout write, and flush. No nested public query. No `.publish.lock` creation |
-| MCP | Fifteenth read-only tool, registered immediately after `components`. Envelope `data` is the exact `ByogGraph.strong_components` result. `truncated` is `components_truncated or nodes_truncated`. Envelope `total` is `n_components_total + n_nodes_total`; `returned` is `n_components_returned` plus the sum of each returned component's `n_nodes_returned`. Internal, cross-component, self-loop, and total relationship-row counts remain exact scalars in `data` and are not added to those envelope counters. Limits include the validated `max_components`, `max_nodes_per_component`, `edge_types`, and `max_envelope_bytes`. The producer is the only truncation source. The 1 MiB envelope limit fails closed. MCP always uses `allow_unlocked_managed=False`. MCP does not expose DOT, a graph path, a symbol, a direction, a rank, an algorithm, or a format. Representatives remain smallest UTF-8 titles, not leaders. `is_cyclic` is mutual directed reachability only. The fixed surface remains exactly 18 tools |
+| MCP | Fifteenth read-only tool, registered immediately after `components`. Envelope `data` is the exact `ByogGraph.strong_components` result. `truncated` is `components_truncated or nodes_truncated`. Envelope `total` is `n_components_total + n_nodes_total`; `returned` is `n_components_returned` plus the sum of each returned component's `n_nodes_returned`. Internal, cross-component, self-loop, and total relationship-row counts remain exact scalars in `data` and are not added to those envelope counters. Limits include the validated `max_components`, `max_nodes_per_component`, `edge_types`, and `max_envelope_bytes`. The producer is the only truncation source. The 1 MiB envelope limit fails closed. MCP always uses `allow_unlocked_managed=False`. MCP does not expose DOT, a graph path, a symbol, a direction, a rank, an algorithm, or a format. Representatives remain smallest UTF-8 titles, not leaders. `is_cyclic` is mutual directed reachability only. The fixed surface remains exactly 19 tools |
 | Malformed args | Bad limits, filters, duplicate titles/ids, missing columns, invalid scalars, or combined `--json --dot`: exit 2, empty stdout |
 | Non-claims | Not weak components, semantic communities, Leiden clustering, architecture, hierarchy, importance, centrality, dependency/build order, proof of runtime recursion or deadlock, ownership or module boundaries, GraphRAG, natural-language analysis, indexer, renderer, or UI. `--dot` is interchange only; it does not reconstruct edges, invoke Graphviz, render an image, or provide an interactive UI. Truncation and totals still come only from the bounded strong-components producer. A representative is not a leader. Component size is not importance. `is_cyclic` is multi-node SCC or a singleton with a selected self-loop, not runtime recursion, execution, deadlock, or severity. Internal/cross/self-loop values are not rendered edge material |
 
@@ -537,7 +556,7 @@ interchange on stdout; Graphviz is not invoked. MCP exposes the same bounded
 producer as `condensation`, the sixteenth read-only tool added, registered
 immediately after `strong_components` and immediately before `shortest_path`.
 There is no `condensation_graph` alias. MCP does not expose DOT. The fixed MCP
-surface remains exactly 18 tools.
+surface remains exactly 19 tools.
 
 Distinguish: `components` is weakly connected grouping; `strong-components`
 is directed mutual-reachability SCC grouping sorted by size; `dependency-order`
@@ -568,7 +587,7 @@ graphrag-code condensation \
 | JSON / human | Deterministic JSON (`sort_keys=True`, `allow_nan=False`, `ensure_ascii=False`). Human output is derived from the same mapping, including a complete zero-count report for an empty graph. One trailing newline on stdout. `--json` and `--dot` are mutually exclusive |
 | DOT | Deterministic Graphviz DOT interchange on stdout from the same producer result (`src/graphrag_code/condensation_dot.py`). Non-strict `digraph graphrag_condensation`. Schema version `1`. Internal ids `c0000`… in producer component order; representatives and node titles are never identifiers. Edges keep stored source→target orientation and the producer's aggregated `n_relationship_rows_total`. Graph metadata (quoted): schema version, requested caps, canonical `edge_types` as JSON text (`null` for no filter or a non-empty JSON array, preserving commas and distinguishing a literal `"all"` type), exact totals, returned counts, and all three truncation flags. Components: readable label plus representative, returned node titles as canonical JSON, n_nodes_total, n_nodes_returned, n_internal_edges_total, n_self_loop_edges_total, n_entity_nodes, n_endpoint_only_nodes, is_cyclic, nodes_truncated. Edges: readable `rows N` label plus source, target, n_relationship_rows_total. Presentation baseline only: `rankdir=LR`, box nodes. The serializer does not reconstruct, expand, sort, or truncate the producer result and does not invent edges, nodes, ranks, layers, or transitive relations. Counts, caps, truncation flags, representative uniqueness, endpoint membership, forward producer order, and empty-result invariants are checked before rendering. Hard limit 1,000,000 UTF-8 bytes including the final newline; overflow and invalid renderer input fail closed with exit 2 and empty stdout. Graphviz is not invoked or required. No output-file option |
 | Snapshot / lease | Same retained-snapshot read scope as other queries. Lease held through load, the single producer call, JSON/human/DOT serialization, stdout write, and flush. No nested public query. No `.publish.lock` creation |
-| MCP | Sixteenth read-only tool added, registered immediately after `strong_components` and immediately before `shortest_path`. Envelope `data` is the exact `ByogGraph.condensation` result. `truncated` is `components_truncated or nodes_truncated or edges_truncated`. Envelope `total` is `n_components_total + n_nodes_total + n_condensation_edges_total`; `returned` is `n_components_returned` plus the sum of each returned component's `n_nodes_returned` plus `n_condensation_edges_returned`. Selected-row, internal, cross-component, self-loop, cyclic, eligible-edge, and `n_edges_total` counts remain exact scalars in `data` and are not added to those envelope counters. Limits include the validated `max_components`, `max_nodes_per_component`, `max_edges`, `edge_types`, and `max_envelope_bytes`. The producer is the only truncation source. The 1 MiB envelope limit fails closed. MCP always uses `allow_unlocked_managed=False`. MCP does not expose DOT, a graph path, a symbol, a direction, a rank, an algorithm, a format, or source/target component arguments. Representatives remain smallest UTF-8 titles, not leaders. Topological position is not an ordinal rank or semantic layer. There is no `condensation_graph` alias. The fixed surface remains exactly 18 tools |
+| MCP | Sixteenth read-only tool added, registered immediately after `strong_components` and immediately before `shortest_path`. Envelope `data` is the exact `ByogGraph.condensation` result. `truncated` is `components_truncated or nodes_truncated or edges_truncated`. Envelope `total` is `n_components_total + n_nodes_total + n_condensation_edges_total`; `returned` is `n_components_returned` plus the sum of each returned component's `n_nodes_returned` plus `n_condensation_edges_returned`. Selected-row, internal, cross-component, self-loop, cyclic, eligible-edge, and `n_edges_total` counts remain exact scalars in `data` and are not added to those envelope counters. Limits include the validated `max_components`, `max_nodes_per_component`, `max_edges`, `edge_types`, and `max_envelope_bytes`. The producer is the only truncation source. The 1 MiB envelope limit fails closed. MCP always uses `allow_unlocked_managed=False`. MCP does not expose DOT, a graph path, a symbol, a direction, a rank, an algorithm, a format, or source/target component arguments. Representatives remain smallest UTF-8 titles, not leaders. Topological position is not an ordinal rank or semantic layer. There is no `condensation_graph` alias. The fixed surface remains exactly 19 tools |
 | Malformed args | Bad limits, filters, duplicate titles/ids, missing columns, invalid scalars, or combined `--json --dot`: exit 2, empty stdout |
 | Non-claims | Not weak components, cycle enumeration, transitive closure or reduction, path enumeration, build/import/call/execution/semantic dependency order, architecture, hierarchy, ownership, leadership, importance, Leiden or semantic communities, centrality, GraphRAG, natural-language analysis, proof of runtime recursion or deadlock, indexer, renderer, or UI. `--dot` is interchange only; truncation and totals still come only from the bounded condensation producer. A representative is not a leader. A topological position is not an ordinal rank or semantic layer. An aggregated condensation edge is not an original relationship record |
 
@@ -583,7 +602,7 @@ serializes the same producer result as deterministic Graphviz DOT
 interchange on stdout; Graphviz is not invoked. MCP exposes the existing producer as `shortest_path`, the
 seventeenth read-only tool, immediately after `condensation` and
 immediately before `degree_ranking`. MCP does not expose DOT. There is no hyphenated alias. The
-fixed MCP surface remains exactly 18 tools.
+fixed MCP surface remains exactly 19 tools.
 
 ```text
 graphrag-code shortest-path <source> <target> \
@@ -607,7 +626,7 @@ graphrag-code shortest-path <source> <target> \
 | JSON / human | Deterministic JSON (`sort_keys=True`, `allow_nan=False`, `ensure_ascii=False`). Human output is derived from the same mapping, including complete unresolved and not-found reports. Not-found text says the bound; it does not say unreachable. One trailing newline on stdout. `--json` and `--dot` are mutually exclusive |
 | DOT | Deterministic Graphviz DOT interchange on stdout from the same producer result (`src/graphrag_code/shortest_path_dot.py`). Non-strict `digraph graphrag_shortest_path`. Schema version `1`. Internal ids `n0000`… in producer node order; stored titles are never identifiers. Edges keep stored source→target orientation and the producer's aggregated `n_relationship_rows_total`. Graph metadata (quoted), in fixed order: schema version, status, found, source, target, source_resolved, target_resolved, canonical `edge_types` as JSON text (`null` for no filter or a non-empty JSON array, preserving commas and distinguishing a literal `"all"` type), max_depth, distance, returned node/step counts, and path row total. Nullable `source`, `target`, and `distance` are canonical JSON tokens so JSON `null` stays distinct from a real string or integer. Nodes: exact title label plus title, path_index, is_source, is_target. Source equal to target sets both endpoint flags. Edges: readable `rows N` label plus source, target, step_index, n_relationship_rows_total. Presentation baseline only: `rankdir=LR`, box nodes, endpoint `peripheries=2`. The serializer does not reconstruct, expand, sort, or truncate the producer result and does not invent edges, nodes, or extra paths. A found zero-hop path emits one node and no edges. Unresolved and `not_found_within_max_depth` results emit a valid empty digraph with graph-level metadata. Hard limit 1,000,000 UTF-8 bytes including the final newline; overflow and invalid renderer input fail closed with exit 2 and empty stdout. Graphviz is not invoked or required. No output-file option |
 | Snapshot / lease | Same retained-snapshot read scope as other queries. Lease held through load, endpoint resolution, the single producer call, JSON/human/DOT serialization, stdout write, and flush. No nested public query. No `.publish.lock` creation |
-| MCP | Seventeenth read-only tool added, registered immediately after `condensation` and immediately before `degree_ranking`. Envelope `data` is the exact `ByogGraph.shortest_path` result. `truncated` is always false: `max_depth` bounds the search and is not output-list truncation. Envelope `total` and `returned` are both `n_nodes_returned + n_steps_returned`. `n_relationship_rows_on_path_total` remains an exact scalar in `data` and is not added to those envelope counters. Limits include the validated `max_depth`, `edge_types`, and `max_envelope_bytes`. The 1 MiB envelope limit fails closed without shrinking nodes, steps, or strings. MCP always uses `allow_unlocked_managed=False`. MCP does not expose DOT, a graph path, a direction, a format, an algorithm, `max_nodes`, `max_edges`, a rank, or an output path. There is no hyphenated `shortest-path` alias. Endpoint ambiguity remains an unresolved producer result, not an argument error. `not_found_within_max_depth` is not global unreachability. The fixed surface remains exactly 18 tools |
+| MCP | Seventeenth read-only tool added, registered immediately after `condensation` and immediately before `degree_ranking`. Envelope `data` is the exact `ByogGraph.shortest_path` result. `truncated` is always false: `max_depth` bounds the search and is not output-list truncation. Envelope `total` and `returned` are both `n_nodes_returned + n_steps_returned`. `n_relationship_rows_on_path_total` remains an exact scalar in `data` and is not added to those envelope counters. Limits include the validated `max_depth`, `edge_types`, and `max_envelope_bytes`. The 1 MiB envelope limit fails closed without shrinking nodes, steps, or strings. MCP always uses `allow_unlocked_managed=False`. MCP does not expose DOT, a graph path, a direction, a format, an algorithm, `max_nodes`, `max_edges`, a rank, or an output path. There is no hyphenated `shortest-path` alias. Endpoint ambiguity remains an unresolved producer result, not an argument error. `not_found_within_max_depth` is not global unreachability. The fixed surface remains exactly 19 tools |
 | Malformed args | Bad limits, filters, duplicate titles/ids, missing columns, invalid scalars, or combined `--json --dot`: exit 2, empty stdout |
 | Non-claims | Not provenance, execution evidence, call/import/build/semantic dependency meaning, architecture, hierarchy, GraphRAG, natural-language analysis, indexer, renderer, or UI. `--dot` is interchange only; it does not search, reconstruct, enumerate, or weigh paths. A shortest hop sequence is not importance, ownership, or a unique semantic path. `not_found_within_max_depth` is not global unreachability |
 
@@ -619,7 +638,7 @@ registry. `graphrag-code snapshot-pin <published-id> --graph <root>
 `snapshot-unpin` write only `<graph>/.snapshot-pins.json`. This is
 retention metadata, not activation, publication, reindexing, backup,
 replication, or a distributed lease. It is intentionally absent from
-MCP. The fixed MCP tool set remains 18 read-only tools.
+MCP. The fixed MCP tool set remains 19 read-only tools.
 
 Canonical registry schema:
 
@@ -677,7 +696,7 @@ snapshot or claim semantic equivalence.
 is a read-only report of what cooperating keep-last cleanup would
 retain and delete. It shares `plan_snapshot_retention` with
 `_cleanup_old_snapshots_locked`. The command is intentionally absent
-from MCP. The fixed MCP tool set remains 18 read-only tools.
+from MCP. The fixed MCP tool set remains 19 read-only tools.
 
 The effective protected set is `current` UNION existing doc-claim pins
 UNION existing operator pins. `keep_last` has an effective minimum of
@@ -793,7 +812,7 @@ and `filesystem_may_have_changed=false`. Pre-deletion failures leave
 stdout empty.
 
 The command is intentionally absent from MCP. The fixed MCP tool set
-remains 18 read-only tools.
+remains 19 read-only tools.
 
 ### Snapshot staging inventory
 
@@ -871,7 +890,7 @@ and stdout flush. It does not take a nested lease. Relative `--graph`
 paths resolve from the invoking cwd. A symlinked graph root,
 `snapshots/`, `current`, or publication lock is rejected without
 following it. The command is intentionally absent from MCP. The fixed
-MCP tool set remains 18 read-only tools.
+MCP tool set remains 19 read-only tools.
 
 ### Snapshot staging cleanup plan
 
@@ -943,7 +962,7 @@ not transactionally atomic. A partial result reports `partial=true`,
 `retry_requires_fresh_plan=true`; there is no rollback, trash,
 quarantine, or recovery. A fresh plan is mandatory after any partial
 result. Apply-result schema version is 1. Both commands are
-intentionally absent from MCP. The fixed MCP tool set remains 18
+intentionally absent from MCP. The fixed MCP tool set remains 19
 read-only tools.
 
 ### Snapshot maintenance plan
@@ -955,7 +974,7 @@ read-only tools.
 Standalone `snapshot-prune` and `snapshot-staging-cleanup` remain
 available, and `snapshot-maintenance-apply` is the composite CAS
 apply. The command is intentionally absent from MCP. The fixed MCP
-tool set remains 18 read-only tools.
+tool set remains 19 read-only tools.
 
 The command requires a managed `current + snapshots/` graph and an
 already-adopted regular `.publish.lock`. It never creates, truncates,
@@ -1119,7 +1138,7 @@ export-apply, export-verify, export-reconcile, export-staging,
 import-plan, transfer-plan, and transfer-apply
 commands are
 intentionally absent from MCP. The fixed MCP tool set
-remains 18 read-only tools.
+remains 19 read-only tools.
 
 `graphrag-code snapshot-export-plan --graph <root> --snapshot
 <id|current>` is a read-only inspection of one retained published
@@ -1187,7 +1206,7 @@ continuous protection against lock-ignoring changes after the final
 observation.
 Ordinary invalid selectors or unsupported layout are exit 2, empty
 stdout. The command is intentionally absent from MCP. The fixed MCP
-tool set remains 18 read-only tools.
+tool set remains 19 read-only tools.
 
 `graphrag-code snapshot-export-apply --graph <root> --snapshot
 <id|current> --destination <new-dir> --expected-export-revision
@@ -1307,7 +1326,7 @@ Integrity or concurrency failures before publication are exit 1,
 empty stdout.
 A fully emitted successful result exits 0. The command is
 intentionally absent from MCP. The fixed MCP tool set remains
-18 read-only tools.
+19 read-only tools.
 
 `graphrag-code snapshot-export-verify --export-dir <directory>
 --expected-export-revision sha256:<64 lowercase hex>` is the
@@ -1364,7 +1383,7 @@ structure, symlinks, invalid envelope content, or concurrent
 changes are exit 1, empty stdout. The verification is not a
 backup, authentic, recoverable, complete source evidence, or
 authorization to delete anything. The command is intentionally
-absent from MCP. The fixed MCP tool set remains 18 read-only
+absent from MCP. The fixed MCP tool set remains 19 read-only
 tools.
 
 `graphrag-code snapshot-export-reconcile --plan-file
@@ -1433,7 +1452,7 @@ equality with the saved plan's canonical payload contract during
 the observation window. A fresh export plan is still required
 before any later apply. Reconciliation performs no recovery and
 authorizes no deletion. The command is intentionally absent from
-MCP. The fixed MCP tool set remains 18 read-only tools.
+MCP. The fixed MCP tool set remains 19 read-only tools.
 
 `graphrag-code snapshot-export-staging --parent <directory>` is the
 read-only structural inventory of private snapshot-export-apply
@@ -1511,7 +1530,7 @@ inspected, so this is not export verification. This is not a
 backup, recovery, authenticity, provenance, or recoverability
 claim. Changes after the final observation are outside the
 observation window. The command is intentionally absent from MCP.
-The fixed MCP tool set remains 18 read-only tools.
+The fixed MCP tool set remains 19 read-only tools.
 
 `graphrag-code snapshot-export-staging-cleanup-plan --parent
 <directory>` is the read-only schema-2 cleanup plan over that same
@@ -1673,7 +1692,7 @@ change, or a valid apply-result/plan mismatch is exit 1, empty
 stdout. Malformed arguments, invalid/oversized/symlinked input
 files, invalid schemas, missing parent, bounds, or unsupported
 primitives are exit 2, empty stdout. All three commands are
-intentionally absent from MCP. The fixed MCP tool set remains 18
+intentionally absent from MCP. The fixed MCP tool set remains 19
 read-only tools.
 
 The plan command does not delete, rename, quarantine, pin,
@@ -1699,7 +1718,7 @@ are required. Relative paths resolve from the invoking cwd.
 Surfaces are also `python -m graphrag_code.snapshot_import_plan`
 and `scripts/snapshot_import_plan.py`. The command is CLI-only
 and intentionally absent from MCP. The fixed MCP tool set
-remains 18 read-only tools.
+remains 19 read-only tools.
 
 The source export directory must be an existing real directory,
 never a symlink. Listing, stat, open, and read operations are
@@ -1841,7 +1860,7 @@ a retained snapshot in an existing managed BYOG graph. Apply
 schema version is 1. Surfaces are also
 `python -m graphrag_code.snapshot_import_apply` and
 `scripts/snapshot_import_apply.py`. The command is CLI-only and
-intentionally absent from MCP. The fixed MCP tool set remains 18
+intentionally absent from MCP. The fixed MCP tool set remains 19
 read-only tools. `--import-confirmed` is mandatory, including for
 an empty or impossible action. Missing confirmation is exit 2,
 empty stdout, and no mutation. `--expected-import-revision` must
@@ -1999,7 +2018,7 @@ target managed graph. Reconcile schema version is 1. Surfaces
 are also `python -m graphrag_code.snapshot_import_reconcile`
 and `scripts/snapshot_import_reconcile.py`. The command is
 CLI-only and intentionally absent from MCP. The fixed MCP tool
-set remains 18 read-only tools.
+set remains 19 read-only tools.
 
 Saved plan and apply-result files may be relative to the
 invoking cwd. They must be bounded regular files (maximum
@@ -2158,7 +2177,7 @@ from the invoking cwd. Surfaces are also
 `python -m graphrag_code.snapshot_transfer_plan` and
 `scripts/snapshot_transfer_plan.py`. The command is CLI-only
 and intentionally absent from MCP. The fixed MCP tool set
-remains 18 read-only tools.
+remains 19 read-only tools.
 
 Both graph arguments must name existing real directories, never
 symlinks, and managed `current + snapshots/` graphs with
@@ -2296,7 +2315,7 @@ creating a standalone export directory. Apply schema version is
 `python -m graphrag_code.snapshot_transfer_apply` and
 `scripts/snapshot_transfer_apply.py`. The command is CLI-only
 and intentionally absent from MCP. The fixed MCP tool set remains
-18 read-only tools. `--transfer-confirmed` is mandatory.
+19 read-only tools. `--transfer-confirmed` is mandatory.
 `--expected-transfer-revision` must be exactly
 `sha256:<64 lowercase hex>`.
 
@@ -2336,7 +2355,7 @@ managed graphs. Reconcile schema version is 1. Surfaces are also
 `python -m graphrag_code.snapshot_transfer_reconcile` and
 `scripts/snapshot_transfer_reconcile.py`. The command is
 CLI-only and intentionally absent from MCP. The fixed MCP tool
-set remains 18 read-only tools.
+set remains 19 read-only tools.
 
 Saved plan and apply-result files may be relative to the
 invoking cwd. They must be bounded regular files (maximum
@@ -2969,7 +2988,7 @@ When `scripts/index_c.py --clang-type-uses` is enabled (default **off**),
 | `ByogGraph.type_closure(symbol, …)` | Bounded cycle-safe BFS over **only** `uses_type` (directions: `dependencies` / `users` / `both`); min depths; self-edges as evidence without node duplication; caps truncate **returned** lists while `n_*_total` stay exact within `max_depth`; malformed rows or duplicate relationship IDs fail closed |
 | `ByogGraph.subgraph(symbol, …)` | Separate relation-generic bounded induced subgraph (see [Bounded multi-hop subgraph query](#bounded-multi-hop-subgraph-query)); does **not** wrap or rename `type_closure` |
 | CLI | `graph_query.py types-used-by` / `type-users` / `type-closure`; same via `graphrag_code.py` (delegation; human + `--json` parity); `type-closure --dot` is deterministic Graphviz DOT interchange of the same producer mapping (`src/graphrag_code/type_closure_dot.py`; non-strict `digraph graphrag_type_closure`; stored orientation; independent caps may emit explicit edge-only endpoint nodes with `in_nodes=false` and no invented depth; omitted material is not reconstructed; Graphviz is not invoked; `--json` and `--dot` mutually exclusive; 1,000,000 UTF-8 byte hard limit). Negative limits / bad directions / malformed `uses_type` rows / combined `--json --dot` / DOT overflow exit 2 with empty stdout |
-| MCP | Existing `type_closure` producer/envelope is unchanged. The fixed surface remains exactly 18 tools and does not expose DOT or a format parameter |
+| MCP | Existing `type_closure` producer/envelope is unchanged. The fixed surface remains exactly 19 tools and does not expose DOT or a format parameter |
 | Context pack (outgoing, depth 1) | `type_dependencies` + `type_dependency_edges` (+ totals/truncated) |
 | Context pack (incoming, depth 1) | `type_user_edges` (+ totals/truncated) |
 | Context pack (depth > 1) | Adds `type_dependency_closure` / `type_user_closure` with per-node min depth, bounded entity text, compact edge evidence, exact totals and truncation flags; default `--type-depth 1` keeps pack JSON byte-identical to direct-only; dangling or non-unique entity endpoints retain one explicit `missing` / `ambiguous` node payload rather than falsifying returned counts |
@@ -3037,7 +3056,7 @@ graphrag-code impact-graph <symbol> \
 | Human | Root, resolved, requested limits, `nodes (returned/total)` with truncation marker, one node per line (`depth`, title, entity type when present), `edges (returned/total)` with truncation marker, one edge per line (`depth`, stored `source -> target`, type, id). Exactly one trailing newline |
 | DOT | Deterministic Graphviz DOT interchange on stdout from the same producer result (`src/graphrag_code/impact_graph_dot.py`). Non-strict `digraph graphrag_impact_graph`. Schema version `1`. Internal ids `n0000`… in producer node order; titles are never identifiers; the resolved root is `n0000`. Edges keep stored `source -> target` orientation. Graph metadata (quoted): schema version, resolved, root when resolved, `relationship_type="calls"`, max_depth, max_nodes, max_edges, totals, returned counts, truncation flags. Nodes: `label`/`title`, persisted title, depth, type when present, `is_root`. Edges: `label="calls"`, persisted id, type, depth. Presentation baseline only: `rankdir=LR`, box nodes, root `peripheries=2`. No descriptions, snippets, spans, weights, confidence, or extra dataframe columns. One shared quoted-string escaper (`quote_dot_string`). Only returned producer material is rendered; omitted nodes/edges are not reconstructed. Hard limit 1,000,000 UTF-8 bytes including the final newline; overflow and invalid renderer input fail closed with exit 2 and empty stdout. Graphviz is not invoked or required. No output-file option |
 | Snapshot / lease | Same retained-snapshot read scope as other queries. `current` and explicit historical ids. Historical reads never activate or change `current`. Shared reader lease and retained descriptors are held through materialization, impact-graph computation, JSON/human/DOT serialization, stdout write, and stdout flush. No nested public query. No `.publish.lock` creation. Unlocked legacy compatibility is unchanged and not broadened |
-| MCP | Eighteenth read-only tool, registered immediately after legacy `impact` and immediately before `type_closure`. There is no hyphenated `impact-graph` alias. Envelope `data` is the exact `ByogGraph.impact_graph` producer mapping. `truncated` is `nodes_truncated or edges_truncated`. Envelope `total` is `n_nodes_total + n_edges_total`; `returned` is `n_nodes_returned + n_edges_returned`. Limits include the validated `max_depth`, `max_nodes`, `max_edges` (dedicated impact-graph defaults 3/50/100 and hard maxima 32/500/500, not subgraph or type-closure constants) and `max_envelope_bytes`. The producer is the only truncation source. The 1 MiB envelope limit fails closed with no secondary shrinking. MCP always uses `allow_unlocked_managed=False`. Explicit snapshot ids never activate or consult `current`. The shared reader lease is held through load, resolution, producer execution, JSON-ready conversion, envelope construction, size check, and return. MCP does not expose DOT, a graph path, a direction, `edge_types`, `max_items`, or a format parameter. Unresolved or ambiguous symbols remain successful complete producer results with `ok=true`. Legacy `impact` remains a separate unbounded title-list tool immediately before `impact_graph`. The fixed surface is exactly 18 tools |
+| MCP | Eighteenth read-only tool, registered immediately after legacy `impact` and immediately before `type_closure`. There is no hyphenated `impact-graph` alias. Envelope `data` is the exact `ByogGraph.impact_graph` producer mapping. `truncated` is `nodes_truncated or edges_truncated`. Envelope `total` is `n_nodes_total + n_edges_total`; `returned` is `n_nodes_returned + n_edges_returned`. Limits include the validated `max_depth`, `max_nodes`, `max_edges` (dedicated impact-graph defaults 3/50/100 and hard maxima 32/500/500, not subgraph or type-closure constants) and `max_envelope_bytes`. The producer is the only truncation source. The 1 MiB envelope limit fails closed with no secondary shrinking. MCP always uses `allow_unlocked_managed=False`. Explicit snapshot ids never activate or consult `current`. The shared reader lease is held through load, resolution, producer execution, JSON-ready conversion, envelope construction, size check, and return. MCP does not expose DOT, a graph path, a direction, `edge_types`, `max_items`, or a format parameter. Unresolved or ambiguous symbols remain successful complete producer results with `ok=true`. Legacy `impact` remains a separate unbounded title-list tool immediately before `impact_graph`. The fixed surface is exactly 19 tools |
 | Malformed args | Bad limits, invalid graph/snapshot/data, combined `--json --dot`, or DOT overflow: exit 2, empty stdout, stderr-only diagnostics |
 | Non-claims | Not runtime execution proof, complete dynamic dispatch, call-observation reconstruction, semantic impact, severity, ownership, importance, architecture, change-risk probability, a unique path or explanation, GraphRAG, or natural-language analysis. Depth is minimum persisted reverse-call hop count only. Caps bound returned material, not traversal work. Totals are exact only within `max_depth` over persisted exact `calls` rows. `--dot` is CLI/Python interchange only and is not exposed by MCP. `ok=true` is not a semantic-impact or runtime-execution claim |
 

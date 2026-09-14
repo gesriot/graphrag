@@ -1097,6 +1097,7 @@ def test_mcp_remains_seventeen_tools_without_dot(tmp_path: Path):
         "graph_status",
         "graph_doctor",
         "query_symbol",
+        "observations",
         "callers",
         "callees",
         "neighbors",
@@ -1113,7 +1114,7 @@ def test_mcp_remains_seventeen_tools_without_dot(tmp_path: Path):
         "snapshot_history",
         "snapshot_diff",
     ]
-    assert len(TOOL_NAMES) == 18
+    assert len(TOOL_NAMES) == 19
     assert "impact-graph" not in TOOL_NAMES
 
     async def _body():

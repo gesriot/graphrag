@@ -1511,6 +1511,7 @@ def test_mcp_exposes_condensation_as_sixteenth_tool(tmp_path: Path):
         "graph_status",
         "graph_doctor",
         "query_symbol",
+        "observations",
         "callers",
         "callees",
         "neighbors",
@@ -1527,7 +1528,7 @@ def test_mcp_exposes_condensation_as_sixteenth_tool(tmp_path: Path):
         "snapshot_history",
         "snapshot_diff",
     ]
-    assert len(TOOL_NAMES) == len(set(TOOL_NAMES)) == 18
+    assert len(TOOL_NAMES) == len(set(TOOL_NAMES)) == 19
 
     expected = ByogGraph(graph).condensation()
     payload = session.condensation()

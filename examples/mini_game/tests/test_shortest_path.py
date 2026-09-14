@@ -1028,6 +1028,7 @@ def test_producer_once_no_nested_query_and_mcp_exposes_shortest_path(
         "graph_status",
         "graph_doctor",
         "query_symbol",
+        "observations",
         "callers",
         "callees",
         "neighbors",
@@ -1044,7 +1045,7 @@ def test_producer_once_no_nested_query_and_mcp_exposes_shortest_path(
         "snapshot_history",
         "snapshot_diff",
     ]
-    assert len(TOOL_NAMES) == len(set(TOOL_NAMES)) == 18
+    assert len(TOOL_NAMES) == len(set(TOOL_NAMES)) == 19
     expected = ByogGraph(graph).shortest_path("A", "B")
     payload = session.shortest_path("A", "B")
     assert payload["tool"] == "shortest_path"

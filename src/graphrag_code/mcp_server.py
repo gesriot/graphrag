@@ -115,6 +115,7 @@ TOOL_NAMES = (
     "graph_status",
     "graph_doctor",
     "query_symbol",
+    "observations",
     "callers",
     "callees",
     "neighbors",
@@ -393,6 +394,41 @@ class GraphMcpSession:
                     snapshot=scope.snap_id,
                     data=graph.symbol(title),
                 )
+        except (ByogReaderLockError, SnapshotReadError) as exc:
+            raise GraphMcpError(str(exc)) from exc
+
+    def observations(
+        self,
+        query: Any,
+        max_items: Any = DEFAULT_MAX_ITEMS,
+        snapshot: Any = CURRENT_REF,
+    ) -> Dict[str, Any]:
+        q = _require_str("query", query)
+        _reject_non_finite("max_items", max_items)
+        limit = _require_int("max_items", max_items, minimum=1, maximum=HARD_MAX_ITEMS)
+        try:
+            with self._scope(snapshot) as scope:
+                if scope.snap_id is None:
+                    raise GraphMcpError(
+                        f"graph has no published snapshot for {snapshot!r}"
+                    )
+                try:
+                    raw = scope.load_graph().observations(q)
+                    items, total, returned, truncated = _truncate_list(raw, limit)
+                    return _envelope(
+                        tool="observations",
+                        graph=self.graph_root,
+                        snapshot=scope.snap_id,
+                        data=items,
+                        limits={"max_items": limit},
+                        truncated=truncated,
+                        total=total,
+                        returned=returned,
+                    )
+                except GraphMcpError:
+                    raise
+                except (TypeError, ValueError) as exc:
+                    raise GraphMcpError(str(exc)) from exc
         except (ByogReaderLockError, SnapshotReadError) as exc:
             raise GraphMcpError(str(exc)) from exc
 
@@ -1196,6 +1232,21 @@ def build_mcp_server(session: GraphMcpSession) -> MCPServer:
     )
     def query_symbol(symbol: str, snapshot: str = CURRENT_REF) -> Dict[str, Any]:
         return session.query_symbol(symbol, snapshot)
+
+    @mcp.tool(
+        name="observations",
+        description=(
+            "Weak/ambiguous/container call-observation diagnostic. "
+            "Persisted call_observations evidence only."
+        ),
+        annotations=READ_ONLY_TOOL,
+    )
+    def observations(
+        query: str,
+        max_items: StrictInt = DEFAULT_MAX_ITEMS,
+        snapshot: str = CURRENT_REF,
+    ) -> Dict[str, Any]:
+        return session.observations(query, max_items, snapshot)
 
     @mcp.tool(
         name="callers",
