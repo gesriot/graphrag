@@ -45,7 +45,8 @@ HARD_MAX_SUBGRAPH_DEPTH = 32
 HARD_MAX_SUBGRAPH_NODES = 500
 HARD_MAX_SUBGRAPH_EDGES = 500
 
-# Bounded reverse-call impact graph (CLI/Python only; not MCP).
+# Bounded reverse-call impact graph (CLI/Python and read-only MCP;
+# deterministic DOT serialization remains CLI/Python only).
 DEFAULT_IMPACT_GRAPH_MAX_DEPTH = 3
 DEFAULT_IMPACT_GRAPH_MAX_NODES = 50
 DEFAULT_IMPACT_GRAPH_MAX_EDGES = 100

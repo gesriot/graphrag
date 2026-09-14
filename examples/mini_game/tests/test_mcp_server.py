@@ -36,6 +36,9 @@ from graphrag_code.byog_graph import (  # type: ignore
     DEFAULT_CONDENSATION_MAX_EDGES,
     DEFAULT_CONDENSATION_MAX_NODES_PER_COMPONENT,
     DEFAULT_DEGREE_RANKING_MAX_NODES,
+    DEFAULT_IMPACT_GRAPH_MAX_DEPTH,
+    DEFAULT_IMPACT_GRAPH_MAX_EDGES,
+    DEFAULT_IMPACT_GRAPH_MAX_NODES,
     DEFAULT_SHORTEST_PATH_MAX_DEPTH,
     DEFAULT_STRONG_COMPONENTS_MAX_COMPONENTS,
     DEFAULT_STRONG_COMPONENTS_MAX_NODES_PER_COMPONENT,
@@ -49,6 +52,9 @@ from graphrag_code.byog_graph import (  # type: ignore
     HARD_MAX_CONDENSATION_COMPONENTS,
     HARD_MAX_CONDENSATION_EDGES,
     HARD_MAX_DEGREE_RANKING_NODES,
+    HARD_MAX_IMPACT_GRAPH_DEPTH,
+    HARD_MAX_IMPACT_GRAPH_EDGES,
+    HARD_MAX_IMPACT_GRAPH_NODES,
     HARD_MAX_SHORTEST_PATH_DEPTH,
     HARD_MAX_STRONG_COMPONENT_NODES,
     HARD_MAX_STRONG_COMPONENTS,
@@ -260,7 +266,7 @@ def test_tools_list_is_exactly_documented(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == len(set(names)) == len(TOOL_NAMES) == 17
+            assert len(names) == len(set(names)) == len(TOOL_NAMES) == 18
             assert names[names.index("neighbors") + 1] == "subgraph"
             assert names[names.index("subgraph") + 1] == "components"
             assert names[names.index("components") + 1] == "strong_components"
@@ -268,11 +274,14 @@ def test_tools_list_is_exactly_documented(tmp_path: Path):
             assert names[names.index("condensation") + 1] == "shortest_path"
             assert names[names.index("shortest_path") + 1] == "degree_ranking"
             assert names[names.index("degree_ranking") + 1] == "impact"
+            assert names[names.index("impact") + 1] == "impact_graph"
+            assert names[names.index("impact_graph") + 1] == "type_closure"
             assert "degree-ranking" not in names
             assert "strong-components" not in names
             assert "condensation-graph" not in names
             assert "condensation_graph" not in names
             assert "shortest-path" not in names
+            assert "impact-graph" not in names
             assert "snapshot_activate" not in names
             for tool in tools:
                 assert tool.input_schema["additionalProperties"] is False
@@ -370,6 +379,9 @@ def test_query_and_graph_walks_match_byog_graph(tmp_path: Path):
         json.dumps(view.shortest_path(symbol, symbol), allow_nan=False, default=str)
     )
     assert session.impact(symbol)["data"] == view.impact(symbol)
+    assert session.impact_graph(symbol)["data"] == json.loads(
+        json.dumps(view.impact_graph(symbol), allow_nan=False, default=str)
+    )
 
 
 def test_type_closure_bounds_and_invalid_direction(tmp_path: Path):
@@ -682,6 +694,7 @@ def test_mcp_calls_do_not_mutate_graph(
     session.degree_ranking()
     session.shortest_path(symbol, symbol)
     session.impact(symbol)
+    session.impact_graph(symbol)
     session.type_closure(symbol)
     session.context_pack(symbol)
     assert _payload_stats(graph) == before_stats
@@ -1948,7 +1961,7 @@ def test_degree_ranking_mcp_schema_defaults_and_unknown_args(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == len(set(names)) == 17
+            assert len(names) == len(set(names)) == 18
             assert names[names.index("components") + 1] == "strong_components"
             assert names[names.index("strong_components") + 1] == "condensation"
             assert names[names.index("condensation") + 1] == "shortest_path"
@@ -2513,7 +2526,7 @@ def test_strong_components_mcp_schema_defaults_and_unknown_args(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == len(set(names)) == 17
+            assert len(names) == len(set(names)) == 18
             assert names[names.index("components") + 1] == "strong_components"
             assert names[names.index("strong_components") + 1] == "condensation"
             assert names[names.index("condensation") + 1] == "shortest_path"
@@ -3095,7 +3108,7 @@ def test_condensation_mcp_schema_defaults_and_unknown_args(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == len(set(names)) == 17
+            assert len(names) == len(set(names)) == 18
             assert names[names.index("strong_components") + 1] == "condensation"
             assert names[names.index("condensation") + 1] == "shortest_path"
             assert names[names.index("shortest_path") + 1] == "degree_ranking"
@@ -3693,7 +3706,7 @@ def test_shortest_path_mcp_schema_defaults_and_unknown_args(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == len(set(names)) == 17
+            assert len(names) == len(set(names)) == 18
             assert names[names.index("condensation") + 1] == "shortest_path"
             assert names[names.index("shortest_path") + 1] == "degree_ranking"
             assert "shortest-path" not in names
@@ -4288,6 +4301,816 @@ def test_shortest_path_mcp_publisher_wait_and_no_nested_query(
     q = ctx.Queue()
     reader = ctx.Process(
         target=_mcp_paused_shortest_path, args=(str(graph), pinned, resume, q)
+    )
+    from test_reader_lease import _cleanup_processes, _publisher
+
+    pub = ctx.Process(target=_publisher, args=(str(graph), "next", 1, about, got, q))
+    try:
+        reader.start()
+        assert pinned.wait(timeout=20)
+        pub.start()
+        assert about.wait(timeout=20)
+        assert not got.is_set()
+        assert _current(graph) == first
+        assert (first_dir / "entities.parquet").is_file()
+        resume.set()
+        reader.join(timeout=20)
+        pub.join(timeout=20)
+        assert not reader.is_alive() and not pub.is_alive()
+        assert got.is_set()
+    finally:
+        _cleanup_processes(pub, reader, release=resume)
+
+
+def _assert_impact_graph_envelope(payload: dict, data: dict) -> None:
+    ready = json.loads(json.dumps(data, allow_nan=False, default=str))
+    assert payload["schema_version"] == 1
+    assert payload["tool"] == "impact_graph"
+    assert payload["ok"] is True
+    assert payload["data"] == ready
+    assert payload["truncated"] is bool(
+        ready["nodes_truncated"] or ready["edges_truncated"]
+    )
+    assert payload["total"] == int(ready["n_nodes_total"]) + int(ready["n_edges_total"])
+    assert payload["returned"] == int(ready["n_nodes_returned"]) + int(
+        ready["n_edges_returned"]
+    )
+    assert list(payload["limits"]) == [
+        "max_depth",
+        "max_nodes",
+        "max_edges",
+        "max_envelope_bytes",
+    ]
+    assert payload["limits"]["max_envelope_bytes"] == HARD_MAX_ENVELOPE_BYTES
+    assert payload["data"]["root"] == ready["root"]
+    assert payload["data"]["resolved"] is ready["resolved"]
+
+
+def test_impact_graph_mcp_schema_defaults_and_unknown_args(tmp_path: Path):
+    graph = _publish_components(
+        tmp_path,
+        [_component_entity("A"), _component_entity("B")],
+        [_component_rel("B", "A", "calls")],
+    )
+    session = _session(graph, "python")
+    sig = inspect.signature(GraphMcpSession.impact_graph)
+    assert list(sig.parameters) == [
+        "self",
+        "symbol",
+        "max_depth",
+        "max_nodes",
+        "max_edges",
+        "snapshot",
+    ]
+    assert sig.parameters["max_depth"].default == DEFAULT_IMPACT_GRAPH_MAX_DEPTH
+    assert sig.parameters["max_nodes"].default == DEFAULT_IMPACT_GRAPH_MAX_NODES
+    assert sig.parameters["max_edges"].default == DEFAULT_IMPACT_GRAPH_MAX_EDGES
+    assert sig.parameters["snapshot"].default == "current"
+    for forbidden in (
+        "graph",
+        "direction",
+        "edge_types",
+        "max_items",
+        "json",
+        "dot",
+        "format",
+        "path",
+        "output_path",
+    ):
+        assert forbidden not in sig.parameters
+
+    defaulted = session.impact_graph("A")
+    view = ByogGraph(graph).impact_graph("A")
+    _assert_impact_graph_envelope(defaulted, view)
+    assert defaulted["limits"]["max_depth"] == DEFAULT_IMPACT_GRAPH_MAX_DEPTH
+    assert defaulted["limits"]["max_nodes"] == DEFAULT_IMPACT_GRAPH_MAX_NODES
+    assert defaulted["limits"]["max_edges"] == DEFAULT_IMPACT_GRAPH_MAX_EDGES
+    assert defaulted["data"]["max_depth"] == DEFAULT_IMPACT_GRAPH_MAX_DEPTH
+    assert defaulted["data"]["max_nodes"] == DEFAULT_IMPACT_GRAPH_MAX_NODES
+    assert defaulted["data"]["max_edges"] == DEFAULT_IMPACT_GRAPH_MAX_EDGES
+    explicit = session.impact_graph("A", max_depth=2, max_nodes=10, max_edges=10)
+    _assert_impact_graph_envelope(
+        explicit,
+        ByogGraph(graph).impact_graph("A", max_depth=2, max_nodes=10, max_edges=10),
+    )
+    assert explicit["limits"]["max_depth"] == 2
+    assert explicit["limits"]["max_nodes"] == 10
+    assert explicit["limits"]["max_edges"] == 10
+    impact_params = list(inspect.signature(GraphMcpSession.impact).parameters)
+    assert impact_params == ["self", "symbol", "max_items", "snapshot"]
+    assert "impact-graph" not in TOOL_NAMES
+    assert list(TOOL_NAMES) == [
+        "graph_status",
+        "graph_doctor",
+        "query_symbol",
+        "callers",
+        "callees",
+        "neighbors",
+        "subgraph",
+        "components",
+        "strong_components",
+        "condensation",
+        "shortest_path",
+        "degree_ranking",
+        "impact",
+        "impact_graph",
+        "type_closure",
+        "context_pack",
+        "snapshot_history",
+        "snapshot_diff",
+    ]
+    assert len(TOOL_NAMES) == 18
+
+    server = build_mcp_server(session)
+
+    async def _body():
+        async with Client(server) as client:
+            tools = (await client.list_tools()).tools
+            names = [tool.name for tool in tools]
+            assert names == list(TOOL_NAMES)
+            assert len(names) == len(set(names)) == 18
+            assert names[names.index("degree_ranking") + 1] == "impact"
+            assert names[names.index("impact") + 1] == "impact_graph"
+            assert names[names.index("impact_graph") + 1] == "type_closure"
+            assert "impact-graph" not in names
+            tool = next(item for item in tools if item.name == "impact_graph")
+            assert tool.annotations.read_only_hint is True
+            assert tool.annotations.destructive_hint is False
+            assert tool.annotations.idempotent_hint is True
+            assert tool.annotations.open_world_hint is False
+            assert tool.input_schema["additionalProperties"] is False
+            props = tool.input_schema["properties"]
+            assert list(props) == [
+                "symbol",
+                "max_depth",
+                "max_nodes",
+                "max_edges",
+                "snapshot",
+            ]
+            assert props["max_depth"]["type"] == "integer"
+            assert props["max_nodes"]["type"] == "integer"
+            assert props["max_edges"]["type"] == "integer"
+            assert props["max_depth"]["default"] == DEFAULT_IMPACT_GRAPH_MAX_DEPTH
+            assert props["max_nodes"]["default"] == DEFAULT_IMPACT_GRAPH_MAX_NODES
+            assert props["max_edges"]["default"] == DEFAULT_IMPACT_GRAPH_MAX_EDGES
+            assert props["snapshot"]["default"] == "current"
+            for extra_args in (
+                {"graph": str(tmp_path / "other")},
+                {"direction": "incoming"},
+                {"edge_types": ["calls"]},
+                {"max_items": 10},
+                {"json": True},
+                {"dot": True},
+                {"format": "dot"},
+                {"path": "out.dot"},
+                {"output_path": "out.json"},
+            ):
+                extra = await client.call_tool(
+                    "impact_graph",
+                    {"symbol": "A", **extra_args},
+                )
+                assert extra.is_error is True, extra_args
+            for invalid_args in (
+                {"max_depth": True},
+                {"max_depth": False},
+                {"max_nodes": True},
+                {"max_edges": False},
+                {"max_depth": 1.0},
+                {"max_nodes": 1.0},
+                {"max_edges": 0.0},
+            ):
+                invalid = await client.call_tool(
+                    "impact_graph",
+                    {"symbol": "A", **invalid_args},
+                )
+                assert invalid.is_error is True, invalid_args
+            body = _payload(await client.call_tool("impact_graph", {"symbol": "A"}))
+            assert body["tool"] == "impact_graph"
+            assert body["data"] == defaulted["data"]
+            legacy = _payload(await client.call_tool("impact", {"symbol": "A"}))
+            assert legacy["tool"] == "impact"
+            assert legacy["data"] == ["B"]
+            impact_tool = next(item for item in tools if item.name == "impact")
+            assert list(impact_tool.input_schema["properties"]) == [
+                "symbol",
+                "max_items",
+                "snapshot",
+            ]
+            assert "dot" not in impact_tool.input_schema["properties"]
+
+    _run(_body)
+
+
+def test_impact_graph_mcp_semantics_parity_snapshots_and_filters(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    graph = tmp_path / "g"
+    older = publish_byog_snapshot(
+        pd.DataFrame([_component_entity("demo:old", source_file="old.py")]),
+        pd.DataFrame(
+            [_component_rel("demo:old", "demo:old", "calls", rid="rel:old-self")]
+        ),
+        pd.DataFrame(
+            [
+                {
+                    "id": "tu:old",
+                    "title": "old.py",
+                    "source_file": "old.py",
+                    "entity_id": "ent:demo:old",
+                }
+            ]
+        ),
+        graph,
+        settings_text="mcp: old\n",
+        keep_last=5,
+    )
+    newer_ents = [
+        _component_entity("A"),
+        _component_entity("B"),
+        _component_entity("C"),
+        _component_entity("D"),
+        _component_entity("Isolated"),
+        _component_entity("other:f"),
+        _component_entity("m:f"),
+    ]
+    newer_rels = [
+        _component_rel("B", "A", "calls", rid="rel:ba1"),
+        _component_rel("B", "A", "calls", rid="rel:ba2"),
+        _component_rel("C", "A", "calls", rid="rel:ca"),
+        _component_rel("D", "B", "calls", rid="rel:db"),
+        _component_rel("A", "A", "calls", rid="rel:self"),
+        _component_rel("A", "B", "calls", rid="rel:ab"),
+        _component_rel("ghost", "A", "calls", rid="rel:ghost"),
+        _component_rel("Isolated", "Isolated", "uses_type", rid="rel:uses"),
+        _component_rel("file.py", "A", "contains", rid="rel:contains"),
+    ]
+    current = publish_byog_snapshot(
+        pd.DataFrame(newer_ents),
+        pd.DataFrame(newer_rels),
+        pd.DataFrame(
+            [
+                {
+                    "id": f"tu:{row['title']}",
+                    "title": "a.py",
+                    "source_file": "a.py",
+                    "entity_id": row["id"],
+                }
+                for row in newer_ents
+            ]
+        ),
+        graph,
+        settings_text="mcp: new\n",
+        keep_last=5,
+    )
+    assert _current(graph) == current.name
+    before = _payload_hashes(graph)
+    session = _session(graph, "python")
+    view = ByogGraph(graph)
+
+    found = session.impact_graph("A")
+    expected = view.impact_graph("A")
+    _assert_impact_graph_envelope(found, expected)
+    assert found["data"]["resolved"] is True
+    assert found["data"]["root"] == "A"
+    assert [n["title"] for n in found["data"]["nodes"]][0] == "A"
+    assert found["data"]["nodes"][0]["depth"] == 0
+    titles = [n["title"] for n in found["data"]["nodes"]]
+    assert "B" in titles and "C" in titles and "D" in titles
+    assert "ghost" in titles
+    assert "Isolated" not in titles
+    edge_ids = [e["id"] for e in found["data"]["edges"]]
+    assert "rel:ba1" in edge_ids and "rel:ba2" in edge_ids
+    assert "rel:self" in edge_ids
+    assert "rel:ghost" in edge_ids
+    assert "rel:db" in edge_ids
+    assert "rel:uses" not in edge_ids
+    assert "rel:contains" not in edge_ids
+    orientations = {(e["source"], e["target"]) for e in found["data"]["edges"]}
+    assert ("B", "A") in orientations
+    assert ("ghost", "A") in orientations
+    explicit_current = session.impact_graph("A", snapshot="current")
+    assert explicit_current["data"] == found["data"]
+    assert explicit_current["snapshot"] == current.name
+
+    zero = session.impact_graph("A", max_depth=0)
+    _assert_impact_graph_envelope(zero, view.impact_graph("A", max_depth=0))
+    assert [n["title"] for n in zero["data"]["nodes"]] == ["A"]
+    assert zero["data"]["nodes"][0]["depth"] == 0
+    assert {e["id"] for e in zero["data"]["edges"]} == {"rel:self"}
+
+    node_capped = session.impact_graph("A", max_nodes=2)
+    _assert_impact_graph_envelope(node_capped, view.impact_graph("A", max_nodes=2))
+    assert node_capped["data"]["nodes_truncated"] is True
+    returned_titles = {n["title"] for n in node_capped["data"]["nodes"]}
+    assert returned_titles == {"A", "B"}
+    for edge in node_capped["data"]["edges"]:
+        assert edge["source"] in returned_titles
+        assert edge["target"] in returned_titles
+    assert node_capped["truncated"] is True
+    assert node_capped["total"] == (
+        node_capped["data"]["n_nodes_total"] + node_capped["data"]["n_edges_total"]
+    )
+    assert node_capped["returned"] == (
+        node_capped["data"]["n_nodes_returned"]
+        + node_capped["data"]["n_edges_returned"]
+    )
+
+    edge_capped = session.impact_graph("A", max_edges=1)
+    _assert_impact_graph_envelope(edge_capped, view.impact_graph("A", max_edges=1))
+    assert edge_capped["data"]["edges_truncated"] is True
+    assert edge_capped["data"]["n_edges_returned"] == 1
+    assert edge_capped["truncated"] is True
+
+    missing = session.impact_graph("does-not-exist")
+    _assert_impact_graph_envelope(missing, view.impact_graph("does-not-exist"))
+    assert missing["ok"] is True
+    assert missing["data"]["resolved"] is False
+    assert missing["data"]["root"] is None
+    assert missing["data"]["nodes"] == []
+    assert missing["data"]["edges"] == []
+    assert missing["total"] == 0
+    assert missing["returned"] == 0
+    assert missing["truncated"] is False
+
+    amb = session.impact_graph("f")
+    _assert_impact_graph_envelope(amb, view.impact_graph("f"))
+    assert amb["data"]["resolved"] is False
+    assert amb["ok"] is True
+
+    historical = session.impact_graph("demo:old", snapshot=older.name)
+    assert historical["snapshot"] == older.name
+    assert _current(graph) == current.name
+    assert historical["data"]["resolved"] is True
+    assert historical["data"]["root"] == "demo:old"
+    assert [n["title"] for n in historical["data"]["nodes"]] == ["demo:old"]
+    assert "A" not in [n["title"] for n in historical["data"]["nodes"]]
+    assert _payload_hashes(graph) == before
+    assert not (graph / ".publish.lock").is_symlink()
+    assert (graph / ".publish.lock").is_file()
+    assert not list(graph.glob(".staging-*"))
+
+    import graphrag_code.snapshot_read as scope_mod
+
+    real = scope_mod.resolve_snapshot
+    seen: list = []
+
+    def counted_resolve(graph_root, snapshot=None):
+        seen.append(snapshot)
+        return real(graph_root, snapshot)
+
+    monkeypatch.setattr(scope_mod, "resolve_snapshot", counted_resolve)
+    hist_again = session.impact_graph("demo:old", snapshot=older.name)
+    assert seen == [older.name]
+    assert hist_again["snapshot"] == older.name
+    assert _current(graph) == current.name
+    seen.clear()
+    session.impact_graph("A", snapshot="current")
+    assert seen == [None]
+    monkeypatch.undo()
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(ROOT / "src")
+    human = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "graphrag_code.graph_query",
+            "impact-graph",
+            "A",
+            "--graph",
+            str(graph),
+        ],
+        capture_output=True,
+        env=env,
+        cwd=str(tmp_path),
+    )
+    json_out = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "graphrag_code.graph_query",
+            "impact-graph",
+            "A",
+            "--graph",
+            str(graph),
+            "--json",
+        ],
+        capture_output=True,
+        env=env,
+        cwd=str(tmp_path),
+    )
+    dot_out = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "graphrag_code.graph_query",
+            "impact-graph",
+            "A",
+            "--graph",
+            str(graph),
+            "--dot",
+        ],
+        capture_output=True,
+        env=env,
+        cwd=str(tmp_path),
+    )
+    assert human.returncode == 0, human.stderr
+    assert json_out.returncode == 0, json_out.stderr
+    assert dot_out.returncode == 0, dot_out.stderr
+    from graphrag_code.graph_query import (
+        dumps_impact_graph_json,
+        format_impact_graph_human,
+    )
+    from graphrag_code.impact_graph_dot import dumps_impact_graph_dot
+
+    producer = view.impact_graph("A")
+    assert json_out.stdout.decode() == dumps_impact_graph_json(producer) + "\n"
+    assert human.stdout.decode() == format_impact_graph_human(producer) + "\n"
+    assert dot_out.stdout.decode() == dumps_impact_graph_dot(producer)
+    assert found["data"] == json.loads(
+        json.dumps(producer, allow_nan=False, default=str)
+    )
+
+    server = build_mcp_server(session)
+
+    async def _body():
+        async with Client(server) as client:
+            payload = _payload(
+                await client.call_tool(
+                    "impact_graph",
+                    {"symbol": "A", "snapshot": current.name},
+                )
+            )
+            assert payload["tool"] == "impact_graph"
+            assert payload["snapshot"] == current.name
+            assert payload["data"] == found["data"]
+            hist = _payload(
+                await client.call_tool(
+                    "impact_graph",
+                    {"symbol": "demo:old", "snapshot": older.name},
+                )
+            )
+            assert hist["snapshot"] == older.name
+            assert _current(graph) == current.name
+            unresolved = _payload(
+                await client.call_tool(
+                    "impact_graph", {"symbol": "does-not-exist"}
+                )
+            )
+            assert unresolved["ok"] is True
+            assert unresolved["data"]["resolved"] is False
+
+    _run(_body)
+    assert _payload_hashes(graph) == before
+    assert not list(tmp_path.glob("*.dot"))
+
+
+def test_impact_graph_mcp_validation_malformed_empty_and_envelope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    graph = _publish_components(
+        tmp_path,
+        [_component_entity("A"), _component_entity("B")],
+        [_component_rel("B", "A", "calls")],
+    )
+    session = _session(graph, "python")
+    observed: list[str] = []
+    orig_scope = session._scope
+
+    def wrapped_scope(snapshot):
+        observed.append(str(snapshot))
+        return orig_scope(snapshot)
+
+    monkeypatch.setattr(session, "_scope", wrapped_scope)
+    with pytest.raises(GraphMcpError, match="symbol"):
+        session.impact_graph("")
+    with pytest.raises(GraphMcpError, match="symbol"):
+        session.impact_graph(None)
+    with pytest.raises(GraphMcpError, match="max_depth"):
+        session.impact_graph("A", max_depth=True)
+    with pytest.raises(GraphMcpError, match="max_nodes"):
+        session.impact_graph("A", max_nodes=False)
+    with pytest.raises(GraphMcpError, match="max_edges"):
+        session.impact_graph("A", max_edges=True)
+    with pytest.raises(GraphMcpError, match="max_depth"):
+        session.impact_graph("A", max_depth=1.5)
+    with pytest.raises(GraphMcpError, match="max_nodes"):
+        session.impact_graph("A", max_nodes=2.0)
+    with pytest.raises(GraphMcpError, match="max_depth"):
+        session.impact_graph("A", max_depth="1")
+    with pytest.raises(GraphMcpError, match="max_depth"):
+        session.impact_graph("A", max_depth=float("nan"))
+    with pytest.raises(GraphMcpError, match="max_nodes"):
+        session.impact_graph("A", max_nodes=math.nan)
+    with pytest.raises(GraphMcpError, match="max_edges"):
+        session.impact_graph("A", max_edges=math.inf)
+    with pytest.raises(GraphMcpError, match="max_depth"):
+        session.impact_graph("A", max_depth=-1)
+    with pytest.raises(GraphMcpError, match="max_nodes"):
+        session.impact_graph("A", max_nodes=0)
+    with pytest.raises(GraphMcpError, match="max_edges"):
+        session.impact_graph("A", max_edges=-1)
+    with pytest.raises(GraphMcpError, match="max_depth"):
+        session.impact_graph("A", max_depth=HARD_MAX_IMPACT_GRAPH_DEPTH + 1)
+    with pytest.raises(GraphMcpError, match="max_nodes"):
+        session.impact_graph("A", max_nodes=HARD_MAX_IMPACT_GRAPH_NODES + 1)
+    with pytest.raises(GraphMcpError, match="max_edges"):
+        session.impact_graph("A", max_edges=HARD_MAX_IMPACT_GRAPH_EDGES + 1)
+    assert observed == []
+    monkeypatch.undo()
+
+    session = _session(graph, "python")
+    with pytest.raises(GraphMcpError):
+        session.impact_graph("A", snapshot="..")
+    zero_edges = session.impact_graph("A", max_edges=0)
+    _assert_impact_graph_envelope(
+        zero_edges, ByogGraph(graph).impact_graph("A", max_edges=0)
+    )
+    assert zero_edges["data"]["n_edges_returned"] == 0
+
+    import graphrag_code.snapshot_read as scope_mod
+
+    real = scope_mod.resolve_snapshot
+    seen = {"n": 0}
+
+    def counted_resolve(graph_root, snapshot=None):
+        seen["n"] += 1
+        seen["last"] = snapshot
+        return real(graph_root, snapshot)
+
+    monkeypatch.setattr(scope_mod, "resolve_snapshot", counted_resolve)
+    session.impact_graph("A")
+    assert seen["n"] == 1
+    assert seen["last"] is None
+    monkeypatch.undo()
+
+    empty_graph = tmp_path / "empty"
+    publish_byog_snapshot(
+        pd.DataFrame(columns=["id", "title", "type", "source_file", "extractor"]),
+        pd.DataFrame(columns=["id", "source", "target", "type", "extractor"]),
+        pd.DataFrame(columns=["id", "title", "source_file"]),
+        empty_graph,
+        settings_text="mcp: empty\n",
+        keep_last=1,
+    )
+    empty_session = GraphMcpSession(
+        empty_graph,
+        configured_indexer="python",
+        resolved_indexer="python",
+        preflight={"indexer": "python", "indexer_resolution": {}},
+    )
+    empty_payload = empty_session.impact_graph("A")
+    expected_empty = json.loads(
+        json.dumps(
+            ByogGraph(empty_graph).impact_graph("A"),
+            allow_nan=False,
+            default=str,
+        )
+    )
+    _assert_impact_graph_envelope(empty_payload, expected_empty)
+    assert empty_payload["data"]["resolved"] is False
+    assert empty_payload["truncated"] is False
+    assert empty_payload["total"] == 0
+    assert empty_payload["returned"] == 0
+
+    bad = tmp_path / "bad"
+    publish_byog_snapshot(
+        pd.DataFrame([_component_entity("A")]),
+        pd.DataFrame(
+            [
+                {
+                    "id": "rel:ok",
+                    "source": "A",
+                    "target": "A",
+                    "type": "calls",
+                    "extractor": "tree-sitter-python",
+                },
+                {
+                    "id": "rel:bad",
+                    "source": "A",
+                    "target": None,
+                    "type": "contains",
+                    "extractor": "tree-sitter-python",
+                },
+            ]
+        ),
+        pd.DataFrame(
+            [{"id": "tu:a", "title": "a.py", "source_file": "a.py", "entity_id": "ent:A"}]
+        ),
+        bad,
+        settings_text="mcp: bad\n",
+        keep_last=1,
+    )
+    bad_session = GraphMcpSession(
+        bad,
+        configured_indexer="python",
+        resolved_indexer="python",
+        preflight={"indexer": "python", "indexer_resolution": {}},
+    )
+    with pytest.raises(GraphMcpError, match="invalid target"):
+        bad_session.impact_graph("A")
+
+    missing = tmp_path / "missing-graph"
+    missing_session = GraphMcpSession(
+        missing,
+        configured_indexer="python",
+        resolved_indexer="python",
+        preflight={"indexer": "python", "indexer_resolution": {}},
+    )
+    with pytest.raises(GraphMcpError):
+        missing_session.impact_graph("A")
+
+    unlocked = _publish_components(
+        tmp_path / "unlocked",
+        [_component_entity("A"), _component_entity("B")],
+        [_component_rel("B", "A", "calls")],
+        name="unlocked",
+    )
+    lock = unlocked / ".publish.lock"
+    lock.unlink()
+    unlocked_session = GraphMcpSession(
+        unlocked,
+        configured_indexer="python",
+        resolved_indexer="python",
+        preflight={"indexer": "python", "indexer_resolution": {}},
+    )
+    with pytest.raises(GraphMcpError, match="publication lock"):
+        unlocked_session.impact_graph("A")
+    assert not lock.exists()
+
+    unsafe = _publish_components(
+        tmp_path / "unsafe",
+        [_component_entity("A"), _component_entity("B")],
+        [_component_rel("B", "A", "calls")],
+        name="unsafe",
+    )
+    real_lock = unsafe / ".publish.lock"
+    backup = unsafe / ".publish.lock.real"
+    real_lock.rename(backup)
+    real_lock.symlink_to(backup)
+    unsafe_session = GraphMcpSession(
+        unsafe,
+        configured_indexer="python",
+        resolved_indexer="python",
+        preflight={"indexer": "python", "indexer_resolution": {}},
+    )
+    with pytest.raises(GraphMcpError, match="unsafe"):
+        unsafe_session.impact_graph("A")
+
+    import graphrag_code.mcp_server as mcp_mod
+
+    monkeypatch.setattr(mcp_mod, "HARD_MAX_ENVELOPE_BYTES", 64)
+    with pytest.raises(GraphMcpError, match="response envelope exceeds hard limit"):
+        session.impact_graph("A")
+    monkeypatch.undo()
+
+    server = build_mcp_server(session)
+
+    async def _body():
+        async with Client(server) as client:
+            for invalid_args in (
+                {"max_depth": True},
+                {"max_nodes": True},
+                {"max_edges": False},
+                {"max_depth": -1},
+                {"max_nodes": 0},
+                {"max_edges": -1},
+                {"max_depth": HARD_MAX_IMPACT_GRAPH_DEPTH + 1},
+                {"max_nodes": HARD_MAX_IMPACT_GRAPH_NODES + 1},
+                {"max_edges": HARD_MAX_IMPACT_GRAPH_EDGES + 1},
+                {"max_depth": 1.5},
+                {"snapshot": ".."},
+                {"symbol": ""},
+            ):
+                args = {"symbol": "A", **invalid_args}
+                invalid = await client.call_tool("impact_graph", args)
+                assert invalid.is_error is True, invalid_args
+                assert not getattr(invalid, "structured_content", None) or (
+                    isinstance(invalid.structured_content, dict)
+                    and invalid.structured_content.get("ok") is not True
+                )
+
+    _run(_body)
+
+
+def _mcp_paused_impact_graph(graph: str, pinned, resume, q) -> None:
+    sys.path.insert(0, str(Path(__file__).parents[3] / "src"))
+    import graphrag_code.mcp_server as mcp_mod
+
+    orig_envelope = mcp_mod._envelope
+
+    def wrapped_envelope(**kwargs):
+        payload = orig_envelope(**kwargs)
+        pinned.set()
+        if not resume.wait(timeout=20):
+            q.put("timeout")
+        return payload
+
+    mcp_mod._envelope = wrapped_envelope
+    session = mcp_mod.GraphMcpSession(
+        Path(graph),
+        configured_indexer="python",
+        resolved_indexer="python",
+        preflight={"indexer": "python", "indexer_resolution": {}},
+    )
+    payload = session.impact_graph("A")
+    q.put(payload["snapshot"])
+
+
+def test_impact_graph_mcp_publisher_wait_and_no_nested_query(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import multiprocessing
+
+    graph = _publish_components(
+        tmp_path,
+        [_component_entity("A"), _component_entity("B")],
+        [_component_rel("B", "A", "calls")],
+    )
+    first = _current(graph)
+    first_dir = graph / "snapshots" / first
+    before = _payload_hashes(graph)
+    session = _session(graph, "python")
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("nested public query or DOT invoked from MCP impact_graph")
+
+    producer_calls = 0
+    producer = ByogGraph.impact_graph
+    resolve_calls = 0
+    resolve = ByogGraph.resolve
+    impact_calls = 0
+    impact = ByogGraph.impact
+
+    def counted_producer(self, *args, **kwargs):
+        nonlocal producer_calls
+        producer_calls += 1
+        return producer(self, *args, **kwargs)
+
+    def counted_resolve(self, *args, **kwargs):
+        nonlocal resolve_calls
+        resolve_calls += 1
+        return resolve(self, *args, **kwargs)
+
+    def counted_impact(self, *args, **kwargs):
+        nonlocal impact_calls
+        impact_calls += 1
+        return impact(self, *args, **kwargs)
+
+    monkeypatch.setattr("graphrag_code.graph_query.impact_graph", boom)
+    monkeypatch.setattr("graphrag_code.graph_query.cli_impact_graph", boom)
+    monkeypatch.setattr("graphrag_code.cli.impact_graph", boom)
+    monkeypatch.setattr("graphrag_code.graph_query.impact", boom)
+    monkeypatch.setattr("graphrag_code.graph_query.subgraph", boom)
+    monkeypatch.setattr(
+        "graphrag_code.impact_graph_dot.dumps_impact_graph_dot", boom
+    )
+    monkeypatch.setattr(ByogGraph, "subgraph", boom)
+    monkeypatch.setattr(ByogGraph, "type_closure", boom)
+    monkeypatch.setattr(ByogGraph, "impact_graph", counted_producer)
+    monkeypatch.setattr(ByogGraph, "resolve", counted_resolve)
+    monkeypatch.setattr(ByogGraph, "impact", counted_impact)
+    payload = session.impact_graph("A")
+    assert payload["ok"] is True
+    assert producer_calls == 1
+    assert resolve_calls == 1
+    assert impact_calls == 0
+    legacy = session.impact("A")
+    assert legacy["tool"] == "impact"
+    assert impact_calls == 1
+    assert producer_calls == 1
+    assert _payload_hashes(graph) == before
+    assert not list(graph.glob(".staging-*"))
+    assert not list(tmp_path.glob("*.dot"))
+    assert (graph / ".publish.lock").is_file()
+    src = inspect.getsource(GraphMcpSession.impact_graph)
+    assert src.count("load_graph()") == 1
+    assert src.count(".impact_graph(") == 1
+    assert "dumps_impact_graph_dot" not in src
+    assert "impact_graph_dot" not in src
+    assert "compute_bounded_call_impact" not in src
+    assert "compute_transitive_call_impact" not in src
+    assert "networkx" not in src
+    assert "subprocess" not in src
+    assert "graph_query.impact_graph" not in src
+    assert "cli_impact_graph" not in src
+    assert ".subgraph(" not in src
+    stripped = src.replace(".impact_graph(", "")
+    assert ".impact(" not in stripped
+    import graphrag_code.mcp_server as mcp_mod
+
+    module_src = inspect.getsource(mcp_mod)
+    assert "impact_graph_dot" not in module_src
+    assert "dumps_impact_graph_dot" not in module_src
+
+    ctx = multiprocessing.get_context("spawn")
+    pinned = ctx.Event()
+    resume = ctx.Event()
+    about = ctx.Event()
+    got = ctx.Event()
+    q = ctx.Queue()
+    reader = ctx.Process(
+        target=_mcp_paused_impact_graph, args=(str(graph), pinned, resume, q)
     )
     from test_reader_lease import _cleanup_processes, _publisher
 

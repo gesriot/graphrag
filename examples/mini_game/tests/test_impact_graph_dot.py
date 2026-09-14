@@ -1078,11 +1078,21 @@ def test_mcp_remains_seventeen_tools_without_dot(tmp_path: Path):
     )
     session = build_session(graph, "python")
     server = build_mcp_server(session)
-    assert not hasattr(session, "impact_graph")
     params = list(inspect.signature(GraphMcpSession.impact).parameters)
     assert "dot" not in params
     assert "format" not in params
     assert params == ["self", "symbol", "max_items", "snapshot"]
+    graph_params = list(inspect.signature(GraphMcpSession.impact_graph).parameters)
+    assert "dot" not in graph_params
+    assert "format" not in graph_params
+    assert graph_params == [
+        "self",
+        "symbol",
+        "max_depth",
+        "max_nodes",
+        "max_edges",
+        "snapshot",
+    ]
     assert list(TOOL_NAMES) == [
         "graph_status",
         "graph_doctor",
@@ -1097,20 +1107,22 @@ def test_mcp_remains_seventeen_tools_without_dot(tmp_path: Path):
         "shortest_path",
         "degree_ranking",
         "impact",
+        "impact_graph",
         "type_closure",
         "context_pack",
         "snapshot_history",
         "snapshot_diff",
     ]
-    assert len(TOOL_NAMES) == 17
-    assert "impact_graph" not in TOOL_NAMES
+    assert len(TOOL_NAMES) == 18
+    assert "impact-graph" not in TOOL_NAMES
 
     async def _body():
         async with Client(server) as client:
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert "impact_graph" not in names
+            assert names[names.index("impact") + 1] == "impact_graph"
+            assert "impact-graph" not in names
             tool = next(item for item in tools if item.name == "impact")
             props = tool.input_schema.get("properties") or {}
             assert "dot" not in props
@@ -1121,5 +1133,15 @@ def test_mcp_remains_seventeen_tools_without_dot(tmp_path: Path):
                 body = body["result"]
             assert body["tool"] == "impact"
             assert "digraph" not in json.dumps(body)
+            graph_tool = next(item for item in tools if item.name == "impact_graph")
+            graph_props = graph_tool.input_schema.get("properties") or {}
+            assert "dot" not in graph_props
+            assert "format" not in graph_props
+            graph_body = await client.call_tool("impact_graph", {"symbol": "A"})
+            payload = graph_body.structured_content
+            if isinstance(payload, dict) and set(payload) == {"result"}:
+                payload = payload["result"]
+            assert payload["tool"] == "impact_graph"
+            assert "digraph" not in json.dumps(payload)
 
     anyio_run(_body)

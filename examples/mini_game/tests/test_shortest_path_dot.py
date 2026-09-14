@@ -1161,12 +1161,13 @@ def test_mcp_remains_seventeen_tools_without_dot(tmp_path: Path):
         "shortest_path",
         "degree_ranking",
         "impact",
+        "impact_graph",
         "type_closure",
         "context_pack",
         "snapshot_history",
         "snapshot_diff",
     ]
-    assert len(TOOL_NAMES) == 17
+    assert len(TOOL_NAMES) == 18
     assert "shortest-path" not in TOOL_NAMES
 
     async def _body():
@@ -1174,7 +1175,7 @@ def test_mcp_remains_seventeen_tools_without_dot(tmp_path: Path):
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert len(names) == 17
+            assert len(names) == 18
             tool = next(item for item in tools if item.name == "shortest_path")
             props = tool.input_schema.get("properties") or {}
             assert "dot" not in props

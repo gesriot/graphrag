@@ -32,6 +32,9 @@ from graphrag_code.byog_graph import (
     DEFAULT_CONDENSATION_MAX_EDGES,
     DEFAULT_CONDENSATION_MAX_NODES_PER_COMPONENT,
     DEFAULT_DEGREE_RANKING_MAX_NODES,
+    DEFAULT_IMPACT_GRAPH_MAX_DEPTH,
+    DEFAULT_IMPACT_GRAPH_MAX_EDGES,
+    DEFAULT_IMPACT_GRAPH_MAX_NODES,
     DEFAULT_SHORTEST_PATH_MAX_DEPTH,
     DEFAULT_STRONG_COMPONENTS_MAX_COMPONENTS,
     DEFAULT_STRONG_COMPONENTS_MAX_NODES_PER_COMPONENT,
@@ -48,6 +51,9 @@ from graphrag_code.byog_graph import (
     HARD_MAX_CONDENSATION_COMPONENTS,
     HARD_MAX_CONDENSATION_EDGES,
     HARD_MAX_DEGREE_RANKING_NODES,
+    HARD_MAX_IMPACT_GRAPH_DEPTH,
+    HARD_MAX_IMPACT_GRAPH_EDGES,
+    HARD_MAX_IMPACT_GRAPH_NODES,
     HARD_MAX_SHORTEST_PATH_DEPTH,
     HARD_MAX_STRONG_COMPONENTS,
     HARD_MAX_STRONG_COMPONENT_NODES,
@@ -119,6 +125,7 @@ TOOL_NAMES = (
     "shortest_path",
     "degree_ranking",
     "impact",
+    "impact_graph",
     "type_closure",
     "context_pack",
     "snapshot_history",
@@ -418,6 +425,67 @@ class GraphMcpSession:
         return self._symbol_list(
             "impact", symbol, max_items, lambda g, title: g.impact(title), snapshot
         )
+
+    def impact_graph(
+        self,
+        symbol: Any,
+        max_depth: Any = DEFAULT_IMPACT_GRAPH_MAX_DEPTH,
+        max_nodes: Any = DEFAULT_IMPACT_GRAPH_MAX_NODES,
+        max_edges: Any = DEFAULT_IMPACT_GRAPH_MAX_EDGES,
+        snapshot: Any = CURRENT_REF,
+    ) -> Dict[str, Any]:
+        title = _require_str("symbol", symbol)
+        for name, value in (
+            ("max_depth", max_depth),
+            ("max_nodes", max_nodes),
+            ("max_edges", max_edges),
+        ):
+            _reject_non_finite(name, value)
+        depth = _require_int(
+            "max_depth", max_depth, minimum=0, maximum=HARD_MAX_IMPACT_GRAPH_DEPTH
+        )
+        nodes = _require_int(
+            "max_nodes", max_nodes, minimum=1, maximum=HARD_MAX_IMPACT_GRAPH_NODES
+        )
+        edges = _require_int(
+            "max_edges", max_edges, minimum=0, maximum=HARD_MAX_IMPACT_GRAPH_EDGES
+        )
+        try:
+            with self._scope(snapshot) as scope:
+                if scope.snap_id is None:
+                    raise GraphMcpError(
+                        f"graph has no published snapshot for {snapshot!r}"
+                    )
+                try:
+                    result = scope.load_graph().impact_graph(
+                        title,
+                        max_depth=depth,
+                        max_nodes=nodes,
+                        max_edges=edges,
+                    )
+                except ValueError as exc:
+                    raise GraphMcpError(str(exc)) from exc
+                truncated = bool(
+                    result["nodes_truncated"] or result["edges_truncated"]
+                )
+                return _envelope(
+                    tool="impact_graph",
+                    graph=self.graph_root,
+                    snapshot=scope.snap_id,
+                    data=result,
+                    limits={
+                        "max_depth": depth,
+                        "max_nodes": nodes,
+                        "max_edges": edges,
+                    },
+                    truncated=truncated,
+                    total=int(result["n_nodes_total"])
+                    + int(result["n_edges_total"]),
+                    returned=int(result["n_nodes_returned"])
+                    + int(result["n_edges_returned"]),
+                )
+        except (ByogReaderLockError, SnapshotReadError) as exc:
+            raise GraphMcpError(str(exc)) from exc
 
     def _symbol_list(
         self, tool: str, symbol: Any, max_items: Any, fn, snapshot: Any = CURRENT_REF
@@ -1312,6 +1380,25 @@ def build_mcp_server(session: GraphMcpSession) -> MCPServer:
         snapshot: str = CURRENT_REF,
     ) -> Dict[str, Any]:
         return session.impact(symbol, max_items, snapshot)
+
+    @mcp.tool(
+        name="impact_graph",
+        description=(
+            "Bounded reverse-call impact graph. "
+            "Deterministic structural exploration only."
+        ),
+        annotations=READ_ONLY_TOOL,
+    )
+    def impact_graph(
+        symbol: str,
+        max_depth: StrictInt = DEFAULT_IMPACT_GRAPH_MAX_DEPTH,
+        max_nodes: StrictInt = DEFAULT_IMPACT_GRAPH_MAX_NODES,
+        max_edges: StrictInt = DEFAULT_IMPACT_GRAPH_MAX_EDGES,
+        snapshot: str = CURRENT_REF,
+    ) -> Dict[str, Any]:
+        return session.impact_graph(
+            symbol, max_depth, max_nodes, max_edges, snapshot
+        )
 
     @mcp.tool(
         name="type_closure",

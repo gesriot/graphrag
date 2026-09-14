@@ -1,8 +1,9 @@
-"""Bounded reverse-call impact graph (CLI/Python only).
+"""Bounded reverse-call impact graph.
 
 Canonical producer: compute_bounded_call_impact. Legacy unbounded
 impact List[str] and MCP impact remain unchanged. DOT is a separate
-serializer over this producer result.
+serializer over this producer result. MCP exposes the bounded producer
+as impact_graph immediately after impact.
 """
 from __future__ import annotations
 
@@ -1049,7 +1050,18 @@ def test_mcp_remains_seventeen_legacy_impact_unchanged(
     server = build_mcp_server(session)
     params = list(inspect.signature(GraphMcpSession.impact).parameters)
     assert params == ["self", "symbol", "max_items", "snapshot"]
-    assert not hasattr(session, "impact_graph")
+    graph_params = list(inspect.signature(GraphMcpSession.impact_graph).parameters)
+    assert graph_params == [
+        "self",
+        "symbol",
+        "max_depth",
+        "max_nodes",
+        "max_edges",
+        "snapshot",
+    ]
+    assert "dot" not in graph_params
+    assert "format" not in graph_params
+    assert "max_items" not in graph_params
     expected = ByogGraph(graph).impact("A")
     assert expected == ["C0", "C1", "C2"]
     payload = session.impact("A")
@@ -1096,13 +1108,15 @@ def test_mcp_remains_seventeen_legacy_impact_unchanged(
         "shortest_path",
         "degree_ranking",
         "impact",
+        "impact_graph",
         "type_closure",
         "context_pack",
         "snapshot_history",
         "snapshot_diff",
     ]
-    assert len(TOOL_NAMES) == 17
-    assert "impact_graph" not in TOOL_NAMES
+    assert len(TOOL_NAMES) == 18
+    assert TOOL_NAMES[TOOL_NAMES.index("impact") + 1] == "impact_graph"
+    assert "impact-graph" not in TOOL_NAMES
     assert not (graph / ".publish.lock").is_symlink()
 
     async def _body():
@@ -1110,7 +1124,7 @@ def test_mcp_remains_seventeen_legacy_impact_unchanged(
             tools = (await client.list_tools()).tools
             names = [tool.name for tool in tools]
             assert names == list(TOOL_NAMES)
-            assert "impact_graph" not in names
+            assert names[names.index("impact") + 1] == "impact_graph"
             assert "impact-graph" not in names
             tool = next(item for item in tools if item.name == "impact")
             props = tool.input_schema.get("properties") or {}
@@ -1121,5 +1135,16 @@ def test_mcp_remains_seventeen_legacy_impact_unchanged(
                 body = body["result"]
             assert body["tool"] == "impact"
             assert body["data"] == expected
+            graph_tool = next(item for item in tools if item.name == "impact_graph")
+            graph_props = graph_tool.input_schema.get("properties") or {}
+            assert list(graph_props) == [
+                "symbol",
+                "max_depth",
+                "max_nodes",
+                "max_edges",
+                "snapshot",
+            ]
+            assert "dot" not in graph_props
+            assert "format" not in graph_props
 
     anyio_run(_body)

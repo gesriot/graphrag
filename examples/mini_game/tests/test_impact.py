@@ -931,12 +931,13 @@ def test_mcp_remains_seventeen_tools_unchanged_envelope_and_one_producer(
         "shortest_path",
         "degree_ranking",
         "impact",
+        "impact_graph",
         "type_closure",
         "context_pack",
         "snapshot_history",
         "snapshot_diff",
     ]
-    assert len(TOOL_NAMES) == 17
+    assert len(TOOL_NAMES) == 18
     assert not (graph / ".publish.lock").is_symlink()
 
     async def _body():

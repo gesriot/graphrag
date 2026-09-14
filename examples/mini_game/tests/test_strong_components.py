@@ -1218,12 +1218,13 @@ def test_mcp_exposes_strong_components_as_fifteenth_tool(tmp_path: Path):
         "shortest_path",
         "degree_ranking",
         "impact",
+        "impact_graph",
         "type_closure",
         "context_pack",
         "snapshot_history",
         "snapshot_diff",
     ]
-    assert len(TOOL_NAMES) == len(set(TOOL_NAMES)) == 17
+    assert len(TOOL_NAMES) == len(set(TOOL_NAMES)) == 18
 
     expected = ByogGraph(graph).strong_components()
     payload = session.strong_components()

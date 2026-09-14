@@ -55,13 +55,15 @@ precise call structure. The intended path is:
    centrality, or architecture inference. `--dot` is a deterministic Graphviz
    DOT interchange of that same bounded producer result on stdout;
    Graphviz is not invoked. `--json` and `--dot` are mutually exclusive.
-   MCP remains exactly 17 read-only
+   MCP remains exactly 18 read-only
    tools, does not expose DOT, includes `subgraph` immediately after
    `neighbors`, includes `components` immediately after `subgraph`, and
    includes `strong_components` immediately after `components`,
    includes `condensation` immediately after `strong_components`,
-   includes `shortest_path` immediately after `condensation`, and
-   includes `degree_ranking` immediately after `shortest_path`.
+   includes `shortest_path` immediately after `condensation`,
+   includes `degree_ranking` immediately after `shortest_path`,
+   includes `impact` immediately after `degree_ranking`, and
+   includes `impact_graph` immediately after `impact`.
    `components` is the existing bounded structural topology producer, not
    semantic community detection, Leiden, clustering, centrality, hierarchy,
    architecture inference, importance ranking, GraphRAG, or
@@ -84,7 +86,7 @@ precise call structure. The intended path is:
    relationship-row degree accounting only: not PageRank, betweenness,
    closeness, eigenvector centrality, a normalized score, semantic
    importance, leadership, architecture, communities, hierarchy, GraphRAG,
-   or natural-language analysis. MCP remains exactly 17 read-only tools.
+   or natural-language analysis. MCP remains exactly 18 read-only tools.
    `dependency-order` is a deterministic structural containment order over
    persisted `contains` rows: source before target across strongly connected
    components, UTF-8 presentation inside a cycle, full unbounded title list.
@@ -105,7 +107,7 @@ precise call structure. The intended path is:
    show the returned SCC grouping only; use `condensation --dot` for the
    cross-SCC DAG. `--json` and `--dot` are mutually exclusive. MCP exposes that existing bounded structural
    producer as `strong_components` immediately after `components`. MCP
-   remains exactly 17 read-only tools. `condensation` is a bounded directed
+   remains exactly 18 read-only tools. `condensation` is a bounded directed
    SCC condensation DAG over selected persisted rows (`--edge-type`,
    `--max-components`, `--max-nodes-per-component`, `--max-edges`). It is
    not weak `components`, not cycle enumeration, not transitive closure,
@@ -118,7 +120,7 @@ precise call structure. The intended path is:
    `condensation`, the sixteenth read-only tool added, immediately after
    `strong_components` and immediately before `shortest_path`. MCP does
    not expose DOT or a format parameter. There is no `condensation_graph`
-   alias. MCP remains exactly 17 read-only tools. `shortest-path` is a
+   alias. MCP remains exactly 18 read-only tools. `shortest-path` is a
    deterministic directed structural shortest path over selected persisted
    rows (`--edge-type`, `--max-depth`). Stored orientation only; among
    minimum-hop paths the UTF-8-smallest complete node-title sequence is
@@ -128,7 +130,7 @@ precise call structure. The intended path is:
    `--dot` are mutually exclusive. MCP exposes that existing producer as `shortest_path`,
    the seventeenth read-only tool, immediately after `condensation` and
    immediately before `degree_ranking`. There is no hyphenated alias.
-   MCP remains exactly 17 read-only tools. `type-closure` is a bounded
+   MCP remains exactly 18 read-only tools. `type-closure` is a bounded
    cycle-safe BFS over **only** persisted `uses_type` rows
    (`--direction dependencies|users|both`). Caps truncate returned lists;
    totals within `max_depth` stay exact. Stored orientation is preserved.
@@ -138,7 +140,7 @@ precise call structure. The intended path is:
    and no invented depth; omitted material is not reconstructed.
    `--json` and `--dot` are mutually exclusive. MCP keeps the existing
    `type_closure` producer/envelope unchanged and does not expose DOT.
-   MCP remains exactly 17 read-only tools. `impact` is one canonical
+   MCP remains exactly 18 read-only tools. `impact` is one canonical
    pure producer (`compute_transitive_call_impact`) over exact persisted
    `calls` rows: reverse reachability, root excluded, UTF-8-sorted
    unbounded `List[str]`. `ByogGraph.impact` and `graph_query.impact`
@@ -152,10 +154,15 @@ precise call structure. The intended path is:
    ordering. `--dot` is a deterministic Graphviz DOT interchange of that
    same producer mapping on stdout; Graphviz is not invoked. Only
    returned producer material is rendered. `--json` and `--dot` are
-   mutually exclusive. CLI/Python only; MCP does not expose
-   `impact_graph` or DOT. This is not runtime execution proof,
+   mutually exclusive. MCP exposes that existing bounded producer as
+   `impact_graph`, the 18th read-only tool, immediately after legacy
+   `impact` and immediately before `type_closure`. There is no
+   hyphenated alias. Envelope `total` / `returned` are node-plus-edge
+   counts. The 1 MiB envelope fails closed. MCP does not expose DOT
+   or output-format selection. Legacy `impact` remains a separate
+   list contract. This is not runtime execution proof,
    dynamic-dispatch completeness, semantic impact, a path explanation,
-   or the unbounded `impact` title list. MCP remains exactly 17
+   or the unbounded `impact` title list. MCP remains exactly 18
    read-only tools.
 6. **Golden-first porting gate** – before Rust: license/provenance, a golden
    contract the **reference language** already passes, then a clean graph audit,
@@ -271,7 +278,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`2257 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`2261 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`
@@ -325,7 +332,7 @@ Historical reads do not require `snapshot-activate` and do not change
 `current`. One shared `.publish.lock` lease pins the selected snapshot
 against cooperating keep-last retention until the complete response is
 built. `current` is resolved exactly once when selected and is not read
-for an explicit published id. The MCP tool set remains exactly 17.
+for an explicit published id. The MCP tool set remains exactly 18.
 Explicit query/context CLI selectors require the existing regular
 publication lock and never create it. Their omitted `--snapshot` path
 keeps the existing default current/legacy-flat pre-lock compatibility
@@ -338,7 +345,7 @@ activation, backup, or replication. Listing never creates the file.
 Unpin does not delete immediately. Cooperating keep-last protects
 ``current``, existing doc-claim pins, and operator pins. A malformed
 registry aborts publication before ``current`` or snapshot deletion.
-MCP remains exactly 17 read-only tools. ``graphrag-code
+MCP remains exactly 18 read-only tools. ``graphrag-code
 snapshot-retention-plan`` (also ``python -m
 graphrag_code.snapshot_retention`` and
 ``scripts/snapshot_retention.py``) is a read-only report of the shared

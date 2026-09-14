@@ -509,7 +509,7 @@ def test_concurrent_publishers_keep_unique_staging_and_publish(tmp_path: Path):
 
 
 def test_mcp_remains_exactly_seventeen_and_has_no_staging_tool():
-    assert len(TOOL_NAMES) == 17
+    assert len(TOOL_NAMES) == 18
     assert "snapshot_staging" not in TOOL_NAMES
     assert "staging_writer" not in " ".join(TOOL_NAMES)
 

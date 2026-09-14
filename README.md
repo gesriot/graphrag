@@ -141,7 +141,7 @@ rest of the call, and reports that canonical id in the response
 envelope. `current` is resolved exactly once when it is selected; an
 explicit id does not read `current`. Cooperating publishers and
 keep-last retention wait until the call releases the lock. The MCP tool
-set remains exactly 17 read-only tools. `snapshot_history` and
+set remains exactly 18 read-only tools. `snapshot_history` and
 `snapshot_diff` keep their own reference contracts. A managed graph without that regular lock file is rejected during
 MCP startup. MCP never creates the lock, and neither does the doctor or
 `ByogGraph`. To add the protocol to an existing pre-lock managed graph
@@ -178,7 +178,7 @@ no partial stdout. DOT is capped at 1,000,000 UTF-8 bytes and fails closed
 before writing. This is deterministic structural graph exploration only:
 not natural-language search, semantic inference, GraphRAG, community
 detection, architecture understanding, completeness beyond stored
-relationships, or a semantic/community visualization. MCP stays exactly 17
+relationships, or a semantic/community visualization. MCP stays exactly 18
 read-only tools and does not expose DOT; `subgraph` is immediately after
 `neighbors`.
 
@@ -211,7 +211,7 @@ this existing bounded topology producer as
 the thirteenth read-only tool, immediately after `subgraph`. It does not
 expose DOT or output-format selection. Representatives remain smallest
 UTF-8 titles, not leaders. Component size remains topology, not
-importance. The MCP tool set remains exactly 17 read-only tools.
+importance. The MCP tool set remains exactly 18 read-only tools.
 
 `graphrag-code degree-ranking` (also `python -m graphrag_code.graph_query degree-ranking`
 and `scripts/graph_query.py degree-ranking`) is a deterministic read-only
@@ -249,7 +249,7 @@ ordinal rank. This is raw directed relationship-row degree accounting
 only: not PageRank, betweenness, closeness, eigenvector centrality, a
 normalized score, semantic importance, leadership, architecture,
 communities, hierarchy, GraphRAG, or natural-language analysis. The MCP
-tool set remains exactly 17 read-only tools.
+tool set remains exactly 18 read-only tools.
 
 `graphrag-code strong-components` (also `python -m graphrag_code.graph_query strong-components`
 and `scripts/graph_query.py strong-components`) is a deterministic read-only
@@ -285,7 +285,7 @@ Leiden or semantic community detection, architecture, hierarchy,
 leadership, ownership, importance, dependency/build/import/call order,
 proof of runtime recursion or deadlock, GraphRAG, or natural-language
 analysis. This is the fifteenth read-only MCP tool. MCP remains read-only and does not index, mutate, activate,
-retain, repair, or clean up. The MCP tool set remains exactly 17
+retain, repair, or clean up. The MCP tool set remains exactly 18
 read-only tools.
 
 `graphrag-code dependency-order` (also `python -m graphrag_code.graph_query dependency-order`
@@ -314,7 +314,7 @@ capped at 1,000,000 UTF-8 bytes and fails closed before writing; the
 producer list itself remains unbounded. This is not a build order,
 import order, call order, semantic dependency order, architecture
 hierarchy, ownership proof, porting plan, GraphRAG, or natural-language
-analysis. MCP remains exactly 17 read-only tools and does not expose
+analysis. MCP remains exactly 18 read-only tools and does not expose
 `dependency_order` or `dependency-order`.
 
 `graphrag-code condensation` (also `python -m graphrag_code.graph_query condensation`
@@ -350,7 +350,7 @@ registered immediately after `strong_components` and immediately before
 `shortest_path`. It does not expose DOT, output-format selection, a graph
 path, a symbol, a direction, a rank, an algorithm, or source/target
 component arguments. MCP remains read-only and does not index, mutate,
-activate, retain, repair, or clean up. The MCP tool set remains exactly 17
+activate, retain, repair, or clean up. The MCP tool set remains exactly 18
 read-only tools. There is no `condensation_graph` or hyphenated alias.
 
 `graphrag-code shortest-path` (also `python -m graphrag_code.graph_query shortest-path`
@@ -381,7 +381,7 @@ read-only tool, immediately after `condensation` and immediately before
 `degree_ranking`. It does not expose DOT, a direction, a format, an
 algorithm, `max_nodes`, `max_edges`, a rank, or an output path. There is no
 hyphenated alias. Endpoint ambiguity remains an unresolved result. The MCP
-tool set remains exactly 17 read-only tools.
+tool set remains exactly 18 read-only tools.
 
 `graphrag-code type-closure` (also `python -m graphrag_code.graph_query type-closure`
 and `scripts/graph_query.py type-closure`) is a bounded cycle-safe BFS over
@@ -406,7 +406,7 @@ serialization identifiers only, not ordinal ranks. `--json` and `--dot`
 are mutually exclusive. DOT is capped at 1,000,000 UTF-8 bytes and fails
 closed before writing. This is not semantic type resolution, ABI proof,
 runtime dispatch, ownership, architecture, importance, hierarchy,
-community, GraphRAG, or natural-language analysis. MCP stays exactly 17
+community, GraphRAG, or natural-language analysis. MCP stays exactly 18
 read-only tools. The existing `type_closure` producer/envelope is
 unchanged and does not expose DOT or output-format selection.
 
@@ -451,8 +451,21 @@ producer lists; rendered Graphviz layout order is not guaranteed.
 Internal `n0000` identifiers are serialization identifiers only, not
 ordinal ranks. `--json` and `--dot` are mutually exclusive. DOT is
 capped at 1,000,000 UTF-8 bytes and fails closed before writing. MCP
-stays exactly 17 read-only tools and does not expose `impact_graph`,
-DOT, or output-format selection. This is not the unbounded `impact`
+exposes that existing bounded producer as `impact_graph`, the 18th
+read-only tool, immediately after legacy `impact` and immediately
+before `type_closure`. There is no hyphenated alias. Envelope `data`
+is the complete producer mapping. Envelope `total` /
+`returned` are node-plus-edge counts; `truncated` is
+`nodes_truncated or edges_truncated`. Limits are the dedicated
+impact-graph defaults 3/50/100 and hard maxima 32/500/500, plus
+`max_envelope_bytes = 1_000_000`. The 1 MiB envelope fails closed
+with no secondary shrinking. Explicit snapshot ids never activate or
+consult `current`. The shared reader lease is held through producer
+execution, JSON-ready conversion, envelope construction, size check,
+and return. MCP does not expose DOT or output-format selection; CLI
+and Python remain the visualization surfaces. Legacy `impact` remains
+a separate unbounded title-list contract. This is not the unbounded
+`impact`
 title list, runtime
 execution proof, complete dynamic dispatch, call-observation
 reconstruction, semantic impact, severity, ownership, importance,
@@ -543,7 +556,7 @@ regular `.publish.lock` and never create that file. Listing holds one
 shared lease; pin and unpin hold one exclusive lease. Advisory locks
 protect only cooperating processes. Manual or lock-ignoring deletion can
 still remove a pinned snapshot. These commands are intentionally absent
-from MCP. The MCP tool set remains exactly 17 read-only tools.
+from MCP. The MCP tool set remains exactly 18 read-only tools.
 
 `snapshot-retention-plan --graph <root> --keep-last <N>` is a read-only
 report of what cooperating keep-last cleanup would retain and delete. It
@@ -911,7 +924,7 @@ export-staging-cleanup-reconcile, import-plan, import-apply,
 import-reconcile, transfer-plan, transfer-apply, and
 transfer-reconcile commands are
 intentionally absent from MCP. The MCP tool set remains exactly
-17 read-only tools.
+18 read-only tools.
 
 Query and context-pack commands accept optional
 `--snapshot <id|current>`. Omitting it preserves the existing default
