@@ -46,6 +46,8 @@ from graphrag_code.byog_graph import (
     DEFAULT_IMPACT_GRAPH_MAX_DEPTH,
     DEFAULT_IMPACT_GRAPH_MAX_EDGES,
     DEFAULT_IMPACT_GRAPH_MAX_NODES,
+    DEFAULT_MODULE_INVENTORY_MAX_MEMBERS_PER_MODULE,
+    DEFAULT_MODULE_INVENTORY_MAX_MODULES,
     DEFAULT_SHORTEST_PATH_MAX_DEPTH,
     DEFAULT_STRONG_COMPONENTS_MAX_COMPONENTS,
     DEFAULT_STRONG_COMPONENTS_MAX_NODES_PER_COMPONENT,
@@ -889,6 +891,38 @@ def impact_graph(
         args.append("--json")
     if dot_out:
         args.append("--dot")
+    _delegate("graph_query.py", args)
+
+
+@app.command("modules")
+def modules(
+    graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
+    max_modules: int = typer.Option(
+        DEFAULT_MODULE_INVENTORY_MAX_MODULES, "--max-modules"
+    ),
+    max_members_per_module: int = typer.Option(
+        DEFAULT_MODULE_INVENTORY_MAX_MEMBERS_PER_MODULE,
+        "--max-members-per-module",
+    ),
+    json_out: bool = typer.Option(False, "--json"),
+):
+    """Bounded inventory of exact persisted module entities (graph_query.py modules).
+
+    Direct contains members only. Human and JSON both delegate to
+    ``graph_query.py``. There is no ``--dot`` on this command.
+    """
+    args = _append_snapshot(["modules", "--graph", str(graph)], snapshot)
+    args.extend(
+        [
+            "--max-modules",
+            str(max_modules),
+            "--max-members-per-module",
+            str(max_members_per_module),
+        ]
+    )
+    if json_out:
+        args.append("--json")
     _delegate("graph_query.py", args)
 
 

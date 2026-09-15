@@ -54,6 +54,14 @@ HARD_MAX_IMPACT_GRAPH_DEPTH = 32
 HARD_MAX_IMPACT_GRAPH_NODES = 500
 HARD_MAX_IMPACT_GRAPH_EDGES = 500
 
+# Bounded inventory of exact persisted module entities and direct contains
+# members (CLI/Python only; not MCP).
+DEFAULT_MODULE_INVENTORY_MAX_MODULES = 50
+HARD_MAX_MODULE_INVENTORY_MODULES = 500
+DEFAULT_MODULE_INVENTORY_MAX_MEMBERS_PER_MODULE = 50
+HARD_MAX_MODULE_INVENTORY_MEMBERS_PER_MODULE = 500
+_MODULE_ENT_REQUIRED = ("id", "title", "type")
+
 # Weakly connected components (structural grouping summary only).
 DEFAULT_COMPONENTS_MAX_COMPONENTS = 20
 DEFAULT_COMPONENTS_MAX_NODES_PER_COMPONENT = 20
@@ -2819,6 +2827,25 @@ class ByogGraph:
                 if c in self.call_observations.columns]
         return self.call_observations.loc[mask, cols].to_dict(orient="records")
 
+    def modules(
+        self,
+        *,
+        max_modules: int = DEFAULT_MODULE_INVENTORY_MAX_MODULES,
+        max_members_per_module: int = DEFAULT_MODULE_INVENTORY_MAX_MEMBERS_PER_MODULE,
+    ) -> Dict[str, Any]:
+        """Bounded inventory of exact persisted ``module`` entities.
+
+        Direct ``contains`` members only. Caps truncate returned lists;
+        totals stay exact. This is not a module dependency graph,
+        architecture, hierarchy, or MCP tool.
+        """
+        return compute_module_inventory(
+            self.ents,
+            self.rels,
+            max_modules=max_modules,
+            max_members_per_module=max_members_per_module,
+        )
+
 
 # Back-compat helpers for existing code that expects dataframes
 def load_byog(graph_dir: Path) -> Dict[str, pd.DataFrame]:
@@ -3831,6 +3858,149 @@ def compute_bounded_call_impact(
         "n_edges_returned": len(edges_out),
         "nodes_truncated": n_nodes_total > len(nodes_out),
         "edges_truncated": n_edges_total > len(edges_out),
+    }
+
+
+def _optional_module_metadata(raw: Any, field: str, loc: Any) -> Optional[str]:
+    value = _subgraph_json_value(raw)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"entity at row {loc!r} has invalid {field}={raw!r}")
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError(
+            f"entity at row {loc!r} has invalid {field}={raw!r}"
+        ) from exc
+    return value
+
+
+def _select_module_entities(ents: Optional[pd.DataFrame]) -> List[Dict[str, Any]]:
+    if ents is None:
+        return []
+    if not isinstance(ents, pd.DataFrame):
+        raise ValueError("entities must be a dataframe or null")
+    if len(ents) == 0:
+        return []
+    missing = sorted(set(_MODULE_ENT_REQUIRED) - set(ents.columns))
+    if missing:
+        raise ValueError(f"entity table is missing required columns {missing!r}")
+    modules: List[Dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    seen_titles: set[str] = set()
+    has_description = "description" in ents.columns
+    has_source_file = "source_file" in ents.columns
+    for row_index, row in ents.iterrows():
+        eid = _require_component_str(row.get("id"), "id", row_index, kind="entity")
+        title = _require_component_str(
+            row.get("title"), "title", row_index, kind="entity"
+        )
+        entity_type = _require_component_str(
+            row.get("type"), "type", row_index, kind="entity"
+        )
+        if entity_type != "module":
+            continue
+        if eid in seen_ids:
+            raise ValueError(f"duplicate selected module id {eid!r}")
+        if title in seen_titles:
+            raise ValueError(f"duplicate selected module title {title!r}")
+        seen_ids.add(eid)
+        seen_titles.add(title)
+        modules.append(
+            {
+                "id": eid,
+                "title": title,
+                "source_file": _optional_module_metadata(
+                    row.get("source_file") if has_source_file else None,
+                    "source_file",
+                    row_index,
+                ),
+                "description": _optional_module_metadata(
+                    row.get("description") if has_description else None,
+                    "description",
+                    row_index,
+                ),
+            }
+        )
+    return modules
+
+
+def compute_module_inventory(
+    ents: Optional[pd.DataFrame],
+    rels: Optional[pd.DataFrame],
+    *,
+    max_modules: int = DEFAULT_MODULE_INVENTORY_MAX_MODULES,
+    max_members_per_module: int = DEFAULT_MODULE_INVENTORY_MAX_MEMBERS_PER_MODULE,
+) -> Dict[str, Any]:
+    """Pure bounded inventory of exact persisted ``module`` entities.
+
+    Direct ``contains`` members only. Caps truncate returned lists;
+    totals stay exact. Non-module contains sources do not create
+    modules. This is not a dependency graph or architecture summary.
+    """
+    max_modules = _require_limit_int(
+        "max_modules",
+        max_modules,
+        minimum=1,
+        maximum=HARD_MAX_MODULE_INVENTORY_MODULES,
+    )
+    max_members_per_module = _require_limit_int(
+        "max_members_per_module",
+        max_members_per_module,
+        minimum=0,
+        maximum=HARD_MAX_MODULE_INVENTORY_MEMBERS_PER_MODULE,
+    )
+    modules = _select_module_entities(ents)
+    selected = _strict_selected_relationship_rows(rels, ["contains"])
+    module_titles = {item["title"] for item in modules}
+    members_by_module: Dict[str, set[str]] = {
+        item["title"]: set() for item in modules
+    }
+    for _rid, src, tgt, _rel_type, _row in selected:
+        if src in module_titles:
+            members_by_module[src].add(tgt)
+    modules.sort(key=lambda item: _utf8_key(item["title"]))
+    complete: List[Dict[str, Any]] = []
+    n_members_total = 0
+    for item in modules:
+        member_titles = sorted(members_by_module[item["title"]], key=_utf8_key)
+        n_members_total += len(member_titles)
+        complete.append({**item, "all_members": member_titles})
+    returned_rows = complete[:max_modules]
+    out_modules: List[Dict[str, Any]] = []
+    n_members_returned = 0
+    members_truncated = False
+    for item in returned_rows:
+        all_members = item["all_members"]
+        members = all_members[:max_members_per_module]
+        truncated = len(all_members) > len(members)
+        members_truncated = members_truncated or truncated
+        n_members_returned += len(members)
+        out_modules.append(
+            {
+                "id": item["id"],
+                "title": item["title"],
+                "source_file": item["source_file"],
+                "description": item["description"],
+                "n_members_total": len(all_members),
+                "n_members_returned": len(members),
+                "members_truncated": truncated,
+                "members": members,
+            }
+        )
+    return {
+        "schema_version": 1,
+        "relationship_type": "contains",
+        "max_modules": max_modules,
+        "max_members_per_module": max_members_per_module,
+        "n_modules_total": len(complete),
+        "n_modules_returned": len(out_modules),
+        "n_members_total": n_members_total,
+        "n_members_returned": n_members_returned,
+        "modules_truncated": len(out_modules) < len(complete),
+        "members_truncated": members_truncated,
+        "modules": out_modules,
     }
 
 

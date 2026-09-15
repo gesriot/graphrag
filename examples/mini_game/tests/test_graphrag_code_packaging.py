@@ -96,6 +96,7 @@ def test_python_module_help():
     assert "degree-ranking" in proc.stdout
     assert "dependency-order" in proc.stdout
     assert "impact-graph" in proc.stdout
+    assert "modules" in proc.stdout
     assert "index-python" in proc.stdout
     assert "mcp" in proc.stdout
     assert "adopt-publication-lock" in proc.stdout
@@ -150,6 +151,7 @@ def test_source_script_and_package_expose_same_commands():
         "degree-ranking",
         "dependency-order",
         "impact-graph",
+        "modules",
         "context-pack",
         "index-python",
         "index-c",

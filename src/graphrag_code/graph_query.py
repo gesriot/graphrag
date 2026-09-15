@@ -20,6 +20,7 @@ Provides:
 - impact_graph(symbol)    # bounded reverse-call impact graph over exact calls
 - symbol(query)
 - observations(symbol_or_module)   # weak/ambiguous/container resolver diagnostics
+- modules()               # bounded inventory of exact module entities and direct contains members
 
 Designed to be used from agent loops, context-pack, or directly from the shell.
 
@@ -48,6 +49,8 @@ Example:
     uv run python scripts/graph_query.py impact-graph sim:run_simulation --graph byog_mini_game --json
     uv run python scripts/graph_query.py impact-graph sim:run_simulation --graph byog_mini_game --dot
     uv run python scripts/graph_query.py observations sim:run_simulation --graph byog_mini_game
+    uv run python scripts/graph_query.py modules --graph byog_mini_game
+    uv run python scripts/graph_query.py modules --graph byog_mini_game --json
 """
 
 from __future__ import annotations
@@ -71,6 +74,8 @@ from graphrag_code.byog_graph import (  # re-export for backward compat
     DEFAULT_IMPACT_GRAPH_MAX_DEPTH,
     DEFAULT_IMPACT_GRAPH_MAX_EDGES,
     DEFAULT_IMPACT_GRAPH_MAX_NODES,
+    DEFAULT_MODULE_INVENTORY_MAX_MEMBERS_PER_MODULE,
+    DEFAULT_MODULE_INVENTORY_MAX_MODULES,
     DEFAULT_SHORTEST_PATH_MAX_DEPTH,
     DEFAULT_STRONG_COMPONENTS_MAX_COMPONENTS,
     DEFAULT_STRONG_COMPONENTS_MAX_NODES_PER_COMPONENT,
@@ -89,6 +94,8 @@ from graphrag_code.byog_graph import (  # re-export for backward compat
     HARD_MAX_IMPACT_GRAPH_DEPTH,
     HARD_MAX_IMPACT_GRAPH_EDGES,
     HARD_MAX_IMPACT_GRAPH_NODES,
+    HARD_MAX_MODULE_INVENTORY_MEMBERS_PER_MODULE,
+    HARD_MAX_MODULE_INVENTORY_MODULES,
     HARD_MAX_SHORTEST_PATH_DEPTH,
     HARD_MAX_STRONG_COMPONENTS,
     HARD_MAX_STRONG_COMPONENT_NODES,
@@ -98,6 +105,7 @@ from graphrag_code.byog_graph import (  # re-export for backward compat
     ByogGraph,
     compute_bounded_call_impact,
     compute_bounded_subgraph,
+    compute_module_inventory,
     compute_condensation_graph,
     compute_containment_dependency_order,
     compute_shortest_path,
@@ -107,6 +115,7 @@ from graphrag_code.byog_graph import (  # re-export for backward compat
     compute_uses_type_closure,
     compute_weakly_connected_components,
     load_graph,
+    _require_limit_int,
 )
 from graphrag_code.snapshot_read import (
     SnapshotReadError,
@@ -314,6 +323,54 @@ def components(
         max_components=max_components,
         max_nodes_per_component=max_nodes_per_component,
     )
+
+
+def modules(
+    ents: Optional[pd.DataFrame],
+    rels: Optional[pd.DataFrame],
+    *,
+    max_modules: int = DEFAULT_MODULE_INVENTORY_MAX_MODULES,
+    max_members_per_module: int = DEFAULT_MODULE_INVENTORY_MAX_MEMBERS_PER_MODULE,
+) -> Dict[str, Any]:
+    """Bounded inventory of exact persisted module entities (delegates once)."""
+    return compute_module_inventory(
+        ents,
+        rels,
+        max_modules=max_modules,
+        max_members_per_module=max_members_per_module,
+    )
+
+
+def dumps_modules_json(result: Dict[str, Any]) -> str:
+    """Deterministic JSON for the module inventory mapping."""
+    return json.dumps(
+        result,
+        indent=2,
+        ensure_ascii=False,
+        sort_keys=True,
+        allow_nan=False,
+    )
+
+
+def format_modules_human(result: Dict[str, Any]) -> str:
+    """Stable human-readable module inventory (shared by graph_query wrappers)."""
+    n_ret = int(result.get("n_modules_returned") or 0)
+    n_tot = int(result.get("n_modules_total") or 0)
+    trunc = " truncated" if result.get("modules_truncated") else ""
+    lines: List[str] = [f"modules ({n_ret}/{n_tot}){trunc}:"]
+    for item in result.get("modules") or []:
+        title = item.get("title")
+        source_file = item.get("source_file")
+        m_ret = int(item.get("n_members_returned") or 0)
+        m_tot = int(item.get("n_members_total") or 0)
+        m_trunc = " truncated" if item.get("members_truncated") else ""
+        source_bit = f" [{source_file}]" if source_file is not None else ""
+        lines.append(
+            f"  {title}{source_bit} members ({m_ret}/{m_tot}){m_trunc}:"
+        )
+        for member in item.get("members") or []:
+            lines.append(f"    {member}")
+    return "\n".join(lines)
 
 
 def strong_components(
@@ -1632,6 +1689,65 @@ def cli_symbol(
             print(json.dumps(res, indent=2, ensure_ascii=False))
         else:
             print("Not found")
+
+
+@app.command("modules")
+def cli_modules(
+    graph: Path = _graph_opt(),
+    snapshot: Optional[str] = _snapshot_opt(),
+    max_modules: int = typer.Option(
+        DEFAULT_MODULE_INVENTORY_MAX_MODULES,
+        "--max-modules",
+        help=(
+            f"Max modules returned (1..{HARD_MAX_MODULE_INVENTORY_MODULES}); "
+            "totals stay exact"
+        ),
+    ),
+    max_members_per_module: int = typer.Option(
+        DEFAULT_MODULE_INVENTORY_MAX_MEMBERS_PER_MODULE,
+        "--max-members-per-module",
+        help=(
+            f"Max member titles per returned module "
+            f"(0..{HARD_MAX_MODULE_INVENTORY_MEMBERS_PER_MODULE}); totals stay exact"
+        ),
+    ),
+    json_output: bool = typer.Option(False, "--json"),
+):
+    """Bounded inventory of exact persisted module entities.
+
+    Direct ``contains`` members only. Caps truncate returned lists; totals
+    stay exact. Not a module dependency graph, architecture, hierarchy,
+    GraphRAG, or natural-language analysis. There is no ``--dot``.
+    """
+    try:
+        _require_limit_int(
+            "max_modules",
+            max_modules,
+            minimum=1,
+            maximum=HARD_MAX_MODULE_INVENTORY_MODULES,
+        )
+        _require_limit_int(
+            "max_members_per_module",
+            max_members_per_module,
+            minimum=0,
+            maximum=HARD_MAX_MODULE_INVENTORY_MEMBERS_PER_MODULE,
+        )
+    except ValueError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from e
+    try:
+        with _scoped_graph(graph, snapshot) as g:
+            result = g.modules(
+                max_modules=max_modules,
+                max_members_per_module=max_members_per_module,
+            )
+            if json_output:
+                print(dumps_modules_json(result), flush=True)
+            else:
+                print(format_modules_human(result), flush=True)
+    except ValueError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from e
 
 
 @app.command("observations")

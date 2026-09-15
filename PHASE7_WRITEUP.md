@@ -42,7 +42,7 @@ precise call structure. The intended path is:
    `calls` edges, dangling targets, semantic-suspicion heuristics (including an
    import-aware check), and a seeded precision sample.
 5. **Local queries and context packs** – `scripts/graph_query.py` (callers,
-   callees, neighbors, subgraph, components, strong-components, condensation, shortest-path, degree-ranking, impact, impact-graph, type-closure, dependency order, symbol, observations)
+   callees, neighbors, subgraph, components, strong-components, condensation, shortest-path, degree-ranking, impact, impact-graph, type-closure, dependency order, symbol, observations, modules)
    and `scripts/context_pack.py` (entity + neighbors + text units + first-class
    `uses_data` / `data_dependencies` when present). `subgraph` is a bounded
    cycle-safe multi-hop induced subgraph over stored relationships, not an
@@ -65,7 +65,9 @@ precise call structure. The intended path is:
    includes `impact` immediately after `degree_ranking`,
    includes `impact_graph` immediately after `impact`, and
    includes `observations` immediately after `query_symbol` and
-   immediately before `callers`. `observations` exposes the existing
+   immediately before `callers`. `modules` is a CLI/Python bounded
+   inventory of exact persisted `module` entities and their direct
+   `contains` members; MCP does not expose it. `observations` exposes the existing
    `ByogGraph.observations(query)` diagnostic over persisted
    `call_observations` rows. Matching and unresolved raw-prefix
    semantics stay those of the producer. `max_items` bounds returned
@@ -289,7 +291,7 @@ work.
 ### 1.5 Full examples suite
 
 Recorded expectation in [Plan.md](Plan.md) and several provenance docs:
-`2265 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
+`2278 passed, 2 xfailed` for `PYTHONPATH=. uv run pytest examples -q`
 (includes the documentation-consistency check and C preprocessor provenance tests).
 
 The product CLI is installable as `graphrag-code` / `python -m graphrag_code`

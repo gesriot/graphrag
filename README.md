@@ -42,7 +42,7 @@ graphs, `examples/`, or experimental evidence.
 These generic installed commands operate on user-supplied directories:
 
 - `graphrag-code doctor`
-- `graphrag-code query-symbol` / `callers` / `callees` / `neighbors` / `subgraph` / `components` / `strong-components` / `condensation` / `shortest-path` / `degree-ranking` / `dependency-order` / `impact` / `impact-graph`
+- `graphrag-code query-symbol` / `callers` / `callees` / `neighbors` / `subgraph` / `components` / `strong-components` / `condensation` / `shortest-path` / `degree-ranking` / `dependency-order` / `impact` / `impact-graph` / `observations` / `modules`
 - `graphrag-code context-pack`
 - `graphrag-code index-python` / `index-c`
 - `graphrag-code adopt-publication-lock --graph <root> --indexer auto --offline-confirmed`
@@ -483,6 +483,21 @@ reconstruction, semantic impact, severity, ownership, importance,
 architecture, a unique path explanation, change-risk probability,
 GraphRAG, or natural-language analysis. Depth is minimum persisted
 reverse-call hops only. Caps bound returned material, not traversal work.
+
+`graphrag-code modules` (also `python -m graphrag_code.graph_query modules`
+and `scripts/graph_query.py modules`) is a bounded inventory of persisted
+entities whose type is exactly `module`, together with their direct
+persisted `contains` members. One canonical producer,
+`compute_module_inventory`, is shared by `ByogGraph.modules` and the free
+`graph_query.modules` helper. Caps (`--max-modules` /
+`--max-members-per-module`, defaults 50/50, hard maxima 500/500) truncate
+returned lists; totals stay exact. Members are distinct titles ordered by
+UTF-8 bytes. Endpoint-only contains targets remain. Non-module contains
+sources do not create modules. `--json` emits the producer mapping.
+There is no `--dot`. MCP remains exactly 19 read-only tools and does not
+expose `modules`. This is not a module dependency graph, import/build/call
+order, architecture, hierarchy, ownership, importance, community
+detection, GraphRAG, or natural-language analysis.
 
 `adopt-publication-lock` is an explicit migration, never an automatic
 MCP or doctor side effect. `--offline-confirmed` is required to create

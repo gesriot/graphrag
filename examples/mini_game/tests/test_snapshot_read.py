@@ -69,6 +69,7 @@ QUERY_COMMANDS = (
     "impact",
     "impact-graph",
     "observations",
+    "modules",
     "context-pack",
 )
 
@@ -274,7 +275,7 @@ def test_all_cli_query_commands_honor_snapshot(tmp_path: Path):
     graph, older, newer = _two(tmp_path)
     env = _child_env()
     for name in QUERY_COMMANDS:
-        if name == "dependency-order":
+        if name in {"dependency-order", "modules"}:
             args = [name, "--graph", str(graph), "--snapshot", older.name]
         elif name == "type-closure":
             args = [

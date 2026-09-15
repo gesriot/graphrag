@@ -278,7 +278,7 @@ Query, context-pack, doctor, and status tools accept an optional selector:
   `callees`, `types-used-by`, `type-users`, `type-closure`, `neighbors`,
   `subgraph`, `components`, `strong-components`, `condensation`,
   `shortest-path`, `degree-ranking`, `dependency-order`, `impact`,
-  `impact-graph`, `observations`, and `context-pack`.
+  `impact-graph`, `observations`, `modules`, and `context-pack`.
 - MCP: optional last argument `snapshot: str = "current"` on
   `graph_status`, `graph_doctor`, `query_symbol`, `observations`, `callers`, `callees`,
   `neighbors`, `subgraph`, `components`, `strong_components`, `condensation`, `shortest_path`, `degree_ranking`, `impact`,
@@ -3059,6 +3059,38 @@ graphrag-code impact-graph <symbol> \
 | MCP | Eighteenth read-only tool, registered immediately after legacy `impact` and immediately before `type_closure`. There is no hyphenated `impact-graph` alias. Envelope `data` is the exact `ByogGraph.impact_graph` producer mapping. `truncated` is `nodes_truncated or edges_truncated`. Envelope `total` is `n_nodes_total + n_edges_total`; `returned` is `n_nodes_returned + n_edges_returned`. Limits include the validated `max_depth`, `max_nodes`, `max_edges` (dedicated impact-graph defaults 3/50/100 and hard maxima 32/500/500, not subgraph or type-closure constants) and `max_envelope_bytes`. The producer is the only truncation source. The 1 MiB envelope limit fails closed with no secondary shrinking. MCP always uses `allow_unlocked_managed=False`. Explicit snapshot ids never activate or consult `current`. The shared reader lease is held through load, resolution, producer execution, JSON-ready conversion, envelope construction, size check, and return. MCP does not expose DOT, a graph path, a direction, `edge_types`, `max_items`, or a format parameter. Unresolved or ambiguous symbols remain successful complete producer results with `ok=true`. Legacy `impact` remains a separate unbounded title-list tool immediately before `impact_graph`. The fixed surface is exactly 19 tools |
 | Malformed args | Bad limits, invalid graph/snapshot/data, combined `--json --dot`, or DOT overflow: exit 2, empty stdout, stderr-only diagnostics |
 | Non-claims | Not runtime execution proof, complete dynamic dispatch, call-observation reconstruction, semantic impact, severity, ownership, importance, architecture, change-risk probability, a unique path or explanation, GraphRAG, or natural-language analysis. Depth is minimum persisted reverse-call hop count only. Caps bound returned material, not traversal work. Totals are exact only within `max_depth` over persisted exact `calls` rows. `--dot` is CLI/Python interchange only and is not exposed by MCP. `ok=true` is not a semantic-impact or runtime-execution claim |
+
+### Bounded module inventory
+
+`graphrag-code modules`, `python -m graphrag_code.graph_query modules`,
+and `scripts/graph_query.py modules` expose one retained-snapshot read of
+a bounded inventory of persisted entities whose type is exactly `module`
+and their direct persisted `contains` members. `ByogGraph.modules(...)`
+and the pure helper `compute_module_inventory(...)` are the same
+contract. MCP remains exactly 19 tools and does not expose `modules`.
+
+```text
+graphrag-code modules \
+  --graph <root> \
+  [--snapshot <id|current>] \
+  [--max-modules N] \
+  [--max-members-per-module N] \
+  [--json]
+```
+
+| Property | Contract |
+| --- | --- |
+| Selection | Entity rows whose `type` is exactly `module`. No case folding, trimming, aliases, title-prefix inference, source-path inference, or `file` promotion |
+| Membership | Distinct targets of persisted rows whose type is exactly `contains` and whose source is the exact selected module title. Direct only. Reverse `contains` is ignored. `calls`, `references`, `imports`, `depends_on`, `uses_type`, `uses_data`, and `CONTAINS` do not participate |
+| Members | Deduplicated titles, UTF-8 ordered. Endpoint-only titles remain. Self-contains yields the module title once. Non-module contains sources do not create modules |
+| Caps | Defaults 50/50. Hard maxima 500/500. `max_modules` 1..500. `max_members_per_module` 0..500. Caps truncate returned lists; `n_modules_total` / `n_members_total` stay exact. `n_members_total` includes complete counts for modules omitted by `max_modules`. `members_truncated` is true if any returned module has truncated members |
+| Ordering | Modules by UTF-8 title bytes. Members inside each module by UTF-8 title bytes. Independent of dataframe row order, locale, and hash iteration |
+| JSON | The producer mapping itself: `indent=2`, `ensure_ascii=False`, `sort_keys=True`, `allow_nan=False`, one trailing newline |
+| Human | First line `modules (returned/total)` with truncation marker. One module line with exact title, source_file in brackets when non-null, and `members (returned/total)` with truncation marker. Indented member titles in producer order. Empty inventory still emits the header. Exactly one trailing newline |
+| Snapshot / lease | Same retained-snapshot read scope as other queries. Historical reads never activate or change `current`. Shared reader lease held through load, producer execution, serialization, stdout write, and flush |
+| MCP | Not exposed. The fixed surface remains exactly 19 tools |
+| Malformed args | Bad limits, invalid graph/snapshot/data: exit 2, empty stdout, stderr-only diagnostics |
+| Non-claims | Not a module dependency graph, import/build/call order, architecture, hierarchy, ownership, importance, community detection, GraphRAG, or natural-language analysis. Caps bound returned material, not traversal work. No DOT, renderer, UI, mutation, indexing, activation, retention, repair, or cleanup |
 
 **Persisted integrity audit (read-only):**
 `scripts/c_clang_type_use_graph_audit.py` validates already-published
